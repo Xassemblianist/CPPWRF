@@ -50,3 +50,15 @@ faithful; the verifier now reports theta-mass drift as INFO when kvdif > 0.
    per-field halo fills (separate OpenMP regions, 8 per acoustic substep) and the
    a/alpha/gamma arrays (could be recomputed inside K_w from c2a, which it already reads).
 5. GPU: untested until the driver loads (reboot).
+
+## T3.2 (Agent 3: plotting scripts) — ACCEPTED, 2026-10-11
+scripts/test_plots.py re-run by Agent 0: all pass (the synthetic front is recovered exactly).
+out/plots/straka/snap_000900.png shows the canonical Straka structure: three rotors,
+head at about 41 km, i.e. 15.35 km from the centre. Minor: the x axis is in absolute km, not
+distance from the centre. Agent 3 respected the no-git rule this time.
+
+## M1 (Agent 1) — ACCEPTED on CPU, 2026-10-11
+Straka sensitivity study accepted: the front is controlled by vertical diffusion (kvdif 0 ->
++272 m); time step, acoustic settings and advection order move it by < 6 m. Open: compare
+directly with real WRF (em_grav2d_x is this case). From here Agent 0 also acts for Agent 1
+(quota exhausted), including git.
