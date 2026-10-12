@@ -72,6 +72,7 @@ case "$cmd" in
       qn=$( [ -s "$ST/agent$n.queue" ] && wc -l < "$ST/agent$n.queue" || echo 0)
       echo "Agent $n: $run, queued $qn, conversation $(cat "$ST/agent$n.cid" 2>/dev/null || echo none)"
       [ -s "$ST/agent$n.last" ] && head -c 400 "$ST/agent$n.last" | sed 's/^/   last: /' && echo
+      true
     done ;;
   log) tail -n "${2:-60}" "$ST/agent$1.log" ;;
   reset) rm -f "$ST/agent$1.cid"; echo "Agent $1 conversation forgotten" ;;
