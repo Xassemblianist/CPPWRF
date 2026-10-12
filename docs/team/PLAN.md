@@ -2,6 +2,15 @@
 
 This file overrides any conflicting ownership statement in an agent's original prompt.
 
+**Since 2026-10-13 Agent 1 and Agent 0 are one agent ("Agent 0", Claude Opus 5.5).** Every
+reference to Agent 1 (ownership, integration, git, STATUS.md) now means Agent 0.
+
+## Rules for every Gemini agent (shared machine: 12 cores, 15 GB RAM, 1 GPU)
+- Run everything with `OMP_NUM_THREADS=4 OMP_WAIT_POLICY=passive`; build with `-j4` at most.
+- Never write files in the repo root or outside your own paths (no *.mod, *.o, *.bin, test
+  programs there): compile Fortran in your own build directory.
+- One heavy job at a time per agent.
+
 ## Agents
 | Name | Model | Role |
 |---|---|---|
