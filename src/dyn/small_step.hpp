@@ -1,13 +1,14 @@
 #pragma once
 // Acoustic small step of the ARW split-explicit scheme (TN 3.2; WRF module_small_step_em.F
-// called from solve_em). Owner: Agent 0.
+// called from solve_em). Written by Agent 0, now maintained by Agent 1.
 //
 // Within one RK stage the acoustic variables are perturbations from the stage-start state
 // (u'' = mu_t u_t - mu* u*, etc.; WRF small_step_prep). Each substep:
 //   K_uv  : advance_uv     horizontal momentum (forward), external-mode filter
 //   K_mut : advance_mu_t   column mass, omega, theta (forward-backward) + sumflux
 //   K_w   : advance_w      vertically implicit w-phi, then calc_p_rho (+ smdiv) per column
-// After the loop, small_step_finish re-couples, and calc_p_rho_phi re-diagnoses p and al.
+// After the loop, small_step_finish re-couples. calc_p_rho_phi (p, al from the new state) is a
+// separate call because WRF runs it after the scalar update (solve_em), with the new moisture.
 #include "core/field.hpp"
 #include "core/grid.hpp"
 #include "dyn/state.hpp"
@@ -27,6 +28,8 @@ class SmallStep {
   // filter at the start of each step, as WRF does.
   void run_stage(State& s, const Tendencies& tend, const BaseState& base, real dt_stage, real dts, int n_small,
                  int rk_step = 0);
+  // calc_p_rho_phi (non-hydrostatic, hypsometric_opt = 1): al, p from mu_2, ph_2, t_2 (+ moisture).
+  void calc_p_rho_phi(State& s, const BaseState& base);
 
  private:
   Grid g_;
