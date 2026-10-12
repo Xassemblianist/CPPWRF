@@ -10,6 +10,8 @@ This file overrides any conflicting ownership statement in an agent's original p
 | Agent 2 | Gemini 3.8 Flash High | Physics port (src/phys/) with differential tests against the original Fortran (docs/team/AGENT2_PHYSICS.md). |
 | Agent 3 | Gemini 3.8 Flash | Reference WRF runs (T3.3), GPU validation and benchmarks (T3.4), dycore extensions (T3.6), I/O and scripts. Works from a task file in docs/team/. |
 | Agent 4 | Gemini 3.8 Flash High | Real-data initialisation: WPS + real.exe equivalent, differential-tested against real.exe (docs/team/AGENT4_REAL_INIT.md). |
+| Agent 5 | Gemini 3.8 Flash | Second physics track: Noah LSM, Kain-Fritsch, Thompson (docs/team/AGENT5_PHYSICS2.md). |
+| Agent 6 | Gemini 3.8 Flash | WRF-format NetCDF output, restarts, regression system (docs/team/AGENT6_NETCDF_REGRESSION.md). |
 
 Agent 0 has slightly more authority (it sets tasks), but Agents 0 and 1 are peers on technical
 questions: disagree in writing (docs/STATUS.md "Disagreements" for Agent 1, docs/review/REVIEW.md
@@ -29,6 +31,8 @@ for Agent 0). The user decides.
 | src/phys/, tests/phys/ (physics ports + Fortran differential tests) | **Agent 2** |
 | src/init_real/, tests/init_real/, ~/wrf_real/ (real-data initialisation) | **Agent 4** |
 | ~/wrf_ref/ (reference WRF for idealized cases) | **Agent 3** |
+| src/phys/{lsm_noah,cu_kf,mp_thompson}/ and tests/phys/ same names | **Agent 5** |
+| src/io_netcdf/, tests/io_netcdf/, tools/regression/ | **Agent 6** |
 | tests/unit/ (all except io) | Agent 1 |
 | tests/verify/ | Agent 0 |
 | docs/team/, docs/review/ | Agent 0 |
