@@ -11,6 +11,12 @@ User (final authority)
      └─ Agent 4, Real-data initialisation
 ```
 
+## Command channel
+Agent 0 dispatches Gemini agents directly with the Antigravity CLI (`tools/agents/agent.sh send N "..."`;
+one CLI conversation per agent, logs in ~/cppwrf_agents/). Agents started in the Antigravity IDE
+finish their current task and then stop; their role continues in a CLI conversation started
+by Agent 0 (all context is in the repo: task file + report).
+
 ## Rules of the chain
 1. **Nothing is accepted without the quality gate.** Agent 0 commits a Gemini agent's work only
    after Agent 7's audit says VERIFIED or VERIFIED WITH NOTES (docs/audit/INDEX.md). A
