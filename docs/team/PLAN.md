@@ -19,10 +19,11 @@ for Agent 0). The user decides.
 | CMakeLists.txt (top level), cmake/ | Agent 1 |
 | src/core/ (backend, field, grid, constants, precision) | Agent 1 |
 | src/dyn/ **except** src/dyn/small_step.* | Agent 1 |
-| src/dyn/small_step.hpp, src/dyn/small_step.cpp | **Agent 0** |
+| src/dyn/small_step.hpp, src/dyn/small_step.cpp | Agent 1 (since M2; written by Agent 0) |
 | src/cases/, src/main.cpp, configs/ | Agent 1 |
 | src/io/ (incl. src/io/CMakeLists.txt), tests/unit/io/ | **Agent 3** |
 | scripts/ (Python readers/plots) | **Agent 3** |
+| tools/gpu/, docs/PERF_MEASURED.md | **Agent 3** |
 | tests/unit/ (all except io) | Agent 1 |
 | tests/verify/ | Agent 0 |
 | docs/team/, docs/review/ | Agent 0 |
@@ -86,3 +87,8 @@ The user relays messages. Each agent reports in its own file:
 - Agent 1 -> docs/STATUS.md
 - Agent 3 -> docs/team/AGENT3_REPORT.md
 - Agent 0 -> docs/review/REVIEW.md
+
+## Routing rule (user, 2026-10-13)
+Gemini's quota is effectively unlimited; Opus's is scarce. Every long, mechanical or
+repetitive job (builds, runs, sweeps, benchmarks, profiling, plots, scripts, docs) goes to
+Agent 3. Opus agents do only numerical-core code and review.
