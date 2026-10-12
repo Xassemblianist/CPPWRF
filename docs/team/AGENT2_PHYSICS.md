@@ -1,11 +1,11 @@
-# Agent 3 task T3.5: WRF physics port with differential testing against the Fortran original
+# Agent 2 task T2.1: WRF physics port with differential testing against the Fortran original
 
 Long task. Work through it in order; each scheme is a milestone with its own report section.
-You may run it in parallel with T3.4 (different files), but never time benchmarks while
-compiling.
+Agent 3 (GPU benchmarks, T3.4) and Agent 4 (real-data init) work in parallel in other paths;
+avoid heavy builds while Agent 3 is timing runs if you can see it (check `nvidia-smi`, `top`).
 
-You are Agent 3 in CPPWRF (/home/ostriquetrum/CPPWRF). Read docs/team/PLAN.md first.
-Reference source: WRF v4.6.1 in ~/wrf_ref/WRF (from T3.3; clone it if missing).
+You are Agent 2 in CPPWRF (/home/ostriquetrum/CPPWRF). Read docs/team/PLAN.md first.
+Reference source: WRF v4.6.1 in ~/wrf_ref/WRF (Agent 3 builds there: read only, never build in it). Compile standalone Fortran copies under tests/phys/fortran/.
 
 ## Why this method
 A physics port can look plausible and still be wrong. Every routine you port is therefore
@@ -16,7 +16,7 @@ differential test is the acceptance criterion, not your own judgement.
 - src/phys/ (new): C++ physics, one directory per scheme (src/phys/mp_kessler/, ...),
   plus src/phys/CMakeLists.txt defining library `cppwrf_phys`.
 - tests/phys/ (new): differential-test harnesses, Fortran drivers, input generators.
-- docs/team/AGENT3_REPORT_T35.md.
+- docs/team/AGENT2_REPORT_PHYS.md.
 Do NOT edit anything else: Agent 1 integrates your library into the model. Never use git write
 commands; never use sudo; do not modify WRF Fortran sources (copy into tests/phys/fortran/
 if you need to compile them standalone, and record each change, e.g. stubbed wrf_error).
@@ -67,7 +67,7 @@ CPU (FP64 expected ~1e-12, FP32 expected ~1e-5).
 Stop after each scheme and write its report section; continue to the next one in the same
 session only if the previous one PASSES.
 
-## Report: docs/team/AGENT3_REPORT_T35.md
+## Report: docs/team/AGENT2_REPORT_PHYS.md
 Per scheme: files, Fortran changes needed for standalone compilation, the input regimes, the
 comparison table (variable | max abs | max rel | worst column), CPU vs CUDA differences,
 ns/column on CPU-12 and on the GPU for 10^5 columns x 50 levels, and open issues.

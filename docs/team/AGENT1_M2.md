@@ -9,8 +9,8 @@ Keep thinking short; write code in small steps; compile often.
 ## Ownership change
 src/dyn/small_step.{hpp,cpp} is now yours (written by Agent 0, who stays reviewer). Keep the
 3-fused-kernels-per-substep structure and the WRF routine mapping comments.
-Parallel work by others: Agent 3 does GPU validation (T3.4, no source edits) and the physics
-library port into src/phys/ (T3.5). After you write "M2 done" in STATUS.md, Agent 3 adds
+Parallel work by others: Agent 3 does GPU validation (T3.4, no source edits), Agent 2 the physics
+library port into src/phys/, Agent 4 real-data init (src/init_real/). After you write "M2 done" in STATUS.md, Agent 3 adds
 Coriolis, damping and 3D configs (T3.6) to your files, so leave those out of M2.
 
 ## Scope (commit after each item: CPU FP32 + FP64 ctest green, CUDA build compiles and its ctest is green)
