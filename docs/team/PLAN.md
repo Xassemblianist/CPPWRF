@@ -7,7 +7,7 @@ This file overrides any conflicting ownership statement in an agent's original p
 |---|---|---|
 | Agent 0 | Claude Opus 5.5 | Manager. Writes the hard numerical kernels it owns, the verification suite, reviews, and all task prompts. |
 | Agent 1 | Claude Opus 5.5 (medium) | Lead implementer: build, core, large-step dynamics, cases, CUDA. |
-| Agent 3 | Gemini 3.8 Flash | Well-specified, self-contained tasks only (I/O, config, scripts). Works from a task file in docs/team/. |
+| Agent 3 | Gemini 3.8 Flash | Large, long tasks with hard acceptance tests (physics ports checked against the original Fortran, GPU validation, benchmarks, tooling). Works from a task file in docs/team/. |
 
 Agent 0 has slightly more authority (it sets tasks), but Agents 0 and 1 are peers on technical
 questions: disagree in writing (docs/STATUS.md "Disagreements" for Agent 1, docs/review/REVIEW.md
@@ -24,6 +24,7 @@ for Agent 0). The user decides.
 | src/io/ (incl. src/io/CMakeLists.txt), tests/unit/io/ | **Agent 3** |
 | scripts/ (Python readers/plots) | **Agent 3** |
 | tools/gpu/, docs/PERF_MEASURED.md | **Agent 3** |
+| src/phys/, tests/phys/ (physics ports + Fortran differential tests) | **Agent 3** |
 | tests/unit/ (all except io) | Agent 1 |
 | tests/verify/ | Agent 0 |
 | docs/team/, docs/review/ | Agent 0 |
