@@ -1,6 +1,6 @@
 # Agent 3 task T3.8: em_hill2d_x initial state in CPPWRF (terrain), verified against WRF t = 0
 
-Agent 0 has ported terrain, map factors, Coriolis and damp_opt=3 into the dycore (3801f2a). The
+Agent 0 has ported terrain, map factors, Coriolis and damp_opt=3 into the dycore (d515110). The
 missing piece for a terrain test is the *initial state* of WRF's hill case. You write it.
 
 Ownership exception (granted): new files src/cases/hill2d.{hpp,cpp}, a new config

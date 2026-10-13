@@ -26,7 +26,7 @@
 CUDA: builds with nvcc 12.4, not runnable (driver not loaded) -> no GPU numbers, no CPU-vs-GPU diff.
 
 ## M2 done (2026-10-13)
-Agent 1 wrote items 1-2 and ran out of quota; Agent 0 verified and committed them (0897729) and
+Agent 1 wrote items 1-2 and ran out of quota; Agent 0 verified and committed them (4f58fcc) and
 wrote items 3-4. Commands below were run with OMP_NUM_THREADS=4 (the machine is shared).
 - **1. Scalar transport** (scalars.*: advect_scalar / advect_scalar_pd with ru_m, rv_m, ww_m,
   rk_update_scalar): tests in test_scalars (constant tracer stays 1, PD positivity, mass).

@@ -7,11 +7,11 @@ Last updated: 2026-10-13 02:12 UTC.
 
 | Report File | Section / Milestone | Author | Commit / Mtime | Verdict | Audit Report |
 |---|---|---|---|---|---|
-| `docs/team/AGENT3_REPORT.md` | T3.1: I/O Library & Config | Agent 3 | Commit `0957c0d` | **VERIFIED WITH NOTES** | [`agent3_t31.md`](docs/audit/agent3_t31.md) |
-| `docs/team/AGENT3_REPORT_T32.md` | T3.2: Plotting Scripts | Agent 3 | Commit `7b22b98` | **VERIFIED** | [`agent3_t32.md`](docs/audit/agent3_t32.md) |
-| `docs/STATUS.md` | M1: CPU Results & Straka Review | Agent 0 (ex-1) | Commit `6bd8a63` | **VERIFIED WITH NOTES** | [`status_m1.md`](docs/audit/status_m1.md) |
-| `docs/STATUS.md` | M2: Moist Core, Scalars & Squall2d | Agent 0 | Commit `b532566` | **VERIFIED WITH NOTES** | [`status_m2.md`](docs/audit/status_m2.md) |
-| `docs/team/AGENT2_REPORT_PHYS.md` | Scheme 1: Kessler Microphysics | Agent 2 | Commit `60bbfc4` | **VERIFIED WITH NOTES** | [`agent2_kessler.md`](docs/audit/agent2_kessler.md) |
+| `docs/team/AGENT3_REPORT.md` | T3.1: I/O Library & Config | Agent 3 | Commit `5b4d773` | **VERIFIED WITH NOTES** | [`agent3_t31.md`](docs/audit/agent3_t31.md) |
+| `docs/team/AGENT3_REPORT_T32.md` | T3.2: Plotting Scripts | Agent 3 | Commit `576f795` | **VERIFIED** | [`agent3_t32.md`](docs/audit/agent3_t32.md) |
+| `docs/STATUS.md` | M1: CPU Results & Straka Review | Agent 0 (ex-1) | Commit `f113b72` | **VERIFIED WITH NOTES** | [`status_m1.md`](docs/audit/status_m1.md) |
+| `docs/STATUS.md` | M2: Moist Core, Scalars & Squall2d | Agent 0 | Commit `d4b7756` | **VERIFIED WITH NOTES** | [`status_m2.md`](docs/audit/status_m2.md) |
+| `docs/team/AGENT2_REPORT_PHYS.md` | Scheme 1: Kessler Microphysics | Agent 2 | Commit `1a24d82` | **VERIFIED WITH NOTES** | [`agent2_kessler.md`](docs/audit/agent2_kessler.md) |
 | `docs/team/AGENT5_REPORT.md` | Scheme 1: Noah Land Surface Model | Agent 5 | 2026-10-13 01:40 | **VERIFIED WITH NOTES** | [`agent5_noah.md`](docs/audit/agent5_noah.md) |
 | `docs/team/AGENT6_REPORT.md` | Parts A/B: NetCDF & Restarts | Agent 6 | 2026-10-13 01:25 | **VERIFIED WITH NOTES** | [`agent6_netcdf.md`](docs/audit/agent6_netcdf.md) |
 | `docs/team/AGENT4_REPORT.md` | T4.1: Real-Data Initialization | Agent 4 | 2026-10-13 01:10 | **PAUSED (Awaiting pkgs)** | Pending system packages (`libpng-dev`, `tcsh`) |

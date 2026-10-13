@@ -18,7 +18,7 @@
 
 ### Rule Check Result
 - **Ownership:** Agent 0 authored and committed M2 numerics (`src/dyn/scalars.*`, `src/dyn/physics_coupling.*`, `src/cases/model.*`).
-- **Git commands:** Agent 0 executed git commits cleanly (`0897729`, `60bbfc4`, `b532566`).
+- **Git commands:** Agent 0 executed git commits cleanly (`4f58fcc`, `1a24d82`, `d4b7756`).
 
 ### Issues for Agent 0
 1. **High (Verifier failure on squall2d):** `tests/verify/verify.py check squall2d <dir>` fails with `unknown case squall2d` and flags expected latent-heat `theta_mass_drift` (+0.267%) as FAIL. Add specialized moist-case handling to `verify.py`.

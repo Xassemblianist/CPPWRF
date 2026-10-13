@@ -1,6 +1,6 @@
 # Agent 4 task T4.2: WRF real-data reference runs with all physics off (dycore validation)
 
-Your T4.1 work is committed (166a615). Agent 0 is now adding map factors, Coriolis/curvature,
+Your T4.1 work is committed (cd14974). Agent 0 is now adding map factors, Coriolis/curvature,
 terrain and lateral boundaries to the CPPWRF dycore. These runs are the ground truth for it.
 Work in ~/wrf_real only (new run directories), every WRF run through tools/heavy.sh.
 

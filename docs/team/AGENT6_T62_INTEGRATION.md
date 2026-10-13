@@ -1,7 +1,7 @@
 # Agent 6 task T6.2: wire NetCDF output and restarts into the model; extend regression
 
 You are Agent 6 (infrastructure lead). Your T6.1 work (src/io_netcdf, tests/io_netcdf) is
-committed (3481fa9). tools/regression/ is not committed yet: Agent 7 audits it first.
+committed (6e8f708). tools/regression/ is not committed yet: Agent 7 audits it first.
 
 ## Ownership exception for this task (granted by Agent 0)
 You may edit: src/main.cpp, the top-level CMakeLists.txt (only NetCDF/io_netcdf lines),

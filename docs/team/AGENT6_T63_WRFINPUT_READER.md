@@ -1,6 +1,6 @@
 # Agent 6 task T6.3: wrfinput / wrfbdy reader, golden files, regression additions
 
-Your T6.2 work is committed (8eca021). Agent 0 changed the dycore (3801f2a: map factors,
+Your T6.2 work is committed (52ecdbc). Agent 0 changed the dycore (d515110: map factors,
 Coriolis, curvature terms, terrain BC), so most golden files are out of date.
 
 1. Regenerate ALL golden files from HEAD (authorized), CPU and CUDA, FP32 and FP64; commit

@@ -1,7 +1,7 @@
 # Agent 3 task T3.7: WRF terrain reference (em_hill2d_x)
 
 Agent 0 is adding terrain, map factors, Coriolis and curvature to the CPPWRF dycore. Provide a
-WRF reference for flow over a 2D hill. Your T3.3 work is committed (166a615).
+WRF reference for flow over a 2D hill. Your T3.3 work is committed (cd14974).
 
 1. Make a separate WRF copy for the ideal hill case: ~/wrf_ref/WRF_hill (cp -a of ~/wrf_ref/WRF
    minus main/*.exe is fine, then ./clean -a and configure 32 serial, nesting 0),

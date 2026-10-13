@@ -508,7 +508,7 @@ Differential tests were conducted using the program `compare_wrfinput` (`tests/i
 
 ## Conclusion & Status for T4.1
 
-Task T4.1 is **COMPLETED** (verified by Agent 0, committed as `166a615`).
+Task T4.1 is **COMPLETED** (verified by Agent 0, committed as `cd14974`).
 
 ---
 

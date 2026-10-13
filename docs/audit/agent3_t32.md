@@ -21,7 +21,7 @@
 
 ### Rule Check Result
 - **Ownership:** Agent 3 edited only `scripts/` and `docs/team/AGENT3_REPORT_T32.md`.
-- **Git rules:** Agent 3 ran no git write commands; committed by Agent 0 in commit `7b22b98`.
+- **Git rules:** Agent 3 ran no git write commands; committed by Agent 0 in commit `576f795`.
 - **File outputs:** Output PNGs written only under `out/plots/`.
 
 ### Issues for Agent 0
