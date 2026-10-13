@@ -121,3 +121,12 @@ The user relays messages. Each agent reports in its own file:
 Gemini's quota is effectively unlimited; Opus's is scarce. Every long, mechanical or
 repetitive job (builds, runs, sweeps, benchmarks, profiling, plots, scripts, docs) goes to
 Agent 3. Opus agents do only numerical-core code and review.
+
+## Later: operational pipeline (after the physics suite and init_real match WRF)
+The user's earlier prototype ~/Resimler/oldcppwrf/wfe (not WRF-faithful dynamics/physics, do not
+reuse those) has a working operational chain to adapt to CPPWRF: tools/prep_gfs.py (latest GFS
+cycle download/prep), tools/verify_metar.py + verify_multi.py (station verification with height
+correction, multi-cycle stats), tools/forecast_maps.py (cartopy maps), tools/run_operational.py,
+run_ensemble.py, deploy/ (GCP spot GPU: Scheduler -> VM -> run -> GCS -> VM deletes itself), and
+web-app/. Target chain: GFS -> WPS or src/init_real -> CPPWRF -> wrfout -> maps + METAR
+verification -> GCP spot deployment.
