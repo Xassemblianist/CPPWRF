@@ -1,7 +1,7 @@
 # CPPWRF Independent Audit Index (Agent 7)
 
 Quality gate and independent verification tracking for Agent 0.
-Last updated: 2026-10-13 06:30 UTC.
+Last updated: 2026-10-13 12:55 UTC.
 
 ## Audit Summary Table
 
@@ -18,6 +18,7 @@ Last updated: 2026-10-13 06:30 UTC.
 | `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.1: Line-by-Line WRF Dycore Source | Agent 0 | Commits `d515110`, `9304294`, `352aca9` | **VERIFIED** | [`agent0_dycore_source.md`](docs/audit/agent0_dycore_source.md) |
 | `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.2: Mutation Testing Dycore Checks | Agent 0 | 2026-10-13 06:25 | **VERIFIED** | [`agent0_dycore_mutations.md`](docs/audit/agent0_dycore_mutations.md) |
 | `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.3: YSU, sfclayrev, Restarts Re-verification | Agent 2, Agent 6 | 2026-10-13 06:10 | **VERIFIED** | [`physics_restart_reverification.md`](docs/audit/physics_restart_reverification.md) |
+| `docs/team/AGENT7_A4_WDAMP.md` | A4: w_damp, calc_cq & top_lid | Agent 0 | Commits `0c8f927`, `468e2bb` | **PASS (FP64 Real-data Proof: rel L2 < 6e-12)** | [`agent0_wdamp_calccq.md`](docs/audit/agent0_wdamp_calccq.md) |
 
 ---
 
