@@ -20,6 +20,7 @@ Last updated: 2026-10-13 12:55 UTC.
 | `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.3: YSU, sfclayrev, Restarts Re-verification | Agent 2, Agent 6 | 2026-10-13 06:10 | **VERIFIED** | [`physics_restart_reverification.md`](docs/audit/physics_restart_reverification.md) |
 | `docs/team/AGENT7_A4_WDAMP.md` | A4: w_damp, calc_cq & top_lid | Agent 0 | Commits `0c8f927`, `468e2bb` | **PASS (FP64 Real-data Proof: rel L2 < 6e-12)** | [`agent0_wdamp_calccq.md`](docs/audit/agent0_wdamp_calccq.md) |
 | `docs/team/AGENT7_A5_PHYSINIT.md` | A5: Physics Init vs WRF t=0 State | Agent 8 | Commit `6d64875` | **VERIFIED WITH DISCREPANCIES (17 exact, SNOALB & SH2O bugs traced)** | [`agent8_physinit.md`](docs/audit/agent8_physinit.md) |
+| `docs/team/AGENT7_A6_SQUALL_INIT.md` | A6: Squall2d Initialization vs WRF | Agent 1 / Agent 0 | 2026-10-13 14:50 | **VERIFIED WITH DISCREPANCIES (8 root causes traced, match proved to 1e-7)** | [`squall_init.md`](docs/audit/squall_init.md) |
 
 ---
 
