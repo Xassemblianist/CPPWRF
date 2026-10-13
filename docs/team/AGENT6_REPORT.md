@@ -240,5 +240,127 @@ Once Agent 0 wires `read_restart` and `write_restart` into `src/main.cpp`:
 
 ---
 
+## Task T6.2: NetCDF WRF Output & Restart Integration Report
+
+- **Date**: 2026-10-13
+- **Scope**: Integration into `src/main.cpp`, Top-Level `CMakeLists.txt`, `src/io_netcdf/`, and `tools/regression/` (under limited ownership exception).
+- **Status**: Completed and fully verified.
+
+### 1. Architectural Changes & Scope Summary
+
+1. **Top-Level `CMakeLists.txt`**:
+   - Added automatic NetCDF-C discovery (`find_package(netCDF CONFIG QUIET)` and `pkg_check_modules(NETCDF netcdf)`).
+   - Conditionally integrates `src/io_netcdf` and links `cppwrf_io_netcdf` into `cppwrf_core`.
+   - Defines `CPPWRF_HAVE_NETCDF` across the core and driver when NetCDF is detected.
+   - Adds `tests/io_netcdf` to CTest suite.
+2. **`src/io_netcdf/`**:
+   - [`wrfout_writer.cpp`](file:///home/ostriquetrum/CPPWRF/src/io_netcdf/wrfout_writer.cpp): Added output support for moist species (`QVAPOR`, `QCLOUD`, `QRAIN`, with aliases `QC` and `QR`) and cumulative grid-scale precipitation (`RAINNC`). Default start date set to `2000-01-01_00:00:00`.
+   - [`restart.cpp`](file:///home/ostriquetrum/CPPWRF/src/io_netcdf/restart.cpp): Fixed 2D domain dimension handling (`dim_sn` vs `dim_sn_stag`) preventing memory overflow during restart read; correctly handled stride logic for zero-stride 2D axes; allowed skipping optional/missing variables gracefully.
+3. **`src/main.cpp` Integration**:
+   - Config option `output.format`: Supports `native` (default), `wrfout`, and `both`. Validates option and raises descriptive runtime errors on unsupported values or missing NetCDF support.
+   - Base state variables (`PB`, `PHB`, `MUB`) downloaded and broadcast to WRF NetCDF outputs.
+   - Config option `restart.interval`: Triggers NetCDF restart generation (`restart_%06ld.nc`) every specified seconds.
+   - Config option `run.restart_file`: Restores prognostic state (`u_1, u_2, v_1, v_2, w_1, w_2, t_1, t_2, ph_1, ph_2, mu_1, mu_2, p, al`), scalar/moisture fields, `h_diabatic`, and microphysics state (`rainnc`, `rainncv`). Halos are recomputed via `fill_halo`.
+   - Preserves pre-restart diagnostic rows in `diag.csv` when continuing in an existing directory.
+4. **`tools/regression/run.sh`**:
+   - Added `squall2d` to regression suite with quick-mode parameters (`run.run_time=12`, `out_interval=2`, `diag_interval=1`).
+   - Added auto GPU detection (`HAS_GPU=1` if `nvcc` and `nvidia-smi` available, with `--no-gpu` / `--gpu` flag support).
+   - Runs all builds and simulation executions under `tools/heavy.sh` (`--exclusive` for model timings).
+
+---
+
+### 2. Output Format Verification (`output.format`)
+
+Three output format modes were verified on `squall2d`:
+1. `output.format = native` (default):
+   - Generates native binary snapshots `snap_*.bin` and `snap_*.json`. No NetCDF files generated.
+2. `output.format = wrfout`:
+   - Generates only WRF NetCDF file `wrfout_d01_2000-01-01_00:00:00`. No `snap_*.bin` files created.
+3. `output.format = both`:
+   - Command:
+     ```bash
+     tools/heavy.sh --exclusive build-cpu/cppwrf configs/squall2d.ini --set=run.run_time=12 --set=output.dir=tests/io_netcdf/test_out/squall_both --set=output.format=both --set=output.out_interval=12
+     ```
+   - Both `snap_000000.bin`, `snap_000002.bin`, and `wrfout_d01_2000-01-01_00:00:00` are written.
+   - NetCDF inspection via `ncdump -h` confirms presence and shapes of:
+     - `float QVAPOR(Time, bottom_top, south_north, west_east)`
+     - `float QCLOUD(Time, bottom_top, south_north, west_east)`
+     - `float QRAIN(Time, bottom_top, south_north, west_east)`
+     - `float RAINNC(Time, south_north, west_east)`
+     - All 29 WRF standard variables, grid dimensions, and global attributes.
+
+---
+
+### 3. Bitwise Restart Acceptance Test Results
+
+Bitwise acceptance was verified across all 8 required configurations using the acceptance suite [`tests/io_netcdf/run_acceptance_restart.py`](file:///home/ostriquetrum/CPPWRF/tests/io_netcdf/run_acceptance_restart.py).
+Each configuration executes:
+- Continuous run: 0 to 600 s.
+- Segment 1: 0 to 300 s (generates `restart_*.nc` at 300 s).
+- Segment 2: Restarts from 300 s NetCDF file, runs to 600 s.
+- Bitwise verification: `cmp` on final snapshot `.bin` files (byte-for-byte exit code 0) and exact match of `diag.csv` columns 1-10 for steps >= 300.
+
+| Test Case | Build Target | Precision | Backend | Final Snapshot Size | `cmp` Bitwise Match | `diag.csv` Cols 1-10 | Status |
+|---|---|---|---|---|---|---|---|
+| **straka** | `build-cpu` | FP32 | CPU (OpenMP) | 1,188,096 B | Identical (exit code 0) | 31/31 rows identical | **PASS** |
+| **straka** | `build-cpu-dp` | FP64 | CPU (OpenMP) | 2,376,192 B | Identical (exit code 0) | 31/31 rows identical | **PASS** |
+| **straka** | `build-cuda` | FP32 | CUDA | 1,188,096 B | Identical (exit code 0) | 31/31 rows identical | **PASS** |
+| **straka** | `build-cuda-dp` | FP64 | CUDA | 2,376,192 B | Identical (exit code 0) | 31/31 rows identical | **PASS** |
+| **squall2d** | `build-cpu` | FP32 | CPU (OpenMP) | 252,640 B | Identical (exit code 0) | 6/6 rows identical | **PASS** |
+| **squall2d** | `build-cpu-dp` | FP64 | CPU (OpenMP) | 505,280 B | Identical (exit code 0) | 6/6 rows identical | **PASS** |
+| **squall2d** | `build-cuda` | FP32 | CUDA | 252,640 B | Identical (exit code 0) | 6/6 rows identical | **PASS** |
+| **squall2d** | `build-cuda-dp` | FP64 | CUDA | 505,280 B | Identical (exit code 0) | 6/6 rows identical | **PASS** |
+
+Execution command:
+```bash
+python3 tests/io_netcdf/run_acceptance_restart.py
+```
+Output:
+```text
+==================================================
+ALL RESTART ACCEPTANCE TESTS PASSED BITWISE!
+==================================================
+```
+
+---
+
+### 4. Regression Runner & CTest Suite
+
+#### 4.1 CTest Results (10/10 PASS across all 4 builds)
+Executed across all configurations:
+- `build-cpu`: 100% tests passed (10/10)
+- `build-cpu-dp`: 100% tests passed (10/10)
+- `build-cuda`: 100% tests passed (10/10)
+- `build-cuda-dp`: 100% tests passed (10/10)
+
+Unit tests include:
+- `test_wrfout_writer`: Validates NetCDF WRF output creation and frames.
+- `test_restart`: In-memory byte-for-byte validation of restart writing and reading.
+- `test_wrfout_python`: `netCDF4` verification of all 29 fields and metadata.
+
+#### 4.2 Squall2D Physics & Budget Verification via `tests/verify/verify.py`
+Running `python3 tests/verify/verify.py check squall2d <dir>` validates:
+- **FP64 Symmetry**:
+  ```text
+  PASS  symmetry  th' 2.86e-14  u 1.52e-13  w 1.09e-12  (tol 1e-06, t=12s)
+  ```
+- **Water Budget Conservation**:
+  ```text
+  PASS  moist_nonnegative  min over ['qv', 'qc', 'qr']: 0.000e+00
+  PASS  water_budget       (water + rain - W0)/W0 = -1.66e-16 (tol 1e-03, mp_physics=1)
+  ```
+- **Dry Mass Conservation**:
+  ```text
+  PASS  dry_mass_drift     rel drift 0.000e+00 (tol 1e-10)
+  ```
+
+#### 4.3 Full Performance & Regression Sweep
+All 20 simulation runs (5 cases $\times$ 4 targets) execute without crashes.
+CPU vs GPU agreement confirms bitwise/tolerance parity:
+- `squall2d`: PASS in both FP32 and FP64.
+- `straka`, `warm_bubble`, `igw`: PASS in both FP32 and FP64.
+
+---
+
 ## Conclusion & Next Steps
-Agent 6 has completed task T6.1 in full. All code, tests, regression tools, and documentation are in place and verified under the multi-tenant shared-machine guidelines. Ready for review and integration by Agent 0. Execution stopped.
+Agent 6 has completed task T6.2 in full. All code, restart acceptance tests, WRF format integrations, regression enhancements, and documentation are in place and verified under the multi-tenant shared-machine guidelines. Ready for review and integration by Agent 0. Execution stopped.
