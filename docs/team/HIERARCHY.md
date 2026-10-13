@@ -7,6 +7,7 @@ User (final authority)
      ├─ Agent 2, Physics lead: owns physics conventions and the shared Fortran test harness
      │   └─ Agent 5, Physics track 2 (follows Agent 2's harness and conventions)
      ├─ Agent 6, Infrastructure lead: builds, regression, NetCDF I/O; watches machine load
+     ├─ Agent 8, Physics driver glue (follows Agent 2's harness)
      ├─ Agent 3, Reference and GPU (WRF reference runs, GPU validation, dycore extensions)
      └─ Agent 4, Real-data initialisation
 ```
