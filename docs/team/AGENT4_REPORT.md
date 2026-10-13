@@ -506,9 +506,873 @@ Differential tests were conducted using the program `compare_wrfinput` (`tests/i
 
 ---
 
+## Conclusion & Status for T4.1
+
+Task T4.1 is **COMPLETED** (verified by Agent 0, committed as `166a615`).
+
+---
+
+# Part D: Task T4.2 — WRF Real-Data Reference Runs with All Physics Off (Dycore Validation)
+
+## 1. Executive Summary & Machine Rule Compliance
+
+In accordance with `docs/team/AGENT4_T42_DRY_REF.md`, `docs/team/PLAN.md`, and `docs/team/HIERARCHY.md`:
+- **All Reference Runs Completed**: 6 dedicated reference simulations (**R0**, **R1**, **R2**, **R3**, **R0_r8**, **R1_r8**) were successfully generated and verified.
+- **Numerical Stability**: Every simulation ran to full completion (`wrf: SUCCESS COMPLETE WRF`) with zero CFL violations, zero NaNs, and zero blow-ups.
+- **Double-Precision Build (`WRF-4.6.1-r8`)**: Successfully compiled a clean `em_real` build in `/home/ostriquetrum/wrf_real/WRF-4.6.1-r8` configured with `./configure -r8` (serial GNU Option 32, `RWORDSIZE=8`, `-fdefault-real-8`). Output fields verified as native IEEE 754 64-bit double precision (`double`), eliminating FP32 truncation noise for Agent 0's core dycore comparison.
+- **Shared-Machine Rules Strictly Enforced**:
+  - All compilation wrapped in `tools/heavy.sh ./compile -j 4 em_real`.
+  - All execution benchmarks and timings conducted under exclusive job locks: `tools/heavy.sh --exclusive`.
+  - OpenMP threads capped at `OMP_NUM_THREADS=4` with `OMP_WAIT_POLICY=passive`.
+  - Zero files written in the repository root or outside `~/wrf_real/`.
+  - Zero git write commands executed.
+
+---
+
+## 2. Master Table of Reference Simulations
+
+| Run ID | Precision | Hybrid Opt | Dynamics Alterations | Duration | Output Int. | Frames | Status | dt | `time_step_sound` | Wall Time | Max RSS | Path to `wrfout` |
+|:---|:---|:---:|:---|:---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---|
+| **R0** | FP32 (single) | 0 | Unfiltered/undamped (`damp_opt=0, w_damping=0`) | 1 h (60 steps) | 10 min | 7 | `SUCCESS` | 60.0 s | 4 | 13.20 s | 445.9 MB | `/home/ostriquetrum/wrf_real/run_R0/wrfout_d01_2026-10-12_00:00:00` |
+| **R1** | FP32 (single) | 0 | Unfiltered/undamped (`damp_opt=0, w_damping=0`) | 5 steps (300 s) | 60 s | 6 | `SUCCESS` | 60.0 s | 4 | 1.49 s | 445.8 MB | `/home/ostriquetrum/wrf_real/run_R1/wrfout_d01_2026-10-12_00:00:00` |
+| **R2** | FP32 (single) | 2 | Unfiltered/undamped (`damp_opt=0, w_damping=0`) | 1 h (60 steps) | 10 min | 7 | `SUCCESS` | 60.0 s | 4 | 11.85 s | 447.8 MB | `/home/ostriquetrum/wrf_real/run_R2/wrfout_d01_2026-10-12_00:00:00` |
+| **R3** | FP32 (single) | 2 | Upper Rayleigh & W-damping (`damp_opt=3, zdamp=5000, dampcoef=0.2, w_damping=1`) | 1 h (60 steps) | 10 min | 7 | `SUCCESS` | 60.0 s | 4 | 12.01 s | 448.7 MB | `/home/ostriquetrum/wrf_real/run_R3/wrfout_d01_2026-10-12_00:00:00` |
+| **R0_r8** | FP64 (double) | 0 | Unfiltered/undamped (`damp_opt=0, w_damping=0`) | 1 h (60 steps) | 10 min | 7 | `SUCCESS` | 60.0 s | 4 | 37.92 s | 903.5 MB | `/home/ostriquetrum/wrf_real/run_R0_r8/wrfout_d01_2026-10-12_00:00:00` |
+| **R1_r8** | FP64 (double) | 0 | Unfiltered/undamped (`damp_opt=0, w_damping=0`) | 5 steps (300 s) | 60 s | 6 | `SUCCESS` | 60.0 s | 4 | 8.21 s | 902.7 MB | `/home/ostriquetrum/wrf_real/run_R1_r8/wrfout_d01_2026-10-12_00:00:00` |
+
+*Note on Acoustic Substepping*:
+WRF calculates the acoustic substeps per RK stage dynamically using:
+$$\text{num\_sound\_steps} = \max\left(2 \cdot \left(\text{int}\left(300 \cdot \frac{\Delta t}{\min(\Delta x, \Delta y)} - 0.01\right) + 1\right), 4\right)$$
+For $\Delta x = \Delta y = 15000\text{ m}$ and $\Delta t = 60\text{ s}$, $300 \times 60 / 15000 = 1.2$, giving $\text{int}(1.19) + 1 = 2$, and $2 \times 2 = 4$.
+Thus, for all runs, WRF chose **`time_step_sound = 4`** ($\Delta t_s = 15.0\text{ s}$).
+
+---
+
+## 3. Double-Precision Build: WRF-4.6.1-r8
+
+A completely isolated second build was compiled in `/home/ostriquetrum/wrf_real/WRF-4.6.1-r8`:
+- **Configuration Command**:
+  ```bash
+  export NETCDF=/home/ostriquetrum/wrf_real/netcdf
+  printf "32\n1\n" | ./configure -r8
+  ```
+- **Configuration Flags Set in `configure.wrf`**:
+  - Compiler Choice: Option 32 (`Linux x86_64 ppc64le, gfortran compiler with gcc (serial)`)
+  - `RWORDSIZE = 8`
+  - `PROMOTION = -fdefault-real-8`
+  - NetCDF-4 library linkage (`-L/home/ostriquetrum/wrf_real/netcdf/lib -lnetcdff -lnetcdf`)
+- **Compilation Command**:
+  ```bash
+  /home/ostriquetrum/CPPWRF/tools/heavy.sh ./compile -j 4 em_real > compile.log 2>&1
+  ```
+- **Build Outcome**:
+  - `main/wrf.exe`: 51,930,296 bytes
+  - `main/real.exe`: 37,883,592 bytes
+  - `main/ndown.exe`: 41,442,632 bytes
+  - `main/tc.exe`: 37,076,864 bytes
+  - Verified precision via `ncdump -h` on output: All prognostic variables (`XLAT`, `XLONG`, `U`, `V`, `W`, `T`, `P`, `PH`, `QVAPOR`, `MU`, etc.) are declared as native `double`.
+
+---
+
+## 4. Detailed Run Reports and Verbatim Namelists
+
+### Run R0 (`hybrid_opt = 0`, 1-Hour History Every 10 min)
+- **Directory**: `/home/ostriquetrum/wrf_real/run_R0/`
+- **Output File**: `/home/ostriquetrum/wrf_real/run_R0/wrfout_d01_2026-10-12_00:00:00` (181 MB, 7 time frames)
+- **Initial & Boundary Files**: `wrfinput_d01` (33 MB, `HYBRID_OPT = 0`), `wrfbdy_d01` (4.3 MB)
+- **Time Step Parameters**: $\Delta t = 60\text{ s}$, `time_step_sound = 4` ($\Delta t_s = 15\text{ s}$)
+- **Exclusive Benchmark (`tools/heavy.sh --exclusive /usr/bin/time -v`)**:
+  - Elapsed wall clock: `0:13.20` (13.20 seconds)
+  - User CPU time: `43.77 s`, System CPU time: `2.72 s`
+  - CPU Utilization: `352%` (4 OpenMP threads)
+  - Maximum Resident Set Size (RSS): `445,976 KB` (~435.5 MB)
+- **Timing for Main**:
+  - Step 1 (00:01:00): `0.29993 s`
+  - Step 2 (00:02:00): `0.19641 s`
+  - Intermediate average: ~`0.185 - 0.205 s` / step
+  - Step 60 (01:00:00): `0.18814 s`
+- **Verbatim Namelist (`run_R0/namelist.input`)**:
+```fortran
+&time_control
+ run_days                            = 0,
+ run_hours                           = 1,
+ run_minutes                         = 0,
+ run_seconds                         = 0,
+ start_year                          = 2026,
+ start_month                         = 10,
+ start_day                           = 12,
+ start_hour                          = 00,
+ end_year                            = 2026,
+ end_month                           = 10,
+ end_day                             = 12,
+ end_hour                            = 06,
+ interval_seconds                    = 21600,
+ input_from_file                     = .true.,
+ history_interval                    = 10,
+ frames_per_outfile                  = 10,
+ restart                             = .false.,
+ restart_interval                    = 1440,
+ io_form_history                     = 2,
+ io_form_restart                     = 2,
+ io_form_input                       = 2,
+ io_form_boundary                    = 2,
+ debug_level                         = 0,
+/
+
+&domains
+ time_step                           = 60,
+ time_step_fract_num                 = 0,
+ time_step_fract_den                 = 1,
+ max_dom                             = 1,
+ e_we                                = 120,
+ e_sn                                = 90,
+ e_vert                              = 45,
+ p_top_requested                     = 5000,
+ num_metgrid_levels                  = 34,
+ num_metgrid_soil_levels             = 4,
+ dx                                  = 15000,
+ dy                                  = 15000,
+ grid_id                             = 1,
+ parent_id                           = 0,
+ i_parent_start                      = 1,
+ j_parent_start                      = 1,
+ parent_grid_ratio                   = 1,
+ parent_time_step_ratio              = 1,
+ feedback                            = 1,
+ smooth_option                       = 0,
+/
+
+&physics
+ mp_physics                          = 0,
+ ra_lw_physics                       = 0,
+ ra_sw_physics                       = 0,
+ radt                                = 0,
+ sf_sfclay_physics                   = 0,
+ sf_surface_physics                  = 0,
+ bl_pbl_physics                      = 0,
+ bldt                                = 0,
+ cu_physics                          = 0,
+ cudt                                = 0,
+ isfflx                              = 0,
+ ifsnow                              = 0,
+ icloud                              = 0,
+ num_soil_layers                     = 5,
+ sf_urban_physics                    = 0,
+/
+
+&fdda
+/
+
+&dynamics
+ hybrid_opt                          = 0,
+ w_damping                           = 0,
+ diff_opt                            = 0,
+ km_opt                              = 0,
+ diff_6th_opt                        = 0,
+ diff_6th_factor                     = 0.12,
+ base_temp                           = 290.,
+ damp_opt                            = 0,
+ zdamp                               = 5000.,
+ dampcoef                            = 0.2,
+ khdif                               = 0,
+ kvdif                               = 0,
+ non_hydrostatic                     = .true.,
+ moist_adv_opt                       = 1,
+ scalar_adv_opt                      = 1,
+ h_mom_adv_order                     = 5,
+ v_mom_adv_order                     = 3,
+ h_sca_adv_order                     = 5,
+ v_sca_adv_order                     = 3,
+ use_theta_m                         = 1,
+ epssm                               = 0.1,
+ gwd_opt                             = 0,
+/
+
+&bdy_control
+ spec_bdy_width                      = 5,
+ specified                           = .true.,
+/
+
+&grib2
+/
+
+&namelist_quilt
+ nio_tasks_per_group = 0,
+ nio_groups = 1,
+/
+```
+
+---
+
+### Run R1 (`hybrid_opt = 0`, 5 Steps, Output Every Step)
+- **Directory**: `/home/ostriquetrum/wrf_real/run_R1/`
+- **Output File**: `/home/ostriquetrum/wrf_real/run_R1/wrfout_d01_2026-10-12_00:00:00` (155 MB, 6 time frames: $t = 0, 60, 120, 180, 240, 300\text{ s}$)
+- **Time Step Parameters**: $\Delta t = 60\text{ s}$, `time_step_sound = 4` ($\Delta t_s = 15\text{ s}$)
+- **Exclusive Benchmark (`tools/heavy.sh --exclusive /usr/bin/time -v`)**:
+  - Elapsed wall clock: `0:01.49` (1.49 seconds)
+  - User CPU time: `3.77 s`, System CPU time: `0.36 s`
+  - CPU Utilization: `276%`
+  - Maximum Resident Set Size (RSS): `445,880 KB` (~435.4 MB)
+- **Timing for Main (Every Step)**:
+  - Step 1 (00:01:00): `0.32425 s`
+  - Step 2 (00:02:00): `0.22282 s`
+  - Step 3 (00:03:00): `0.21599 s`
+  - Step 4 (00:04:00): `0.21838 s`
+  - Step 5 (00:05:00): `0.21080 s`
+- **Verbatim Namelist (`run_R1/namelist.input`)**:
+```fortran
+&time_control
+ run_days                            = 0,
+ run_hours                           = 0,
+ run_minutes                         = 5,
+ run_seconds                         = 0,
+ start_year                          = 2026,
+ start_month                         = 10,
+ start_day                           = 12,
+ start_hour                          = 00,
+ start_minute                        = 00,
+ start_second                        = 00,
+ end_year                            = 2026,
+ end_month                           = 10,
+ end_day                             = 12,
+ end_hour                            = 00,
+ end_minute                          = 05,
+ end_second                          = 00,
+ interval_seconds                    = 21600,
+ input_from_file                     = .true.,
+ history_interval                    = 0,
+ history_interval_s                  = 60,
+ frames_per_outfile                  = 10,
+ restart                             = .false.,
+ restart_interval                    = 1440,
+ io_form_history                     = 2,
+ io_form_restart                     = 2,
+ io_form_input                       = 2,
+ io_form_boundary                    = 2,
+ debug_level                         = 0,
+/
+
+&domains
+ time_step                           = 60,
+ time_step_fract_num                 = 0,
+ time_step_fract_den                 = 1,
+ max_dom                             = 1,
+ e_we                                = 120,
+ e_sn                                = 90,
+ e_vert                              = 45,
+ p_top_requested                     = 5000,
+ num_metgrid_levels                  = 34,
+ num_metgrid_soil_levels             = 4,
+ dx                                  = 15000,
+ dy                                  = 15000,
+ grid_id                             = 1,
+ parent_id                           = 0,
+ i_parent_start                      = 1,
+ j_parent_start                      = 1,
+ parent_grid_ratio                   = 1,
+ parent_time_step_ratio              = 1,
+ feedback                            = 1,
+ smooth_option                       = 0,
+/
+
+&physics
+ mp_physics                          = 0,
+ ra_lw_physics                       = 0,
+ ra_sw_physics                       = 0,
+ radt                                = 0,
+ sf_sfclay_physics                   = 0,
+ sf_surface_physics                  = 0,
+ bl_pbl_physics                      = 0,
+ bldt                                = 0,
+ cu_physics                          = 0,
+ cudt                                = 0,
+ isfflx                              = 0,
+ ifsnow                              = 0,
+ icloud                              = 0,
+ num_soil_layers                     = 5,
+ sf_urban_physics                    = 0,
+/
+
+&fdda
+/
+
+&dynamics
+ hybrid_opt                          = 0,
+ w_damping                           = 0,
+ diff_opt                            = 0,
+ km_opt                              = 0,
+ diff_6th_opt                        = 0,
+ diff_6th_factor                     = 0.12,
+ base_temp                           = 290.,
+ damp_opt                            = 0,
+ zdamp                               = 5000.,
+ dampcoef                            = 0.2,
+ khdif                               = 0,
+ kvdif                               = 0,
+ non_hydrostatic                     = .true.,
+ moist_adv_opt                       = 1,
+ scalar_adv_opt                      = 1,
+ h_mom_adv_order                     = 5,
+ v_mom_adv_order                     = 3,
+ h_sca_adv_order                     = 5,
+ v_sca_adv_order                     = 3,
+ use_theta_m                         = 1,
+ epssm                               = 0.1,
+ gwd_opt                             = 0,
+/
+
+&bdy_control
+ spec_bdy_width                      = 5,
+ specified                           = .true.,
+/
+
+&grib2
+/
+
+&namelist_quilt
+ nio_tasks_per_group = 0,
+ nio_groups = 1,
+/
+```
+
+---
+
+### Run R2 (`hybrid_opt = 2`, 1-Hour History Every 10 min)
+- **Directory**: `/home/ostriquetrum/wrf_real/run_R2/`
+- **Output File**: `/home/ostriquetrum/wrf_real/run_R2/wrfout_d01_2026-10-12_00:00:00` (181 MB, 7 time frames)
+- **Initial & Boundary Files**: `wrfinput_d01` (33 MB, `HYBRID_OPT = 2`), `wrfbdy_d01` (4.3 MB)
+- **Time Step Parameters**: $\Delta t = 60\text{ s}$, `time_step_sound = 4` ($\Delta t_s = 15\text{ s}$)
+- **Exclusive Benchmark (`tools/heavy.sh --exclusive /usr/bin/time -v`)**:
+  - Elapsed wall clock: `0:11.85` (11.85 seconds)
+  - User CPU time: `39.96 s`, System CPU time: `2.63 s`
+  - CPU Utilization: `359%` (4 OpenMP threads)
+  - Maximum Resident Set Size (RSS): `447,812 KB` (~437.3 MB)
+- **Timing for Main**:
+  - Step 1 (00:01:00): `0.31585 s`
+  - Step 2 (00:02:00): `0.18813 s`
+  - Intermediate average: ~`0.183 - 0.198 s` / step
+  - Step 60 (01:00:00): `0.18422 s`
+- **Verbatim Namelist (`run_R2/namelist.input`)**:
+```fortran
+&time_control
+ run_days                            = 0,
+ run_hours                           = 1,
+ run_minutes                         = 0,
+ run_seconds                         = 0,
+ start_year                          = 2026,
+ start_month                         = 10,
+ start_day                           = 12,
+ start_hour                          = 00,
+ end_year                            = 2026,
+ end_month                           = 10,
+ end_day                             = 12,
+ end_hour                            = 06,
+ interval_seconds                    = 21600,
+ input_from_file                     = .true.,
+ history_interval                    = 10,
+ frames_per_outfile                  = 10,
+ restart                             = .false.,
+ restart_interval                    = 1440,
+ io_form_history                     = 2,
+ io_form_restart                     = 2,
+ io_form_input                       = 2,
+ io_form_boundary                    = 2,
+ debug_level                         = 0,
+/
+
+&domains
+ time_step                           = 60,
+ time_step_fract_num                 = 0,
+ time_step_fract_den                 = 1,
+ max_dom                             = 1,
+ e_we                                = 120,
+ e_sn                                = 90,
+ e_vert                              = 45,
+ p_top_requested                     = 5000,
+ num_metgrid_levels                  = 34,
+ num_metgrid_soil_levels             = 4,
+ dx                                  = 15000,
+ dy                                  = 15000,
+ grid_id                             = 1,
+ parent_id                           = 0,
+ i_parent_start                      = 1,
+ j_parent_start                      = 1,
+ parent_grid_ratio                   = 1,
+ parent_time_step_ratio              = 1,
+ feedback                            = 1,
+ smooth_option                       = 0,
+/
+
+&physics
+ mp_physics                          = 0,
+ ra_lw_physics                       = 0,
+ ra_sw_physics                       = 0,
+ radt                                = 0,
+ sf_sfclay_physics                   = 0,
+ sf_surface_physics                  = 0,
+ bl_pbl_physics                      = 0,
+ bldt                                = 0,
+ cu_physics                          = 0,
+ cudt                                = 0,
+ isfflx                              = 0,
+ ifsnow                              = 0,
+ icloud                              = 0,
+ num_soil_layers                     = 5,
+ sf_urban_physics                    = 0,
+/
+
+&fdda
+/
+
+&dynamics
+ hybrid_opt                          = 2,
+ w_damping                           = 0,
+ diff_opt                            = 0,
+ km_opt                              = 0,
+ diff_6th_opt                        = 0,
+ diff_6th_factor                     = 0.12,
+ base_temp                           = 290.,
+ damp_opt                            = 0,
+ zdamp                               = 5000.,
+ dampcoef                            = 0.2,
+ khdif                               = 0,
+ kvdif                               = 0,
+ non_hydrostatic                     = .true.,
+ moist_adv_opt                       = 1,
+ scalar_adv_opt                      = 1,
+ h_mom_adv_order                     = 5,
+ v_mom_adv_order                     = 3,
+ h_sca_adv_order                     = 5,
+ v_sca_adv_order                     = 3,
+ use_theta_m                         = 1,
+ epssm                               = 0.1,
+ gwd_opt                             = 0,
+/
+
+&bdy_control
+ spec_bdy_width                      = 5,
+ specified                           = .true.,
+/
+
+&grib2
+/
+
+&namelist_quilt
+ nio_tasks_per_group = 0,
+ nio_groups = 1,
+/
+```
+
+---
+
+### Run R3 (`hybrid_opt = 2`, `damp_opt = 3`, `w_damping = 1`)
+- **Directory**: `/home/ostriquetrum/wrf_real/run_R3/`
+- **Output File**: `/home/ostriquetrum/wrf_real/run_R3/wrfout_d01_2026-10-12_00:00:00` (181 MB, 7 time frames)
+- **Initial & Boundary Files**: `wrfinput_d01` (33 MB, `HYBRID_OPT = 2`), `wrfbdy_d01` (4.3 MB)
+- **Time Step Parameters**: $\Delta t = 60\text{ s}$, `time_step_sound = 4` ($\Delta t_s = 15\text{ s}$)
+- **Exclusive Benchmark (`tools/heavy.sh --exclusive /usr/bin/time -v`)**:
+  - Elapsed wall clock: `0:12.01` (12.01 seconds)
+  - User CPU time: `40.92 s`, System CPU time: `2.29 s`
+  - CPU Utilization: `359%` (4 OpenMP threads)
+  - Maximum Resident Set Size (RSS): `448,748 KB` (~438.2 MB)
+- **Timing for Main**:
+  - Step 1 (00:01:00): `0.29307 s`
+  - Step 2 (00:02:00): `0.19058 s`
+  - Intermediate average: ~`0.185 - 0.200 s` / step
+  - Step 60 (01:00:00): `0.18837 s`
+- **Verbatim Namelist (`run_R3/namelist.input`)**:
+```fortran
+&time_control
+ run_days                            = 0,
+ run_hours                           = 1,
+ run_minutes                         = 0,
+ run_seconds                         = 0,
+ start_year                          = 2026,
+ start_month                         = 10,
+ start_day                           = 12,
+ start_hour                          = 00,
+ end_year                            = 2026,
+ end_month                           = 10,
+ end_day                             = 12,
+ end_hour                            = 06,
+ interval_seconds                    = 21600,
+ input_from_file                     = .true.,
+ history_interval                    = 10,
+ frames_per_outfile                  = 10,
+ restart                             = .false.,
+ restart_interval                    = 1440,
+ io_form_history                     = 2,
+ io_form_restart                     = 2,
+ io_form_input                       = 2,
+ io_form_boundary                    = 2,
+ debug_level                         = 0,
+/
+
+&domains
+ time_step                           = 60,
+ time_step_fract_num                 = 0,
+ time_step_fract_den                 = 1,
+ max_dom                             = 1,
+ e_we                                = 120,
+ e_sn                                = 90,
+ e_vert                              = 45,
+ p_top_requested                     = 5000,
+ num_metgrid_levels                  = 34,
+ num_metgrid_soil_levels             = 4,
+ dx                                  = 15000,
+ dy                                  = 15000,
+ grid_id                             = 1,
+ parent_id                           = 0,
+ i_parent_start                      = 1,
+ j_parent_start                      = 1,
+ parent_grid_ratio                   = 1,
+ parent_time_step_ratio              = 1,
+ feedback                            = 1,
+ smooth_option                       = 0,
+/
+
+&physics
+ mp_physics                          = 0,
+ ra_lw_physics                       = 0,
+ ra_sw_physics                       = 0,
+ radt                                = 0,
+ sf_sfclay_physics                   = 0,
+ sf_surface_physics                  = 0,
+ bl_pbl_physics                      = 0,
+ bldt                                = 0,
+ cu_physics                          = 0,
+ cudt                                = 0,
+ isfflx                              = 0,
+ ifsnow                              = 0,
+ icloud                              = 0,
+ num_soil_layers                     = 5,
+ sf_urban_physics                    = 0,
+/
+
+&fdda
+/
+
+&dynamics
+ hybrid_opt                          = 2,
+ w_damping                           = 1,
+ diff_opt                            = 0,
+ km_opt                              = 0,
+ diff_6th_opt                        = 0,
+ diff_6th_factor                     = 0.12,
+ base_temp                           = 290.,
+ damp_opt                            = 3,
+ zdamp                               = 5000.,
+ dampcoef                            = 0.2,
+ khdif                               = 0,
+ kvdif                               = 0,
+ non_hydrostatic                     = .true.,
+ moist_adv_opt                       = 1,
+ scalar_adv_opt                      = 1,
+ h_mom_adv_order                     = 5,
+ v_mom_adv_order                     = 3,
+ h_sca_adv_order                     = 5,
+ v_sca_adv_order                     = 3,
+ use_theta_m                         = 1,
+ epssm                               = 0.1,
+ gwd_opt                             = 0,
+/
+
+&bdy_control
+ spec_bdy_width                      = 5,
+ specified                           = .true.,
+/
+
+&grib2
+/
+
+&namelist_quilt
+ nio_tasks_per_group = 0,
+ nio_groups = 1,
+/
+```
+
+---
+
+### Run R0_r8 (Double Precision `real*8`, `hybrid_opt = 0`, 1-Hour History Every 10 min)
+- **Directory**: `/home/ostriquetrum/wrf_real/run_R0_r8/`
+- **Output File**: `/home/ostriquetrum/wrf_real/run_R0_r8/wrfout_d01_2026-10-12_00:00:00` (221 MB, 7 time frames, 64-bit double precision)
+- **Initial & Boundary Files**: `wrfinput_d01` (33 MB, `HYBRID_OPT = 0`), `wrfbdy_d01` (6.5 MB)
+- **Time Step Parameters**: $\Delta t = 60\text{ s}$, `time_step_sound = 4` ($\Delta t_s = 15\text{ s}$)
+- **Exclusive Benchmark (`tools/heavy.sh --exclusive /usr/bin/time -v`)**:
+  - Elapsed wall clock: `0:37.92` (37.92 seconds)
+  - User CPU time: `36.20 s`, System CPU time: `1.70 s`
+  - CPU Utilization: `99%` (serial GNU gfortran, 1 core)
+  - Maximum Resident Set Size (RSS): `903,556 KB` (~882.4 MB)
+- **Timing for Main**:
+  - Step 1 (00:01:00): `1.41562 s`
+  - Step 2 (00:02:00): `0.54350 s`
+  - Intermediate average: ~`0.525 - 0.540 s` / step
+  - Step 60 (01:00:00): `0.52544 s`
+- **Verbatim Namelist (`run_R0_r8/namelist.input`)**:
+```fortran
+&time_control
+ run_days                            = 0,
+ run_hours                           = 1,
+ run_minutes                         = 0,
+ run_seconds                         = 0,
+ start_year                          = 2026,
+ start_month                         = 10,
+ start_day                           = 12,
+ start_hour                          = 00,
+ end_year                            = 2026,
+ end_month                           = 10,
+ end_day                             = 12,
+ end_hour                            = 06,
+ interval_seconds                    = 21600,
+ input_from_file                     = .true.,
+ history_interval                    = 10,
+ frames_per_outfile                  = 10,
+ restart                             = .false.,
+ restart_interval                    = 1440,
+ io_form_history                     = 2,
+ io_form_restart                     = 2,
+ io_form_input                       = 2,
+ io_form_boundary                    = 2,
+ debug_level                         = 0,
+/
+
+&domains
+ time_step                           = 60,
+ time_step_fract_num                 = 0,
+ time_step_fract_den                 = 1,
+ max_dom                             = 1,
+ e_we                                = 120,
+ e_sn                                = 90,
+ e_vert                              = 45,
+ p_top_requested                     = 5000,
+ num_metgrid_levels                  = 34,
+ num_metgrid_soil_levels             = 4,
+ dx                                  = 15000,
+ dy                                  = 15000,
+ grid_id                             = 1,
+ parent_id                           = 0,
+ i_parent_start                      = 1,
+ j_parent_start                      = 1,
+ parent_grid_ratio                   = 1,
+ parent_time_step_ratio              = 1,
+ feedback                            = 1,
+ smooth_option                       = 0,
+/
+
+&physics
+ mp_physics                          = 0,
+ ra_lw_physics                       = 0,
+ ra_sw_physics                       = 0,
+ radt                                = 0,
+ sf_sfclay_physics                   = 0,
+ sf_surface_physics                  = 0,
+ bl_pbl_physics                      = 0,
+ bldt                                = 0,
+ cu_physics                          = 0,
+ cudt                                = 0,
+ isfflx                              = 0,
+ ifsnow                              = 0,
+ icloud                              = 0,
+ num_soil_layers                     = 5,
+ sf_urban_physics                    = 0,
+/
+
+&fdda
+/
+
+&dynamics
+ hybrid_opt                          = 0,
+ w_damping                           = 0,
+ diff_opt                            = 0,
+ km_opt                              = 0,
+ diff_6th_opt                        = 0,
+ diff_6th_factor                     = 0.12,
+ base_temp                           = 290.,
+ damp_opt                            = 0,
+ zdamp                               = 5000.,
+ dampcoef                            = 0.2,
+ khdif                               = 0,
+ kvdif                               = 0,
+ non_hydrostatic                     = .true.,
+ moist_adv_opt                       = 1,
+ scalar_adv_opt                      = 1,
+ h_mom_adv_order                     = 5,
+ v_mom_adv_order                     = 3,
+ h_sca_adv_order                     = 5,
+ v_sca_adv_order                     = 3,
+ use_theta_m                         = 1,
+ epssm                               = 0.1,
+ gwd_opt                             = 0,
+/
+
+&bdy_control
+ spec_bdy_width                      = 5,
+ specified                           = .true.,
+/
+
+&grib2
+/
+
+&namelist_quilt
+ nio_tasks_per_group = 0,
+ nio_groups = 1,
+/
+```
+
+---
+
+### Run R1_r8 (Double Precision `real*8`, `hybrid_opt = 0`, 5 Steps, Output Every Step)
+- **Directory**: `/home/ostriquetrum/wrf_real/run_R1_r8/`
+- **Output File**: `/home/ostriquetrum/wrf_real/run_R1_r8/wrfout_d01_2026-10-12_00:00:00` (189 MB, 6 time frames, 64-bit double precision: $t = 0, 60, 120, 180, 240, 300\text{ s}$)
+- **Time Step Parameters**: $\Delta t = 60\text{ s}$, `time_step_sound = 4` ($\Delta t_s = 15\text{ s}$)
+- **Exclusive Benchmark (`tools/heavy.sh --exclusive /usr/bin/time -v`)**:
+  - Elapsed wall clock: `0:08.21` (8.21 seconds)
+  - User CPU time: `7.86 s`, System CPU time: `0.34 s`
+  - CPU Utilization: `99%` (serial GNU gfortran, 1 core)
+  - Maximum Resident Set Size (RSS): `902,740 KB` (~881.6 MB)
+- **Timing for Main (Every Step)**:
+  - Step 1 (00:01:00): `1.47434 s`
+  - Step 2 (00:02:00): `1.35808 s`
+  - Step 3 (00:03:00): `1.34134 s`
+  - Step 4 (00:04:00): `1.33396 s`
+  - Step 5 (00:05:00): `1.33466 s`
+- **Verbatim Namelist (`run_R1_r8/namelist.input`)**:
+```fortran
+&time_control
+ run_days                            = 0,
+ run_hours                           = 0,
+ run_minutes                         = 5,
+ run_seconds                         = 0,
+ start_year                          = 2026,
+ start_month                         = 10,
+ start_day                           = 12,
+ start_hour                          = 00,
+ start_minute                        = 00,
+ start_second                        = 00,
+ end_year                            = 2026,
+ end_month                           = 10,
+ end_day                             = 12,
+ end_hour                            = 00,
+ end_minute                          = 05,
+ end_second                          = 00,
+ interval_seconds                    = 21600,
+ input_from_file                     = .true.,
+ history_interval                    = 0,
+ history_interval_s                  = 60,
+ frames_per_outfile                  = 10,
+ restart                             = .false.,
+ restart_interval                    = 1440,
+ io_form_history                     = 2,
+ io_form_restart                     = 2,
+ io_form_input                       = 2,
+ io_form_boundary                    = 2,
+ debug_level                         = 0,
+/
+
+&domains
+ time_step                           = 60,
+ time_step_fract_num                 = 0,
+ time_step_fract_den                 = 1,
+ max_dom                             = 1,
+ e_we                                = 120,
+ e_sn                                = 90,
+ e_vert                              = 45,
+ p_top_requested                     = 5000,
+ num_metgrid_levels                  = 34,
+ num_metgrid_soil_levels             = 4,
+ dx                                  = 15000,
+ dy                                  = 15000,
+ grid_id                             = 1,
+ parent_id                           = 0,
+ i_parent_start                      = 1,
+ j_parent_start                      = 1,
+ parent_grid_ratio                   = 1,
+ parent_time_step_ratio              = 1,
+ feedback                            = 1,
+ smooth_option                       = 0,
+/
+
+&physics
+ mp_physics                          = 0,
+ ra_lw_physics                       = 0,
+ ra_sw_physics                       = 0,
+ radt                                = 0,
+ sf_sfclay_physics                   = 0,
+ sf_surface_physics                  = 0,
+ bl_pbl_physics                      = 0,
+ bldt                                = 0,
+ cu_physics                          = 0,
+ cudt                                = 0,
+ isfflx                              = 0,
+ ifsnow                              = 0,
+ icloud                              = 0,
+ num_soil_layers                     = 5,
+ sf_urban_physics                    = 0,
+/
+
+&fdda
+/
+
+&dynamics
+ hybrid_opt                          = 0,
+ w_damping                           = 0,
+ diff_opt                            = 0,
+ km_opt                              = 0,
+ diff_6th_opt                        = 0,
+ diff_6th_factor                     = 0.12,
+ base_temp                           = 290.,
+ damp_opt                            = 0,
+ zdamp                               = 5000.,
+ dampcoef                            = 0.2,
+ khdif                               = 0,
+ kvdif                               = 0,
+ non_hydrostatic                     = .true.,
+ moist_adv_opt                       = 1,
+ scalar_adv_opt                      = 1,
+ h_mom_adv_order                     = 5,
+ v_mom_adv_order                     = 3,
+ h_sca_adv_order                     = 5,
+ v_sca_adv_order                     = 3,
+ use_theta_m                         = 1,
+ epssm                               = 0.1,
+ gwd_opt                             = 0,
+/
+
+&bdy_control
+ spec_bdy_width                      = 5,
+ specified                           = .true.,
+/
+
+&grib2
+/
+
+&namelist_quilt
+ nio_tasks_per_group = 0,
+ nio_groups = 1,
+/
+```
+
+---
+
+## 5. Notes & Recommendations for Agent 0
+
+1. **Reference Datasets Location**:
+   - `R0` (FP32, `hybrid_opt = 0`, 1 h): `/home/ostriquetrum/wrf_real/run_R0/wrfout_d01_2026-10-12_00:00:00`
+   - `R1` (FP32, `hybrid_opt = 0`, 5 steps): `/home/ostriquetrum/wrf_real/run_R1/wrfout_d01_2026-10-12_00:00:00`
+   - `R2` (FP32, `hybrid_opt = 2`, 1 h): `/home/ostriquetrum/wrf_real/run_R2/wrfout_d01_2026-10-12_00:00:00`
+   - `R3` (FP32, `hybrid_opt = 2` + damp, 1 h): `/home/ostriquetrum/wrf_real/run_R3/wrfout_d01_2026-10-12_00:00:00`
+   - `R0_r8` (FP64, `hybrid_opt = 0`, 1 h): `/home/ostriquetrum/wrf_real/run_R0_r8/wrfout_d01_2026-10-12_00:00:00`
+   - `R1_r8` (FP64, `hybrid_opt = 0`, 5 steps): `/home/ostriquetrum/wrf_real/run_R1_r8/wrfout_d01_2026-10-12_00:00:00`
+2. **Double-Precision Reference without Truncation Noise**:
+   - For bit-exact or near-machine-precision verification of the CPPWRF dycore (map factors, metric terms, Coriolis, boundaries), use `run_R1_r8` (5 timesteps) and `run_R0_r8` (1 hour). All floating-point fields in these files are stored as 64-bit IEEE double precision (`NC_DOUBLE`).
+3. **Acoustic Substeps**:
+   - WRF dynamically used 4 acoustic substeps per RK stage ($\Delta t_s = 15\text{ s}$) across all simulations.
+
+---
+
 ## Conclusion & Status
 
-Task T4.1 is **COMPLETED**.
-All rules in `docs/team/AGENT4_REAL_INIT.md`, `docs/team/PLAN.md`, and `docs/team/HIERARCHY.md` have been fulfilled.
+Task T4.2 is **COMPLETED**.
+All requirements specified in `docs/team/AGENT4_T42_DRY_REF.md` have been fulfilled.
+Agent 4 is now **STOPPED**, awaiting inspection and further instructions from Agent 0.
 
-**Agent 4 is now STOPPED, awaiting further instructions from Agent 0.**
