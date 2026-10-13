@@ -1,7 +1,7 @@
 # CPPWRF Independent Audit Index (Agent 7)
 
 Quality gate and independent verification tracking for Agent 0.
-Last updated: 2026-10-13 02:12 UTC.
+Last updated: 2026-10-13 06:30 UTC.
 
 ## Audit Summary Table
 
@@ -15,6 +15,9 @@ Last updated: 2026-10-13 02:12 UTC.
 | `docs/team/AGENT5_REPORT.md` | Scheme 1: Noah Land Surface Model | Agent 5 | 2026-10-13 01:40 | **VERIFIED WITH NOTES** | [`agent5_noah.md`](docs/audit/agent5_noah.md) |
 | `docs/team/AGENT6_REPORT.md` | Parts A/B: NetCDF & Restarts | Agent 6 | 2026-10-13 01:25 | **VERIFIED WITH NOTES** | [`agent6_netcdf.md`](docs/audit/agent6_netcdf.md) |
 | `docs/team/AGENT4_REPORT.md` | T4.1: Real-Data Initialization | Agent 4 | 2026-10-13 01:10 | **PAUSED (Awaiting pkgs)** | Pending system packages (`libpng-dev`, `tcsh`) |
+| `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.1: Line-by-Line WRF Dycore Source | Agent 0 | Commits `d515110`, `9304294`, `352aca9` | **VERIFIED** | [`agent0_dycore_source.md`](docs/audit/agent0_dycore_source.md) |
+| `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.2: Mutation Testing Dycore Checks | Agent 0 | 2026-10-13 06:25 | **VERIFIED** | [`agent0_dycore_mutations.md`](docs/audit/agent0_dycore_mutations.md) |
+| `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.3: YSU, sfclayrev, Restarts Re-verification | Agent 2, Agent 6 | 2026-10-13 06:10 | **VERIFIED** | [`physics_restart_reverification.md`](docs/audit/physics_restart_reverification.md) |
 
 ---
 
