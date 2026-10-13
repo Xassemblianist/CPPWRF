@@ -1370,9 +1370,123 @@ A completely isolated second build was compiled in `/home/ostriquetrum/wrf_real/
 
 ---
 
+---
+
+# Agent 4 Report: Lateral Boundary Condition Call Map, C++ Port, & Differential Testing (T4.3)
+
+## 1. Executive Summary & Deliverables
+
+In accordance with `docs/team/AGENT4_T43_BC_PORT.md`, `docs/team/PLAN.md`, and `docs/team/HIERARCHY.md`:
+- **Sub-task 1: Exhaustive Boundary Call Map & Interior Alteration Document**:
+  - Authored [docs/team/AGENT4_BC_CALLMAP.md](file:///home/ostriquetrum/CPPWRF/docs/team/AGENT4_BC_CALLMAP.md).
+  - Documents every lateral boundary routine call in `dyn_em` across the RK3 time step, big step utilities, acoustic sub-stepping, and physics interfaces.
+  - Details exact interior alterations: specified zone (spec_zone = 1), relaxation zone (spec_bdy_width - 1 = 4), exponential cosine relaxation coefficients $F_C, G_C$, geopotential coupling, and flat halo extrapolation.
+- **Sub-task 2: Single-Source FP32/FP64 C++20 Data Structures & Kernels**:
+  - Implemented in [src/bdy/bdy_data.hpp](file:///home/ostriquetrum/CPPWRF/src/bdy/bdy_data.hpp): reader-independent boundary slabs (`BdySlab`), lightweight views (`BdySlabView`), boundary containers (`BdySet`, `BdyTendSet`), and width constants.
+  - Implemented in [src/bdy/bdy_kernels.hpp](file:///home/ostriquetrum/CPPWRF/src/bdy/bdy_kernels.hpp): single-source templated kernels for:
+    1. `lbc_fcx_gcx`: analytical relaxation factor computation ($F_C, G_C$).
+    2. `relax_bdytend_core_3d` & `relax_bdytend_core_2d`: relaxation zone tendency coupling across all staggering orientations ('M', 'U', 'V', 'W').
+    3. `spec_bdytend` (3D & 2D): specified boundary zone tendencies.
+    4. `spec_bdyupdate` (3D & 2D): RK boundary field state update.
+    5. `spec_bdyupdate_ph`: geopotential perturbation update with column mass variation.
+    6. `zero_grad_bdy`: zero-gradient boundary conditions on vertical velocity $w$.
+    7. `flow_dep_bdy`: flow-dependent advective inflow/outflow boundary conditions.
+    8. `spec_bdy_final` (3D & 2D): final boundary coupling and overwrite.
+    9. `set_physical_bc3d_flat` & `set_physical_bc2d_flat`: flat physical boundary extrapolation.
+- **Sub-task 3: Differential Test Suite & Real R0 Verification**:
+  - Implemented in [tests/bdy/test_bdy_differential.cpp](file:///home/ostriquetrum/CPPWRF/tests/bdy/test_bdy_differential.cpp) and executable script [tests/bdy/run_test.sh](file:///home/ostriquetrum/CPPWRF/tests/bdy/run_test.sh).
+  - Validated against reference WRF 4.6.1 Fortran routines (`module_bc.F`, `module_bc_em.F`) compiled with `gfortran` into `tests/bdy/build/libwrfbdy_ref.a`.
+  - Validated against real R0 WRF dataset (`/home/ostriquetrum/wrf_real/run_R0/` `wrfbdy_d01` vs `wrfinput_d01`).
+  - Verified with AddressSanitizer (`-fsanitize=address,undefined`) with zero errors and zero memory leaks.
+
+---
+
+## 2. Test Execution & Differential Results
+
+The entire test suite is fully automated via `./tests/bdy/run_test.sh` under `tools/heavy.sh`.
+
+```
+=================================================================
+   CPPWRF T4.3: Lateral Boundary Differential Test Suite (C++ vs WRF)
+=================================================================
+[TEST 1] Differential test: lbc_fcx_gcx ... PASSED (max_rel=2.60209e-16)
+[TEST 2] Differential test: relax_bdytend_core_3d (multiple tiles/variables) ... PASSED (points=74533 max_rel=4.51946e-13)
+[TEST 3] Differential test: relax_bdytend_core_2d (mu) ... PASSED (max_rel=1.26309e-15)
+[TEST 4] Differential test: spec_bdytend (3D & 2D) ... PASSED (bit-exact, max_abs=0)
+[TEST 5] Differential test: spec_bdyupdate ... PASSED (max_rel=0)
+[TEST 6] Differential test: spec_bdyupdate_ph ... PASSED (max_rel=2.64336e-16)
+[TEST 7] Differential test: zero_grad_bdy (w) ... PASSED (bit-exact, max_abs=0)
+[TEST 8] Differential test: flow_dep_bdy ... PASSED (bit-exact, max_abs=0)
+[TEST 9] Differential test: spec_bdy_final (3D & 2D) ... PASSED (max_rel=0)
+[TEST 10] Differential test: set_physical_bc (flat halos) ... PASSED (bit-exact, max_abs=0)
+[TEST 11] Verification against R0 wrfbdy_d01 & wrfinput_d01 ...
+  Domain extents: nx=119, ny=89, nz=44
+  [Check MU South b=0]: points=119 max_abs=0 max_rel=0 -> MATCHES (bit-exact)!
+  [Check T South b=0 coupled]: points=5236 max_abs=0 max_rel=0 -> MATCHES (bit-exact)!
+  [Check U West b=0 coupled]: points=3916 max_abs=0 max_rel=0 -> MATCHES (bit-exact)!
+  === All R0 wrfbdy & wrfinput checks verified successfully! ===
+=================================================================
+   >>> ALL LATERAL BOUNDARY DIFFERENTIAL TESTS PASSED! <<<
+=================================================================
+```
+
+### Detailed Category Summary:
+| Test ID | Kernel / Target | Points Evaluated | Max Absolute Difference | Max Relative Difference | Pass Threshold | Status |
+|:---|:---|:---:|:---:|:---:|:---:|:---:|
+| **TEST 1** | `lbc_fcx_gcx` | 5 | $0.0$ | $2.60 \times 10^{-16}$ | $\le 10^{-12}$ | **PASS** |
+| **TEST 2** | `relax_bdytend_core_3d` | 74,533 | $2.31 \times 10^{-11}$ | $4.52 \times 10^{-13}$ | $\le 10^{-12}$ | **PASS** |
+| **TEST 3** | `relax_bdytend_core_2d` | 336 | $1.28 \times 10^{-13}$ | $1.26 \times 10^{-15}$ | $\le 10^{-12}$ | **PASS** |
+| **TEST 4** | `spec_bdytend` | 8,820 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+| **TEST 5** | `spec_bdyupdate` | 7,616 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+| **TEST 6** | `spec_bdyupdate_ph` | 1,512 | $1.46 \times 10^{-11}$ | $2.64 \times 10^{-16}$ | $\le 10^{-12}$ | **PASS** |
+| **TEST 7** | `zero_grad_bdy` | 2,464 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+| **TEST 8** | `flow_dep_bdy` | 1,920 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+| **TEST 9** | `spec_bdy_final` | 9,156 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+| **TEST 10** | `set_physical_bc` (flat) | 12,636 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+| **TEST 11a**| R0 MU South ($b=0$) | 119 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+| **TEST 11b**| R0 T South ($b=0$, coupled) | 5,236 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+| **TEST 11c**| R0 U West ($b=0$, coupled) | 3,916 | $0.0$ | $0.0$ | Bit-exact | **PASS** |
+
+---
+
+## 3. Key Technical Discoveries & Implementation Notes
+
+1. **WRF Fortran Boundary Slab Indexing**:
+   - In WRF Fortran registry and code, boundary arrays (`field_bxs`, `field_bxe`, etc.) are declared with the 2nd dimension always spanning the vertical coordinate `kds:kde` ($nz + 1$), regardless of whether the field is staggered on levels ('W') or on half-levels ('M', 'U', 'V').
+   - In C++, allocating `BdySlab` with `nk = nz + 1` preserves exact memory pitch matching: `stride(b) = n_horizontal * (nz + 1)`.
+2. **Moist Potential Temperature Coupling in WRF 4.x**:
+   - When `use_theta_m = 1`, WRF couples perturbation moist potential temperature:
+     $$\theta_m = (\theta_{dry} + 300) \cdot (1 + \frac{R_v}{R_d} \cdot q_v) - 300$$
+     $$T_{coupled} = \theta_m \cdot (c_{1h} \cdot (\mu + \mu_b) + c_{2h})$$
+   - With $R_v = 461.6 \text{ J}\cdot\text{kg}^{-1}\text{K}^{-1}$ and $R_d = 287.0 \text{ J}\cdot\text{kg}^{-1}\text{K}^{-1}$, verifying `T_BYS` in `wrfbdy_d01` against `wrfinput_d01` produced **exact bit-for-bit equality ($0.0$ difference across all 5,236 boundary points)**.
+3. **Staggered Velocity Coupling**:
+   - Velocity $U$ at the boundary is coupled with dry air mass $\mu$ and map scale factor $msfuy$:
+     $$U_{coupled} = \frac{(c_{1h} \cdot (\mu_u + \mu_{bu}) + c_{2h}) \cdot U}{msfuy}$$
+   - Verified against `U_BXS` in `wrfbdy_d01` yielding **exact bit-for-bit equality ($0.0$ difference across all 3,916 boundary points)**.
+4. **Physical BC Boundary Zone Memory Layout**:
+   - WRF's `set_physical_bc3d` uses an internal parameter `bdyzone = 4` and loops over $j = jts - 4$ to $j = jte + 4$. For domain boundaries, memory dimension halos must provide at least 5 cells (`ims = 1 - 5`, `ime = ni + 5`) to guarantee no out-of-bounds array indexing in Fortran.
+   - The C++ kernel `set_physical_bc3d_flat` faithfully implements this layout while respecting stagger boundaries and 3-point physical halo extrapolation.
+
+---
+
+## 4. Verification Proof Commands
+
+```bash
+# 1. Run the differential test suite (C++ vs Fortran + R0 verification)
+./tests/bdy/run_test.sh
+
+# 2. Run under AddressSanitizer and UndefinedBehaviorSanitizer
+tools/heavy.sh tests/bdy/build/test_bdy_asan
+
+# 3. Check call map documentation
+cat docs/team/AGENT4_BC_CALLMAP.md
+```
+
+---
+
 ## Conclusion & Status
 
-Task T4.2 is **COMPLETED**.
-All requirements specified in `docs/team/AGENT4_T42_DRY_REF.md` have been fulfilled.
+Task T4.3 is **COMPLETED**.
+All lateral boundary routines have been mapped, implemented in single-source FP32/FP64 C++20, and differentially verified with 100% passing tests (bit-exact or $\le 4.52 \times 10^{-13}$).
 Agent 4 is now **STOPPED**, awaiting inspection and further instructions from Agent 0.
 
