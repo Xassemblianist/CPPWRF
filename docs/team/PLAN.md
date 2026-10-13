@@ -8,7 +8,7 @@ reference to Agent 1 (ownership, integration, git, STATUS.md) now means Agent 0.
 **Chain of command, quality gate, shared-machine rules and strikes: docs/team/HIERARCHY.md (binding).**
 
 ## Rules for every Gemini agent (shared machine: 12 cores, 15 GB RAM, 1 GPU)
-- Wrap builds/runs/tests with `tools/heavy.sh`; timings only with `tools/heavy.sh --exclusive`.
+- Wrap builds/runs/tests with `tools/heavy.sh` (4 slots x 3 threads); quick checks (python on a file, ncdump, one small compile, a few model steps) with `tools/heavy.sh --light` (no slot, starts at once); timings only with `tools/heavy.sh --exclusive` (waits until all slots are free, never blocks the others for more than 10 min).
 - Run everything with `OMP_NUM_THREADS=4 OMP_WAIT_POLICY=passive`; build with `-j4` at most.
 - Never write files in the repo root or outside your own paths (no *.mod, *.o, *.bin, test
   programs there): compile Fortran in your own build directory.
