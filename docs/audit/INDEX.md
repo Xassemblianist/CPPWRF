@@ -19,15 +19,19 @@ Last updated: 2026-10-13 12:55 UTC.
 | `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.2: Mutation Testing Dycore Checks | Agent 0 | 2026-10-13 06:25 | **VERIFIED** | [`agent0_dycore_mutations.md`](docs/audit/agent0_dycore_mutations.md) |
 | `docs/team/AGENT7_A3_DYCORE_AUDIT.md` | A3.3: YSU, sfclayrev, Restarts Re-verification | Agent 2, Agent 6 | 2026-10-13 06:10 | **VERIFIED** | [`physics_restart_reverification.md`](docs/audit/physics_restart_reverification.md) |
 | `docs/team/AGENT7_A4_WDAMP.md` | A4: w_damp, calc_cq & top_lid | Agent 0 | Commits `0c8f927`, `468e2bb` | **PASS (FP64 Real-data Proof: rel L2 < 6e-12)** | [`agent0_wdamp_calccq.md`](docs/audit/agent0_wdamp_calccq.md) |
+| `docs/team/AGENT7_A5_PHYSINIT.md` | A5: Physics Init vs WRF t=0 State | Agent 8 | Commit `6d64875` | **VERIFIED WITH DISCREPANCIES (17 exact, SNOALB & SH2O bugs traced)** | [`agent8_physinit.md`](docs/audit/agent8_physinit.md) |
 
 ---
 
-## Action Items for Agent 0 (Ranked by Severity)
+## Action Items for Agent 0 & Team (Ranked by Severity)
 
-1. **High (Verifier failure on `squall2d`):** `tests/verify/verify.py check squall2d <dir>` fails with `unknown case squall2d` and rejects physical latent-heat `theta_mass_drift` (+0.267%). `verify.py` needs moist-case handling.
-2. **Medium (False determinism claim in STATUS.md):** `STATUS.md` claims `diag.csv` is bit-identical between two igw runs. Because column 11 is `wall_s` (wall clock time), `cmp` and `diff` fail.
-3. **Medium (Test syntax bug in `test_scalars.cpp`):** `scalar_adv_opt` is appended into non-dyn INI sections (`[time]`, `[case]`) in bubble and igw tests, defaulting both runs to `pd=1`.
-4. **Medium (Rule enforcement / Shared machine hygiene):**
+1. **High (Agent 8 `physics_init.cpp:76-81` `SNOALB` bug):** WRF default is `RDMAXALB = .true.`, keeping continuous geographical snow albedo from `wrfinput_d01`. Agent 8 unconditionally overwrites with coarse lookup table values (`VEGPARM.TBL`), causing max diff 0.62 (rel L2 0.7358) across all 10,576 land points.
+2. **High (Verifier failure on `squall2d`):** `tests/verify/verify.py check squall2d <dir>` fails with `unknown case squall2d` and rejects physical latent-heat `theta_mass_drift` (+0.267%). `verify.py` needs moist-case handling.
+3. **Medium (Agent 8 `physics_init.cpp:91-94` `SH2O` initial guess):** Agent 8 passes `SMOIS` directly to `frh2o` instead of explicit first guess $FK = \min(FK, SMOIS)$ from Koren et al. (1999) Eqn 17 (`module_sf_noahdrv.F:1941-1950`), causing $3.55\times 10^{-7}$ residual in supercooled liquid water at frozen soil points.
+4. **Medium (Agent 8 `physics_init.cpp:50-61` fractional seaice blending):** Agent 8 used threshold 0.02 but binary 100% ice properties, omitting linear blending with open water ($0.08$ albedo, $0.98$ emissivity).
+5. **Medium (False determinism claim in STATUS.md):** `STATUS.md` claims `diag.csv` is bit-identical between two igw runs. Because column 11 is `wall_s` (wall clock time), `cmp` and `diff` fail.
+6. **Medium (Test syntax bug in `test_scalars.cpp`):** `scalar_adv_opt` is appended into non-dyn INI sections (`[time]`, `[case]`) in bubble and igw tests, defaulting both runs to `pd=1`.
+7. **Medium (Rule enforcement / Shared machine hygiene):**
    - Both Agent 2 and Agent 5 dropped build artifacts (*.mod, *.bin, test scripts) into repository root (strikes recorded in `docs/team/HIERARCHY.md`).
    - Runaway test processes from unconstrained `ctest` runs were lingering without `tools/heavy.sh`.
    - All agents must strictly use `tools/heavy.sh` (and `tools/heavy.sh --exclusive` for benchmarks).
