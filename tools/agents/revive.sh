@@ -13,6 +13,7 @@ while true; do
     exec 7>"$ST/agent$n.lock"
     if ! flock -n 7; then continue; fi  # a worker is running
     flock -u 7
+    [ -e "$ST/agent$n.paused" ] && continue  # paused by Agent 0 (quota)
     [ -s "$ST/agent$n.queue" ] && continue
     [ -s "$ST/agent$n.last" ] || continue
     if head -c 40 "$ST/agent$n.last" | grep -qE "^(ERROR|UNPARSED)"; then

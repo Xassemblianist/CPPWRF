@@ -5,6 +5,7 @@
 #   tools/agents/agent.sh status                 per agent: running?, queued messages, last result
 #   tools/agents/agent.sh log <N> [lines]        tail Agent N's log
 #   tools/agents/agent.sh reset <N>              forget Agent N's conversation (next send starts fresh)
+#   tools/agents/agent.sh pause|resume <N>       stop starting workers for N (quota) / restart its queue
 # State and logs live in ~/cppwrf_agents/ (outside the repo). Each agent keeps one CLI
 # conversation; the first message of a conversation gets the role preamble below.
 # Owner: Agent 0.
@@ -61,8 +62,11 @@ case "$cmd" in
   send)
     n=$1; msg=$2
     python3 -c "import sys,json; print(json.dumps(sys.argv[1]))" "$msg" >> "$ST/agent$n.queue"
-    nohup "$0" _worker "$n" >/dev/null 2>&1 &
-    echo "queued for Agent $n" ;;
+    if [ -e "$ST/agent$n.paused" ]; then echo "queued for Agent $n (paused: no worker started)"; else
+      nohup "$0" _worker "$n" >/dev/null 2>&1 &
+      echo "queued for Agent $n"; fi ;;
+  pause) touch "$ST/agent$1.paused"; echo "Agent $1 paused (running turn not stopped)" ;;
+  resume) rm -f "$ST/agent$1.paused"; nohup "$0" _worker "$1" >/dev/null 2>&1 & echo "Agent $1 resumed" ;;
   _worker) worker "$1" ;;
   status)
     for f in "$ST"/agent*.cid "$ST"/agent*.queue; do [ -e "$f" ] || continue; done
