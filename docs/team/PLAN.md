@@ -25,6 +25,7 @@ reference to Agent 1 (ownership, integration, git, STATUS.md) now means Agent 0.
 | Agent 5 | Gemini 3.8 Flash High | Second physics track: Noah LSM, Kain-Fritsch, Thompson (docs/team/AGENT5_PHYSICS2.md). |
 | Agent 6 | Gemini 3.8 Flash High | WRF-format NetCDF output, restarts, regression system (docs/team/AGENT6_NETCDF_REGRESSION.md). |
 | Agent 8 | Gemini 3.8 Flash High | Physics driver glue (phy_prep, tendency coupling), differential-tested (docs/team/AGENT8_PHYS_DRIVER.md). |
+| Agent 9 | Gemini 3.8 Flash High | WRF diffusion/damping kernels (diff_opt 1/2, km_opt 1/4, 6th order, w_damp), differential-tested (docs/team/AGENT9_DIFFUSION.md). |
 | Agent 7 | Gemini 3.8 Flash High | Independent auditor: re-runs every report's claims, mutation-tests the tests, checks rule violations (docs/team/AGENT7_AUDITOR.md). Never writes model code. |
 
 Agent 0 has slightly more authority (it sets tasks), but Agents 0 and 1 are peers on technical
@@ -45,6 +46,7 @@ for Agent 0). The user decides.
 | src/phys/, tests/phys/ (physics ports + Fortran differential tests) | **Agent 2** |
 | src/init_real/, tests/init_real/, ~/wrf_real/ (real-data initialisation) | **Agent 4** |
 | src/bdy/, tests/bdy/ (lateral boundary routines) | **Agent 4** |
+| src/dyn/diffusion/, tests/dyn/diffusion/ (diffusion kernels) | **Agent 9** |
 | src/phys/driver/, tests/phys/driver/ (physics driver glue) | **Agent 8** (excluded from Agent 2's src/phys) |
 | src/cases/hill2d.* , configs/hill2d_* (task T3.8 exception) | **Agent 3** |
 | ~/wrf_ref/ (reference WRF for idealized cases) | **Agent 3** |

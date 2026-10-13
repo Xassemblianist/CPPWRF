@@ -8,6 +8,7 @@ User (final authority)
      │   └─ Agent 5, Physics track 2 (follows Agent 2's harness and conventions)
      ├─ Agent 6, Infrastructure lead: builds, regression, NetCDF I/O; watches machine load
      ├─ Agent 8, Physics driver glue (follows Agent 2's harness)
+     ├─ Agent 9, Diffusion and damping kernels
      ├─ Agent 3, Reference and GPU (WRF reference runs, GPU validation, dycore extensions)
      └─ Agent 4, Real-data initialisation
 ```
