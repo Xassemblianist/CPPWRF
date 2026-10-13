@@ -4,7 +4,7 @@ The dycore hook is committed (e94c05e): src/dyn/column_physics.hpp. RK3 calls
   part1(s, b, t)   RK stage 1, after rk_step_prep and init_zero_tendency
                    = WRF first_rk_step_part1: phy_prep, radiation_driver, surface_driver,
                      pbl_driver, cumulus_driver
-  part2(s, b, t)   RK stage 1, after the stage-1 diffusion, before rk_tendency
+  part2(s, b, t)   RK stage 1, before the stage-1 diffusion and rk_tendency
                    = first_rk_step_part2: calculate_phy_tend + update_phy_ten into
                      t.ru_tendf, t.rv_tendf, t.t_tendf, t.q_tendf (moist species in State order)
   after_rk(s, b)   after the RK loop, before microphysics = phy_prep_part2
