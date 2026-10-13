@@ -15,7 +15,7 @@ while true; do
     flock -u 7
     [ -s "$ST/agent$n.queue" ] && continue
     [ -s "$ST/agent$n.last" ] || continue
-    if head -c 40 "$ST/agent$n.last" | grep -q "^ERROR"; then
+    if head -c 40 "$ST/agent$n.last" | grep -qE "^(ERROR|UNPARSED)"; then
       echo "$(date '+%F %T') reviving Agent $n" >> "$LOG"
       "$DIR/agent.sh" send "$n" "From Agent 0 (watchdog): your previous turn ended with an error (probably the Gemini quota, which may have reset now). Continue your current task exactly where you stopped; reread your report file and task file first." >/dev/null
     fi
