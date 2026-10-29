@@ -3,13 +3,18 @@
 Differential test comparison script for WSM6 microphysics.
 Compares Fortran vs C++ outputs on identical inputs.
 Outputs max abs diff, max rel diff (with physical floor), worst column, and PASS/FAIL.
-Acceptance criterion: max rel diff <= 1e-12 in FP64.
+--tol 0 (CPU FP64): every value identical as tests/verify/exact.py (NaN equals only NaN, -0 differs from +0);
+otherwise max rel diff <= tol.
 """
+import os
 
 import argparse
 import struct
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
 
 def read_output(filepath):
     with open(filepath, 'rb') as f:
@@ -35,6 +40,10 @@ def read_output(filepath):
         graupel    = np.fromfile(f, dtype=np.float64, count=n2d)
         graupelncv = np.fromfile(f, dtype=np.float64, count=n2d)
         sr         = np.fromfile(f, dtype=np.float64, count=n2d)
+        re = [np.fromfile(f, dtype=np.float64, count=n3d) for _ in range(3)]  # re_cloud, re_ice, re_snow
+        if re[2].size != n3d or f.read(1):
+            raise ValueError(f"{filepath}: not {10 * n3d + 7 * n2d} values after the header")
+        re_cloud, re_ice, re_snow = (a.reshape((nz, n_cols)) for a in re)
 
         return {
             'n_cols': n_cols, 'nz': nz,
@@ -42,7 +51,8 @@ def read_output(filepath):
             'rain': rain, 'rainncv': rainncv,
             'snow': snow, 'snowncv': snowncv,
             'graupel': graupel, 'graupelncv': graupelncv,
-            'sr': sr
+            'sr': sr,
+            're_cloud': re_cloud, 're_ice': re_ice, 're_snow': re_snow
         }
 
 def compare_outputs(fortran_file, cpp_file, tol=1e-12):
@@ -70,11 +80,12 @@ def compare_outputs(fortran_file, cpp_file, tol=1e-12):
         'snowncv': 1e-12,   # Step snow (mm)
         'graupel': 1e-12,   # Accumulated graupel (mm)
         'graupelncv': 1e-12,# Step graupel (mm)
-        'sr': 1e-12         # Snow ratio [0, 1]
+        'sr': 1e-12,        # Snow ratio [0, 1]
+        're_cloud': 1e-6, 're_ice': 1e-6, 're_snow': 1e-6  # effective radii (m)
     }
 
     variables = ['th', 'q', 'qc', 'qr', 'qi', 'qs', 'qg',
-                 'rain', 'rainncv', 'snow', 'snowncv', 'graupel', 'graupelncv', 'sr']
+                 'rain', 'rainncv', 'snow', 'snowncv', 'graupel', 'graupelncv', 'sr', 're_cloud', 're_ice', 're_snow']
     all_pass = True
     results = []
 
@@ -102,8 +113,9 @@ def compare_outputs(fortran_file, cpp_file, tol=1e-12):
         else:
             worst_col = int(np.argmax(rel_diff))
 
-        status = "PASS" if max_rel <= tol else "FAIL"
-        if max_rel > tol:
+        ok = colcmp.same(var, f_arr, c_arr, quiet=True) if tol == 0 else max_rel <= tol
+        status = "PASS" if ok else "FAIL"
+        if not ok:
             all_pass = False
 
         results.append({

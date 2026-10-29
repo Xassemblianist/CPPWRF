@@ -1,88 +1,47 @@
 #!/usr/bin/env bash
+# Diffusion and damping kernels (km_opt 1-4, diff_6th, w_damp, damping layers): WRF v4.8.0's own module_diffusion_em,
+# module_big_step_utilities_em, ... (the -r8 build, WRF_DIR; tests/phys/wrf_fortran.sh) called by driver_diffusion.f90
+# against the C++ kernels (driver_diffusion.cpp), tolerance 0 in CPU FP64; with nvcc and a GPU also the CUDA FP64
+# build (relative 1e-12).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-BUILD_DIR="${DIFF_TEST_BUILD_DIR:-${SCRIPT_DIR}/build}"
 HEAVY="${REPO_ROOT}/tools/heavy.sh"
-[ -n "${WRF_DIR:-}" ] || { echo "SKIP: set WRF_DIR to a WRF v4.8.0 -r8 build"; exit 77; }  # ctest: skipped
-WRF_R8="${WRF_DIR}"
+. "${REPO_ROOT}/tests/phys/wrf_fortran.sh"
+wrf_need r8
+BUILD_DIR="${DIFF_TEST_BUILD_DIR:-${SCRIPT_DIR}/build}/diffusion"
 mkdir -p "${BUILD_DIR}"
 cd "${BUILD_DIR}"
 
-echo "======================================================================"
-echo " 1. Building Fortran Differential Driver (gfortran -fdefault-real-8)"
-echo "======================================================================"
-"${HEAVY}" gfortran -std=gnu -ffree-form -fdefault-real-8 -O2 -ftree-vectorize -funroll-loops \
-  -I "${WRF_R8}/dyn_em" \
-  -I "${WRF_R8}/frame" \
-  -I "${WRF_R8}/share" \
-  "${SCRIPT_DIR}/driver_diffusion.f90" \
-  "${WRF_R8}/main/libwrflib.a" \
-  "${WRF_R8}/external/io_netcdf/libwrfio_nf.a" \
-  "${WRF_R8}/external/esmf_time_f90/libesmf_time.a" \
-  "${WRF_R8}/external/fftpack/fftpack5/libfftpack.a" \
-  "${WRF_R8}/external/io_int/libwrfio_int.a" \
-  "${WRF_R8}/external/io_int/module_internal_header_util.o" \
-  "${WRF_R8}/external/io_grib1/libio_grib1.a" \
-  "${WRF_R8}/external/io_grib_share/libio_grib_share.a" \
-  "${WRF_R8}/frame/pack_utils.o" \
-  "${WRF_R8}/external/RSL_LITE/librsl_lite.a" \
-  -lnetcdff -lnetcdf \
-  -o "${BUILD_DIR}/driver_diffusion_f90"
+echo "== 1. Fortran driver (WRF objects of ${W})"
+wrf_fortran "${BUILD_DIR}/driver_diffusion_f90" "${SCRIPT_DIR}/driver_diffusion.f90"
 
-echo "======================================================================"
-echo " 2. Building C++ CPU Differential Driver (g++ -std=c++20 -DCPPWRF_DOUBLE)"
-echo "======================================================================"
+echo "== 2. C++ CPU FP64 driver"
 "${HEAVY}" g++ -std=c++20 -DCPPWRF_DOUBLE -O3 -march=native -ffp-contract=off -fopenmp \
-  -I "${REPO_ROOT}/src" \
-  "${SCRIPT_DIR}/driver_diffusion.cpp" \
-  "${REPO_ROOT}/src/core/backend.cpp" \
-  -lmvec \
+  -I "${REPO_ROOT}/src" "${SCRIPT_DIR}/driver_diffusion.cpp" "${REPO_ROOT}/src/core/backend.cpp" -lmvec \
   -o "${BUILD_DIR}/driver_diffusion_cpp"
 
-echo "======================================================================"
-echo " 3. Building C++ CUDA FP64 Driver (nvcc -std=c++20 -DCPPWRF_USE_CUDA -DCPPWRF_DOUBLE)"
-echo "======================================================================"
-"${HEAVY}" nvcc -std=c++20 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA -O3 \
-  --expt-relaxed-constexpr --extended-lambda \
-  -I "${REPO_ROOT}/src" \
-  -x cu "${SCRIPT_DIR}/driver_diffusion_cuda.cu" \
-  -x cu "${REPO_ROOT}/src/core/backend.cpp" \
-  -lmvec \
-  -o "${BUILD_DIR}/driver_diffusion_cuda"
-
-echo "======================================================================"
-echo " 4. Generating Physical 3D Test Inputs (Terrain, Map Factors, Shear, Steps)"
-echo "======================================================================"
 INPUT_BIN="${BUILD_DIR}/diffusion_input.bin"
 FORT_OUT="${BUILD_DIR}/diffusion_output_fortran.bin"
 CPP_OUT="${BUILD_DIR}/diffusion_output_cpp.bin"
 CUDA_OUT="${BUILD_DIR}/diffusion_output_cuda.bin"
 
+echo "== 3. inputs (terrain, map factors, shear, steps)"
 python3 "${SCRIPT_DIR}/generate_inputs.py" "${INPUT_BIN}"
 
-echo "======================================================================"
-echo " 5. Running Fortran Reference Driver"
-echo "======================================================================"
+echo "== 4. WRF and C++ CPU runs, comparison (tolerance 0)"
 "${HEAVY}" "${BUILD_DIR}/driver_diffusion_f90" "${INPUT_BIN}" "${FORT_OUT}"
-
-echo "======================================================================"
-echo " 6. Running CPPWRF C++ CPU Driver"
-echo "======================================================================"
 "${HEAVY}" "${BUILD_DIR}/driver_diffusion_cpp" "${INPUT_BIN}" "${CPP_OUT}"
-
-echo "======================================================================"
-echo " 7. Running CPPWRF C++ CUDA Driver"
-echo "======================================================================"
-"${HEAVY}" "${BUILD_DIR}/driver_diffusion_cuda" "${INPUT_BIN}" "${CUDA_OUT}"
-
-echo "======================================================================"
-echo " 8. Comparing Fortran vs C++ CPU Outputs (Tolerance 1e-12)"
-echo "======================================================================"
 python3 "${SCRIPT_DIR}/compare.py" "${FORT_OUT}" "${CPP_OUT}" --tol 0
 
-echo "======================================================================"
-echo " 9. Comparing Fortran vs C++ CUDA Outputs (Tolerance 1e-12)"
-echo "======================================================================"
-python3 "${SCRIPT_DIR}/compare.py" "${FORT_OUT}" "${CUDA_OUT}" --tol 1e-12
+if command -v nvcc > /dev/null && nvidia-smi > /dev/null 2>&1; then
+  echo "== 5. C++ CUDA FP64 driver (relative 1e-12)"
+  "${HEAVY}" nvcc -std=c++20 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA -O3 --expt-relaxed-constexpr --extended-lambda \
+    -I "${REPO_ROOT}/src" -x cu "${SCRIPT_DIR}/driver_diffusion_cuda.cu" -x cu "${REPO_ROOT}/src/core/backend.cpp" \
+    -lmvec -o "${BUILD_DIR}/driver_diffusion_cuda"
+  "${HEAVY}" "${BUILD_DIR}/driver_diffusion_cuda" "${INPUT_BIN}" "${CUDA_OUT}"
+  python3 "${SCRIPT_DIR}/compare.py" "${FORT_OUT}" "${CUDA_OUT}" --tol 1e-12
+else
+  echo "== 5. no nvcc / GPU: the CUDA build is not checked"
+fi

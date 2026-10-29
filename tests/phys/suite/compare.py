@@ -3,8 +3,9 @@
 
 Every record the C++ driver writes is compared with the WRF record of the same name
 (P1_n = after first_rk_step_part1, P2_n = after first_rk_step_part2, OUTn = after
-phy_prep_part2, n = 1..3). Pass: every element bit-identical or |c - f| <= tol*max(|c|,|f|)
-(tol = 1e-12, FP64). Prints one table row per field (worst over the 3 calls) and, with
+phy_prep_part2, n = 1..3). Pass: every record of the table below that WRF wrote is written by the C++ too, with
+the same shape, and (--tol 0) every element identical as tests/verify/exact.py (NaN equals only NaN, -0 differs
+from +0), or |c - f| <= tol*max(|c|,|f|) for --tol > 0. Prints one table row per field (worst over the 3 calls) and, with
 --markdown, the same table in Markdown.
 """
 import argparse
@@ -16,6 +17,9 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from suite_io import read_records  # noqa: E402
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "verify"))
+import exact  # noqa: E402
 
 GROUPS = [
     ("phy_prep", ["TH_PHY", "P_PHY", "PI_PHY", "T_PHY", "RHO", "U_PHY", "V_PHY", "Z", "Z_AT_W", "DZ8W", "P8W", "T8W",
@@ -35,13 +39,15 @@ GROUPS = [
 
 
 def stats(c, f, tol):
+    if c.shape != f.shape:
+        return 0, f.size, float("nan"), float("nan"), max(f.size, 1)
     d = np.abs(c - f)
     scale = np.maximum(np.abs(c), np.abs(f))
-    exact = int(np.sum(c == f))
+    same = int(np.sum(~exact.differ(c, f)))
     with np.errstate(divide="ignore", invalid="ignore"):
         rel = np.where(d == 0, 0.0, d / np.where(scale > 0, scale, 1.0))
-    bad = int(np.sum(d > tol * scale))
-    return exact, c.size, float(d.max()) if d.size else 0.0, float(rel.max()) if rel.size else 0.0, bad
+    bad = int(np.sum(exact.differ(c, f))) if tol == 0 else int(np.sum(~(d <= tol * scale)))
+    return same, c.size, float(np.nanmax(d)) if d.size else 0.0, float(np.nanmax(rel)) if rel.size else 0.0, bad
 
 
 def main():
@@ -64,9 +70,10 @@ def main():
                 keys = [f"OUT{n}:{name}" for n in (1, 2, 3)]
             else:
                 keys = [f"P1_{n}:{name}" for n in (1, 2, 3)] + [f"OUT{n}:{name}" for n in (1, 2, 3)]
-            keys = [k for k in keys if k in C and k in F]
-            if not keys:
-                print(f"missing: {name}", file=sys.stderr)
+            keys = [k for k in keys if k in F]
+            lost = [k for k in keys if k not in C]
+            if not keys or lost:
+                print(f"missing: {name} {'(not in the WRF file)' if not keys else lost}", file=sys.stderr)
                 ok = False
                 continue
             tot = [0, 0, 0.0, 0.0, 0]

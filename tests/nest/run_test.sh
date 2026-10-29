@@ -1,105 +1,56 @@
 #!/bin/bash
 # ==============================================================================
-# CPPWRF: differential (CPU) and CUDA test runner for the nest numerics
-# Tests all nesting interpolation, boundary forcing, feedback, and init kernels
-# against unmodified WRF 4.8.0 Fortran (-fdefault-real-8)
+# CPPWRF: differential (CPU) and CUDA test of the nest numerics: interpolation, boundary forcing, feedback and
+# initialisation kernels against WRF v4.8.0's own compiled routines (the -r8 build, WRF_DIR; called through
+# fortran_nest_bridge.f90, linked by tests/phys/wrf_fortran.sh) on the coarse fields of the R0 reference run
+# (CPPWRF_WRF_RUNS). CPU FP64: tolerance 0; CUDA FP64 (with nvcc and a GPU): relative 1e-12.
 # ==============================================================================
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-OUT_DIR="${CPPWRF_SCRATCH:-${HOME}/cppwrf_scratch}/nest_test"
-
-export TMPDIR="${OUT_DIR}/tmp"
-mkdir -p "${TMPDIR}"
+. "${REPO_ROOT}/tests/phys/wrf_fortran.sh"
+wrf_need r8
+[ -n "${CPPWRF_WRF_RUNS:-}" ] || { echo "SKIP: set CPPWRF_WRF_RUNS (run_R0_r8)"; exit 77; }
+OUT_DIR="${DIFF_TEST_BUILD_DIR:-${CPPWRF_SCRATCH:-${HOME}/cppwrf_scratch}}/nest_test"
+HEAVY="${REPO_ROOT}/tools/heavy.sh"
 mkdir -p "${OUT_DIR}"
+cd "${OUT_DIR}"
 
 echo "=================================================================="
 echo "CPPWRF nest numerics verification"
 echo "=================================================================="
 
-# 1. Dataset Extraction
+# 1. the coarse fields of the R0 reference run
 DATASET="${OUT_DIR}/coarse_fields.bin"
-if [[ ! -f "${DATASET}" ]]; then
-  echo "Extracting coarse dataset from WRF run..."
-  "${REPO_ROOT}/tools/heavy.sh" --light python3 "${SCRIPT_DIR}/extract_coarse_fields.py" "${DATASET}"
-fi
+python3 "${SCRIPT_DIR}/extract_coarse_fields.py" "${DATASET}"
 
-# 2. Compile Fortran Bridge against the WRF 4.8.0 -r8 reference
-[ -n "${WRF_DIR:-}" ] || { echo "SKIP: set WRF_DIR to a WRF v4.8.0 -r8 build"; exit 77; }  # ctest: skipped
-WRF_ROOT="${WRF_DIR}"
-BRIDGE_OBJ="${OUT_DIR}/fortran_nest_bridge.o"
-if [[ ! -f "${BRIDGE_OBJ}" || "${SCRIPT_DIR}/fortran_nest_bridge.f90" -nt "${BRIDGE_OBJ}" ]]; then
-  echo "Compiling Fortran nest bridge against WRF 4.8.0 libraries..."
-  "${REPO_ROOT}/tools/heavy.sh" gfortran -c -fdefault-real-8 -O2 -ftree-vectorize -funroll-loops -fPIC \
-    -I"${WRF_ROOT}/inc" -I"${WRF_ROOT}/main" -I"${WRF_ROOT}/frame" \
-    -I"${WRF_ROOT}/share" -I"${WRF_ROOT}/dyn_em" \
-    -J"${OUT_DIR}" \
-    "${SCRIPT_DIR}/fortran_nest_bridge.f90" -o "${BRIDGE_OBJ}"
-fi
-
-WRF_LIBS=(
-  "${WRF_ROOT}/main/libwrflib.a"
-  "${WRF_ROOT}/external/RSL_LITE/librsl_lite.a"
-  "${WRF_ROOT}/frame/module_internal_header_util.o"
-  "${WRF_ROOT}/frame/pack_utils.o"
-  "${WRF_ROOT}/external/io_int/libwrfio_int.a"
-  -L"${WRF_ROOT}/external/esmf_time_f90" -lesmf_time
-  -L"${WRF_ROOT}/external/io_netcdf" -lwrfio_nf
-  -L"${NETCDF:?set NETCDF to the NetCDF prefix of the WRF build}/lib" -lnetcdff -lnetcdf
-  "${WRF_ROOT}/external/fftpack/fftpack5/libfftpack.a"
-  "${WRF_ROOT}/external/io_grib1/libio_grib1.a"
-  "${WRF_ROOT}/external/io_grib_share/libio_grib_share.a"
-  -lgfortran -lm -fopenmp
-)
-
-# 3. CPU Differential Test
+# 2. CPU differential test: the C++ kernels and the bridge to WRF's routines in one program
 echo "Compiling CPU differential test suite..."
-"${REPO_ROOT}/tools/heavy.sh" g++ -std=c++20 -DCPPWRF_DOUBLE -O3 \
-  -I"${REPO_ROOT}/src" -I"${REPO_ROOT}" \
-  "${SCRIPT_DIR}/test_nest_differential.cpp" \
-  "${REPO_ROOT}/src/dyn/lateral_bc.cpp" \
-  "${REPO_ROOT}/src/core/halo.cpp" \
-  "${REPO_ROOT}/src/core/backend.cpp" \
-  "${BRIDGE_OBJ}" \
-  "${WRF_LIBS[@]}" \
-  -o "${OUT_DIR}/test_nest_differential"
+CXXOPT=(-std=c++20 -DCPPWRF_DOUBLE -O3 -ffp-contract=off -fopenmp -I"${REPO_ROOT}/src" -I"${REPO_ROOT}")
+"${HEAVY}" g++ "${CXXOPT[@]}" -c "${SCRIPT_DIR}/test_nest_differential.cpp" -o test_nest_differential.o
+for s in dyn/lateral_bc core/halo core/backend; do
+  "${HEAVY}" g++ "${CXXOPT[@]}" -c "${REPO_ROOT}/src/${s}.cpp" -o "$(basename "$s").o"
+done
+wrf_fortran "${OUT_DIR}/test_nest_differential" "${SCRIPT_DIR}/fortran_nest_bridge.f90" test_nest_differential.o \
+  lateral_bc.o halo.o backend.o -fopenmp -lstdc++
 
 echo "Executing CPU differential test suite..."
-"${REPO_ROOT}/tools/heavy.sh" "${OUT_DIR}/test_nest_differential" "${DATASET}"
+"${HEAVY}" "${OUT_DIR}/test_nest_differential" "${DATASET}"
 
-# 4. CUDA FP64 Device Kernel Test
+# 3. CUDA FP64 device kernel test
 if command -v nvcc &>/dev/null && nvidia-smi &>/dev/null; then
   echo "Compiling CUDA device objects..."
-  "${REPO_ROOT}/tools/heavy.sh" nvcc -x cu -c -std=c++20 -O3 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA \
-    --expt-relaxed-constexpr --extended-lambda -I"${REPO_ROOT}/src" \
-    "${REPO_ROOT}/src/dyn/lateral_bc.cpp" -o "${OUT_DIR}/lateral_bc_cuda.o"
-
-  "${REPO_ROOT}/tools/heavy.sh" nvcc -x cu -c -std=c++20 -O3 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA \
-    --expt-relaxed-constexpr --extended-lambda -I"${REPO_ROOT}/src" \
-    "${REPO_ROOT}/src/core/halo.cpp" -o "${OUT_DIR}/halo_cuda.o"
-
-  "${REPO_ROOT}/tools/heavy.sh" nvcc -x cu -c -std=c++20 -O3 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA \
-    --expt-relaxed-constexpr --extended-lambda -I"${REPO_ROOT}/src" \
-    "${REPO_ROOT}/src/core/backend.cpp" -o "${OUT_DIR}/backend_cuda.o"
-
-  "${REPO_ROOT}/tools/heavy.sh" nvcc -c -std=c++20 -O3 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA \
-    --expt-relaxed-constexpr --extended-lambda -I"${REPO_ROOT}/src" -I"${REPO_ROOT}" \
-    "${SCRIPT_DIR}/test_nest_cuda.cu" -o "${OUT_DIR}/test_nest_cuda.o"
-
-  "${REPO_ROOT}/tools/heavy.sh" --light g++ -std=c++20 -DCPPWRF_DOUBLE \
-    -I"${REPO_ROOT}/src" -I"${REPO_ROOT}" \
-    "${OUT_DIR}/test_nest_cuda.o" \
-    "${OUT_DIR}/lateral_bc_cuda.o" \
-    "${OUT_DIR}/halo_cuda.o" \
-    "${OUT_DIR}/backend_cuda.o" \
-    "${BRIDGE_OBJ}" \
-    "${WRF_LIBS[@]}" \
-    -lcudart \
-    -o "${OUT_DIR}/test_nest_cuda"
-
+  NVOPT=(-std=c++20 -O3 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA --expt-relaxed-constexpr --extended-lambda
+         -I"${REPO_ROOT}/src" -I"${REPO_ROOT}")
+  for s in dyn/lateral_bc core/halo core/backend; do
+    "${HEAVY}" nvcc -x cu -c "${NVOPT[@]}" "${REPO_ROOT}/src/${s}.cpp" -o "$(basename "$s")_cuda.o"
+  done
+  "${HEAVY}" nvcc -c "${NVOPT[@]}" "${SCRIPT_DIR}/test_nest_cuda.cu" -o test_nest_cuda.o
+  wrf_fortran "${OUT_DIR}/test_nest_cuda" "${SCRIPT_DIR}/fortran_nest_bridge.f90" test_nest_cuda.o \
+    lateral_bc_cuda.o halo_cuda.o backend_cuda.o -lcudart -lstdc++
   echo "Executing CUDA FP64 device kernel test on GPU..."
-  "${REPO_ROOT}/tools/heavy.sh" "${OUT_DIR}/test_nest_cuda" "${DATASET}"
+  "${HEAVY}" "${OUT_DIR}/test_nest_cuda" "${DATASET}"
 else
   echo "CUDA not detected; skipping GPU device test."
 fi

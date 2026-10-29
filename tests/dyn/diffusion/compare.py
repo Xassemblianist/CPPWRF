@@ -2,12 +2,18 @@
 """
 compare.py
 Differential verification comparison between Fortran WRF v4.8.0 reference
-and CPPWRF C++ diffusion and damping outputs.
+and CPPWRF C++ diffusion and damping outputs. Both files must hold the same kernel tags (at least one); --tol 0:
+every value identical as tests/verify/exact.py (NaN equals only NaN, -0 differs from +0), otherwise relative error
+(over max(1, |WRF|)) <= tol.
 """
 
+import os
 import sys
 import struct
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "phys"))
+import colcmp  # noqa: E402
 
 def read_chunks(filename):
     chunks = {}
@@ -22,8 +28,11 @@ def read_chunks(filename):
                 break
             count = struct.unpack('i', count_bytes)[0]
             data_bytes = f.read(count * 8)
-            arr = np.frombuffer(data_bytes, dtype=np.float64)
-            chunks[tag] = arr
+            if len(data_bytes) != count * 8:
+                raise ValueError(f"{filename}: chunk {tag} truncated")
+            if tag in chunks:
+                raise ValueError(f"{filename}: chunk {tag} written twice")
+            chunks[tag] = np.frombuffer(data_bytes, dtype=np.float64)
     return chunks
 
 def main():
@@ -43,7 +52,12 @@ def main():
     f_chunks = read_chunks(fort_file)
     c_chunks = read_chunks(cpp_file)
 
-    all_passed = True
+    all_passed = bool(f_chunks)
+    if not f_chunks:
+        print(f"no kernel output in {fort_file}")
+    for tag in sorted(set(c_chunks) - set(f_chunks)):
+        print(f"{tag:<30} | ONLY IN C++ OUTPUT")
+        all_passed = False
     print("=" * 95)
     print(f"{'Variable / Kernel Tag':<30} | {'Count':<7} | {'Max Ref':<11} | {'Max Abs Err':<12} | {'Max Rel Err':<12} | {'Status'}")
     print("-" * 95)
@@ -69,7 +83,7 @@ def main():
         rel_err = abs_err / denom
         max_rel = np.max(rel_err)
 
-        passed = (max_rel <= tol)
+        passed = colcmp.same(tag, f_data, c_data, quiet=True) if tol == 0 else bool(max_rel <= tol)
         status = "PASS" if passed else "FAIL"
         if not passed:
             all_passed = False

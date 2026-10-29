@@ -1,3 +1,4 @@
+#undef NDEBUG  // the checks are asserts: keep them in Release builds
 #include <cassert>
 #include <cmath>
 #include <cstdio>

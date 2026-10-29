@@ -5,6 +5,7 @@
 #include <vector>
 #include <iomanip>
 #include <string>
+#include <cstring>
 
 using namespace cppwrf::phys::mp_thompson;
 
@@ -16,8 +17,9 @@ struct TableStat {
     bool pass;
 };
 
+// tolerance 0: the same bits (-0 differs from +0); max |diff| and max rel diff for the report
 template <typename T>
-bool compare_buffer(const std::string& name, const T* cpp_data, const double* f_data, size_t count, double tol, TableStat& stat) {
+bool compare_buffer(const std::string& name, const T* cpp_data, const double* f_data, size_t count, TableStat& stat) {
     double max_abs = 0.0;
     double max_rel = 0.0;
     bool pass = true;
@@ -32,7 +34,7 @@ bool compare_buffer(const std::string& name, const T* cpp_data, const double* f_
         double rel = diff / denom;
         if (rel > max_rel) max_rel = rel;
 
-        if (rel > tol) {
+        if (std::memcmp(&c, &f, sizeof(double)) != 0) {
             pass = false;
         }
     }
@@ -60,7 +62,6 @@ int main(int argc, char** argv) {
 
     std::vector<TableStat> stats;
     bool overall_pass = true;
-    constexpr double TOL = 1.0e-12;
 
     auto test_one = [&](const std::string& name, const double* cpp_data, size_t count) {
         std::vector<double> f_data(count);
@@ -71,7 +72,7 @@ int main(int argc, char** argv) {
             return;
         }
         TableStat st;
-        bool ok = compare_buffer(name, cpp_data, f_data.data(), count, TOL, st);
+        bool ok = compare_buffer(name, cpp_data, f_data.data(), count, st);
         stats.push_back(st);
         if (!ok) overall_pass = false;
     };
@@ -120,6 +121,11 @@ int main(int argc, char** argv) {
     test_one("tpc_wev", tables_cpp.tpc_wev.data(), N_WEV);
     test_one("tnc_wev", tables_cpp.tnc_wev.data(), N_WEV);
 
+    if (in.peek() != std::ifstream::traits_type::eof()) {
+        std::cerr << table_path << " holds more than the 30 tables\n";
+        overall_pass = false;
+    }
+
     std::cout << std::left << std::setw(15) << "Table Name"
               << std::right << std::setw(12) << "Elements"
               << std::setw(18) << "Max Abs Diff"
@@ -138,7 +144,7 @@ int main(int argc, char** argv) {
     std::cout << std::string(73, '-') << "\n";
 
     if (overall_pass) {
-        std::cout << "All Thompson lookup tables verified against Fortran! (PASS <= 1e-12)\n";
+        std::cout << "All Thompson lookup tables bit-identical to WRF's thompson_init\n";
         return 0;
     } else {
         std::cerr << "Table verification FAILED for one or more tables!\n";

@@ -3,7 +3,8 @@ import argparse
 import struct
 import numpy as np
 
-def generate_sfclayrev_inputs(num_cols=2500, nz=50, out_path="sfclayrev_input.bin", seed=42):
+def generate_sfclayrev_inputs(num_cols=2500, nz=50, out_path="sfclayrev_input.bin", seed=42, isfflx=1, isftcflx=0,
+                               iz0tlnd=0):
     np.random.seed(seed)
 
     # Physical constants (from phys_constants.hpp / WRF share/module_model_constants.F)
@@ -23,10 +24,7 @@ def generate_sfclayrev_inputs(num_cols=2500, nz=50, out_path="sfclayrev_input.bi
     karman = 0.4
     p1000mb = 100000.0
 
-    isfflx = 1
-    shalwater_z0 = 0
-    isftcflx = 0
-    iz0tlnd = 0
+    shalwater_z0 = 0  # shalwater_z0 and scm_force_flux are rejected by CPPWRF (tools/wrf2cppwrf.py)
     scm_force_flux = 0
 
     # Allocate 1D arrays of size num_cols
@@ -229,5 +227,8 @@ if __name__ == "__main__":
     parser.add_argument("--nz", type=int, default=50)
     parser.add_argument("--out", type=str, default="sfclayrev_input.bin")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--isfflx", type=int, default=1)
+    parser.add_argument("--isftcflx", type=int, default=0)
+    parser.add_argument("--iz0tlnd", type=int, default=0)
     args = parser.parse_args()
-    generate_sfclayrev_inputs(args.cols, args.nz, args.out, args.seed)
+    generate_sfclayrev_inputs(args.cols, args.nz, args.out, args.seed, args.isfflx, args.isftcflx, args.iz0tlnd)

@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
+"""compare.py WRF.bin CPP.bin --cols N --nz K [--tol T]: the YSU outputs; --tol 0 (CPU FP64): every value identical
+as tests/verify/exact.py (NaN equals only NaN, -0 differs from +0), otherwise max rel or max abs diff <= tol."""
 import argparse
+import os
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
 
 VAR_NAMES_3D = [
     "rublten", "rvblten", "rthblten", "rqvblten", "rqcblten", "rqiblten",
@@ -69,7 +75,7 @@ def compare_ysu_outputs(fortran_file, cpp_file, n_cols=2500, nz=50, tol=1e-12):
 
         active_pts = np.count_nonzero(np.abs(f_arr) > 1e-15)
 
-        passed = (max_rel <= tol) or (max_abs <= tol)
+        passed = colcmp.same(name, f_arr, c_arr, quiet=True) if tol == 0 else (max_rel <= tol) or (max_abs <= tol)
         status = "PASS" if passed else "FAIL"
         if not passed:
             all_pass = False
@@ -93,7 +99,7 @@ def compare_ysu_outputs(fortran_file, cpp_file, n_cols=2500, nz=50, tol=1e-12):
 
         active_pts = np.count_nonzero(np.abs(f_arr) > 1e-15)
 
-        passed = (max_rel <= tol) or (max_abs <= tol)
+        passed = colcmp.same(name, f_arr, c_arr, quiet=True) if tol == 0 else (max_rel <= tol) or (max_abs <= tol)
         status = "PASS" if passed else "FAIL"
         if not passed:
             all_pass = False

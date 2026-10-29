@@ -2,22 +2,10 @@ cmake_minimum_required(VERSION 3.24)
 
 set(CPPWRF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 
-# Fortran flags for bit-for-bit WRF verification
-# WRF's own -r8 configure flags (FCOPTIM): gfortran vectorises through libmvec as in wrf.exe
-set(PHYS_FORTRAN_FLAGS "-cpp -ffree-form -fdefault-real-8 -fdefault-double-8 -O2 -ftree-vectorize -funroll-loops")
+# The Fortran side (WRF's module_sf_noahlsm.o, module_sf_noahdrv.o) is compiled and linked by run_test.sh
+# (tests/phys/wrf_fortran.sh)
 
-# 1. Fortran Driver
-add_executable(driver_noah_fortran
-  fortran/driver_noah.f90
-  fortran/module_sf_noahlsm.F
-  fortran/stubs.f90
-)
-set_target_properties(driver_noah_fortran PROPERTIES
-  Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fortran_modules"
-  COMPILE_FLAGS "${PHYS_FORTRAN_FLAGS}"
-)
-
-# 2. C++ Driver (CPU FP64)
+# 1. C++ Driver (CPU FP64)
 add_executable(driver_noah_cpu
   driver_noah.cpp
   ${CPPWRF_ROOT}/src/phys/lsm_noah/noah.cpp
@@ -84,4 +72,4 @@ add_test(
   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-set_tests_properties(test_phys_noah PROPERTIES LABELS diff)
+set_tests_properties(test_phys_noah PROPERTIES LABELS diff SKIP_RETURN_CODE 77)

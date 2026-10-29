@@ -260,6 +260,8 @@ int main(int argc, char** argv) {
   auto v3 = [&](DevBuffer<real>& b) { return View3<real>{b.get(), sj3d, sk3d}; };
 
   phys::noah::NoahKernel kernel;
+  // opt_thcnd (1 Peters-Lidard, 2 McCumber-Pielke for soil types 3 and 4): CPPWRF_TEST_OPT_THCND, as the Fortran driver
+  if (const char* e = std::getenv("CPPWRF_TEST_OPT_THCND")) kernel.opt_thcnd = std::atoi(e);
   kernel.lwdn = v2c(d_lwdn);
   kernel.soldn = v2c(d_soldn);
   kernel.solnet = v2c(d_solnet);

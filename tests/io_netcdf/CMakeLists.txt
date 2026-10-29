@@ -20,3 +20,4 @@ target_link_libraries(test_wrf_readers PRIVATE cppwrf_io_netcdf)
 target_include_directories(test_wrf_readers PRIVATE ${NETCDF_INCDIR} ${CMAKE_SOURCE_DIR}/src)
 target_compile_features(test_wrf_readers PRIVATE cxx_std_20)
 add_test(NAME test_wrf_readers COMMAND test_wrf_readers WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(test_wrf_readers PROPERTIES SKIP_RETURN_CODE 77)  # without ${CPPWRF_WRF_RUNS}/wrf_run

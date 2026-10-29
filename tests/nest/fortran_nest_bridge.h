@@ -79,13 +79,6 @@ void wrf_bridge_adjust_tempqv(const double* mub, const double* save_mub,
                               int ims, int ime, int jms, int jme, int kms, int kme,
                               int ips, int ipe, int jps, int jpe, int kps, int kpe);
 
-void wrf_bridge_couple_or_uncouple_em(double* u_2, double* v_2, double* w_2, double* ph_2, double* t_2, double* qv,
-                                      const double* mub, const double* mu_2,
-                                      const double* msfuy, const double* msfvx, const double* msfty,
-                                      const double* c1f, const double* c2f,
-                                      const double* c1h, const double* c2h,
-                                      int nx, int ny, int nz, int couple_int);
-
 #ifdef __cplusplus
 }
 #endif

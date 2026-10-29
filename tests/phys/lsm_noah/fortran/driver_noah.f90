@@ -1,14 +1,14 @@
 program driver_noah
   use module_sf_noahlsm
+  use module_sf_noahdrv, only: soil_veg_gen_parm
   implicit none
 
-  character(len=256) :: infile, outfile, table_dir
+  character(len=256) :: infile, outfile
   integer :: n_cols, nsoil, isurban_in
   real*8 :: dt_in, zlvl_in
   real*8, dimension(8) :: sldpth_in
 
-  integer :: nargs, c, k, lc, iindex, num_slope
-  character(len=4) :: sltype_in, lutype_in
+  integer :: nargs, c, k
   character(len=256) :: llanduse_str = 'USGS', lsoil_str = 'STAS'
 
   ! Inputs per column
@@ -37,6 +37,7 @@ program driver_noah
   real*8 :: sfhead1rt_val, infxs1rt_val, etpnd1_val, aoasis_val
   real*8 :: xsda_qfx_val, hfx_phy_val, qfx_phy_val, xqnorm_val, hcpct_fasdas_val
   integer :: nroot_val, opt_thcnd_val, fasdas_val
+  character(len=8) :: opt_env
 
   nargs = command_argument_count()
   if (nargs < 1) then
@@ -51,83 +52,9 @@ program driver_noah
     call get_command_argument(2, outfile)
   end if
 
-  if (nargs < 3) then
-    table_dir = '.'
-  else
-    call get_command_argument(3, table_dir)
-  end if
-
-  ! Read GENPARM.TBL
-  open(19, file=trim(table_dir)//'/GENPARM.TBL', status='old', action='read')
-  read(19,*)
-  read(19,*)
-  read(19,*) num_slope
-  slpcats = num_slope
-  do lc = 1, slpcats
-     read(19,*) slope_data(lc)
-  end do
-  read(19,*)
-  read(19,*) sbeta_data
-  read(19,*)
-  read(19,*) fxexp_data
-  read(19,*)
-  read(19,*) csoil_data
-  read(19,*)
-  read(19,*) salp_data
-  read(19,*)
-  read(19,*) refdk_data
-  read(19,*)
-  read(19,*) refkdt_data
-  read(19,*)
-  read(19,*) frzk_data
-  read(19,*)
-  read(19,*) zbot_data
-  read(19,*)
-  read(19,*) czil_data
-  read(19,*)
-  read(19,*) smlow_data
-  read(19,*)
-  read(19,*) smhigh_data
-  read(19,*)
-  read(19,*) lvcoef_data
-  close(19)
-
-  ! Read SOILPARM.TBL
-  open(19, file=trim(table_dir)//'/SOILPARM.TBL', status='old', action='read')
-  read(19,*)
-  read(19,'(A4)') sltype_in
-  read(19,*) slcats, iindex
-  do lc = 1, slcats
-     read(19,*) iindex, bb(lc), drysmc(lc), f11(lc), maxsmc(lc), &
-                refsmc(lc), satpsi(lc), satdk(lc), satdw(lc),    &
-                wltsmc(lc), qtz(lc)
-  end do
-  close(19)
-
-  ! Read VEGPARM.TBL
-  open(19, file=trim(table_dir)//'/VEGPARM.TBL', status='old', action='read')
-  read(19,*)
-  read(19,*) lutype_in
-  read(19,*) lucats, iindex
-  do lc = 1, lucats
-     read(19,*) iindex, shdtbl(lc), nrotbl(lc), rstbl(lc), rgltbl(lc), hstbl(lc), &
-                snuptbl(lc), maxalb(lc), laimintbl(lc), laimaxtbl(lc), emissmintbl(lc), &
-                emissmaxtbl(lc), albedomintbl(lc), albedomaxtbl(lc), z0mintbl(lc), z0maxtbl(lc), &
-                ztopvtbl(lc), zbotvtbl(lc)
-  end do
-  read(19,*)
-  read(19,*) topt_data
-  read(19,*)
-  read(19,*) cmcmax_data
-  read(19,*)
-  read(19,*) cfactr_data
-  read(19,*)
-  read(19,*) rsmax_data
-  read(19,*)
-  read(19,*) bare
-  read(19,*)
-  read(19,*) natural
-  close(19)
+  ! WRF's own table reader (module_sf_noahdrv.F), as lsminit calls it: VEGPARM.TBL, SOILPARM.TBL and GENPARM.TBL
+  ! of the current directory (run_test.sh links WRF's run/ tables there)
+  call soil_veg_gen_parm(trim(llanduse_str), trim(lsoil_str))
 
   ! Open input file
   open(unit=10, file=trim(infile), status='old', access='stream', form='unformatted')
@@ -193,7 +120,10 @@ program driver_noah
   close(10)
 
   ! Run SFLX on each column
+  ! opt_thcnd (1 Peters-Lidard, 2 McCumber-Pielke for soil types 3 and 4): CPPWRF_TEST_OPT_THCND, as the C++ driver
+  call get_environment_variable("CPPWRF_TEST_OPT_THCND", opt_env)
   opt_thcnd_val = 1
+  if (len_trim(opt_env) > 0) read(opt_env, *) opt_thcnd_val
   aoasis_val = 1.0
   fasdas_val = 0
   xsda_qfx_val = 0.0

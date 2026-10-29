@@ -66,6 +66,9 @@ program driver_ysu_fortran
   allocate(rqvblten(n_cols, nz, 1), rqcblten(n_cols, nz, 1), rqiblten(n_cols, nz, 1))
   allocate(exch_h(n_cols, nz, 1), exch_m(n_cols, nz, 1))
   allocate(hpbl(n_cols, 1), wstar(n_cols, 1), delta(n_cols, 1), kpbl2d(n_cols, 1))
+  ! outputs start at 0 as the C++ driver's (ysu leaves rqcblten / rqiblten alone without flag_qc / flag_qi)
+  rublten = 0; rvblten = 0; rthblten = 0; rqvblten = 0; rqcblten = 0; rqiblten = 0
+  exch_h = 0; exch_m = 0; hpbl = 0; wstar = 0; delta = 0; kpbl2d = 0
 
   ! Read 3D arrays: element (i, k) is at i + (k-1)*n_cols in binary stream
   read(iunit) ((u3d(i, k, 1), i=1,n_cols), k=1,nz)

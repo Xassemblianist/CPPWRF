@@ -1,213 +1,58 @@
 cmake_minimum_required(VERSION 3.24)
 
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-  project(cppwrf_phys_tests LANGUAGES CXX Fortran)
+  project(cppwrf_phys_tests LANGUAGES C CXX)
   set(CMAKE_CXX_STANDARD 20)
   set(CMAKE_CXX_STANDARD_REQUIRED ON)
   enable_testing()
   find_package(OpenMP REQUIRED COMPONENTS CXX)
   set(CPPWRF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 else()
-  enable_language(Fortran)
   set(CPPWRF_ROOT "${CMAKE_SOURCE_DIR}")
 endif()
 
-# WRF's own -r8 configure flags (FCOPTIM): gfortran vectorises through libmvec as wrf.exe does
-set(WRF_FORTRAN_FLAGS "-ffree-form -fdefault-real-8 -DDOUBLE_PRECISION -O2 -ftree-vectorize -funroll-loops")
+# Column tests of the physics schemes against WRF v4.8.0's own compiled code. The C++ drivers are built here
+# (CPU FP64); each run_test.sh compiles its Fortran driver and links it to the objects of the WRF build that made
+# the model's references (tests/phys/wrf_fortran.sh: WRF_DIR = -r8, WRF_R8D8_DIR = -r8 -fdefault-double-8). Without
+# that build a test exits 77 (skipped). No WRF source is compiled by a test.
 
-set(FORTRAN_KESSLER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/fortran/module_mp_kessler.F")
+# C++ drivers of Kessler, WSM6, the revised MM5 surface layer and YSU (CPU FP64)
+foreach(t "mp_kessler;driver_kessler_cpu;driver_kessler.cpp;mp_kessler/kessler.cpp"
+          "mp_wsm6;driver_wsm6_cpu;driver_wsm6.cpp;mp_wsm6/wsm6.cpp"
+          "sf_sfclayrev;driver_sfclayrev_cpu;driver_sfclayrev.cpp;sf_sfclayrev/sfclayrev.cpp"
+          "bl_ysu;driver_ysu_cpu;driver_ysu.cpp;bl_ysu/ysu.cpp")
+  list(GET t 0 dir)
+  list(GET t 1 exe)
+  list(GET t 2 drv)
+  list(GET t 3 src)
+  add_executable(${exe} ${dir}/${drv} ${CPPWRF_ROOT}/src/phys/${src} ${CPPWRF_ROOT}/src/core/backend.cpp)
+  target_include_directories(${exe} PRIVATE ${CPPWRF_ROOT}/src ${CMAKE_CURRENT_SOURCE_DIR})
+  target_compile_definitions(${exe} PRIVATE CPPWRF_DOUBLE)
+  target_compile_options(${exe} PRIVATE -O3 -march=native -ffp-contract=off)
+  target_link_libraries(${exe} PRIVATE OpenMP::OpenMP_CXX)
+endforeach()
 
-# 1. Fortran Driver
-add_executable(driver_kessler_fortran
-  mp_kessler/driver_kessler.f90
-  ${FORTRAN_KESSLER_SRC}
-)
-set_target_properties(driver_kessler_fortran PROPERTIES
-  Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fortran_modules"
-  COMPILE_FLAGS "${WRF_FORTRAN_FLAGS}"
-)
-
-# 2. C++ Driver (CPU FP64)
-add_executable(driver_kessler_cpu
-  mp_kessler/driver_kessler.cpp
-  ${CPPWRF_ROOT}/src/phys/mp_kessler/kessler.cpp
-  ${CPPWRF_ROOT}/src/core/backend.cpp
-)
-target_include_directories(driver_kessler_cpu PRIVATE
-  ${CPPWRF_ROOT}/src
-)
-target_compile_definitions(driver_kessler_cpu PRIVATE CPPWRF_DOUBLE)
-target_compile_options(driver_kessler_cpu PRIVATE -O3 -march=native -ffp-contract=off)
-target_link_libraries(driver_kessler_cpu PRIVATE
-  OpenMP::OpenMP_CXX
-)
-
-# 3. CTest entry
-find_package(Python3 COMPONENTS Interpreter REQUIRED)
-add_test(
-  NAME test_phys_kessler
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/mp_kessler/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-set_tests_properties(test_phys_kessler PROPERTIES LABELS diff)
-
-# ==============================================================================
-# WSM6 Scheme
-# ==============================================================================
-set(FORTRAN_WSM6_SRCS
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/ccpp_kind_types.F"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/module_libmassv.F90"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/mp_radar.F90"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/mp_wsm6_effectRad.F90"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/mp_wsm6.F90"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/module_mp_wsm6.F"
-)
-
-add_executable(driver_wsm6_fortran
-  mp_wsm6/driver_wsm6.f90
-  ${FORTRAN_WSM6_SRCS}
-)
-set_target_properties(driver_wsm6_fortran PROPERTIES
-  Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fortran_modules_wsm6"
-  COMPILE_FLAGS "${WRF_FORTRAN_FLAGS}"
-)
-
-add_executable(driver_wsm6_cpu
-  mp_wsm6/driver_wsm6.cpp
-  ${CPPWRF_ROOT}/src/phys/mp_wsm6/wsm6.cpp
-  ${CPPWRF_ROOT}/src/core/backend.cpp
-)
-target_include_directories(driver_wsm6_cpu PRIVATE
-  ${CPPWRF_ROOT}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}
-)
-target_compile_definitions(driver_wsm6_cpu PRIVATE CPPWRF_DOUBLE)
-target_compile_options(driver_wsm6_cpu PRIVATE -O3 -march=native -ffp-contract=off)
-target_link_libraries(driver_wsm6_cpu PRIVATE
-  OpenMP::OpenMP_CXX
-)
-
-add_test(
-  NAME test_phys_wsm6
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/mp_wsm6/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-set_tests_properties(test_phys_wsm6 PROPERTIES LABELS diff)
-
-# ==============================================================================
-# Revised MM5 Surface Layer Scheme (sf_sfclayrev)
-# ==============================================================================
-set(FORTRAN_SFCLAYREV_SRCS
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/ccpp_kind_types.F"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/sf_sfclayrev.F90"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/module_sf_sfclayrev.F"
-)
-
-add_executable(driver_sfclayrev_fortran
-  sf_sfclayrev/driver_sfclayrev.f90
-  ${FORTRAN_SFCLAYREV_SRCS}
-)
-# WRF's own -r8 configure flags: gfortran vectorises the pow/exp loops through libmvec as in wrf.exe
-set_target_properties(driver_sfclayrev_fortran PROPERTIES
-  Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fortran_modules_sfclayrev"
-  COMPILE_FLAGS "-ffree-form -fdefault-real-8 -DDOUBLE_PRECISION -O2 -ftree-vectorize -funroll-loops -DEM_CORE=1"
-)
-
-add_executable(driver_sfclayrev_cpu
-  sf_sfclayrev/driver_sfclayrev.cpp
-  ${CPPWRF_ROOT}/src/phys/sf_sfclayrev/sfclayrev.cpp
-  ${CPPWRF_ROOT}/src/core/backend.cpp
-)
-target_include_directories(driver_sfclayrev_cpu PRIVATE
-  ${CPPWRF_ROOT}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}
-)
-target_compile_definitions(driver_sfclayrev_cpu PRIVATE CPPWRF_DOUBLE)
-target_compile_options(driver_sfclayrev_cpu PRIVATE -O3 -march=native -ffp-contract=off)
-target_link_libraries(driver_sfclayrev_cpu PRIVATE
-  OpenMP::OpenMP_CXX
-)
-
-add_test(
-  NAME test_phys_sfclayrev
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/sf_sfclayrev/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-set_tests_properties(test_phys_sfclayrev PROPERTIES LABELS diff)
-
-# ==============================================================================
-# YSU PBL Scheme (bl_ysu)
-# ==============================================================================
-set(FORTRAN_YSU_SRCS
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/ccpp_kind_types.F"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/bl_ysu.F90"
-  "${CMAKE_CURRENT_SOURCE_DIR}/fortran/module_bl_ysu.F"
-)
-
-add_executable(driver_ysu_fortran
-  bl_ysu/driver_ysu.f90
-  ${FORTRAN_YSU_SRCS}
-)
-set_target_properties(driver_ysu_fortran PROPERTIES
-  Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fortran_modules_ysu"
-  COMPILE_FLAGS "${WRF_FORTRAN_FLAGS} -ffree-line-length-none"
-)
-
-add_executable(driver_ysu_cpu
-  bl_ysu/driver_ysu.cpp
-  ${CPPWRF_ROOT}/src/phys/bl_ysu/ysu.cpp
-  ${CPPWRF_ROOT}/src/core/backend.cpp
-)
-target_include_directories(driver_ysu_cpu PRIVATE
-  ${CPPWRF_ROOT}/src
-  ${CMAKE_CURRENT_SOURCE_DIR}
-)
-target_compile_definitions(driver_ysu_cpu PRIVATE CPPWRF_DOUBLE)
-target_compile_options(driver_ysu_cpu PRIVATE -O3 -march=native -ffp-contract=off)
-target_link_libraries(driver_ysu_cpu PRIVATE
-  OpenMP::OpenMP_CXX
-)
-
-add_test(
-  NAME test_phys_ysu
-  COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/bl_ysu/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-set_tests_properties(test_phys_ysu PROPERTIES LABELS diff)
-
-# ==============================================================================
-# MYJ PBL + Eta Surface Layer Scheme (bl_myj + sf_myjsfc)
-# ==============================================================================
-add_test(
-  NAME test_phys_bl_myj
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/bl_myj/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}/bl_myj_test
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-set_tests_properties(test_phys_bl_myj PROPERTIES LABELS diff SKIP_RETURN_CODE 77)
-
-# ==============================================================================
-# Noah LSM ice surfaces (SFLX_GLACIAL land ice, SFLX_SEAICE sea ice)
-# ==============================================================================
-add_test(
-  NAME test_phys_lsm_noah_ice
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsm_noah_ice/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}/lsm_noah_ice_test
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-set_tests_properties(test_phys_lsm_noah_ice PROPERTIES LABELS diff)
-
-# ==============================================================================
-# Kain-Fritsch, Noah LSM, Thompson (own CMake projects: tables and column drivers)
-# ==============================================================================
+# Kain-Fritsch, Noah LSM, Thompson (own CMake files: tables and column drivers)
 foreach(scheme cu_kf lsm_noah mp_thompson)
   add_subdirectory(${scheme})
 endforeach()
 
-# ==============================================================================
-# Noah-MP v5.1.2 Land Surface Model (lsm_noahmp, sf_surface_physics=4)
-# ==============================================================================
-add_test(
-  NAME test_phys_lsm_noahmp
-  COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/lsm_noahmp/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}/lsm_noahmp_test
-  WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-)
-set_tests_properties(test_phys_lsm_noahmp PROPERTIES LABELS diff SKIP_RETURN_CODE 77)
+# ctest entries (label diff). Schemes with CMake drivers get this build directory; the others (MYJ, Noah ice,
+# Noah-MP, MYNN) build their drivers in their own work directory.
+set(PHYS_BIN ${CMAKE_CURRENT_BINARY_DIR})
+foreach(t "kessler;mp_kessler;${PHYS_BIN}"
+          "wsm6;mp_wsm6;${PHYS_BIN}"
+          "sfclayrev;sf_sfclayrev;${PHYS_BIN}"
+          "ysu;bl_ysu;${PHYS_BIN}"
+          "bl_myj;bl_myj;${PHYS_BIN}/bl_myj_test"
+          "lsm_noah_ice;lsm_noah_ice;${PHYS_BIN}/lsm_noah_ice_test"
+          "lsm_noahmp;lsm_noahmp;${PHYS_BIN}/lsm_noahmp_test"
+          "bl_mynn;bl_mynn;${PHYS_BIN}/bl_mynn_test"
+          "sf_mynn;sf_mynn;${PHYS_BIN}/sf_mynn_test")
+  list(GET t 0 name)
+  list(GET t 1 dir)
+  list(GET t 2 work)
+  add_test(NAME test_phys_${name} COMMAND bash ${CMAKE_CURRENT_SOURCE_DIR}/${dir}/run_test.sh ${work}
+           WORKING_DIRECTORY ${PHYS_BIN})
+  set_tests_properties(test_phys_${name} PROPERTIES LABELS diff SKIP_RETURN_CODE 77)
+endforeach()

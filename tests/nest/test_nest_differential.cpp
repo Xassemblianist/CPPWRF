@@ -3,12 +3,12 @@
 #include <vector>
 #include <cmath>
 #include <string>
+#undef NDEBUG  // the checks below are asserts
 #include <cassert>
 
 #include "nest/nest_interp.hpp"
 #include "nest/nest_bdy.hpp"
 #include "nest/nest_feedback.hpp"
-#include "nest/nest_couple.hpp"
 #include "nest/nest_init.hpp"
 
 #include "tests/nest/fortran_nest_bridge.h"
@@ -17,27 +17,32 @@
 using namespace cppwrf::nest;
 using namespace cppwrf::nest::test;
 
+// Tolerance 0 (CPU FP64): a value passes only with the same value as WRF's (NaN equals only NaN, -0 differs from
+// +0, as tests/verify/exact.py); max |diff| and max rel diff are for the report.
+std::size_t g_mismatches = 0;
+
 struct DiffStats {
   double max_abs_diff = 0.0;
   double max_rel_diff = 0.0;
   std::size_t count = 0;
   std::size_t mismatches = 0;
 
-  void update(double cpp_val, double f_val, double tol = 1.0e-12) {
+  void update(double cpp_val, double f_val) {
     count++;
     double diff = std::abs(cpp_val - f_val);
     if (diff > max_abs_diff) max_abs_diff = diff;
     double denom = std::max(std::abs(f_val), 1.0e-20);
     double rel = diff / denom;
     if (rel > max_rel_diff) max_rel_diff = rel;
-    if (rel > tol && diff > 1.0e-14) {
+    const bool same = (std::isnan(cpp_val) && std::isnan(f_val)) ||
+                      (cpp_val == f_val && std::signbit(cpp_val) == std::signbit(f_val));
+    if (!same) {
       mismatches++;
+      g_mismatches++;
     }
   }
 
-  bool passed(double tol = 1.0e-12) const {
-    return max_rel_diff <= tol || max_abs_diff <= 1.0e-13;
-  }
+  bool passed() const { return count > 0 && mismatches == 0; }
 };
 
 void run_sint_sintb_tests(const CoarseDataset& ds) {
@@ -217,12 +222,31 @@ void run_interp_fcn_sint_tests(const CoarseDataset& ds) {
         }
       }
 
-      DiffStats stats_cpp, stats_dev;
+      // 4. the model's kernel (KSintView3D: src/cases/nest_driver.cpp interpolates PHB and O3RAD, unstaggered,
+      //    with it) on the same Fortran-layout arrays (i, k, j)
+      std::vector<double> nfld_model(n_size, 0.0);
+      if (var_type == 0) {
+        const int cni = c_ime - c_ims + 1, cnk = c_kme - c_kms + 1;
+        const int nni = n_ime - n_ims + 1, nnk = n_kme - n_kms + 1;
+        cppwrf::View3<const double> cv{cfld.data(), cni * cnk, cni};
+        cppwrf::View3<double> nv{nfld_model.data(), nni * nnk, nni};
+        KSintView3D<cppwrf::View3<const double>, cppwrf::View3<double>> kv{cv, nv, ipos, jpos, ratio, ratio, false,
+                                                                           false};
+        for (int k = 0; k < n_nz; ++k)
+          for (int nj = 0; nj < n_jme; ++nj)
+            for (int ni = 0; ni < n_ime; ++ni) kv(ni, nj, k);
+      }
+
+      DiffStats stats_cpp, stats_dev, stats_model;
       for (std::size_t idx = 0; idx < nfld_f.size(); ++idx) {
-        if (imask[idx % imask.size()] == 1) {
-          stats_cpp.update(nfld_cpp[idx], nfld_f[idx]);
-          stats_dev.update(nfld_dev[idx], nfld_f[idx]);
-        }
+        stats_cpp.update(nfld_cpp[idx], nfld_f[idx]);
+        stats_dev.update(nfld_dev[idx], nfld_f[idx]);
+        if (var_type == 0) stats_model.update(nfld_model[idx], nfld_f[idx]);
+      }
+      if (var_type == 0) {
+        std::cout << "    -> model KSintView3D vs Fortran: max_abs=" << stats_model.max_abs_diff << " ["
+                  << (stats_model.passed() ? "PASS" : "FAIL") << "]\n";
+        assert(stats_model.passed());
       }
 
       std::string vname = (var_type == 0 ? "T (unstaggered)" : (var_type == 1 ? "U (xstag)" : "V (ystag)"));
@@ -455,105 +479,6 @@ void run_feedback_tests(const CoarseDataset& ds) {
   }
 }
 
-void run_coupling_tests(const CoarseDataset& ds) {
-  std::cout << "\n======================================================\n";
-  std::cout << "TEST 5: Coupling & Uncoupling (couple_or_uncouple_em)\n";
-  std::cout << "======================================================\n";
-
-  const int nx = ds.nx, ny = ds.ny, nz = 5;
-
-  std::vector<double> u_cpp = ds.u, u_f = ds.u;
-  std::vector<double> v_cpp = ds.v, v_f = ds.v;
-  std::vector<double> w_cpp = ds.w, w_f = ds.w;
-  std::vector<double> ph_cpp = ds.ph, ph_f = ds.ph;
-  std::vector<double> t_cpp = ds.t, t_f = ds.t;
-  std::vector<double> qv_cpp = ds.qvapor, qv_f = ds.qvapor;
-
-  // 1. Couple (couple = true)
-  couple_or_uncouple_em(
-      u_cpp.data(), v_cpp.data(), w_cpp.data(), ph_cpp.data(), t_cpp.data(), qv_cpp.data(),
-      ds.mub.data(), ds.mu.data(),
-      ds.msfuy.data(), ds.msfvx.data(), ds.msfty.data(),
-      ds.c1f.data(), ds.c2f.data(), ds.c1h.data(), ds.c2h.data(),
-      nx, ny, nz, true);
-
-  wrf_bridge_couple_or_uncouple_em(
-      u_f.data(), v_f.data(), w_f.data(), ph_f.data(), t_f.data(), qv_f.data(),
-      ds.mub.data(), ds.mu.data(),
-      ds.msfuy.data(), ds.msfvx.data(), ds.msfty.data(),
-      ds.c1f.data(), ds.c2f.data(), ds.c1h.data(), ds.c2h.data(),
-      nx, ny, nz, 1);
-
-  DiffStats s_u, s_v, s_w, s_ph, s_t, s_qv;
-  for (std::size_t i = 0; i < (nx + 1) * nz * ny; ++i) s_u.update(u_cpp[i], u_f[i]);
-  for (std::size_t i = 0; i < nx * nz * (ny + 1); ++i) s_v.update(v_cpp[i], v_f[i]);
-  for (std::size_t i = 0; i < nx * (nz + 1) * ny; ++i) {
-    s_w.update(w_cpp[i], w_f[i]);
-    s_ph.update(ph_cpp[i], ph_f[i]);
-  }
-  for (std::size_t i = 0; i < nx * nz * ny; ++i) {
-    s_t.update(t_cpp[i], t_f[i]);
-    s_qv.update(qv_cpp[i], qv_f[i]);
-  }
-
-  std::cout << "  Couple step:\n"
-            << "    -> U:  max_rel=" << s_u.max_rel_diff  << " max_abs=" << s_u.max_abs_diff  << " [" << (s_u.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> V:  max_rel=" << s_v.max_rel_diff  << " max_abs=" << s_v.max_abs_diff  << " [" << (s_v.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> W:  max_rel=" << s_w.max_rel_diff  << " max_abs=" << s_w.max_abs_diff  << " [" << (s_w.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> PH: max_rel=" << s_ph.max_rel_diff << " max_abs=" << s_ph.max_abs_diff << " [" << (s_ph.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> T:  max_rel=" << s_t.max_rel_diff  << " max_abs=" << s_t.max_abs_diff  << " [" << (s_t.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> QV: max_rel=" << s_qv.max_rel_diff << " max_abs=" << s_qv.max_abs_diff << " [" << (s_qv.passed() ? "PASS" : "FAIL") << "]\n";
-
-  assert(s_u.passed());
-  assert(s_v.passed());
-  assert(s_w.passed());
-  assert(s_ph.passed());
-  assert(s_t.passed());
-  assert(s_qv.passed());
-
-  // 2. Uncouple (couple = false)
-  couple_or_uncouple_em(
-      u_cpp.data(), v_cpp.data(), w_cpp.data(), ph_cpp.data(), t_cpp.data(), qv_cpp.data(),
-      ds.mub.data(), ds.mu.data(),
-      ds.msfuy.data(), ds.msfvx.data(), ds.msfty.data(),
-      ds.c1f.data(), ds.c2f.data(), ds.c1h.data(), ds.c2h.data(),
-      nx, ny, nz, false);
-
-  wrf_bridge_couple_or_uncouple_em(
-      u_f.data(), v_f.data(), w_f.data(), ph_f.data(), t_f.data(), qv_f.data(),
-      ds.mub.data(), ds.mu.data(),
-      ds.msfuy.data(), ds.msfvx.data(), ds.msfty.data(),
-      ds.c1f.data(), ds.c2f.data(), ds.c1h.data(), ds.c2h.data(),
-      nx, ny, nz, 0);
-
-  DiffStats su2, sv2, sw2, sph2, st2, sqv2;
-  for (std::size_t i = 0; i < (nx + 1) * nz * ny; ++i) su2.update(u_cpp[i], u_f[i]);
-  for (std::size_t i = 0; i < nx * nz * (ny + 1); ++i) sv2.update(v_cpp[i], v_f[i]);
-  for (std::size_t i = 0; i < nx * (nz + 1) * ny; ++i) {
-    sw2.update(w_cpp[i], w_f[i]);
-    sph2.update(ph_cpp[i], ph_f[i]);
-  }
-  for (std::size_t i = 0; i < nx * nz * ny; ++i) {
-    st2.update(t_cpp[i], t_f[i]);
-    sqv2.update(qv_cpp[i], sqv2.count < qv_f.size() ? qv_f[i] : 0.0);
-  }
-
-  std::cout << "  Uncouple step:\n"
-            << "    -> U:  max_rel=" << su2.max_rel_diff  << " max_abs=" << su2.max_abs_diff  << " [" << (su2.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> V:  max_rel=" << sv2.max_rel_diff  << " max_abs=" << sv2.max_abs_diff  << " [" << (sv2.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> W:  max_rel=" << sw2.max_rel_diff  << " max_abs=" << sw2.max_abs_diff  << " [" << (sw2.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> PH: max_rel=" << sph2.max_rel_diff << " max_abs=" << sph2.max_abs_diff << " [" << (sph2.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> T:  max_rel=" << st2.max_rel_diff  << " max_abs=" << st2.max_abs_diff  << " [" << (st2.passed() ? "PASS" : "FAIL") << "]\n"
-            << "    -> QV: max_rel=" << sqv2.max_rel_diff << " max_abs=" << sqv2.max_abs_diff << " [" << (sqv2.passed() ? "PASS" : "FAIL") << "]\n";
-
-  assert(su2.passed());
-  assert(sv2.passed());
-  assert(sw2.passed());
-  assert(sph2.passed());
-  assert(st2.passed());
-  assert(sqv2.passed());
-}
-
 void run_initialisation_tests(const CoarseDataset& ds) {
   std::cout << "\n======================================================\n";
   std::cout << "TEST 6: Nest Initialisation (blend_terrain, adjust_tempqv, copy_3d_field)\n";
@@ -668,11 +593,14 @@ int main(int argc, char** argv) {
   run_interp_fcn_sint_tests(ds);
   run_bdy_interp_tests(ds);
   run_feedback_tests(ds);
-  run_coupling_tests(ds);
   run_initialisation_tests(ds);
 
+  if (g_mismatches) {
+    std::cout << "NEST NUMERICS: " << g_mismatches << " values differ from WRF's\n";
+    return 1;
+  }
   std::cout << "\n======================================================\n";
-  std::cout << "ALL NEST NUMERICS CPU DIFFERENTIAL TESTS PASSED! <= 1e-12\n";
+  std::cout << "ALL NEST NUMERICS CPU DIFFERENTIAL TESTS PASSED (bit-identical)\n";
   std::cout << "======================================================\n";
   return 0;
 }

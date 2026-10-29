@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
+"""compare.py WRF.bin CPP.bin [--tol T]: the revised MM5 surface layer outputs; --tol 0 (CPU FP64): every value
+identical as tests/verify/exact.py (NaN equals only NaN, -0 differs from +0), otherwise max rel diff <= tol."""
 import argparse
+import os
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
 
 VAR_NAMES = [
     "regime", "hfx", "qfx", "lh", "qsfc", "mol", "rmol", "gz1oz0",
@@ -60,6 +66,9 @@ def compare_outputs(fortran_file, cpp_file, tol=1e-12):
     n_vars = len(VAR_NAMES)
     bytes_per_var = n_bytes // n_vars
     n_cols = bytes_per_var // 8
+    if n_cols == 0 or n_bytes != n_vars * n_cols * 8:
+        print(f"ERROR: {n_bytes} bytes are not {n_vars} variables of 8-byte values")
+        return False
 
     print(f"Comparing {n_cols} columns across {n_vars} variables (tol = {tol:e}):")
     print(f"{'Variable':<12} | {'Active Pts':<10} | {'Max Abs Diff':<14} | {'Max Rel Diff':<14} | {'Worst Col':<10} | {'Status':<6}")
@@ -85,7 +94,7 @@ def compare_outputs(fortran_file, cpp_file, tol=1e-12):
         # Active points: points where variable is non-zero (or physically active)
         active_pts = np.count_nonzero(np.abs(f_val) > 1e-15)
 
-        passed = max_rel <= tol
+        passed = colcmp.same(name, f_val, c_val, quiet=True) if tol == 0 else max_rel <= tol
         status = "PASS" if passed else "FAIL"
         if not passed:
             all_pass = False

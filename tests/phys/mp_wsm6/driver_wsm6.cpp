@@ -208,6 +208,16 @@ int main(int argc, char** argv) {
            v_rain, v_rainncv, v_snow, v_snowncv,
            v_graupel, v_graupelncv, v_sr,
            real(delt), range, nz, params);
+  // the effective radii for RRTMG (has_reqc = has_reqi = has_reqs = 1), as src/dyn/physics_coupling.cpp
+  Buffer d_re_qc(n3d), d_re_qi(n3d), d_re_qs(n3d);
+  parallel_for(Range3D{0, n_cols, 0, 1, 0, nz},
+               Wsm6EffRadKernel<real>{params.pidnc, params.pidn0s, params.alpha, params.n0s, params.n0smax,
+                                      params.t0c, params.qmin, real(2.49E-6), real(4.99E-6), real(9.99E-6),
+                                      real(50.E-6), real(125.E-6), real(999.E-6), View3<const real>{v_th.p, sj, sk},
+                                      View3<const real>{v_pii.p, sj, sk}, View3<const real>{v_qc.p, sj, sk},
+                                      View3<const real>{v_qi.p, sj, sk}, View3<const real>{v_qs.p, sj, sk},
+                                      View3<const real>{v_den.p, sj, sk}, View3<real>{d_re_qc.get(), sj, sk},
+                                      View3<real>{d_re_qi.get(), sj, sk}, View3<real>{d_re_qs.get(), sj, sk}});
   dev_sync();
 
 #if defined(CPPWRF_USE_CUDA)
@@ -294,6 +304,12 @@ int main(int argc, char** argv) {
   std::fwrite(out_graupel.data(), sizeof(double), n2d, fo);
   std::fwrite(out_graupelncv.data(), sizeof(double), n2d, fo);
   std::fwrite(out_sr.data(), sizeof(double), n2d, fo);
+  for (Buffer* b : {&d_re_qc, &d_re_qi, &d_re_qs}) {
+    std::vector<real> r(n3d);
+    copy_to_host(r.data(), b->get(), n3d * sizeof(real));
+    std::vector<double> o(r.begin(), r.end());
+    std::fwrite(o.data(), sizeof(double), n3d, fo);
+  }
 
   std::fclose(fo);
   return 0;

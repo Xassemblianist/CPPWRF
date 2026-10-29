@@ -2,13 +2,17 @@
 """
 Differential comparison script for Kain-Fritsch (cu_physics = 1).
 Compares output_fortran.bin against output_cpp.bin across all 16 variables.
-PASS criterion: max rel diff <= 1e-12 in FP64.
+PASS criterion (--tol 0, CPU FP64): every value identical as tests/verify/exact.py (NaN equals only NaN, -0 differs
+from +0); otherwise max rel diff <= tol.
 """
 
 import sys
 import os
 import struct
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
 
 def compare_kf(f_file="output_fortran.bin", cpp_file="output_cpp.bin", tol=1e-12):
     if not os.path.exists(f_file):
@@ -75,12 +79,16 @@ def compare_kf(f_file="output_fortran.bin", cpp_file="output_cpp.bin", tol=1e-12
             worst_idx = np.argmax(rel_diff)
             worst_col = worst_idx % ncols if is_3d else worst_idx
 
-            status = "**PASS**" if max_rel <= tol else "**FAIL**"
-            if max_rel > tol:
+            ok = colcmp.same(name, data_f, data_c, quiet=True) if tol == 0 else max_rel <= tol
+            status = "**PASS**" if ok else "**FAIL**"
+            if not ok:
                 all_pass = False
 
             print(f"| `{name}` | {desc} | {max_abs:.6e} | {max_rel:.6e} | {worst_col} | {status} |")
 
+        if ff.read(1) or fc.read(1):
+            print("Error: more data than the 16 variables")
+            all_pass = False
         print()
         if all_pass:
             print(f"**Result: OVERALL PASS** (All variables max rel diff <= {tol:.1e})")

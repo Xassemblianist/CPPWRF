@@ -3,13 +3,18 @@
 Differential test comparison script for Noah LSM.
 Compares Fortran vs C++ outputs on identical inputs.
 Outputs max abs diff, max rel diff (with physical floor), worst column, and PASS/FAIL.
-Acceptance criterion: max rel diff <= 1e-12 in FP64.
+Acceptance criterion (--tol 0, CPU FP64): every value identical as tests/verify/exact.py (NaN equals only NaN, -0
+differs from +0); otherwise max rel diff <= tol.
 """
 
 import argparse
+import os
 import struct
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
 
 def read_noah_output(filepath):
     with open(filepath, 'rb') as f:
@@ -45,7 +50,12 @@ def read_noah_output(filepath):
         # 3D outputs (5)
         var3d_names = ['stc', 'smc', 'sh2o', 'et', 'smav']
         for name in var3d_names:
-            data[name] = np.fromfile(f, dtype=np.float64, count=n3d).reshape((nsoil, n_cols))
+            a = np.fromfile(f, dtype=np.float64, count=n3d)
+            if a.size != n3d:
+                raise ValueError(f"{filepath}: {name} incomplete")
+            data[name] = a.reshape((nsoil, n_cols))
+        if f.read(1):
+            raise ValueError(f"{filepath}: more data than the 42 outputs")
 
         return data
 
@@ -148,8 +158,9 @@ def compare_outputs(fortran_file, cpp_file, tol=1e-12):
         else:
             worst_col = int(np.argmax(rel_diff))
 
-        status = "PASS" if max_rel <= tol else "FAIL"
-        if max_rel > tol:
+        ok = colcmp.same(var, f_arr, c_arr, quiet=True) if tol == 0 else max_rel <= tol
+        status = "PASS" if ok else "FAIL"
+        if not ok:
             all_pass = False
 
         results.append({

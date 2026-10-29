@@ -1,26 +1,22 @@
 #!/usr/bin/env bash
 # Column differential test for the Noah ice surfaces: SFLX_GLACIAL (land ice) and SFLX_SEAICE
-# (sea ice), called from WRF v4.8.0's own compiled objects ${WRF_DIR}/phys/module_sf_noahlsm.o,
-# module_sf_noahlsm_glacial_only.o and module_sf_noah_seaice.o (their only outside reference,
-# wrf_error_fatal3, is in stubs.f90).
+# (sea ice), called from WRF v4.8.0's own compiled objects (module_sf_noahlsm_glacial_only.o and
+# module_sf_noah_seaice.o of the -r8 build, WRF_DIR; tests/phys/wrf_fortran.sh).
 # Pass criterion: bit-identical (tol = 0.0) in CPU FP64.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 HEAVY="${REPO_ROOT}/tools/heavy.sh"
-WRF_DIR="${WRF_DIR:?set WRF_DIR to a WRF v4.8.0 -r8d8 build (phys/*.o)}"
+. "${SCRIPT_DIR}/../wrf_fortran.sh"
+wrf_need r8
 OUT_DIR="${1:-${PWD}/test_lsm_noah_ice}"
 
 mkdir -p "${OUT_DIR}"
 cd "${OUT_DIR}"
 
-echo "=== Building Fortran & C++ Differential Drivers (linking WRF objects of ${WRF_DIR}/phys) ==="
-"${HEAVY}" --light gfortran -O2 -ffree-form -ffree-line-length-none -fdefault-real-8 -fdefault-double-8 \
-  -I"${WRF_DIR}/phys" -J. \
-  "${SCRIPT_DIR}/driver_noah_ice.f90" "${SCRIPT_DIR}/stubs.f90" "${WRF_DIR}/phys/module_sf_noahlsm.o" \
-  "${WRF_DIR}/phys/module_sf_noahlsm_glacial_only.o" "${WRF_DIR}/phys/module_sf_noah_seaice.o" \
-  -lmvec -lm -o driver_noah_ice_fortran
+echo "=== Building Fortran & C++ Differential Drivers (linking ${W}/main/libwrflib.a) ==="
+wrf_fortran "${OUT_DIR}/driver_noah_ice_fortran" "${SCRIPT_DIR}/driver_noah_ice.f90"
 
 "${HEAVY}" --light g++ -std=c++20 -DCPPWRF_DOUBLE -O3 -march=native -ffp-contract=off -fopenmp \
   -I"${REPO_ROOT}/src" \

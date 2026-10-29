@@ -1,3 +1,4 @@
+#undef NDEBUG  // the checks are asserts: keep them in Release builds
 #include <cassert>
 #include <cmath>
 #include <cstdlib>
@@ -20,16 +21,16 @@ static void check_near(double val, double expected, double tol, const std::strin
 int main() {
   const char* runs_env = std::getenv("CPPWRF_WRF_RUNS");
   if (!runs_env || !*runs_env) {
-    std::cout << "Notice: CPPWRF_WRF_RUNS is not set; skipping real file checks.\n";
-    return 0;
+    std::cout << "SKIP: CPPWRF_WRF_RUNS is not set\n";
+    return 77;
   }
   std::string runs = runs_env;
   std::string wrfinput_path = runs + "/wrf_run/wrfinput_d01";
   std::string wrfbdy_path = runs + "/wrf_run/wrfbdy_d01";
 
   if (!std::filesystem::exists(wrfinput_path)) {
-    std::cout << "Notice: " << wrfinput_path << " not found, skipping real file checks.\n";
-    return 0;
+    std::cout << "SKIP: " << wrfinput_path << " not found\n";
+    return 77;
   }
 
   std::cout << "Testing read_wrfinput on " << wrfinput_path << "...\n";

@@ -201,24 +201,29 @@ endforeach()
 # Namelist translator (tools/wrf2cppwrf.py; python3, no WRF data needed)
 add_subdirectory(tests/tools)
 
-# Differential tests against the original WRF Fortran (gfortran; slow): physics schemes, the
-# physics driver glue, diffusion kernels, lateral boundaries. ctest -L diff runs them.
+# Differential tests against WRF v4.8.0's own compiled code (gfortran; slow): physics schemes, the
+# physics driver glue, diffusion kernels, nest numerics. ctest -L diff runs them; they need WRF_DIR (a WRF v4.8.0
+# -r8 build tree) and WRF_R8D8_DIR (-r8 -fdefault-double-8), some CPPWRF_WRF_RUNS (tests/phys/wrf_fortran.sh), and
+# exit 77 (skipped) without them. tools/gcp/gcp_run.sh runs them on every full VM suite.
 option(CPPWRF_DIFF_TESTS "Register the WRF-Fortran differential tests with ctest" OFF)
 if(CPPWRF_DIFF_TESTS)
   find_package(OpenMP REQUIRED COMPONENTS CXX)  # the CPU reference drivers (also in CUDA builds)
   add_subdirectory(tests/phys)
-  foreach(t dyn/diffusion phys/suite nest)  # need WRF_DIR (a WRF v4.8.0 -r8 build); nest also NETCDF
+  set(DIFF_WORK ${CMAKE_BINARY_DIR}/diff_work)
+  foreach(t dyn/diffusion phys/suite nest)
     string(REPLACE "/" "_" tname "diff_${t}")
     add_test(NAME ${tname} COMMAND bash ${CMAKE_SOURCE_DIR}/tests/${t}/run_test.sh WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    set_tests_properties(${tname} PROPERTIES LABELS diff SKIP_RETURN_CODE 77)  # 77: no WRF build / runs
+    set_tests_properties(${tname} PROPERTIES LABELS diff SKIP_RETURN_CODE 77  # 77: no WRF build / runs
+                         ENVIRONMENT "DIFF_TEST_BUILD_DIR=${DIFF_WORK}")
   endforeach()
   # column replays of the model's cumulus calls through WRF's objects (CPU FP64 cppwrf; need
-  # CPPWRF_WRF_RUNS and WRF_R8D8_DIR, a WRF v4.8.0 -r8 -double-8 build)
+  # CPPWRF_WRF_RUNS and WRF_R8D8_DIR)
   if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA)
     foreach(t cu_gfl cu_ntiedtke)
       add_test(NAME diff_phys_${t} COMMAND bash ${CMAKE_SOURCE_DIR}/tests/phys/${t}/run_test.sh ${CMAKE_BINARY_DIR}
                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-      set_tests_properties(diff_phys_${t} PROPERTIES LABELS diff SKIP_RETURN_CODE 77)
+      set_tests_properties(diff_phys_${t} PROPERTIES LABELS diff SKIP_RETURN_CODE 77
+                           ENVIRONMENT "CPPWRF_SCRATCH=${DIFF_WORK}")
     endforeach()
   endif()
 endif()

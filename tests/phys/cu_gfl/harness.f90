@@ -5,7 +5,7 @@
 program harness
   use module_cu_gfl, only: cu_grell_freitas_li
   implicit none
-  integer :: nx, ny, nz, i, j, ishallow, ichoice, itimestep, nbad, ncol
+  integer :: nx, ny, nz, i, j, ishallow, ichoice, itimestep, nbad, ncol, nb
   real(8), allocatable, dimension(:,:,:) :: u, v, t, q, p, pi, rho, dz8w, w, p8w, rthften, rthraten, rthblten, &
        rqvften, rqvblten, rthcuten, rqvcuten, rqccuten, rqicuten, rucuten, rvcuten, &
        c_rth, c_rqv, c_rqc, c_rqi, c_ru, c_rv, gdc, gdc2
@@ -88,7 +88,12 @@ program harness
       e = max(e, abs(hbot(i,j)   - c_hbot(i,j)) / max(abs(hbot(i,j)),   1d-30))
       amax = max(amax, aerr)
       emax = max(emax, e)
-      if (aerr > 0.d0) then
+      ! tolerance 0: the same bits (-0 differs from +0, NaN only equals the same NaN)
+      nb = ndiff(rthcuten(i,1:nz,j), c_rth(i,1:nz,j)) + ndiff(rqvcuten(i,1:nz,j), c_rqv(i,1:nz,j)) &
+         + ndiff(rqccuten(i,1:nz,j), c_rqc(i,1:nz,j)) + ndiff(rqicuten(i,1:nz,j), c_rqi(i,1:nz,j)) &
+         + ndiff(rucuten(i,1:nz,j), c_ru(i,1:nz,j)) + ndiff(rvcuten(i,1:nz,j), c_rv(i,1:nz,j)) &
+         + ndiff([raincv(i,j), pratec(i,j), htop(i,j), hbot(i,j)], [c_rain(i,j), c_prat(i,j), c_htop(i,j), c_hbot(i,j)])
+      if (nb > 0) then
         nbad = nbad + 1
         if (nbad <= 15) write(*,'(a,2i4,a,es10.3,a,es10.3,a,2es14.6)') 'i,j(0-based)', i-1, j-1, &
              ' abs', aerr, ' rel', e, ' rain wrf/cpp', raincv(i,j), c_rain(i,j)
@@ -97,6 +102,10 @@ program harness
   end do
   write(*,*) 'convecting columns', ncol, ' differing >0:', nbad, ' max abs', amax, ' max rel', emax
 contains
+  integer function ndiff(x, y)
+    real(8), intent(in) :: x(:), y(:)
+    ndiff = count(transfer(x, 0_8, size(x)) /= transfer(y, 0_8, size(y)))
+  end function
   subroutine r3(x, nk)
     real(8) :: x(:,:,:)
     integer :: nk, ii, jj, kk

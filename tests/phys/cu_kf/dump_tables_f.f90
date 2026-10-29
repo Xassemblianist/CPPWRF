@@ -1,28 +1,15 @@
+! WRF's Kain-Fritsch lookup tables: kf_lutab of module_cu_kfeta.o with the saturation constants of
+! module_model_constants (as kfinit gets them); dump_tables_c.c writes the module's private tables.
 PROGRAM dump_tables_f
-  USE module_cu_kfeta, ONLY: kf_lutab, ttab, qstab, the0k, alu, rdpr, rdthk, plutop
+  USE module_cu_kfeta, ONLY: kf_lutab
+  USE module_model_constants, ONLY: svp1, svp2, svp3, svpt0
   IMPLICIT NONE
-
-  REAL :: svp1, svp2, svp3, svpt0
-  INTEGER :: u
-
-  svp1 = 0.6112
-  svp2 = 17.67
-  svp3 = 29.65
-  svpt0 = 273.15
+  INTERFACE
+    SUBROUTINE dump_kf_tables()
+    END SUBROUTINE dump_kf_tables
+  END INTERFACE
 
   CALL kf_lutab(svp1, svp2, svp3, svpt0)
-
-  OPEN(NEWUNIT=u, FILE="tables_fortran.bin", FORM="unformatted", ACCESS="stream", STATUS="replace")
-  WRITE(u) rdpr, rdthk, plutop
-  WRITE(u) the0k
-  WRITE(u) alu
-  WRITE(u) ttab
-  WRITE(u) qstab
-  CLOSE(u)
-
-  PRINT *, "Fortran tables dumped successfully."
-  PRINT *, "rdpr =", rdpr, "rdthk =", rdthk, "plutop =", plutop
-  PRINT *, "the0k(1) =", the0k(1), "the0k(220) =", the0k(220)
-  PRINT *, "ttab(1,1) =", ttab(1,1), "ttab(250,220) =", ttab(250,220)
-  PRINT *, "qstab(1,1) =", qstab(1,1), "qstab(250,220) =", qstab(250,220)
+  CALL dump_kf_tables()
+  PRINT *, "WRF kf_lutab tables written to tables_fortran.bin"
 END PROGRAM dump_tables_f

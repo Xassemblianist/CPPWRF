@@ -1,6 +1,8 @@
 program driver_wsm6
   use module_mp_wsm6, only: wsm6
   use mp_wsm6, only: mp_wsm6_init
+  use module_model_constants, only: re_qc_bg_c => re_qc_bg, re_qi_bg_c => re_qi_bg, re_qs_bg_c => re_qs_bg, &
+                                    re_qc_max_c => re_qc_max, re_qi_max_c => re_qi_max, re_qs_max_c => re_qs_max
   implicit none
 
   character(len=256) :: infile, outfile
@@ -65,15 +67,20 @@ program driver_wsm6
     stop 1
   end if
 
-  has_reqc = 0
-  has_reqi = 0
-  has_reqs = 0
-  re_qc_bg = 0.d0
-  re_qi_bg = 0.d0
-  re_qs_bg = 0.d0
-  re_qc_max = 0.d0
-  re_qi_max = 0.d0
-  re_qs_max = 0.d0
+  ! the effective radii for RRTMG as module_microphysics_driver.F passes them (has_reqc = has_reqi = has_reqs = 1
+  ! with RRTMG, the bounds of module_model_constants.F)
+  has_reqc = 1
+  has_reqi = 1
+  has_reqs = 1
+  re_qc_bg = re_qc_bg_c
+  re_qi_bg = re_qi_bg_c
+  re_qs_bg = re_qs_bg_c
+  re_qc_max = re_qc_max_c
+  re_qi_max = re_qi_max_c
+  re_qs_max = re_qs_max_c
+  re_cloud = 0.d0
+  re_ice = 0.d0
+  re_snow = 0.d0
   diagflag = .false.
   do_radar_ref = 0
 
@@ -112,6 +119,9 @@ program driver_wsm6
   write(20) graupel
   write(20) graupelncv
   write(20) sr
+  write(20) re_cloud
+  write(20) re_ice
+  write(20) re_snow
   close(20)
 
   deallocate(th, q, qc, qr, qi, qs, qg, den, pii, p, delz, &

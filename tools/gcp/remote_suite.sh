@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # The VM side of tools/gcp/gcp_run.sh (startup script): installs the build tools, builds the CPU FP64 binary
 # with the instruction set of the reference workstation (-march=skylake, as -march=native there), runs
-# wrf_suite.py, copies the results to the bucket and powers the VM off.
+# wrf_suite.py, copies the results to the bucket and powers the VM off. The full suite (no cases) also runs the
+# differential and unit tests (tools/gcp/run_diff_tests.sh: diff.log, ctest.log) next to the suite.
 # Metadata: bucket, src (object of the git archive), data (objects of tools/colab/stage_data.py's tars, comma-separated),
 #           result (prefix for the results), jobs, threads, cases (empty: all CPU cases).
 md() { curl -s -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/attributes/$1"; }
@@ -11,7 +12,7 @@ put() { gcloud storage cp "$@" "gs://$B/$RES/" || true; }
 trap 'put $J/job.log $J/setup.out; date > $J/done; put $J/done; poweroff' EXIT
 set -x
 export DEBIAN_FRONTEND=noninteractive
-apt-get -qq update && apt-get -qq install -y build-essential cmake libnetcdf-dev python3-netcdf4 python3-numpy > /dev/null
+apt-get -qq update && apt-get -qq install -y build-essential cmake gfortran libnetcdf-dev libnetcdff-dev python3-netcdf4 python3-numpy > /dev/null
 gcloud storage cp "gs://$B/$SRC" $J/src.tar.gz
 mkdir -p $J/src $J/data && tar xzf $J/src.tar.gz -C $J/src
 # a data tar that did not arrive or a failed build: setup.out (gcp_run.sh then exits with 1)
@@ -24,6 +25,13 @@ cmake -S $J/src -B $J/build -DCMAKE_BUILD_TYPE=Release -DCPPWRF_DOUBLE=ON -DCPPW
   || echo "BUILD_FAILED (cmake.log)" >> $J/setup.out
 put $J/cmake.log $J/setup.out
 cd $J/src
+# the differential tests against WRF's objects (diff_data.tar) and the ctest unit tests, in their own build, while
+# the suite runs
+if [ -z "$CASES" ]; then
+  (OMP_NUM_THREADS=4 bash tools/gcp/run_diff_tests.sh $J/src $J/build_diff $J/data $J > $J/diff_setup.out 2>&1
+   put $J/diff_cmake.log $J/diff.log $J/ctest.log $J/diff_setup.out) &
+  DIFF_PID=$!
+fi
 # the translator's unit tests (tests/tools/test_wrf2cppwrf.py: namelists of the data's WRF runs, 2-step model runs)
 CPPWRF_WRF_RUNS=$J/data/wrf_runs CPPWRF_WRF_REF=$J/data/wrf_ref CPPWRF_BIN=$J/build/cppwrf OMP_NUM_THREADS=1 \
   python3 tests/tools/test_wrf2cppwrf.py -v > $J/unit.log 2>&1; echo "exit $?" >> $J/unit.log
@@ -47,4 +55,8 @@ if [ -z "$CASES" ]; then
   CPPWRF_WRF_REF=$J/data/wrf_ref CPPWRF_SCRATCH=$J OMP_NUM_THREADS=$THR python3 tests/verify/ideal_files_test.py $J/build \
     > $J/idealfiles.log 2>&1; echo "exit $?" >> $J/idealfiles.log
   put $J/files.log $J/idealfiles.log
+fi
+if [ -z "$CASES" ]; then
+  wait $DIFF_PID
+  cat $J/diff_setup.out >> $J/setup.out; put $J/setup.out
 fi

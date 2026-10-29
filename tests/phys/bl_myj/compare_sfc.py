@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
 import argparse
+import os
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402  (tol 0: identical as tests/verify/exact.py, NaN equals only NaN, -0 differs from +0)
 
 VAR_NAMES = [
     "qsfc", "thz0", "qz0", "uz0", "vz0", "ustar", "znt", "pblh", "rmol", "akhs", "akms",
@@ -61,7 +65,7 @@ def compare_myjsfc_outputs(fortran_file, cpp_file, tol=0.0):
 
         active_pts = int(np.count_nonzero(np.abs(f_arr) > 1e-15))
 
-        passed = (max_rel <= tol) or (max_abs <= tol)
+        passed = colcmp.same(name, f_arr, c_arr, quiet=True) if tol == 0 else (max_rel <= tol) or (max_abs <= tol)
         status = "PASS" if passed else "FAIL"
         if not passed:
             all_pass = False

@@ -26,3 +26,6 @@ v05_iofields.tar
 v05_files_data.tar
 # its files that are links on the reference machine, as files (stage_files_data.py --links-only)
 v05_files_links.tar
+# the WRF v4.8.0 objects (-r8, -r8 -fdefault-double-8 builds) and input subsets of the differential tests
+# (ctest -L diff; tools/gcp/stage_diff_data.sh, tools/gcp/run_diff_tests.sh)
+diff_data.tar

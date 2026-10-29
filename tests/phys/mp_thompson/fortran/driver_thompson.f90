@@ -78,7 +78,10 @@ PROGRAM driver_thompson
   READ(u_in) sr(:, 1)
   CLOSE(u_in)
 
-  ! Initialize tables
+  ! Initialize tables. write_thompson_tables is .true. by default (Registry); no namelist is read here, so it is set
+  ! as WRF's: thompson_init writes qr_acr_qg_V4.dat, qr_acr_qsV2.dat and freezeH2O.dat, which the C++ driver reads
+  ! as the model reads a run's table files
+  CALL nl_set_write_thompson_tables(1, .TRUE.)
   CALL thompson_init(hgt=hgt, &
                      ids=1, ide=ncols+1, jds=1, jde=2, kds=1, kde=nlevels, &
                      ims=1, ime=ncols, jms=1, jme=1, kms=1, kme=nlevels, &

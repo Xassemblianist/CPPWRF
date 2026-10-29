@@ -7,7 +7,7 @@ program harn
   real(8), dimension(1,km) :: u, v, t, qv, qc, qi, qvf, tf, oz, om, ap
   real(8), dimension(1,km+1) :: zz, aph
   real(8) :: evap(1), hfx(1), dx(1), rn(1), d, dmax(7), rel
-  integer :: lndj(1), ios, col, nbad, errflg, k
+  integer :: lndj(1), ios, col, nbad, errflg, k, nb
   character(len=256) :: fn, errmsg
   real(8), parameter :: rd = 287., cp = 7.*rd/2.
   call get_command_argument(1, fn)
@@ -26,17 +26,25 @@ program harn
     rn = 0
     call cu_ntiedtke_run(u, v, t, qv, qc, qi, qvf, tf, oz, zz, om, ap, aph, evap, hfx, rn, lndj, 1, km, km+1, &
                          sc(4), dx, errmsg, errflg)
+    ! tolerance 0: the same bits in every output (-0 differs from +0, NaN only equals the same NaN)
+    nb = ndiff(u(1,:), outc(:,1)) + ndiff(v(1,:), outc(:,2)) + ndiff(t(1,:), outc(:,3)) + ndiff(qv(1,:), outc(:,4)) &
+       + ndiff(qc(1,:), outc(:,5)) + ndiff(qi(1,:), outc(:,6)) + ndiff(rn, [rnc])
     rel = 0
     rel = max(rel, maxval(abs(u(1,:) - outc(:,1))) / max(1d-30, maxval(abs(u(1,:)))))
     rel = max(rel, maxval(abs(v(1,:) - outc(:,2))) / max(1d-30, maxval(abs(v(1,:)))))
     rel = max(rel, maxval(abs(t(1,:) - outc(:,3))) / max(1d-30, maxval(abs(t(1,:)))))
     rel = max(rel, maxval(abs(qv(1,:) - outc(:,4))) / max(1d-30, maxval(abs(qv(1,:)))))
     rel = max(rel, abs(rn(1) - rnc) / max(1d-30, abs(rn(1))))
-    if (rel > 0d0) then
+    if (nb > 0) then
       nbad = nbad + 1
       if (nbad <= 10) write(*,'(a,i6,a,es10.3,a,2es14.6,a,2es14.6)') 'col', col, ' rel', rel, ' rn f/c', rn(1), rnc, &
         ' tbot f/c', t(1,km), outc(km,3)
     end if
   end do
   write(*,*) 'columns', col, ' mismatching', nbad
+contains
+  integer function ndiff(x, y)
+    real(8), intent(in) :: x(:), y(:)
+    ndiff = count(transfer(x, 0_8, size(x)) /= transfer(y, 0_8, size(y)))
+  end function
 end program

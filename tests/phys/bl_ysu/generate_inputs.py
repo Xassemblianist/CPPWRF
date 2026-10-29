@@ -3,7 +3,7 @@ import argparse
 import struct
 import numpy as np
 
-def generate_ysu_inputs(num_cols=2500, nz=50, dt=60.0, out_path="ysu_input.bin", seed=42, topdown=1):
+def generate_ysu_inputs(num_cols=2500, nz=50, dt=60.0, out_path="ysu_input.bin", seed=42, topdown=1, flag_q=1):
     np.random.seed(seed)
 
     # Physical constants (WRF share/module_model_constants.F)
@@ -24,8 +24,8 @@ def generate_ysu_inputs(num_cols=2500, nz=50, dt=60.0, out_path="ysu_input.bin",
     svpt0 = 273.15
 
     ysu_topdown_pblmix = topdown  # WRF default 1
-    flag_qc = 1
-    flag_qi = 1
+    flag_qc = flag_q  # f_qc / f_qi of the microphysics (0 without microphysics, as the P1 case)
+    flag_qi = flag_q
 
     # 3D arrays: (nz, num_cols) in python, flattening to (nz, num_cols)
     u3d = np.zeros((nz, num_cols), dtype=np.float64)
@@ -246,5 +246,6 @@ if __name__ == "__main__":
     parser.add_argument("--out", type=str, default="ysu_input.bin")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--topdown", type=int, default=1, help="ysu_topdown_pblmix")
+    parser.add_argument("--flag-q", type=int, default=1, help="flag_qc = flag_qi")
     args = parser.parse_args()
-    generate_ysu_inputs(args.cols, args.nz, args.dt, args.out, args.seed, args.topdown)
+    generate_ysu_inputs(args.cols, args.nz, args.dt, args.out, args.seed, args.topdown, args.flag_q)

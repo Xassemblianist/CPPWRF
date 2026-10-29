@@ -12,8 +12,9 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-[ -n "${WRF_DIR:-}" ] || { echo "SKIP: set WRF_DIR to a WRF v4.8.0 -r8 build (tests/phys/suite/build_wrf_r8.sh)"; exit 77; }  # ctest: skipped
-B="$SCRIPT_DIR/build"
+. "$SCRIPT_DIR/../wrf_fortran.sh"
+wrf_need r8   # tests/phys/suite/build_wrf_r8.sh builds one
+B="${DIFF_TEST_BUILD_DIR:-$SCRIPT_DIR/build}/suite"
 HEAVY="$REPO/tools/heavy.sh"
 [ -x "$HEAVY" ] || HEAVY=""
 mkdir -p "$B"
@@ -22,20 +23,10 @@ cd "$B"
 echo "== 1. inputs"
 python3 -I "$SCRIPT_DIR/generate_inputs.py" suite_input.bin
 cp "$SCRIPT_DIR/namelist.input" .
-for t in LANDUSE.TBL VEGPARM.TBL SOILPARM.TBL GENPARM.TBL; do cp "$WRF_DIR/run/$t" .; done
+for t in LANDUSE.TBL VEGPARM.TBL SOILPARM.TBL GENPARM.TBL; do cp -L "$W/run/$t" .; done
 
 echo "== 2. WRF reference (fortran/suite_ref.F90 + unmodified WRF objects)"
-W="$WRF_DIR"
-INC="-I$W/main -I$W/frame -I$W/share -I$W/phys -I$W/dyn_em -I$W/inc -I$W/external/esmf_time_f90"
-$HEAVY gfortran -c -O2 -ffree-form -ffree-line-length-none -fdefault-real-8 -fallow-argument-mismatch \
-  $INC "$SCRIPT_DIR/fortran/suite_ref.F90" -o suite_ref.o
-NCLIB="$(nf-config --flibs 2>/dev/null || echo "-L${NETCDF:-/usr}/lib -lnetcdff -lnetcdf")"
-$HEAVY gfortran -o suite_ref suite_ref.o "$W/main/module_wrf_top.o" "$W/main/libwrflib.a" \
-  "$W/external/fftpack/fftpack5/libfftpack.a" "$W/external/io_grib1/libio_grib1.a" \
-  "$W/external/io_grib_share/libio_grib_share.a" "$W/external/io_int/libwrfio_int.a" \
-  -L"$W/external/esmf_time_f90" -lesmf_time "$W/external/RSL_LITE/librsl_lite.a" \
-  "$W/frame/module_internal_header_util.o" "$W/frame/pack_utils.o" \
-  -L"$W/external/io_netcdf" -lwrfio_nf $NCLIB
+wrf_fortran "$B/suite_ref" "$SCRIPT_DIR/fortran/suite_ref.F90" "$W/main/module_wrf_top.o"
 ./suite_ref > suite_ref.log 2>&1 || { tail -20 suite_ref.log; exit 1; }
 tail -1 suite_ref.log
 

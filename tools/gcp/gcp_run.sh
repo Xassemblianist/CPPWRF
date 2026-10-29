@@ -7,7 +7,9 @@
 # The bucket holds the reference data once (tools/colab/stage_data.py's tar, uploaded with
 # `gcloud storage cp`; --data names them, comma-separated, default suite_data.tar,ideal_data.tar); the source is the committed HEAD.
 # Before the suite the VM runs tests/tools/test_wrf2cppwrf.py (the translator; OUT/unit.log); after the full suite
-# (no --cases) tests/verify/run_wrf_files_test.sh and ideal_files_test.py (OUT/files.log, OUT/idealfiles.log).
+# (no --cases) tests/verify/run_wrf_files_test.sh and ideal_files_test.py (OUT/files.log, OUT/idealfiles.log) and,
+# next to the suite, the differential tests against WRF's objects and the other ctest tests
+# (tools/gcp/run_diff_tests.sh with diff_data.tar of the data list: OUT/diff.log, OUT/ctest.log).
 # The VM is a spot VM (Debian 13: the same gcc and glibc as the reference workstation) that powers
 # itself off at the end and is deleted here; --max-run-duration deletes it in any case. The machine and zone are
 # tools/gcp/gcp_pick.py's cheapest now (spot price for 176 vCPUs over 2 hours plus the data transfer; Intel only:
@@ -15,8 +17,8 @@
 # one tried while one has no capacity or quota; --machine fixes the type, --zones limits the zones. Without
 # --threads each of the --jobs suite jobs gets the machine's vCPUs / jobs threads.
 # Exit status 0 only for a complete suite without FAIL or SKIP (wrf_suite.py's SUITE line and exit 0), passing
-# translator tests and comparator self-test (tests/verify/selftest.py), files tests without FAIL or SKIP (full
-# suite), and no data or build failure on the VM; a
+# translator tests and comparator self-test (tests/verify/selftest.py), files, differential and ctest tests without
+# FAIL or SKIP (full suite), and no data or build failure on the VM; a
 # VM that ends early is INCOMPLETE (status 1).
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -80,6 +82,12 @@ if [ -z "$CASES" ]; then  # the full suite: the output files tests too (remote_s
     echo "$f: PASS $(grep -c '^PASS ' "$OUT/$f.log") FAIL $(grep -c '^FAIL ' "$OUT/$f.log") SKIP $(grep -c '^SKIP ' "$OUT/$f.log")"
     grep -E "^(FAIL|SKIP) " "$OUT/$f.log" | cut -c1-200 || true  # none: grep fails (set -e, pipefail)
     grep -E "^exit [1-9]" "$OUT/$f.log" && bad=1
+  done
+  for f in diff ctest; do
+    if [ ! -f "$OUT/$f.log" ]; then echo "[gcp_run] INCOMPLETE: no $f.log"; bad=1; continue; fi
+    echo "$f: $(grep -E 'tests passed' "$OUT/$f.log" || echo 'no ctest summary')"
+    grep -E '^\s*[0-9]+ - .*\((Failed|Timeout|SEGFAULT|Subprocess|Skipped|Not Run)|^SKIPPED ' "$OUT/$f.log" || true
+    grep -qx "exit 0" "$OUT/$f.log" || bad=1
   done
 fi
 exit $bad

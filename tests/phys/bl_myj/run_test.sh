@@ -1,27 +1,24 @@
 #!/usr/bin/env bash
 # Column differential test for MYJ PBL (bl_pbl_physics=2) and Eta Surface Layer (sf_sfclay_physics=2)
-# Calls WRF v4.8.0's own compiled objects in ${WRF_DIR}/main/libwrflib.a.
+# Calls WRF v4.8.0's own compiled objects (module_bl_myjpbl.o, module_sf_myjsfc.o of the -r8 build that made the
+# P9 references, WRF_DIR; tests/phys/wrf_fortran.sh).
 # Pass criterion: bit-identical (tol = 0.0) in CPU FP64.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 HEAVY="${REPO_ROOT}/tools/heavy.sh"
-[ -n "${WRF_DIR:-}" ] || { echo "SKIP: set WRF_DIR to a WRF v4.8.0 -r8d8 build (main/libwrflib.a)"; exit 77; }  # ctest: skipped
+. "${SCRIPT_DIR}/../wrf_fortran.sh"
+wrf_need r8
 [ -n "${CPPWRF_WRF_RUNS:-}" ] || { echo "SKIP: set CPPWRF_WRF_RUNS to the WRF reference runs (run_P4_r8, run_P1_r8 wrfout for the input columns)"; exit 77; }
 OUT_DIR="${1:-${PWD}/test_bl_myj}"
 
 mkdir -p "${OUT_DIR}"
 cd "${OUT_DIR}"
 
-echo "=== Building Fortran & C++ Differential Drivers (linking ${WRF_DIR}/main/libwrflib.a) ==="
-"${HEAVY}" --light gfortran -O2 -ffree-form -ffree-line-length-none -fdefault-real-8 -fdefault-double-8 \
-  -I"${WRF_DIR}/main" -I"${WRF_DIR}/phys" -I"${WRF_DIR}/frame" -I"${WRF_DIR}/share" \
-  "${SCRIPT_DIR}/driver_sf_myjsfc.f90" "${WRF_DIR}/main/libwrflib.a" -lmvec -lm -o driver_sf_myjsfc_fortran
-
-"${HEAVY}" --light gfortran -O2 -ffree-form -ffree-line-length-none -fdefault-real-8 -fdefault-double-8 \
-  -I"${WRF_DIR}/main" -I"${WRF_DIR}/phys" -I"${WRF_DIR}/frame" -I"${WRF_DIR}/share" \
-  "${SCRIPT_DIR}/driver_bl_myj.f90" "${WRF_DIR}/main/libwrflib.a" -lmvec -lm -o driver_bl_myj_fortran
+echo "=== Building Fortran & C++ Differential Drivers (linking ${W}/main/libwrflib.a) ==="
+wrf_fortran "${OUT_DIR}/driver_sf_myjsfc_fortran" "${SCRIPT_DIR}/driver_sf_myjsfc.f90"
+wrf_fortran "${OUT_DIR}/driver_bl_myj_fortran" "${SCRIPT_DIR}/driver_bl_myj.f90"
 
 "${HEAVY}" --light g++ -std=c++20 -DCPPWRF_DOUBLE -O3 -march=native -ffp-contract=off -fopenmp \
   -I"${REPO_ROOT}/src" \

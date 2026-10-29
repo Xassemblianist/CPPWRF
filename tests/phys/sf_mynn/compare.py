@@ -1,21 +1,22 @@
 #!/usr/bin/env python3
-"""compare.py WRF.bin CPP.bin NI [--tol 0]: per-field max |difference| of the MYNN surface-layer outputs."""
+"""compare.py WRF.bin CPP.bin NI: the MYNN surface-layer outputs, every value identical as tests/verify/exact.py (NaN
+equals only NaN, -0 differs from +0)."""
+import os
 import sys
+
 import numpy as np
-names = "pblh chs chs2 cqs cqs2 cpm znt ust ustm zol mol rmol psim psih qgh hfx qfx lh flhc flqc qsfc u10 v10 th2 t2 q2 gz1oz0 wspd br ch ck cka cd cda".split()
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
+
+names = ("pblh chs chs2 cqs cqs2 cpm znt ust ustm zol mol rmol psim psih qgh hfx qfx lh flhc flqc qsfc u10 v10 th2 t2 "
+         "q2 gz1oz0 wspd br ch ck cka cd cda").split()
 ni = int(sys.argv[3])
-tol = float(sys.argv[sys.argv.index("--tol") + 1]) if "--tol" in sys.argv else 0.0
-a = np.fromfile(sys.argv[1], dtype=np.float64).reshape(len(names), ni)
-b = np.fromfile(sys.argv[2], dtype=np.float64).reshape(len(names), ni)
-bad = 0
-for k, x, y in zip(names, a, b):
-    d = np.abs(x - y)
-    same_nan = np.isnan(x) & np.isnan(y)
-    d[same_nan] = 0
-    nd = int((d > tol).sum() + (np.isnan(x) ^ np.isnan(y)).sum())
-    if nd:
-        bad += 1
-        i = int(np.nanargmax(d))
-        print(f"DIFF {k:7s} {nd:6d} points, max {d[i]:.3e} at {i}: wrf {x[i]!r} cpp {y[i]!r}")
+for p in sys.argv[1:3]:
+    if os.path.getsize(p) != len(names) * ni * 8:
+        sys.exit(f"{p}: {os.path.getsize(p)} bytes, expected {len(names) * ni * 8}")
+a = colcmp.read_exact(sys.argv[1], np.float64, len(names) * ni).reshape(len(names), ni)
+b = colcmp.read_exact(sys.argv[2], np.float64, len(names) * ni).reshape(len(names), ni)
+bad = sum(not colcmp.same(k, x, y, quiet=True) for k, x, y in zip(names, a, b))
 print(f"{'PASS' if bad == 0 else 'FAIL'}: {len(names) - bad}/{len(names)} fields identical")
 sys.exit(1 if bad else 0)

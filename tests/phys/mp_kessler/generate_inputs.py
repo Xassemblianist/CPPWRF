@@ -10,7 +10,8 @@ Generates N >= 2000 realistic atmospheric columns covering:
 - Hydrometeors present / absent
 - Exactly zero and near-zero mixing ratios
 - Autoconversion threshold edge cases (qc ~ 0.001)
-- High rain mixing ratios triggering Courant substepping (crmax > 0.75)
+- High rain mixing ratios triggering Courant substepping (crmax > 0.75: nfall up to 5 at dt = 60 s;
+  at dt = 12 s every column has nfall = 1)
 - Small dt and large dt support
 """
 

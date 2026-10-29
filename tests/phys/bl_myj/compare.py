@@ -6,8 +6,12 @@ Checks 7 2D variables and 9 3D variables across all columns and levels.
 """
 
 import argparse
+import os
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402  (tol 0: identical as tests/verify/exact.py, NaN equals only NaN, -0 differs from +0)
 
 VARS_2D = [
     "qsfc", "thz0", "qz0", "ct", "pblh", "kpbl", "mixht"
@@ -75,7 +79,7 @@ def compare_myjpbl_outputs(fortran_file, cpp_file, tol=0.0, nz=44):
         max_rel = np.max(rel_diff)
         active_pts = int(np.count_nonzero(np.abs(f_arr) > 1e-15))
 
-        passed = (max_rel <= tol) or (max_abs <= tol)
+        passed = colcmp.same(name, f_arr, c_arr, quiet=True) if tol == 0 else (max_rel <= tol) or (max_abs <= tol)
         status = "PASS" if passed else "FAIL"
         if not passed:
             all_pass = False
@@ -100,7 +104,7 @@ def compare_myjpbl_outputs(fortran_file, cpp_file, tol=0.0, nz=44):
         max_rel = np.max(rel_diff)
         active_pts = int(np.count_nonzero(np.abs(f_arr) > 1e-15))
 
-        passed = (max_rel <= tol) or (max_abs <= tol)
+        passed = colcmp.same(name, f_arr, c_arr, quiet=True) if tol == 0 else (max_rel <= tol) or (max_abs <= tol)
         status = "PASS" if passed else "FAIL"
         if not passed:
             all_pass = False

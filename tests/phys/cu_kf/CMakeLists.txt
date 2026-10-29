@@ -2,20 +2,16 @@ cmake_minimum_required(VERSION 3.24)
 
 set(CPPWRF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../..")
 
-# Fortran flags for bit-for-bit WRF verification
-# WRF's own r8d8 configure flags (FCOPTIM): gfortran vectorises through libmvec as in wrf.exe
-set(PHYS_FORTRAN_FLAGS "-cpp -ffree-form -fdefault-real-8 -fdefault-double-8 -O2 -ftree-vectorize -funroll-loops")
+# The Fortran side (WRF's module_cu_kfeta.o) is compiled and linked by run_test.sh (tests/phys/wrf_fortran.sh)
 
-# 1. Fortran Driver
-add_executable(fortran_driver_kf
-  fortran/driver_kf.f90
-  fortran/module_cu_kfeta.F
-  fortran/stubs.f90
+# 1. Table test: init_kf_tables against WRF's kf_lutab (dump_tables_f.f90 + dump_tables_c.c)
+add_executable(test_tables_kf
+  test_tables.cpp
+  ${CPPWRF_ROOT}/src/phys/cu_kf/kf_tables.cpp
 )
-set_target_properties(fortran_driver_kf PROPERTIES
-  Fortran_MODULE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/fortran_modules"
-  COMPILE_FLAGS "${PHYS_FORTRAN_FLAGS}"
-)
+target_include_directories(test_tables_kf PRIVATE ${CPPWRF_ROOT} ${CPPWRF_ROOT}/src)
+target_compile_definitions(test_tables_kf PRIVATE CPPWRF_DOUBLE)
+target_compile_options(test_tables_kf PRIVATE -O3 -march=native -ffp-contract=off)
 
 # 2. C++ Driver (CPU FP64)
 add_executable(driver_kf_cpu
@@ -84,4 +80,4 @@ add_test(
   COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/run_test.sh ${CMAKE_CURRENT_BINARY_DIR}
   WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
 )
-set_tests_properties(test_phys_cu_kf PROPERTIES LABELS diff)
+set_tests_properties(test_phys_cu_kf PROPERTIES LABELS diff SKIP_RETURN_CODE 77)

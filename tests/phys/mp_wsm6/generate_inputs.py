@@ -15,7 +15,7 @@ import argparse
 import struct
 import numpy as np
 
-def generate_wsm6_inputs(n_cols=2500, nz=50, dt=120.0, seed=42):
+def generate_wsm6_inputs(n_cols=2500, nz=50, dt=120.0, seed=42, hail_opt=0):
     np.random.seed(seed)
 
     # Physical constants matching WRF
@@ -40,7 +40,6 @@ def generate_wsm6_inputs(n_cols=2500, nz=50, dt=120.0, seed=42):
     cliq = 4190.0
     cice = 2106.0
     psat = 610.78
-    hail_opt = 0
 
     p1000mb = 100000.0
 
@@ -241,10 +240,11 @@ def main():
     parser.add_argument('--nz', type=int, default=50, help='Number of vertical levels')
     parser.add_argument('--dt', type=float, default=120.0, help='Timestep in seconds')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--hail', type=int, default=0, help='hail_opt (0: graupel, 1: hail)')
     parser.add_argument('--out', type=str, default='wsm6_input.bin', help='Output binary file')
     args = parser.parse_args()
 
-    data = generate_wsm6_inputs(n_cols=args.cols, nz=args.nz, dt=args.dt, seed=args.seed)
+    data = generate_wsm6_inputs(n_cols=args.cols, nz=args.nz, dt=args.dt, seed=args.seed, hail_opt=args.hail)
     write_binary(data, args.out)
     print(f"Generated {args.cols} columns x {args.nz} levels WSM6 inputs to {args.out}")
 

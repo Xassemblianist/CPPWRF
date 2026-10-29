@@ -3,13 +3,18 @@
 Differential test comparison script for Kessler microphysics.
 Compares Fortran vs C++ outputs on identical inputs.
 Outputs max abs diff, max rel diff (with physical floor), worst column, and PASS/FAIL.
-Acceptance criterion: max rel diff <= 1e-12 in FP64.
+--tol 0 (CPU FP64): every value identical as tests/verify/exact.py (NaN equals only NaN, -0 differs from +0);
+otherwise max rel diff <= tol.
 """
+import os
 
 import argparse
 import struct
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
 
 def read_output(filepath):
     with open(filepath, 'rb') as f:
@@ -26,6 +31,8 @@ def read_output(filepath):
         qr = np.fromfile(f, dtype=np.float64, count=n3d).reshape((nz, n_cols))
         rainnc = np.fromfile(f, dtype=np.float64, count=n2d)
         rainncv = np.fromfile(f, dtype=np.float64, count=n2d)
+        if rainncv.size != n2d or f.read(1):
+            raise ValueError(f"{filepath}: not {4 * n3d + 2 * n2d} values after the header")
 
         return {
             'n_cols': n_cols,
@@ -89,8 +96,9 @@ def compare_outputs(fortran_file, cpp_file, tol=1e-12):
         else:
             worst_col = int(np.argmax(rel_diff))
 
-        status = "PASS" if max_rel <= tol else "FAIL"
-        if max_rel > tol:
+        ok = colcmp.same(var, f_arr, c_arr, quiet=True) if tol == 0 else max_rel <= tol
+        status = "PASS" if ok else "FAIL"
+        if not ok:
             all_pass = False
 
         results.append({

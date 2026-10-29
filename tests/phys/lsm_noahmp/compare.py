@@ -4,13 +4,18 @@ Differential validator for Noah-MP v5.1.2 (sf_surface_physics = 4).
 Compares WRF v4.8.0 Fortran outputs (linked from libwrflib.a) vs C++ outputs
 across 62 2D INOUT state variables, 77 2D OUT diagnostic variables, and 11 3D
 snow/soil/albedo state arrays (150 variables total).
-Target criterion: max_abs_diff == 0.0 in CPU FP64.
+Target criterion (--tol 0, CPU FP64): every value identical as tests/verify/exact.py (NaN equals only NaN, -0
+differs from +0).
 """
 
 import argparse
+import os
 import struct
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
 
 INOUT_2D = [
     "tsk", "hfx", "qfx", "lh", "grdflx", "smstav", "smstot", "sfcrunoff", "udrunoff",
@@ -72,6 +77,11 @@ def compare_noahmp_outputs(fortran_file, cpp_file, tol=0.0):
         ("albsoildifxy", 2),
     ]
 
+    expected = (len(vars_2d) + sum(nz for _, nz in vars_3d)) * n_cols * 8
+    if n_cols <= 0 or len(f_data) != expected:
+        print(f"ERROR: {len(f_data)} bytes after the header, expected {expected}")
+        return False
+
     offset = 0
     all_pass = True
     global_max_abs = 0.0
@@ -96,7 +106,7 @@ def compare_noahmp_outputs(fortran_file, cpp_file, tol=0.0):
         active_pts = int(np.count_nonzero((np.abs(f_arr) > 1e-15) & (f_arr != -9999.0)))
         n_checked += 1
 
-        passed = (max_abs <= tol) or (max_rel <= tol)
+        passed = colcmp.same(name, f_arr, c_arr, quiet=True) if tol == 0 else (max_abs <= tol) or (max_rel <= tol)
         status = "PASS" if passed else "FAIL"
         if not passed:
             all_pass = False
@@ -122,7 +132,7 @@ def compare_noahmp_outputs(fortran_file, cpp_file, tol=0.0):
         active_pts = int(np.count_nonzero((np.abs(f_arr) > 1e-15) & (f_arr != -9999.0)))
         n_checked += 1
 
-        passed = (max_abs <= tol) or (max_rel <= tol)
+        passed = colcmp.same(name, f_arr, c_arr, quiet=True) if tol == 0 else (max_abs <= tol) or (max_rel <= tol)
         status = "PASS" if passed else "FAIL"
         shape_str = f"({n_cols},{nz})"
         print(f"{name:<16} | {shape_str:<10} | {active_pts:<10} | {max_abs:<14.6e} | {max_rel:<14.6e} | {status:<6}")

@@ -1,16 +1,15 @@
 #!/usr/bin/env bash
 # Column differential test of the MYNN-EDMF PBL scheme (bl_pbl_physics = 5, WRF's default bl_mynn_* options)
-# against WRF v4.8.0's own compiled mynnedmf_driver (${WRF_DIR}/main/libwrflib.a of a -r8 -fdefault-double-8
-# build: its DOUBLE PRECISION locals are REAL*16 in a plain -r8 build). Pass: bit-identical (tolerance 0).
+# against WRF v4.8.0's own compiled mynnedmf_driver (the -r8 -fdefault-double-8 build that made the MYNN
+# references, WRF_R8D8_DIR; tests/phys/wrf_fortran.sh). Pass: bit-identical (tolerance 0).
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-[ -n "${WRF_DIR:-}" ] || { echo "SKIP: set WRF_DIR to a WRF v4.8.0 -r8 -fdefault-double-8 build"; exit 77; }
+. "${SCRIPT_DIR}/../wrf_fortran.sh"
+wrf_need r8d8
 OUT_DIR="${1:-${PWD}/test_bl_mynn}"
-mkdir -p "$OUT_DIR"; cd "$OUT_DIR"
-gfortran -O2 -ffree-form -ffree-line-length-none -fdefault-real-8 -fdefault-double-8 \
-  -I"$WRF_DIR/main" -I"$WRF_DIR/phys" -I"$WRF_DIR/frame" -I"$WRF_DIR/share" \
-  "$SCRIPT_DIR/driver_bl_mynn.f90" "$WRF_DIR/main/libwrflib.a" -lmvec -lm -o driver_bl_mynn_fortran
+mkdir -p "$OUT_DIR"; cd "$OUT_DIR"; OUT_DIR=$(pwd)
+wrf_fortran "$OUT_DIR/driver_bl_mynn_fortran" "$SCRIPT_DIR/driver_bl_mynn.f90"
 g++ -std=c++20 -DCPPWRF_DOUBLE -O3 -march=native -ffp-contract=off -I"$REPO_ROOT/src" \
   "$SCRIPT_DIR/driver_bl_mynn.cpp" "$REPO_ROOT/src/core/backend.cpp" -lmvec -lm -o driver_bl_mynn_cpu_fp64
 fail=0

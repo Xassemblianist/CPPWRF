@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
-"""Compare driver_noah_ice outputs (WRF Fortran vs C++): every output of both routines."""
+"""Compare driver_noah_ice outputs (WRF Fortran vs C++): every output of both routines. --tol 0: identical as
+tests/verify/exact.py (NaN equals only NaN, -0 differs from +0)."""
 import argparse
+import os
 import sys
 import numpy as np
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+import colcmp  # noqa: E402
 
 GLACIAL = ["t1", "snowh", "sneqv", "sncovr", "snotime1", "ribb", "emissi", "albedo", "z0", "eta", "sheat",
            "eta_kinematic", "fdown", "esnow", "dew", "etp", "ssoil", "flx1", "flx2", "flx3", "snomlt", "runoff1",
@@ -32,7 +37,7 @@ def main():
         return 1
     names = [f"glacial.{n}" for n in GLACIAL + [f"stc{k + 1}" for k in range(sf)]] + \
             [f"seaice.{n}" for n in SEAICE + [f"stc{k + 1}" for k in range(sf)]]
-    if len(names) * nf != df.size:
+    if nf == 0 or len(names) * nf != df.size:
         print(f"ERROR: {df.size} values, expected {len(names)} x {nf}")
         return 1
     ok = True
@@ -46,7 +51,7 @@ def main():
             bad = False
         d = np.abs(np.nan_to_num(f) - np.nan_to_num(c))
         mx = float(d.max())
-        bad = bad or mx > a.tol
+        bad = bad or (not colcmp.same(name, f, c, quiet=True) if a.tol == 0 else mx > a.tol)
         ok = ok and not bad
         print(f"{name:<24} max abs diff {mx:.3e}  range [{np.nanmin(f):.6g}, {np.nanmax(f):.6g}]  "
               f"{'FAIL (col ' + str(int(d.argmax()) + 1) + ')' if bad else 'OK'}")
