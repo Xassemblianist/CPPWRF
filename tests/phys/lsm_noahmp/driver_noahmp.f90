@@ -462,7 +462,7 @@ program driver_noahmp_fortran
   write(ounit) (z0(i, 1), i=1,n_cols)
   write(ounit) (znt(i, 1), i=1,n_cols)
   write(ounit) (rs(i, 1), i=1,n_cols)
-  write(ounit) (dble(isnowxy(i, 1)), i=1,n_cols)
+  write(ounit) (real(isnowxy(i, 1), 8), i=1,n_cols)  ! not dble: DOUBLE PRECISION is quad under -fdefault-real-8
   write(ounit) (tvxy(i, 1), i=1,n_cols)
   write(ounit) (tgxy(i, 1), i=1,n_cols)
   write(ounit) (canicexy(i, 1), i=1,n_cols)
