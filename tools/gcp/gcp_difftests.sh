@@ -3,11 +3,12 @@
 # (the full suite of gcp_run.sh runs them too), optionally with deliberate faults that the tests must catch.
 #
 #   CPPWRF_GCP_PROJECT=... CPPWRF_GCP_BUCKET=... tools/gcp/gcp_difftests.sh [--faults DIR] [--machine TYPE]
-#       [--zones Z,...] [--vcpus N] [--data OBJ,...] [--out DIR]
+#       [--zones Z,...] [--vcpus N] [--tests REGEX] [--data OBJ,...] [--out DIR]
 #
 # The source is the committed HEAD; --data (default diff_data.tar: tools/gcp/stage_diff_data.sh) names the data
-# tars. --faults DIR: its *.patch files (patch -p1 on the source, a line "# tests: REGEX" naming the tests that
-# must fail), each applied alone after the clean run (tools/gcp/run_diff_tests.sh). Machine: gcp_pick.py's
+# tars; --tests limits the ctest runs to the tests matching REGEX. --faults DIR: its *.patch files (patch -p1 on
+# the source, a line "# tests: REGEX" naming the tests that must fail), each applied alone after the clean run
+# (tools/gcp/run_diff_tests.sh). Machine: gcp_pick.py's
 # cheapest Intel spot VM with --vcpus vCPUs (default 16: each fault rebuilds; --machine fixes the type, --zones
 # limits the zones); remote_difftests.sh powers it off at the end and it is deleted here (--max-run-duration in
 # any case).
@@ -18,11 +19,11 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$REPO/tools/gcp/pick_lib.sh"
 : "${CPPWRF_GCP_PROJECT:?set CPPWRF_GCP_PROJECT}" "${CPPWRF_GCP_BUCKET:?set CPPWRF_GCP_BUCKET}"
 P=$CPPWRF_GCP_PROJECT BK=$CPPWRF_GCP_BUCKET
-MACHINE= ZONES= DATA=diff_data.tar OUT= FAULTS= VCPUS=16
+MACHINE= ZONES= DATA=diff_data.tar OUT= FAULTS= VCPUS=16 TESTS=
 while [ $# -gt 0 ]; do
   case $1 in
     --machine) MACHINE=$2; shift 2 ;; --zones) ZONES=$2; shift 2 ;; --data) DATA=$2; shift 2 ;;
-    --out) OUT=$2; shift 2 ;; --faults) FAULTS=$(cd "$2" && pwd); shift 2 ;; --vcpus) VCPUS=$2; shift 2 ;;
+    --out) OUT=$2; shift 2 ;; --faults) FAULTS=$(cd "$2" && pwd); shift 2 ;; --vcpus) VCPUS=$2; shift 2 ;; --tests) TESTS=$2; shift 2 ;;
     *) sed -n "2,15p" "$0"; exit 2 ;;
   esac
 done
@@ -48,7 +49,7 @@ while read -r -u 3 M z DISK; do
        --provisioning-model=SPOT --instance-termination-action=DELETE --max-run-duration=6h \
        --image-family=debian-13 --image-project=debian-cloud --boot-disk-size=60GB --boot-disk-type=$DISK \
        --scopes=storage-rw --metadata-from-file=startup-script="$REPO/tools/gcp/remote_difftests.sh" \
-       --metadata="^@^bucket=$BK@src=src/$STAMP.tar.gz@data=$DATA@faults=$FOBJ@result=$RES" \
+       --metadata="^@^bucket=$BK@src=src/$STAMP.tar.gz@data=$DATA@faults=$FOBJ@result=$RES@tests=$TESTS" \
        > "$OUT/create.log" 2>&1; then ZONE=$z MACHINE=$M; break; fi
   why=$(grep -oE "stockout|ZONE_RESOURCE_POOL_EXHAUSTED|Quota '[A-Z0-9_]*'|does not exist|not available|not supported" "$OUT/create.log" | head -1)
   echo "[gcp_difftests] $M $z: ${why:-error}"

@@ -15,6 +15,7 @@ struct TableStat {
     double max_abs_diff;
     double max_rel_diff;
     bool pass;
+    size_t ndiff = 0;  // differing elements
 };
 
 // tolerance 0: the same bits (-0 differs from +0); max |diff| and max rel diff for the report
@@ -35,11 +36,17 @@ bool compare_buffer(const std::string& name, const T* cpp_data, const double* f_
         if (rel > max_rel) max_rel = rel;
 
         if (std::memcmp(&c, &f, sizeof(double)) != 0) {
+            if (++stat.ndiff <= 5)  // the first differing elements (flat index in WRF's column-major order)
+                std::cout << "  " << name << "[" << i << "]: C++ " << std::setprecision(17) << c << " WRF " << f << "\n";
             pass = false;
         }
     }
 
-    stat = {name, count, max_abs, max_rel, pass};
+    stat.name = name;
+    stat.count = count;
+    stat.max_abs_diff = max_abs;
+    stat.max_rel_diff = max_rel;
+    stat.pass = pass;
     return pass;
 }
 
@@ -139,7 +146,9 @@ int main(int argc, char** argv) {
                   << std::right << std::setw(12) << s.count
                   << std::setw(18) << s.max_abs_diff
                   << std::setw(18) << s.max_rel_diff
-                  << std::setw(10) << (s.pass ? "PASS" : "FAIL") << "\n";
+                  << std::setw(10) << (s.pass ? "PASS" : "FAIL");
+        if (!s.pass) std::cout << "  (" << s.ndiff << " elements differ)";
+        std::cout << "\n";
     }
     std::cout << std::string(73, '-') << "\n";
 

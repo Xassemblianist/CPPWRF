@@ -10,7 +10,8 @@
 # DATA/wrf_runs_diff). OUT gets diff.log and ctest.log, each ending with "exit N" (ctest's status; a skipped test
 # is a failure here: "SKIPPED" line). Each FAULT.patch (patch -p1 on SRC; a line "# tests: REGEX" names the ctest
 # tests it must break) is applied after these, built, its tests run, and taken back: OUT/faults.log gets
-# "FAULT NAME DETECTED" when one of them failed and "FAULT NAME MISSED" when all passed.
+# "FAULT NAME DETECTED" when one of them failed and "FAULT NAME MISSED" when all passed. DIFF_TESTS (a ctest -R
+# regex) limits both runs to those tests.
 set -uo pipefail
 SRC=$(readlink -f "$1") BUILD=$2 DATA=$(readlink -f "$3") OUT=$(readlink -f "$4"); shift 4
 mkdir -p "$BUILD" "$OUT"
@@ -37,8 +38,9 @@ ctest_log() {  # LOG ctest-args...: the run, the skipped tests as SKIPPED lines,
   return $s
 }
 # serial: the column tests of one directory share its work files
-ctest_log "$OUT/diff.log" -L diff; st=$?
-ctest_log "$OUT/ctest.log" -LE diff -E '^(real_vs_wrf|wrf_files_vs_wrf|wrf2cppwrf_translator)$' -j"$(nproc)" || st=1
+sel=(); [ -n "${DIFF_TESTS:-}" ] && sel=(-R "$DIFF_TESTS")
+ctest_log "$OUT/diff.log" -L diff "${sel[@]}"; st=$?
+ctest_log "$OUT/ctest.log" -LE diff -E '^(real_vs_wrf|wrf_files_vs_wrf|wrf2cppwrf_translator)$' -j"$(nproc)" "${sel[@]}" || st=1
 
 : > "$OUT/faults.log"
 for f in "$@"; do
