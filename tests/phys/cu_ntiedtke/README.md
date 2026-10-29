@@ -11,14 +11,13 @@ The port (`src/phys/cu_ntiedtke/ntiedtke.hpp`) is checked against WRF's own obje
    passed to `cu_ntiedtke_run` (top to bottom), then the 6 updated arrays and the rain. `km = 44` is
    fixed in the harness.
 
-2. Replay the inputs through WRF's `cu_ntiedtke_run` (r8d8 build, see docs/PHYSICS_SUITE.md):
+2. Replay the inputs through WRF's `cu_ntiedtke_run` (the objects of the r8d8 build that made the P7
+   references, `WRF_R8D8_DIR`; `tests/phys/wrf_fortran.sh` links the harness to them):
 
-       W=$WRF_DIR
-       gfortran -O2 -fdefault-real-8 -fdefault-double-8 -I$W/phys -o harness harness.f90 \
-         $W/phys/physics_mmm/cu_ntiedtke.o $W/phys/ccpp_kind_types.o
-       ./harness nt.bin                 # columns whose outputs differ by more than 1e-12 (relative)
+       . tests/phys/wrf_fortran.sh; wrf_need r8d8; wrf_fortran harness tests/phys/cu_ntiedtke/harness.f90
+       ./harness nt.bin                 # columns whose u, v, t, qv, qc, qi or rain differ (any bit)
 
-   Steps 2 and 4 of P7: all 10591 columns agree.
+   `run_test.sh` (ctest `diff_phys_cu_ntiedtke`) does both for steps 2 and 4 of P7: every column identical.
 
 3. `sensitivity.f90 nt.bin <column> <eps>` applies 500 random relative perturbations of size eps to
    one column's inputs and reports the largest change of the convective temperature change. At step 4

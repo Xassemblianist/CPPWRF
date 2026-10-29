@@ -21,17 +21,29 @@ is verified against WRF, and the current results. All numbers come from `tests/v
 
 ## Verification method
 
-1. **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme and
-   kernel runs on the same inputs in C++ and in WRF v4.8.0's own Fortran (unmodified source or
-   WRF's compiled objects, built with WRF's configure flags), and every output must be bit-identical
-   in CPU FP64 (tolerance 0). This covers Kessler, WSM6, Thompson (with WRF's table files), YSU
-   (ysu_topdown_pblmix 0 and 1), MYJ and the Eta surface layer, revised MM5 surface layer, Noah,
-   Noah-MP, Kain-Fritsch, the diffusion and damping kernels (km_opt 1-4), the
-   nest numerics, and the physics suite driver. Grell-Freitas-Li and New Tiedtke are checked by
-   replaying the model's own column inputs through WRF's objects. Run them with
-   `cmake -DCPPWRF_DOUBLE=ON -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DIFF_TESTS=ON` and `ctest -L diff`,
-   with `WRF_DIR` (a WRF -r8 build), `WRF_R8D8_DIR` (-r8 -double-8), `NETCDF` and
-   `CPPWRF_WRF_RUNS` set.
+1. **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`, ctest label `diff`): each scheme
+   and kernel runs on the same inputs in C++ and in WRF v4.8.0's own compiled code: the test's Fortran driver
+   is linked to the objects of the WRF build that made the model references (`tests/phys/wrf_fortran.sh`;
+   `WRF_DIR` = the -r8 build for Kessler, WSM6, KF, Noah, Noah-MP, MYJ, the revised MM5 surface layer,
+   YSU, the diffusion kernels, the nest numerics and the physics suite driver; `WRF_R8D8_DIR` = -r8
+   -fdefault-double-8 for Thompson, MYNN and the cumulus replays). No WRF source is copied or compiled by
+   a test. Every output must be bit-identical in CPU FP64 (tolerance 0, compared as tests/verify/exact.py:
+   NaN equals only NaN, -0 differs from +0; an empty or truncated output fails). This covers Kessler
+   (one and several fall steps), WSM6 (hail_opt 0 and 1, effective radii), Thompson (its tables and the
+   table files it writes), YSU (ysu_topdown_pblmix 0 and 1, with and without the cloud tendencies), MYJ and
+   the Eta surface layer, the revised MM5 surface layer (isfflx 0/1, isftcflx 0-2, iz0tlnd 0-2, kim_tofd),
+   Noah (opt_thcnd 1 and 2) and its sea-ice path, Noah-MP, MYNN-EDMF and the MYNN surface layer (default
+   options; the other options are covered by the model runs, 2.), Kain-Fritsch (its tables bit by bit, both
+   triggers, three moisture sets), the diffusion and damping kernels (km_opt 1-4), the nest interpolation
+   (the model's KSintView3D and the host references; feedback, blending, the nest boundary and coupling are
+   covered by the nest model runs N1-N3), and the physics suite driver. Grell-Freitas-Li and New Tiedtke are
+   checked by replaying the model's own column inputs through WRF's objects (the scheme call; their pre- and
+   post-processing by the model runs P8 and P7). RRTMG has no ctest (its checks need WRF debug dumps); the
+   model runs P3 and P4 cover it. Run them with `cmake -DCPPWRF_DOUBLE=ON -DCPPWRF_ENABLE_CUDA=OFF
+   -DCPPWRF_DIFF_TESTS=ON` and `ctest -L diff`, with `WRF_DIR`, `WRF_R8D8_DIR` and `CPPWRF_WRF_RUNS` set;
+   without them a test is skipped (77). Every full VM suite runs them (`tools/gcp/run_diff_tests.sh`
+   with `diff_data.tar`: the WRF objects and the input subsets; a skipped test fails the suite);
+   `tools/gcp/gcp_difftests.sh --faults DIR` runs them alone with deliberate faults that must be caught.
 2. **Model runs against WRF** (`tests/verify/wrf_suite.py`): WRF v4.8.0 and CPPWRF are run from the same
    wrfinput/wrfbdy files (119 x 89 x 44, 15 km, dt 60 s; nests 120 x 90 x 44 at 5 km). The CPU FP64 cases
    compare CPPWRF's wrfout files with WRF's at tolerance 0 (tests/verify/exact.py: NaN equals only NaN, -0

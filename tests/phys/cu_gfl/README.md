@@ -6,13 +6,11 @@
 
 2. Run WRF v4.8.0's own `cu_grell_freitas_li` (`r8d8` objects) on them and compare `RTHCUTEN`, `RQVCUTEN`, `RQCCUTEN`, `RQICUTEN`, `RUCUTEN`, `RVCUTEN`, `RAINCV`, `PRATEC`, `HTOP`, and `HBOT`:
 
-       W=$WRF_DIR/phys
-       gfortran -O2 -fdefault-real-8 -fdefault-double-8 -I$W -o harness harness.f90 \
-         $W/module_cu_gfl_wrf.o $W/module_cu_gfl_deep.o $W/module_cu_gfl_sh.o \
-         $W/module_cu_gfl_common.o $W/ccpp_kind_types.o
+       . tests/phys/wrf_fortran.sh; wrf_need r8d8; wrf_fortran harness tests/phys/cu_gfl/harness.f90
        ulimit -s unlimited; ./harness gfl.bin [ishallow=1] [ichoice=0] [dt=60] [dx=15000] [itimestep=1]
 
-   P8 steps 1, 5, 10 (deep and shallow+deep): every column identical (max absolute difference 0).
+   `run_test.sh` (ctest `diff_phys_cu_gfl`) does both for P8 steps 1, 5, 10 (deep and shallow+deep): every
+   column identical (same bits).
 
 Notes on WRF v4.8.0 GFL (`src/phys/cu_gfl`):
 - `gfortran` vectorises the `zu` profile loop of `get_zu_zd_pdf_fim` (`module_cu_gfl_deep.o`) and calls glibc's 2-lane vector pow `_ZGVbN2vv_pow` for pairs of iterations (scalar `pow` for an odd remainder iteration), evaluating `(((x**(a - 1.) * b) / beta) * (1. - x)**(b - 1.))`; it can differ from scalar `pow` or left-to-right multiplication by 1 ULP. The C++ calls the same `libmvec` function on the host (`gfl_common.hpp`, `zu_profile`) and preserves Fortran's evaluation order (`rates_up_pdf` `smooth_Heaviside` and `irainevap`'s `edt * evfact * (sig_init * sig_init)`).
