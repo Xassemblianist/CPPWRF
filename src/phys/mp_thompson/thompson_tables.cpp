@@ -43,11 +43,12 @@ void par_for_host(int n_items, F&& fn) {
 // Exact Numerical Recipes / Lancaster approximations matching module_mp_thompson.F
 
 // thompson_init's bin edges xDx(n) = DEXP((n-1)/nb*DLOG(xDx(nb+1)/xDx(1)) + DLOG(xDx(1))), n = 2..nb: gfortran
-// folds the logs (and the whole n = 2 term) at compile time with MPFR (correctly rounded) and runs
-// n = 3..nb through libmvec's 2-lane exp. cr_*: correctly rounded via long double.
+// folds the logs and the whole terms n = 2, nb - 1 and nb at compile time with MPFR (correctly rounded; WRF's
+// module_mp_thompson.o stores them as constants: the pairs xDx(1:2) and xDx(nb-1:nb) of every species) and runs
+// n = 3..nb-2 through libmvec's 2-lane exp. cr_*: correctly rounded via long double. n: the 0-based C++ index.
 inline double cr_log(double x) { return double(logl((long double)x)); }
 inline double cr_exp(double x) { return double(expl((long double)x)); }
-inline double bin_exp(double a, int n) { return n == 1 ? cr_exp(a) : vm::exp(a, 0, 2); }
+inline double bin_exp(double a, int n, int nb) { return (n == 1 || n >= nb - 2) ? cr_exp(a) : vm::exp(a, 0, 2); }
 
 inline double gammln(double xx) {
     constexpr double stp = 2.5066282746310005;
@@ -434,7 +435,7 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
     xDx[0] = D0i;
     xDx[nbi] = 2.0 * D0s;
     for (int n = 1; n < nbi; ++n) {
-        xDx[n] = bin_exp((double(n) / double(nbi)) * cr_log(xDx[nbi] / xDx[0]) + cr_log(xDx[0]), n);
+        xDx[n] = bin_exp((double(n) / double(nbi)) * cr_log(xDx[nbi] / xDx[0]) + cr_log(xDx[0]), n, nbi);
     }
     double Di[nbi], dti[nbi];
     for (int n = 0; n < nbi; ++n) {
@@ -445,7 +446,7 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
     xDx[0] = D0r;
     xDx[nbr] = 0.005;
     for (int n = 1; n < nbr; ++n) {
-        xDx[n] = bin_exp((double(n) / double(nbr)) * cr_log(xDx[nbr] / xDx[0]) + cr_log(xDx[0]), n);
+        xDx[n] = bin_exp((double(n) / double(nbr)) * cr_log(xDx[nbr] / xDx[0]) + cr_log(xDx[0]), n, nbr);
     }
     double Dr[nbr], dtr[nbr];
     for (int n = 0; n < nbr; ++n) {
@@ -456,7 +457,7 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
     xDx[0] = D0s;
     xDx[nbs] = 0.02;
     for (int n = 1; n < nbs; ++n) {
-        xDx[n] = bin_exp((double(n) / double(nbs)) * cr_log(xDx[nbs] / xDx[0]) + cr_log(xDx[0]), n);
+        xDx[n] = bin_exp((double(n) / double(nbs)) * cr_log(xDx[nbs] / xDx[0]) + cr_log(xDx[0]), n, nbs);
     }
     double Ds[nbs], dts[nbs];
     for (int n = 0; n < nbs; ++n) {
@@ -467,7 +468,7 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
     xDx[0] = D0g;
     xDx[nbg] = 0.05;
     for (int n = 1; n < nbg; ++n) {
-        xDx[n] = bin_exp((double(n) / double(nbg)) * cr_log(xDx[nbg] / xDx[0]) + cr_log(xDx[0]), n);
+        xDx[n] = bin_exp((double(n) / double(nbg)) * cr_log(xDx[nbg] / xDx[0]) + cr_log(xDx[0]), n, nbg);
     }
     double Dg[nbg], dtg[nbg];
     for (int n = 0; n < nbg; ++n) {
@@ -478,7 +479,7 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
     xDx[0] = 1.0;
     xDx[nbc] = 3000.0;
     for (int n = 1; n < nbc; ++n) {
-        xDx[n] = bin_exp((double(n) / double(nbc)) * cr_log(xDx[nbc] / xDx[0]) + cr_log(xDx[0]), n);
+        xDx[n] = bin_exp((double(n) / double(nbc)) * cr_log(xDx[nbc] / xDx[0]) + cr_log(xDx[0]), n, nbc);
     }
     double t_Nc[nbc];
     for (int n = 0; n < nbc; ++n) {
