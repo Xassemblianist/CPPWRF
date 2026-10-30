@@ -690,7 +690,7 @@ bool DomainRunner::start() {
   }
 
   snap_ = std::make_unique<io::SnapshotWriter>(out_dir_);
-  dg_ = std::make_unique<dyn::Diagnostics>(g);
+  dg_ = std::make_unique<dyn::Diagnostics>(g, cfg_.get_int("dyn.use_theta_m", 1) == 1);
 
   prepare_output();
 

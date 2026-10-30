@@ -66,7 +66,7 @@ DiagRow Diagnostics::compute(const State& s, const BaseState& b) {
   r.max_abs_w = red_.max(g.cells(Stagger::W), FMaxAbs{s.w_2.cview()});
   for (int n = 0; n < s.n_scalars(); ++n)
     r.max_abs_q = std::max(r.max_abs_q, red_.max(g.mass_cells(), FMaxAbs{s.q_2[n].cview()}));
-  const bool moist = s.P_QV >= 0;
+  const bool moist = theta_m_ && s.P_QV >= 0;
   const C3 qv = moist ? s.q_2[s.P_QV].cview() : C3{};
   r.max_th_pert = red_.max(g.mass_cells(), FThp{s.t_2.cview(), b.t_init.view(), 1.0, qv, moist});
   r.min_th_pert = -red_.max(g.mass_cells(), FThp{s.t_2.cview(), b.t_init.view(), -1.0, qv, moist});

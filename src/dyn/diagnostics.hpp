@@ -17,7 +17,8 @@ struct DiagRow {
 
 class Diagnostics {
  public:
-  explicit Diagnostics(const Grid& g) : g_(g), red_(g.nz + 1) {}
+  // theta_m: t_2 holds theta_m - t0 when there is qv (use_theta_m = 1); else dry theta - t0
+  explicit Diagnostics(const Grid& g, bool theta_m = true) : g_(g), red_(g.nz + 1), theta_m_(theta_m) {}
   // Deterministic device reductions. dry_mass [kg], theta_mass [kg K], total_energy [J]
   // (kinetic + c_v T + geopotential, dry). NaN/Inf in a field -> +inf in its max.
   DiagRow compute(const State& s, const BaseState& b);
@@ -25,6 +26,7 @@ class Diagnostics {
  private:
   Grid g_;
   Reducer red_;
+  bool theta_m_;
 };
 
 // Snapshot variables (u, v, w, th_pert, theta, p, p_pert, ph, mu, mu_pert, z_m) computed on the
