@@ -20,10 +20,21 @@ cmake -S "$SRC" -B "$BUILD" -DCMAKE_BUILD_TYPE=Release -DCPPWRF_DOUBLE=ON -DCPPW
   cmake --build "$BUILD" -j"$(nproc)" >> "$OUT/diff_cmake.log" 2>&1 ||
   { echo "BUILD_FAILED (diff_cmake.log)"; echo "exit 1" > "$OUT/diff.log"; exit 1; }
 
-# the WRF runs the tests read: the suite's where there, the diff tar's subsets otherwise
+# the WRF runs the tests read, file by file: the suite's where there, the diff tar's subsets otherwise (a suite
+# run directory need not hold every file a test reads, e.g. run_R0_r8's first wrfout)
 RUNS=$OUT/diff_runs; rm -rf "$RUNS"; mkdir -p "$RUNS"
-for d in "$DATA"/wrf_runs/* "$DATA"/wrf_runs_diff/*; do
-  [ -e "$d" ] && [ ! -e "$RUNS/$(basename "$d")" ] && ln -s "$d" "$RUNS/"
+for d in "$DATA"/wrf_runs/*; do
+  [ -e "$DATA/wrf_runs_diff/$(basename "$d")" ] || ln -s "$d" "$RUNS/"
+done
+for d in "$DATA"/wrf_runs_diff/*; do
+  [ -e "$d" ] || continue
+  for s in "$DATA/wrf_runs/$(basename "$d")" "$d"; do
+    [ -d "$s" ] || continue
+    ( cd "$s" && find -L . -type d ) | while read -r p; do mkdir -p "$RUNS/$(basename "$d")/$p"; done
+    ( cd "$s" && find -L . ! -type d ) | while read -r p; do
+      [ -e "$RUNS/$(basename "$d")/$p" ] || ln -s "$s/$p" "$RUNS/$(basename "$d")/$p"
+    done
+  done
 done
 export WRF_DIR=$DATA/wrf_build/r8 WRF_R8D8_DIR=$DATA/wrf_build/r8d8 CPPWRF_WRF_RUNS=$RUNS
 export OMP_NUM_THREADS=${OMP_NUM_THREADS:-4} OMP_WAIT_POLICY=passive
