@@ -902,3 +902,30 @@ be byte-identical, and every chunk must come from the pool. It passes with HDF5 
 Open: the remaining output time (L FP64 1.15 s per frame) is HDF5's own work in the model's thread: the shuffle,
 the copy of the precompressed chunk and the write. It could move to a background thread while the GPU steps, but
 NetCDF is not thread-safe, and the model reads NetCDF files during the run (boundaries, wrfinput fields, sst_update).
+
+## Tiles: one domain as several tiles (P03 phase 1; measured, Colab G4)
+
+`run.tiles = PxQ` (docs/USER_GUIDE.md, section 7) runs the domain as host threads with their own fields and CUDA
+streams; the halo fills exchange the points around each tile first. Stepping time of the 119 x 89 x 44 P8 domain,
+1 h (60 steps), history off, each run twice, one G4 GPU (RTX PRO 6000 Blackwell) shared by the tiles:
+
+| Layout | GPU FP64 (s) | GPU FP32 (s) |
+|---|---|---|
+| 1 (main's path) | 1.018, 1.035 | 0.302, 0.302 |
+| 1, CUDA graphs off | 1.041, 1.041 | 0.332, 0.332 |
+| 2x1 | 1.643, 1.200 | 0.805, 0.797 |
+| 1x2 | 1.163, 1.602 | 0.468, 0.764 |
+| 2x2 | 2.250, 1.415 | 1.011, 0.711 |
+
+Without tiles nothing of this runs, and the time is main's: GPU FP32 against the base build (origin/main acf030d)
+in the same session, alternated six times, P8 0.306 s against 0.306-0.307 s, P6 0.355-0.356 s for both; CPU FP64
+(16 OpenMP threads) R1D6 0.613 / 0.625 / 0.615 s against 0.615 / 0.624 / 0.617 s and P8 (10 min) 0.717 / 0.691 /
+0.687 s against 0.695 / 0.675 / 0.688 s.
+
+Tiles on one GPU are slower: every exchange waits for the tile's stream and meets the other tiles at a host barrier
+twice (before and after the copies), and the tiles' kernels have a quarter or half of the points each, so the GPU
+is less busy. CUDA graphs are off with tiles (from 1.02 to 1.04 s and from 0.30 to 0.33 s at one tile). On the CPU
+with 16 threads in all, R1D6's slowest tile takes 1.24 s with 2x1 and 2.1-2.2 s with 2x2 (0.62 s without tiles):
+each tile has 8 or 4 threads and the same barriers. Phase 1 is the proof that the decomposition gives the same bits;
+the time on several GPUs, the exchanges inside a graph (device-side flags instead of host barriers) and tiles that
+allocate only their own patch are the next steps.
