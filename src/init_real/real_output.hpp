@@ -100,6 +100,44 @@ class WrfLowinpWriter {
   wrf_io::StreamFile f_;
 };
 
+// wrffdda_d0N (grid_fdda >= 1): the auxinput10 stream, one record per input time after the first (real_em.F
+// assemble_output: Times = the previous time; the analyses of that time (*_NDG_OLD) and of this time (*_NDG_NEW):
+// u_2, v_2, th_phy_m_t0, QV, ph_2 on the mass dimensions and mu_2)
+template <typename T>
+class WrfFddaWriter {
+ public:
+  struct Analysis {
+    F3<T> u, v, t, q, ph;
+    F2<T> mu;
+    explicit Analysis(const RealDomain<T>& dm)
+        : u(dm.u_2), v(dm.v_2), t(dm.th_phy_m_t0), q(dm.qv), ph(dm.ph_2), mu(dm.mu_2) {}
+  };
+  WrfFddaWriter(const std::string& path, const RealDomain<T>& dm, const MetEm& m, const WrfSchema& sc,
+                const WrfConfig& c, const std::string& start_date)
+      : f_(path, sc.stream_vars(c, dm.d.ide, dm.d.jde, dm.d.kde, int(sizeof(T)), 1, 4), c,
+           domain_atts(c, m, dm, start_date), wrf_io::Stream::auxinput10, !c.logical("use_netcdf_classic")) {}
+  void write(const std::string& date, const Analysis& old, const Analysis& nw) {
+    f_.write(date, [&](const OutVar& v, std::vector<double>& out) {
+      const std::string& n = v.name;
+      const std::size_t u = n.rfind("_NDG_");
+      if (u == std::string::npos) return false;
+      const Analysis& a = n.compare(u, 8, "_NDG_OLD") == 0 ? old : nw;
+      const std::string f = n.substr(0, u);
+      if (f == "MU") {  // (south_north, one_stag, west_east)
+        out = nc_order(a.mu, int(v.dimlens[2]), int(v.dimlens[0]));
+        return true;
+      }
+      const F3<T>* x = f == "U" ? &a.u : f == "V" ? &a.v : f == "T" ? &a.t : f == "Q" ? &a.q : f == "PH" ? &a.ph : nullptr;
+      if (!x) return false;
+      out = nc_order(*x, int(v.dimlens[2]), int(v.dimlens[0]), int(v.dimlens[1]));
+      return true;
+    });
+  }
+
+ private:
+  wrf_io::StreamFile f_;
+};
+
 }  // namespace cppwrf::init_real
 
 namespace cppwrf::init_real {

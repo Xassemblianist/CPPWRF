@@ -346,7 +346,7 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       }
       if (sub == "spec_bdy_width") ov.push_back("real.spec_bdy_width=" + val);
       else if (sub == "wrfinput" || sub == "wrfbdy" || sub == "dir" || sub == "bdy_interval" || sub == "nested" ||
-               sub == "e_we" || sub == "e_sn" || sub == "e_vert" || sub == "wrflowinp")
+               sub == "e_we" || sub == "e_sn" || sub == "e_vert" || sub == "wrflowinp" || sub == "wrffdda")
         ov.push_back("real." + sub + "=" + val);
       else if (sub == "dt" && id >= 2 && std::abs(std::stod(val) - child_dt) > 1e-9 * child_dt)
         // WRF: a nest's time step is its parent's divided by parent_time_step_ratio (the namelist value is ignored)
@@ -359,6 +359,8 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
         ov.push_back("domain." + sub + "=" + val);
       else if (sub.rfind("phys_", 0) == 0)  // per-domain physics (WRF max_domains options: cu_physics, radt, ...)
         ov.push_back("phys." + sub.substr(5) + "=" + val);
+      else if (sub.rfind("fdda_", 0) == 0)  // per-domain grid nudging (&fdda max_domains options)
+        ov.push_back("fdda." + sub.substr(5) + "=" + val);
       else if (sub.find('.') != std::string::npos)
         ov.push_back(sub + "=" + val);
       else
@@ -382,7 +384,8 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
         if (k.rfind("domains.", 0) == 0) continue;
         if (k.size() >= 4 && k[0] == 'd' && std::isdigit(k[1]) && std::isdigit(k[2]) && k[3] == '.') continue;
         if (id >= 2 && (k == "real.wrfbdy" || k == "real.bdy_interval" || k == "real.dx" || k == "real.dy" ||
-                        k == "real.e_we" || k == "real.e_sn" || k == "real.e_vert" || k == "real.wrflowinp"))
+                        k == "real.e_we" || k == "real.e_sn" || k == "real.e_vert" || k == "real.wrflowinp" ||
+                        k == "real.wrffdda"))
           continue;  // domain 1's (a nest's come from its [d0N] section)
         auto dot = k.find('.');
         if (dot != std::string::npos) {

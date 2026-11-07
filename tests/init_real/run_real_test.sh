@@ -2,12 +2,14 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # cppwrf_real against WRF real.exe: every reference case in ${CPPWRF_WRF_RUNS}/real
 # (tools/init_real/make_real_refs.sh) must give identical wrfinput_d0N, wrfbdy_d01 and (sst_update = 1)
-# wrflowinp_d0N files.
+# wrflowinp_d0N and (grid_fdda >= 1) wrffdda_d0N files.
 #   usage: run_real_test.sh [BUILD_DIR] [case ...]
+# A case with a '/' is a directory of its own (a WRF reference run made with real.exe: namelist.input, the met_em
+# files and real.exe's outputs; precision double without a precision file).
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-if [ -z "${CPPWRF_WRF_RUNS:-}" ] || [ ! -d "${CPPWRF_WRF_RUNS}/real" ]; then
+if [ -z "${CPPWRF_WRF_RUNS:-}" ] || { [ ! -d "${CPPWRF_WRF_RUNS}/real" ] && [[ "${2:-}" != */* ]]; }; then
   echo "SKIP: \${CPPWRF_WRF_RUNS}/real not found"; exit 77
 fi
 BUILD_DIR=${1:-${REPO_ROOT}/build}; shift || true
@@ -19,13 +21,15 @@ cases=("$@")
 fail=0
 for c in "${cases[@]}"; do
   ref=${CPPWRF_WRF_RUNS}/real/$c
+  [[ "$c" == */* ]] && ref=$c
+  prec=double; [ -f "$ref/precision" ] && prec=$(cat "$ref/precision")
   rm -rf "$WORK"; mkdir -p "$WORK"
   if ! "$EXE" --namelist "$ref/namelist.input" --met-dir "$ref" --out-dir "$WORK" \
-       --precision "$(cat "$ref/precision")" --schema "$SCHEMA" > "$WORK/run.log" 2>&1; then
+       --precision "$prec" --schema "$SCHEMA" > "$WORK/run.log" 2>&1; then
     echo "FAIL $c: cppwrf_real failed"; tail -3 "$WORK/run.log"; fail=1; continue
   fi
   ok=1
-  for f in "$ref"/wrfinput_d0? "$ref"/wrfbdy_d01 "$ref"/wrflowinp_d0?; do
+  for f in "$ref"/wrfinput_d0? "$ref"/wrfbdy_d01 "$ref"/wrflowinp_d0? "$ref"/wrffdda_d0?; do
     [ -f "$f" ] || continue
     python3 "${SCRIPT_DIR}/compare_real.py" "$WORK/$(basename "$f")" "$f" > "$WORK/cmp.log" 2>&1 \
       || { ok=0; cat "$WORK/cmp.log"; }

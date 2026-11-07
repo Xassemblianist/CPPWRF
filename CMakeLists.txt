@@ -84,6 +84,7 @@ list(APPEND CPPWRF_SOURCES
   ${CMAKE_SOURCE_DIR}/src/phys/driver/surface_driver.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/pbl_driver.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/cumulus_driver.cpp
+  ${CMAKE_SOURCE_DIR}/src/phys/driver/fdda_driver.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/phy_prep.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/tendency_coupling.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/landuse_tables.cpp
@@ -117,6 +118,7 @@ set_source_files_properties(
   ${CMAKE_SOURCE_DIR}/src/phys/driver/surface_driver.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/pbl_driver.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/cumulus_driver.cpp
+  ${CMAKE_SOURCE_DIR}/src/phys/driver/fdda_driver.cpp
   PROPERTIES COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CUDA>:--fmad=false>")
 
 add_library(cppwrf_core STATIC ${CPPWRF_SOURCES})

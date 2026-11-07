@@ -167,6 +167,12 @@ void calculate_phy_tend(PhysicsTendencies& pt, const dyn::State& s, const dyn::B
     if (s.P_QC >= 0) couple(pt.rqcblten);
     if (s.P_QI >= 0) couple(pt.rqiblten);
   }
+  if (f.grid_fdda > 0) {  // fdda: u and v tendencies are staggered, only interior points have muu / muv
+    batch.add(Range3D{1, g.nx, 0, g.ny, 0, g.nz}, KCouple{pt.rundgdten.view(), s.muu.cview(), b.c1h.view(), b.c2h.view()});
+    batch.add(Range3D{0, g.nx, 1, g.ny, 0, g.nz}, KCouple{pt.rvndgdten.view(), s.muv.cview(), b.c1h.view(), b.c2h.view()});
+    couple(pt.rthndgdten);  // RMUNDGDTEN: no coupling
+    if (s.P_QV >= 0) couple(pt.rqvndgdten);
+  }
   batch.run();
 }
 
@@ -211,6 +217,13 @@ void update_phy_ten(dyn::Tendencies& t, PhysicsTendencies& pt, const dyn::State&
     if (s.P_QC >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QC], pt.rqccuten);
     if (s.P_QI >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QI], pt.rqicuten);
   }
+  if (f.grid_fdda == 1) {  // phy_fg_ten, PSUFDDAGD: add_a2a, add_c2c_u / add_c2c_v (the staggered tendencies as
+                           // they are, over add_a2c_u's / add_a2c_v's ranges); RMUNDGDTEN = 0 into mu_tendf
+    add.add(ar, KAdd::A2A, t.t_tendf, pt.rthndgdten);
+    add.add(a2c_u_range(g), KAdd::A2A, t.ru_tendf, pt.rundgdten);
+    add.add(a2c_v_range(g), KAdd::A2A, t.rv_tendf, pt.rvndgdten);
+    if (s.P_QV >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QV], pt.rqvndgdten);
+  }
   add.run();
 }
 
@@ -247,6 +260,12 @@ void phy_prep_part2(PhysicsTendencies& pt, const dyn::State& s, const dyn::BaseS
   if (f.cu_physics == 16 || f.cu_physics == 3) {  // advective forcing of the cumulus scheme
     if (s.P_QV >= 0) decouple(pt.rqvften);
     decouple(pt.rthften);
+  }
+  if (f.grid_fdda > 0) {  // fdda: u and v tendencies are staggered, only interior points have muu / muv
+    batch.add(Range3D{1, g.nx, 0, g.ny, 0, g.nz}, KDecouple{pt.rundgdten.view(), s.muus.cview(), b.c1h.view(), b.c2h.view()});
+    batch.add(Range3D{0, g.nx, 1, g.ny, 0, g.nz}, KDecouple{pt.rvndgdten.view(), s.muvs.cview(), b.c1h.view(), b.c2h.view()});
+    decouple(pt.rthndgdten);  // RMUNDGDTEN: no coupling
+    if (f.grid_fdda == 1 && s.P_QV >= 0) decouple(pt.rqvndgdten);  // grid_fdda = 2 decouples RPHNDGDTEN instead
   }
   batch.run();
   if (f.cu_physics == 16 || f.cu_physics == 3) {

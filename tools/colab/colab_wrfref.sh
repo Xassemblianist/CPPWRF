@@ -5,14 +5,15 @@
 # glibc and NetCDF, which the WRF executables of the data tars were built with).
 #
 #   CPPWRF_GCP_BUCKET=... tools/colab/colab_wrfref.sh REFS.txt [--gpu L4|A100|T4] [--data OBJ,...] [--files NAME,...]
-#       [--cases NAME,...] [--runs DIR] [--out DIR] [--check-only] [--stage OBJ:CASE,...] [--hours H] [--rev REV]
-#       [--session NAME] [--keep]
+#       [--cases NAME,...] [--real NAME,...] [--runs DIR] [--out DIR] [--check-only] [--stage OBJ:CASE,...] [--hours H]
+#       [--rev REV] [--session NAME] [--keep]
 #
 # REFS.txt: one reference per line "NAME BASE_RUN WRF_EXE section.key=value ..." as gcp_wrfref.sh's. The runtime makes
 # run_NAME and run_NAME/steps (tools/gcp/wrf_ref_run.py, in parallel), rst_NAME and rsm_NAME
 # (tests/verify/make_restart_refs.sh, make_resumed_refs.sh), lists the MD5 of every file WRF wrote (OUT/refs_md5.txt)
 # and, with --files / --cases, runs run_wrf_files_test.sh / wrf_suite.py (exact case names) of the commit against them
-# (tools/colab/wrfref_body.sh). --data: the tars with the base runs and WRF executables (default matrix_data.tar; from
+# (tools/colab/wrfref_body.sh); --real: cppwrf_real of the commit against the real.exe outputs (wrfinput, wrfbdy,
+# wrflowinp, wrffdda) of these references (run.real=..., tests/init_real/run_real_test.sh). --data: the tars with the base runs and WRF executables (default matrix_data.tar; from
 # Google Drive, else the bucket, as colab_suite.sh). The references are downloaded and unpacked into --runs (default
 # $CPPWRF_WRF_RUNS; an existing run_NAME stops the script), the links to the runtime's inputs pointing to the files of
 # DIR/BASE_RUN and wrf.exe to $WRF_R8 / $WRF_R8D8 (default ~/wrf_real/WRF-4.8.0-r8[d8]/main/wrf.exe). --check-only:
@@ -27,15 +28,15 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${CPPWRF_GCP_BUCKET:?set CPPWRF_GCP_BUCKET}"
 BK=$CPPWRF_GCP_BUCKET
 REFS=$(readlink -f "$1"); shift
-GPU=L4 DATA=matrix_data.tar OUT= FILES= CASES= FETCH=1 RUNS=${CPPWRF_WRF_RUNS:-$HOME/wrf_real480} STAGE= HOURS=4 REV=HEAD S= KEEP=0 NPROC=
+GPU=L4 DATA=matrix_data.tar OUT= FILES= CASES= REALC= FETCH=1 RUNS=${CPPWRF_WRF_RUNS:-$HOME/wrf_real480} STAGE= HOURS=4 REV=HEAD S= KEEP=0 NPROC=
 WRF_R8=${WRF_R8:-$HOME/wrf_real/WRF-4.8.0-r8/main/wrf.exe} WRF_R8D8=${WRF_R8D8:-$HOME/wrf_real/WRF-4.8.0-r8d8/main/wrf.exe}
 while [ $# -gt 0 ]; do
   case $1 in
     --gpu) GPU=$2; shift 2 ;; --data) DATA=$2; shift 2 ;; --out) OUT=$2; shift 2 ;;
-    --files) FILES=$2; shift 2 ;; --cases) CASES=$2; shift 2 ;; --runs) RUNS=$2; shift 2 ;;
+    --files) FILES=$2; shift 2 ;; --cases) CASES=$2; shift 2 ;; --runs) RUNS=$2; shift 2 ;; --real) REALC=$2; shift 2 ;;
     --check-only) FETCH=0; shift ;; --stage) STAGE=$2; FETCH=0; shift 2 ;; --hours) HOURS=$2; shift 2 ;;
     --rev) REV=$2; shift 2 ;; --session) S=$2; shift 2 ;; --keep) KEEP=1; shift ;;
-    *) sed -n '3,24p' "$0"; exit 2 ;;
+    *) sed -n '3,26p' "$0"; exit 2 ;;
   esac
 done
 case $GPU in L4|A100|T4) ;; *) echo "--gpu $GPU: only the Intel runtimes L4, A100, T4"; exit 2 ;; esac
@@ -52,7 +53,7 @@ TAG=colab_wrfref
 . "$REPO/tools/colab/colab_lib.sh"
 cj_start "$GPU"
 cj_send "$REFS" in/refs.txt
-cj_launch "$REPO/tools/colab/wrfref_body.sh" "$DATA" "$FILES" "$CASES" "$STAGE" "$FETCH"
+cj_launch "$REPO/tools/colab/wrfref_body.sh" "$DATA" "$FILES" "$CASES" "$STAGE" "$FETCH" "$REALC"
 cj_wait "$HOURS" refs.out
 cj_results
 bad=0
@@ -105,11 +106,12 @@ if [ -n "$STAGE" ]; then
   echo "== stage"; tail -3 "$OUT/stage.log" 2>/dev/null || echo "no stage.log"
   grep -q "^DRIVE ${STAGE%%:*} " "$OUT/data.txt" 2>/dev/null || { echo "[colab_wrfref] $STAGE: not staged"; bad=1; }
 fi
-for f in files.log suite.log; do
+for f in files.log suite.log real.log; do
   [ -f "$OUT/$f" ] || continue
   echo "== $f"; grep -E "^(PASS|FAIL|SKIP)|compared" "$OUT/$f" || tail -5 "$OUT/$f"
   grep -qx "exit 0" "$OUT/$f" || { echo "[colab_wrfref] $f: $(tail -1 "$OUT/$f")"; bad=1; }
 done
 [ -z "$FILES" ] || [ -f "$OUT/files.log" ] || { echo "[colab_wrfref] no files.log"; bad=1; }
 [ -z "$CASES" ] || [ -f "$OUT/suite.log" ] || { echo "[colab_wrfref] no suite.log"; bad=1; }
+[ -z "$REALC" ] || [ -f "$OUT/real.log" ] || { echo "[colab_wrfref] no real.log"; bad=1; }
 exit $bad

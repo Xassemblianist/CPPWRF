@@ -10,6 +10,7 @@
 #include <set>
 #include <sstream>
 #include <stdexcept>
+#include <tuple>
 
 namespace cppwrf::wrf_io {
 
@@ -178,6 +179,21 @@ void derive_config(WrfConfig& c, int max_dom, bool real_exe) {
     bool on = false;
     for (int id = 1; id <= max_dom; ++id) on = on || c.num("prec_acc_dt", id) > 0;
     c.set("prec_acc_opt", on ? "1" : "0");
+  }
+  // check_nml_consistency (module_check_a_mundo.F:1598-1636): grid_fdda = 0 zeroes this domain's gfdda end and
+  // interval, grid_sfdda = 0 with pxlsm_soil_nudge = 0 the sgfdda ones; then dyn_em/namelist_remappings_em.h
+  // copies gfdda_* to the auxinput10 stream options and sgfdda_* to auxinput9's
+  for (const auto& [stream, src, on] :
+       {std::tuple<const char*, const char*, bool>{"auxinput10", "gfdda", c.integer("grid_fdda") != 0},
+        {"auxinput9", "sgfdda", c.integer("grid_sfdda") != 0 || c.integer("pxlsm_soil_nudge") != 0}}) {
+    for (const char* x : {"begin_d", "begin_h", "begin_m", "begin_s", "begin_y", "end_d", "end_h", "end_m", "end_s",
+                          "end_y", "inname", "interval", "interval_d", "interval_h", "interval_m", "interval_s",
+                          "interval_y"}) {
+      const std::string k = std::string(x);
+      const bool zeroed = !on && (k.rfind("end_", 0) == 0 || k.rfind("interval", 0) == 0);
+      c.set(std::string(stream) + "_" + k, zeroed ? std::string("0") : c.get(std::string(src) + "_" + k));
+    }
+    c.set(std::string("io_form_") + stream, c.get(std::string("io_form_") + src));
   }
   // wrf.exe: seed_dim from random_seed(size=...) of gfortran's runtime
   if (!real_exe) c.set("seed_dim", "8");

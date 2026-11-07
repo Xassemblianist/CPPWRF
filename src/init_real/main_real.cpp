@@ -76,6 +76,8 @@ static int run(const RealOptions& o, const Namelist& nl, const WrfSchema& sc, co
   };
   std::unique_ptr<WrfBdyWriter<T>> bdy;
   std::unique_ptr<WrfLowinpWriter<T>> lowinp;  // real_em.F: output_auxinput4 at every time with sst_update = 1
+  std::unique_ptr<WrfFddaWriter<T>> fdda;       // real_em.F: output_auxinput10 at every time after the first
+  std::unique_ptr<typename WrfFddaWriter<T>::Analysis> fdda_old;
   std::string date = o.start_date, prev = o.start_date;
   for (int loop = 1; loop <= time_loop_max; ++loop) {
     {  // real_em.F: geth_julgmt at every time (the GMT / JULDAY of the files; its February persists)
@@ -119,10 +121,21 @@ static int run(const RealOptions& o, const Namelist& nl, const WrfSchema& sc, co
         do_stuff();
       }
     }
+    if (o.grid_fdda >= 1) {  // assemble_output: *_NDG_OLD at loop 1, *_NDG_NEW and the record at later loops
+      auto now = std::make_unique<typename WrfFddaWriter<T>::Analysis>(dom);
+      if (loop >= 2) {
+        if (loop == 2) {
+          fdda = std::make_unique<WrfFddaWriter<T>>(out_dir + "/wrffdda_" + dn, dom, m, sc, cfg, o.start_date);
+        }
+        fdda->write(prev, *fdda_old, *now);
+      }
+      fdda_old = std::move(now);  // OLD = NEW for the next time
+    }
     prev = date;
     date = add_seconds(date, o.interval_seconds);
   }
   if (bdy) std::cout << "cppwrf_real: wrote " << out_dir << "/wrfbdy_d01 (" << time_loop_max - 1 << " times)\n";
+  if (fdda) std::cout << "cppwrf_real: wrote " << out_dir << "/wrffdda_" << dn << " (" << time_loop_max - 1 << " times)\n";
   return 0;
 }
 

@@ -81,6 +81,8 @@ bool wants_column_physics(const io::Config& cfg);
 void init_real_physics(const io::Config& cfg, Model& m);
 // sst_update = 1: the auxinput4 record of `date` (WRF date string) from wrflowinp_d0N into the suite's fields
 void read_wrflowinp(const std::string& path, const std::string& date, phys::driver::PhysicsSuite& su);
+// grid_fdda = 1: the auxinput10 record of `date` from wrffdda_d0N into the suite's analyses (fdda3d, fdda2d)
+void read_wrffdda(const std::string& path, const std::string& date, phys::driver::PhysicsSuite& su);
 // phy_init's landuse_init (LANDUSE.TBL for the season of julday) on the wrfinput LU_INDEX, SEAICE, SNOWC;
 // usemonalb: ALBBCK keeps the wrfinput value (albbck_in) and snow-covered points take ALBEDO = SNOALB
 // (snoalb_in, the wrfinput SNOALB); both may be empty without usemonalb

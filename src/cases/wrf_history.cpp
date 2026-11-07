@@ -307,7 +307,8 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
   phy_init_["STEPRA"] = {stepn("radt")};
   phy_init_["STEPBL"] = {m_.suite ? double(m_.suite->stepbl) : stepn("bldt")};
   phy_init_["STEPCU"] = {m_.suite ? double(m_.suite->stepcu) : stepn("cudt")};
-  phy_init_["STEPFG"] = {1.0};
+  // fg_init (phy_init, every run): STEPFG = max(nint(FGDT*60./DT), 1)
+  phy_init_["STEPFG"] = {m_.suite && m_.suite->options().fdda.grid_fdda == 1 ? double(m_.suite->stepfg) : stepn("fgdt")};
   phy_init_["LAST_STEP_UPDATED"] = {-1.0};
   phy_init_["MIN_PTCHSZ"] = {double(std::min(g.nx, g.ny * jrep_) + 1)};  // x-z runs: WRF's e_sn = 3
   {  // lbc_fcx_gcx (spec_exp = 0): only specified and nested domains; ideal domains keep the input's zeros
@@ -675,6 +676,9 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
   }
   for (const Field2* f : f2_)
     if (f->name() == vn && copy_field(*f, dims, out)) return true;
+  if ((vn == "mu_ndg_old" || vn == "mu_ndg_new") && dims.size() == 3 && dims[1] == 1)  // fdda2d: (j, one_stag, i)
+    for (const Field2* f : f2_)
+      if (f->name() == vn && copy_field(*f, {dims[0], dims[2]}, out)) return true;
   for (const Field3* f : f3_)
     if (f->name() == vn && copy_field(*f, dims, out)) return true;
   if (prep_)  // phy_prep of a run without column physics (first_rk_step_part1 runs it every step)
@@ -1156,6 +1160,14 @@ void WrfHistory::write_restart(long step, double time_sec, double history_interv
       secs = int(since < 0 ? iv - (el - std::lround(restart_sec_)) : iv - since % iv);
       // d01 reads (and turns it off) before med_restart_out; at the last step and on nests it is still ringing
       if ((step == m_.nsteps || d.grid_id > 1) && since >= 0 && since % iv == 0) ring = 1;
+    } else if (a == 36 && aux10_iv_s_ > 0) {  // AUXINPUT10_ALARM (grid_fdda), as the auxinput4 alarm
+      const long iv = std::lround(aux10_iv_s_), since = el - std::lround(aux10_ref_s_);
+      // PrevRingTime: the last ring up to the alarm's StopTime (no ring after it)
+      long last = el;
+      if (aux10_stop_s_ >= 0 && el > std::lround(aux10_stop_s_)) last = std::lround(aux10_stop_s_);
+      const long lsince = last - std::lround(aux10_ref_s_);
+      secs = int(lsince < 0 ? iv - (el - std::lround(restart_sec_)) : iv - (el - (last - lsince % iv)));
+      if ((step == m_.nsteps || d.grid_id > 1) && since >= 0 && since % iv == 0 && last == el) ring = 1;
     } else if (a == 51) {
       ring = 1;
       secs = int(std::lround(restart_secs_to_ring));

@@ -6,6 +6,7 @@
 //                           add_a2c_u, add_a2c_v with the specified-boundary ranges)
 //   conv_t_tendf_to_moist   dyn_em/module_big_step_utilities_em.F (use_theta_m = 1)
 //   phy_prep_part2          dyn_em/module_big_step_utilities_em.F (decoupling with muts)
+//   phy_fg_ten              phys/module_physics_addtendc.F (PSUFDDAGD: add_a2a, add_c2c_u, add_c2c_v)
 // Only the radiation and PBL tendencies of the P1 suite are held here (cumulus and shallow
 // cumulus coupling are added with those schemes).
 #include "core/backend.hpp"
@@ -23,6 +24,9 @@ struct PhysicsTendencies {
   // advective forcing of New Tiedtke (WRF RTHFTEN, RQVFTEN): set_tend in rk_tendency / rk_scalar_tend
   // (advection * msfty, last RK stage), decoupled in phy_prep_part2
   Field3 rthften, rqvften;
+  // grid nudging (grid_fdda = 1; allocated by the suite then): RUNDGDTEN at u points, RVNDGDTEN at v points,
+  // RTHNDGDTEN and RQVNDGDTEN at mass points (RPHNDGDTEN and RMUNDGDTEN stay 0 with grid_fdda = 1)
+  Field3 rundgdten, rvndgdten, rthndgdten, rqvndgdten;
 };
 
 struct CouplingFlags {
@@ -31,6 +35,7 @@ struct CouplingFlags {
   int cu_physics = 0;      // cu_physics (1 = KFETASCHEME: phy_cu_ten adds th, qv, qc, qr, qi, qs;
                            // 3 = GFLSCHEME: th, qv, qc, qi; 16 = NTIEDTKESCHEME: u, v, th, qv, qc, qi)
   bool theta_m = false;    // use_theta_m = 1 (phy_prep_part2: dry-theta RTHFTEN)
+  int grid_fdda = 0;       // 1: the grid nudging tendencies (calculate_phy_tend, phy_fg_ten, phy_prep_part2)
 };
 
 void calculate_phy_tend(PhysicsTendencies& pt, const dyn::State& s, const dyn::BaseState& b, const Grid& g,

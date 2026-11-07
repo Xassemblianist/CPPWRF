@@ -71,6 +71,8 @@ d0|configs/real_d0_r8.ini|$R/run_D0_r8/steps|$R/rst_D0_r8|
 d0v|configs/real_d0v_r8.ini|$R/run_D0V_r8/steps|$R/rst_D0V_r8|
 su1|configs/real_su1_r8.ini|$R/rst_SU1_r8|$R/rst_SU1_r8|--set run.run_time=180
 hy1|configs/real_p1_r8.ini|$R/run_HY1_r8/steps|-|--set real.dir=$R/run_HY1_r8/steps --set dyn.hypsometric_opt=1
+fd1|configs/real_fd1_r8.ini|$R/run_FD1_r8/steps|$R/rst_FD1_r8|
+fdn|configs/real_fdn_r8.ini|$R/run_FDN_r8/steps|$R/rst_FDN_r8|
 "
 want=" $* "
 fail=0 n=0 skip=0

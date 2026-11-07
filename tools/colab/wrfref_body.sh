@@ -5,13 +5,15 @@
 # and run_NAME/steps, in parallel) and its restart references (tests/verify/make_restart_refs.sh,
 # make_resumed_refs.sh), lists the MD5 of every file WRF wrote (refs_md5.txt: "MD5 DIR/FILE"), packs them as
 # fetch/refs.tar (links kept; FETCH=1), packs the suite's tar of STAGE (OBJ:CASE,...; tools/colab/stage_data.py --whole)
-# as drive/OBJ (remote_chroot_job.sh puts it on Drive), then with FILES / CASES builds CPPWRF and runs
-# run_wrf_files_test.sh / wrf_suite.py against them (their logs end with "exit N").
+# as drive/OBJ (remote_chroot_job.sh puts it on Drive) and, with FILES, the files test's references of those cases
+# (tools/gcp/stage_files_data.py --cases) as drive/OBJ with _files.tar for _data.tar, then with FILES / CASES builds CPPWRF and runs
+# run_wrf_files_test.sh / wrf_suite.py against them, with REAL (NAME,...) builds cppwrf_real and runs
+# tests/init_real/run_real_test.sh on the real.exe outputs of run_NAME (their logs end with "exit N").
 #
-#   wrfref_body.sh J FILES CASES STAGE FETCH
+#   wrfref_body.sh J FILES CASES STAGE FETCH [REAL]
 #
 # J: /opt/job with refs.txt, src/ and data/ (data/runs: the base runs, data/wrf: the WRF executables, as on the VM).
-J=$1 FILES=$2 CASES=$3 STAGE=$4 FETCH=$5
+J=$1 FILES=$2 CASES=$3 STAGE=$4 FETCH=$5 REAL=${6:-}
 W=$J/wrf_runs; mkdir -p $W
 set -x
 touch $J/setup.out
@@ -26,19 +28,31 @@ names=$(grep -v '^\s*#' $J/refs.txt | awk 'NF {print $1}')
 dirs=$(for n in $names; do for p in run rst rsm; do [ -d "$W/${p}_$n" ] && echo "${p}_$n"; done; done)
 # shellcheck disable=SC2086
 ( cd $W && find $dirs -type f \( -name 'wrfout_*' -o -name 'wrfrst_*' -o -name 'auxhist*' -o -name 'wrfinput_*' \
-    -o -name 'wrfbdy_*' -o -name 'wrflowinp_*' \) | sort | xargs -r md5sum | awk '{print "MD5", $2, $1}' ) > $J/refs_md5.txt
+    -o -name 'wrfbdy_*' -o -name 'wrflowinp_*' -o -name 'wrffdda_*' \) | sort | xargs -r md5sum | awk '{print "MD5", $2, $1}' ) > $J/refs_md5.txt
 # shellcheck disable=SC2086
 [ "$FETCH" = 0 ] || { mkdir -p $J/fetch && tar cf $J/fetch/refs.tar -C $W $dirs; }
 if [ -n "$STAGE" ]; then  # the suite's tar of these references, to Drive
   mkdir -p $J/drive
   CPPWRF_WRF_RUNS=$W python3 $J/src/tools/colab/stage_data.py --whole --only "${STAGE#*:}" "$J/drive/${STAGE%%:*}" > $J/stage.log 2>&1 \
     && echo "STAGED ${STAGE%%:*}" >> $J/stage.log
+  if [ -n "$FILES" ]; then
+    fobj=${STAGE%%:*}; fobj=${fobj%_data.tar}_files.tar
+    CPPWRF_WRF_RUNS=$W python3 $J/src/tools/gcp/stage_files_data.py --cases "$FILES" "$J/drive/$fobj" >> $J/stage.log 2>&1 \
+      && echo "STAGED $fobj" >> $J/stage.log
+  fi
 fi
-[ -n "$FILES$CASES" ] || exit 0
+[ -n "$FILES$CASES$REAL" ] || exit 0
+targets=cppwrf; [ -z "$REAL" ] || targets="cppwrf cppwrf_real"
+# shellcheck disable=SC2086
 cmake -S $J/src -B $J/build -DCMAKE_BUILD_TYPE=Release -DCPPWRF_DOUBLE=ON -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_NATIVE=OFF \
-  -DCMAKE_CXX_FLAGS="-march=skylake -mtune=skylake" > $J/cmake.log 2>&1 && cmake --build $J/build -j"$(nproc)" --target cppwrf >> $J/cmake.log 2>&1 \
+  -DCMAKE_CXX_FLAGS="-march=skylake -mtune=skylake" > $J/cmake.log 2>&1 && cmake --build $J/build -j"$(nproc)" --target $targets >> $J/cmake.log 2>&1 \
   || echo "BUILD_FAILED (cmake.log)" >> $J/setup.out
 cd $J/src
+if [ -n "$REAL" ]; then
+  # shellcheck disable=SC2046
+  CPPWRF_WRF_RUNS=$W CPPWRF_SCRATCH=$J bash tests/init_real/run_real_test.sh $J/build $(for n in ${REAL//,/ }; do echo "$W/run_$n"; done) > $J/real.log 2>&1
+  echo "exit $?" >> $J/real.log
+fi
 if [ -n "$FILES" ]; then
   # shellcheck disable=SC2086
   CPPWRF_WRF_RUNS=$W CPPWRF_SCRATCH=$J bash tests/verify/run_wrf_files_test.sh $J/build ${FILES//,/ } > $J/files.log 2>&1

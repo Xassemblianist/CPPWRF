@@ -38,6 +38,13 @@ class WrfHistory {
   void write_auxhist3(long step, double time_sec);
   // AUXHIST3_ALARM for the restart files (alarm 4): its interval and a time it rang, in seconds (interval 0: none)
   void set_auxhist3_alarm(double interval_s, double ref_s) { aux3_iv_s_ = interval_s; aux3_ref_s_ = ref_s; }
+  // grid_fdda: AUXINPUT10_ALARM for the restart files (alarm 36): its interval, a time it rang and its StopTime, in
+  // seconds since the simulation start (interval 0: none; stop < 0: none)
+  void set_auxinput10_alarm(double interval_s, double ref_s, double stop_s) {
+    aux10_iv_s_ = interval_s;
+    aux10_ref_s_ = ref_s;
+    aux10_stop_s_ = stop_s;
+  }
   // wrfrst_d0N_<date>: the restart stream at model time time_sec when the restart alarm rings (alarms from the
   // history alarm's interval and a time it rang, in seconds; the restart alarm's seconds to its next ring; a time the
   // sst_update alarm rang)
@@ -100,6 +107,7 @@ class WrfHistory {
   double aux3_iv_s_ = 0, aux3_ref_s_ = 0;
   int jrep_ = 1;  // output rows per model row: 2 for ideal x-z runs (ny = 1)
   double auxinput4_interval_s_ = 0;  // sst_update: the AUXINPUT4 alarm
+  double aux10_iv_s_ = 0, aux10_ref_s_ = 0, aux10_stop_s_ = -1;  // grid_fdda: the AUXINPUT10 alarm
   int wrfinput_id_ = -1;
   std::vector<double> p_hyd0_;  // P_HYD of the initial state (start_em)
   std::unique_ptr<phys::driver::PhyPrepFields> prep_;  // runs without column physics

@@ -143,7 +143,18 @@ void read_wrfrst(const std::string& path, io_netcdf::RestartMeta& meta, std::vec
     nc_inq_vardimid(id, var, dids.data());
     std::vector<std::size_t> len(static_cast<std::size_t>(nd));
     for (int d = 0; d < nd; ++d) nc_inq_dimlen(id, dids[std::size_t(d)], &len[std::size_t(d)]);
-    // (Time, [k,] j, i)
+    // (Time, [k,] j, i); a 2-D field of the fdda2d array (MU_NDG_OLD/NEW): (Time, j, one_stag = 1, i)
+    const bool onestag = nd == 4 && len[2] == 1 && v.nz <= 1 && int(len[1]) == v.ny && int(len[3]) == v.nx;
+    if (onestag) {
+      const std::size_t st4[4] = {0, 0, 0, 0}, ct4[4] = {1, len[1], 1, len[3]};
+      buf.resize(len[1] * len[3]);
+      if (nc_get_vara_double(id, var, st4, ct4, buf.data()) != NC_NOERR)
+        throw std::runtime_error("wrfrst: cannot read " + v.name);
+      real* d = static_cast<real*>(const_cast<void*>(v.data));
+      for (int j = 0; j < v.ny; ++j)
+        for (int i = 0; i < v.nx; ++i) d[j * v.sj + i] = real(buf[std::size_t(j) * std::size_t(v.nx) + std::size_t(i)]);
+      continue;
+    }
     const bool three = nd == 4;
     if (nd < 3 || int(len[std::size_t(nd - 1)]) != v.nx || int(len[std::size_t(nd - 2)]) != v.ny ||
         (three && int(len[1]) < v.nz) || (!three && v.nz > 1))
@@ -494,6 +505,9 @@ void DomainRunner::load_restart_file(const std::string& path) {
     const auto [aring, asecs] = wrf_alarm(path, 30);
     if (asecs >= 0 && asecs < 1700000000) aux4_first_s_ = double(start_step) * g.dt + double(asecs);
     aux4_ring_at_start_ = aring == 1 ? 1 : 0;
+    const auto [ring10, secs10] = wrf_alarm(path, 36);  // AUXINPUT10_ALARM (grid_fdda)
+    if (secs10 >= 0 && secs10 < 1700000000) aux10_first_s_ = double(start_step) * g.dt + double(secs10);
+    aux10_ring_at_start_ = ring10 == 1 ? 1 : 0;
     if (aux3_iv_ > 0) {  // AUXHIST3_ALARM: an output alarm as the history one (share/input_wrf.F:290-325)
       const auto [ring3, secs3] = wrf_alarm(path, 4);
       if (secs3 >= 1700000000) {
@@ -715,6 +729,12 @@ bool DomainRunner::start() {
     if (m_.suite && m_.suite->options().sst_update == 1)
       throw std::runtime_error("sst_update with time.adaptive is not supported (the auxinput4 alarm by time is not ported)");
   }
+  if (aux10_on()) {  // set_timekeeping: StopTime = the run's start + auxinput10_end_h (none without an end)
+    const int end_h = m_.suite->options().fdda.end_h;
+    aux10_stop_s_ = end_h > 0 ? double(start_step) * g.dt + double(end_h) * 3600.0 : -1.0;
+    if (wrfout_)
+      wrfout_->set_auxinput10_alarm(double(m_.suite->options().fdda.interval_m) * 60.0, aux10_first_s_, aux10_stop_s_);
+  }
 
   std::filesystem::create_directories(out_dir_);
 
@@ -863,6 +883,8 @@ void DomainRunner::before_step(long n) {
   // sst_update: med_before_solve_io reads auxinput4 after the history output when its alarm rings
   if (m_.suite && m_.suite->options().sst_update == 1 && aux4_read_step_ != n - 1 && aux4_due(n - 1))
     read_aux4(n - 1);
+  // grid_fdda: med_before_solve_io reads auxinput10 (wrffdda_d0N) when its alarm rings
+  if (aux10_on() && aux10_read_step_ != n - 1 && aux10_due(n - 1)) read_aux10(n - 1);
 #endif
 }
 
@@ -874,6 +896,22 @@ bool DomainRunner::aux4_due(long s) const {
   const double t = double(s) * m_.g.dt, iv = cfg_.get_double("phys.auxinput4_interval", 360.0) * 60.0;
   return iv > 0 && t >= aux4_first_s_ - 1e-6 &&
          std::fabs((t - aux4_first_s_) - iv * std::round((t - aux4_first_s_) / iv)) < 1e-6;
+}
+
+bool DomainRunner::aux10_on() const { return m_.suite && m_.suite->options().fdda.grid_fdda == 1; }
+
+bool DomainRunner::aux10_due(long s) const {
+  if (s == start_step && start_step > 0 && aux10_ring_at_start_ >= 0) return aux10_ring_at_start_ == 1;
+  const double t = double(s) * m_.g.dt, iv = double(m_.suite->options().fdda.interval_m) * 60.0;
+  if (aux10_stop_s_ >= 0 && t > aux10_stop_s_ + 1e-6) return false;  // ESMF_ClockAdvance: CurrTime > StopTime
+  return iv > 0 && t >= aux10_first_s_ - 1e-6 &&
+         std::fabs((t - aux10_first_s_) - iv * std::round((t - aux10_first_s_) / iv)) < 1e-6;
+}
+
+void DomainRunner::read_aux10(long s) {
+  read_wrffdda(cfg_.get_string("real.dir") + "/" + cfg_.get_string("real.wrffdda", "wrffdda_" + domain_tag_),
+               wrf_io::add_seconds(start_date_, std::lround(double(s) * m_.g.dt)), *m_.suite);
+  aux10_read_step_ = s;
 }
 
 void DomainRunner::read_aux4(long s) {
@@ -920,6 +958,7 @@ bool DomainRunner::after_step(long n) {
   // this time (a nest reads in its own med_before_solve_io, after the parent's med_restart_out)
   if (ring && !last && domain_tag_ == "d01" && m_.suite && m_.suite->options().sst_update == 1 && aux4_due(n))
     read_aux4(n);
+  if (ring && !last && domain_tag_ == "d01" && aux10_on() && aux10_due(n)) read_aux10(n);
   if (rst_iv_s_ > 0 && (ring || last) && (rst_end_ <= 0 || n <= rst_end_)) {
     do_restart(n, ring);
   }

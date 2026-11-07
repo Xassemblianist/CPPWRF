@@ -365,6 +365,27 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   }
   if (o.fractional_seaice == 1) sea_ = std::make_unique<SeaIceFields>(g);
   if (o.sst_update == 1) xicem = Field2(g, Stagger::M, "xicem");
+  // grid nudging: package psufddagd (grid_fdda == 1); fddagdinit's checks (module_fdda_psufddagd.F)
+  if (o.fdda.grid_fdda != 0 && o.fdda.grid_fdda != 1)
+    throw std::runtime_error("PhysicsSuite: grid_fdda = " + std::to_string(o.fdda.grid_fdda) +
+                             " is not supported (0 or 1; spectral nudging, grid_fdda = 2, is not ported)");
+  if (o.fdda.grid_fdda == 1) {
+    if (o.fdda.guv < 0) throw std::runtime_error("In grid FDDA, Guv must be positive.");
+    if (o.fdda.gt < 0) throw std::runtime_error("In grid FDDA, Gt must be positive.");
+    if (o.fdda.gq < 0) throw std::runtime_error("In grid FDDA, Gq must be positive.");
+    if (o.fdda.interval_m <= 0) throw std::runtime_error("In grid FDDA, gfdda_interval_m must be > 0");
+    for (auto [f, name] : std::initializer_list<std::pair<Field3*, const char*>>{
+             {&u_ndg_old, "u_ndg_old"}, {&v_ndg_old, "v_ndg_old"}, {&t_ndg_old, "t_ndg_old"}, {&q_ndg_old, "q_ndg_old"},
+             {&ph_ndg_old, "ph_ndg_old"}, {&u_ndg_new, "u_ndg_new"}, {&v_ndg_new, "v_ndg_new"},
+             {&t_ndg_new, "t_ndg_new"}, {&q_ndg_new, "q_ndg_new"}, {&ph_ndg_new, "ph_ndg_new"}, {&hfx_fdda, "hfx_fdda"}})
+      *f = Field3(g, Stagger::M, name);
+    mu_ndg_old = Field2(g, Stagger::M, "mu_ndg_old");
+    mu_ndg_new = Field2(g, Stagger::M, "mu_ndg_new");
+    pt.rundgdten = Field3(g, Stagger::U, "rundgdten");
+    pt.rvndgdten = Field3(g, Stagger::V, "rvndgdten");
+    pt.rthndgdten = Field3(g, Stagger::M, "rthndgdten");
+    pt.rqvndgdten = Field3(g, Stagger::M, "rqvndgdten");
+  }
   if (o.seaice_thickness_opt != 0 || o.seaice_snowdepth_opt != 0)
     throw std::runtime_error("PhysicsSuite: seaice_thickness_opt/seaice_snowdepth_opt 1 need ICEDEPTH/SNOWSI input");
   if (o.seaice_albedo_opt != 0)
@@ -536,6 +557,9 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   // cu_init (module_physics_init.F:4025-4026): STEPCU = max(nint(CUDT*60./DT), 1)
   stepcu = int(std::lround(o.cudt * 60. / g.dt));
   if (stepcu < 1) stepcu = 1;
+  // fg_init (module_physics_init.F:4953-4954): STEPFG = max(nint(FGDT*60./DT), 1)
+  stepfg = int(std::lround(real(o.fdda.fgdt) * real(60.) / real(g.dt)));
+  if (stepfg < 1) stepfg = 1;
   // Registry packages prec_acc (prec_acc_opt == 1), bucketropt (bucketr_opt == 1), bucketfopt (bucketf_opt == 1)
   if (o.prec_acc_opt) {
     prec_acc_c = Field2(g, Stagger::M, "prec_acc_c");
@@ -702,6 +726,8 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
   if (o_.prec_acc_opt)
     for (Field2* f : {&prec_acc_c, &prec_acc_nc, &snow_acc_nc}) v.emplace_back("sfc_" + f->name(), f);
   for (Field2* f : clwrf_) v.emplace_back("sfc_" + f->name(), f);  // output_diagnostics (Registry rh3)
+  if (o_.fdda.grid_fdda == 1)  // fdda2d members (Registry i{10}r)
+    for (Field2* f : {&mu_ndg_old, &mu_ndg_new}) v.emplace_back("sfc_" + f->name(), f);
   if (o_.sf_surface_physics == 4) {
     for (Field2* f : {&xlat_sfc, &xlong_sfc, &tvxy, &tgxy, &canicexy, &canliqxy, &eahxy, &tahxy, &cmxy, &chxy,
                       &fwetxy, &sneqvoxy, &alboldxy, &qsnowxy, &qrainxy, &wslakexy, &zwtxy, &waxy, &wtxy, &lfmassxy,
@@ -755,6 +781,10 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
     v.emplace_back("sfc_rqvften", &pt.rqvften);
   }
   if (o_.cu_physics == 6) v.emplace_back("sfc_rqvften", &pt.rqvften);  // read by the next step's cu_tiedtke
+  if (o_.fdda.grid_fdda == 1)  // package psufddagd: the analyses (i{10}r), the tendencies (r) and HFX_FDDA (rh)
+    for (Field3* f : {&u_ndg_old, &v_ndg_old, &t_ndg_old, &q_ndg_old, &ph_ndg_old, &u_ndg_new, &v_ndg_new, &t_ndg_new,
+                      &q_ndg_new, &ph_ndg_new, &hfx_fdda, &pt.rundgdten, &pt.rvndgdten, &pt.rthndgdten, &pt.rqvndgdten})
+      v.emplace_back("sfc_" + f->name(), f);
   for (Field3* f : {re_cloud_, re_ice_, re_snow_})
     if (f) v.emplace_back("sfc_" + f->name(), f);
   return v;
@@ -842,10 +872,11 @@ void PhysicsSuite::part1(dyn::State& s, const dyn::BaseState& b, dyn::Tendencies
   vmdump::dump("vm_pbl", 1, {&pt.rublten, &pt.rvblten, &pt.rthblten, &pt.rqvblten, &exch_h}, {&pblh});
   cumulus_driver(s, b);
   if (o_.cu_physics == 3) convtrans_prep(s);
+  fddagd_driver(s, b);
 }
 
 void PhysicsSuite::part2(const dyn::State& s, const dyn::BaseState& b, dyn::Tendencies& t) {
-  const CouplingFlags f{radiation_on(), o_.bl_pbl_physics > 0, o_.cu_physics, o_.use_theta_m == 1};
+  const CouplingFlags f{radiation_on(), o_.bl_pbl_physics > 0, o_.cu_physics, o_.use_theta_m == 1, o_.fdda.grid_fdda};
   calculate_phy_tend(pt, s, b, g_, f);
   update_phy_ten(t, pt, s, g_, f);
   if (o_.use_theta_m == 1) {
@@ -865,7 +896,8 @@ void PhysicsSuite::part2(const dyn::State& s, const dyn::BaseState& b, dyn::Tend
 
 void PhysicsSuite::after_rk(const dyn::State& s, const dyn::BaseState& b) {
   advance_ppt(s);
-  phy_prep_part2(pt, s, b, g_, CouplingFlags{radiation_on(), o_.bl_pbl_physics > 0, o_.cu_physics, o_.use_theta_m == 1});
+  phy_prep_part2(pt, s, b, g_,
+                 CouplingFlags{radiation_on(), o_.bl_pbl_physics > 0, o_.cu_physics, o_.use_theta_m == 1, o_.fdda.grid_fdda});
 }
 
 // module_after_all_rk_steps.F -> diagnostics_driver -> diagnostic_output_calc, then clwrf_output_calc, at the end of
@@ -962,6 +994,7 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
   if (o_.prec_acc_opt) v.insert(v.end(), {&prec_acc_c, &prec_acc_nc, &snow_acc_nc});
   v.insert(v.end(), clwrf_.begin(), clwrf_.end());
   if (o_.sf_surface_physics == 1) v.push_back(&capg);  // THC: phy_init's landuse_init value (WrfHistory)
+  if (o_.fdda.grid_fdda == 1) v.insert(v.end(), {&mu_ndg_old, &mu_ndg_new});
   return v;
 }
 
@@ -976,6 +1009,9 @@ std::vector<const Field3*> PhysicsSuite::fields3() const {
     if (o_.bl_mynn_output > 0) v.insert(v.end(), {&edmf_a, &edmf_w, &edmf_thl, &edmf_qt, &edmf_ent, &edmf_qc});
     if (o_.tke_budget == 1) v.insert(v.end(), {&qshear, &qbuoy, &qdiss, &qwt, &dqke});
   }
+  if (o_.fdda.grid_fdda == 1)
+    v.insert(v.end(), {&u_ndg_old, &v_ndg_old, &t_ndg_old, &q_ndg_old, &ph_ndg_old, &u_ndg_new, &v_ndg_new, &t_ndg_new,
+                       &q_ndg_new, &ph_ndg_new, &hfx_fdda, &pt.rundgdten, &pt.rvndgdten, &pt.rthndgdten, &pt.rqvndgdten});
   return v;
 }
 

@@ -121,6 +121,14 @@ class DomainRunner {
   long aux4_read_step_ = -1;  // the step (time n * dt) whose wrflowinp record was read last
   bool aux4_due(long s) const;
   void read_aux4(long s);
+  // grid_fdda: AUXINPUT10_ALARM (gfdda_interval_m) rings as the auxinput4 one up to its StopTime, this run's start
+  // + gfdda_end_h (aux10_stop_s_ < 0: none); a ring reads the analyses of that time from wrffdda_d0N
+  double aux10_first_s_ = 0.0, aux10_stop_s_ = -1.0;
+  int aux10_ring_at_start_ = -1;
+  long aux10_read_step_ = -1;
+  bool aux10_on() const;
+  bool aux10_due(long s) const;
+  void read_aux10(long s);
   long rst_end_ = 0;  // restart.end: last step with a restart file (0: no end)
   bool stop_on_nonfinite_ = true;
   bool nonfinite_every_step_ = false;  // run.check_nonfinite_every_step

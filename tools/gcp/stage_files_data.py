@@ -3,7 +3,7 @@
 """Pack the references of tests/verify/run_wrf_files_test.sh and tests/verify/ideal_files_test.py whole (every frame
 and variable) for the VM suite (tools/gcp/remote_suite.sh runs both tests after wrf_suite.py).
 
-  stage_files_data.py [--list] [--links-only] OUT.tar|-   (-: the tar to stdout, e.g. | gcloud storage cp - gs://BUCKET/X.tar)
+  stage_files_data.py [--list] [--links-only] [--cases NAME,...] OUT.tar|-   (-: the tar to stdout, e.g. | gcloud storage cp - gs://BUCKET/X.tar)
 
 From ${CPPWRF_WRF_RUNS}: for each case of run_wrf_files_test.sh the input directory of its configuration (real.dir;
 inputs and tables as tools/colab/stage_data.py keeps them), its wrfout reference directory and its restart (rst_) and
@@ -12,7 +12,9 @@ the restart file it started from is left out); the steps/ references of wrf_suit
 (stage_data.py --no-steps leaves them out of its tar); from ${CPPWRF_WRF_REF}: the reference directories of the ideal
 cases (wrfout, namelist.input, input_sounding). Links are followed. --list prints the files and their size instead.
 --links-only packs only the files that are links (their content): v05_files_links.tar, after v05_files_data.tar in
-tests/verify/vm_data.txt, replaces the links that tar packed as links before the dereference fix.
+tests/verify/vm_data.txt, replaces the links that tar packed as links before the dereference fix. --cases: only these
+run_wrf_files_test.sh cases (their input, wrfout, restart and resumed directories; no steps/ or ideal references), the
+files tar of a new reference set (tools/colab/wrfref_body.sh).
 """
 import os
 import re
@@ -30,17 +32,22 @@ OUTPUTS = re.compile(r"(wrfout|wrfrst)_d\d\d_.*|namelist\.input|myoutfields\.txt
 
 
 def files_test_cases():
-    """(config, wrfout reference dir, restart dir or None, extra --set) of run_wrf_files_test.sh's CASES."""
+    """(name, config, wrfout reference dir, restart dir or None, extra --set) of run_wrf_files_test.sh's CASES."""
     text = open(os.path.join(REPO, "tests", "verify", "run_wrf_files_test.sh")).read()
     for line in text.split('CASES="', 1)[1].split('\n"', 1)[0].strip().splitlines():
-        _, cfg, ref, rst, extra = line.split("|")
-        yield cfg, ref.replace("$R", WR), None if rst == "-" else rst.replace("$R", WR), extra.replace("$R", WR)
+        name, cfg, ref, rst, extra = line.split("|")
+        yield name, cfg, ref.replace("$R", WR), None if rst == "-" else rst.replace("$R", WR), extra.replace("$R", WR)
 
 
 def main():
     args = sys.argv[1:]
     listing = "--list" in args
     links_only = "--links-only" in args
+    only = None
+    if "--cases" in args:
+        i = args.index("--cases")
+        only = set(args[i + 1].split(","))
+        del args[i:i + 2]
     out = [a for a in args if a not in ("--list", "--links-only")][0]
     files = {}  # path in the tar -> file
 
@@ -53,7 +60,9 @@ def main():
             if OUTPUTS.match(f) and os.path.isfile(p) and (links or not os.path.islink(p)):
                 add(p, WR, "wrf_runs")
 
-    for cfg, ref, rst, extra in files_test_cases():
+    for name, cfg, ref, rst, extra in files_test_cases():
+        if only is not None and name not in only:
+            continue
         m = re.search(r"real\.dir=(\S+)", extra)
         rd = m.group(1) if m else stage_data.config_value(cfg, "real", "dir").replace("${CPPWRF_WRF_RUNS}", WR)
         thompson = (stage_data.config_value(cfg, "phys", "mp_physics") or "0").strip() == "8"
@@ -69,7 +78,7 @@ def main():
             rsm = rst.replace("/rst_", "/rsm_")
             if os.path.isdir(rsm):
                 add_outputs(rsm, links=False)
-    for name, key, cfg, sets, wo, t, tol in wrf_suite.CASES:
+    for name, key, cfg, sets, wo, t, tol in [] if only is not None else wrf_suite.CASES:
         refs = list(wo.values()) if isinstance(wo, dict) else [wo]
         if not all(x == 0.0 for x in tol.values()):
             continue

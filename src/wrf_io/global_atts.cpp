@@ -120,6 +120,10 @@ void write_global_atts(NcOut& nc, const WrfConfig& c, const DomainAtts& d, Strea
     ci("MOIST_ADV_OPT", "moist_adv_opt"); ci("SCALAR_ADV_OPT", "scalar_adv_opt"); ci("TKE_ADV_OPT", "tke_adv_opt");
     ci("DIFF_6TH_OPT", "diff_6th_opt"); cr("DIFF_6TH_FACTOR", "diff_6th_factor");
     if (c.integer("topo_wind") == 1) ci("TOPO_WIND", "topo_wind");
+    if (c.integer("grid_fdda") == 1) {  // output_wrf.F:736-743 (if_ramping, dtramp_min: domain 1's)
+      cr("FGDT", "fgdt"); cr("GUV", "guv"); cr("GT", "gt"); cr("GQ", "gq");
+      ci("IF_RAMPING", "if_ramping"); cr("DTRAMP_MIN", "dtramp_min");
+    }
     ci("OBS_NUDGE_OPT", "obs_nudge_opt");
     cr("BUCKET_MM", "bucket_mm"); cr("BUCKET_J", "bucket_j"); cr("PREC_ACC_DT", "prec_acc_dt");
     ci("ISFTCFLX", "isftcflx"); ci("ISHALLOW", "ishallow"); ci("ISFFLX", "isfflx");
@@ -155,7 +159,7 @@ void write_global_atts(NcOut& nc, const WrfConfig& c, const DomainAtts& d, Strea
     auto it = d.proj.find(a);
     r(a, it == d.proj.end() ? 0.0 : it->second);
   }
-  if (s != Stream::boundary) {
+  if (s != Stream::boundary && s != Stream::auxinput10) {  // output_wrf.F:925
     int jy = d.julyr, jd = d.julday;
     double gm = d.gmt;
     if (!d.have_julgmt) julgmt(d.gmt_date.empty() ? d.start_date : d.gmt_date, jy, jd, gm);  // real.exe: this domain's start

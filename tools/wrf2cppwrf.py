@@ -453,8 +453,7 @@ DEFAULT_ONLY_OPTIONS = {
     ("physics", "kf_edrates"): (0, "KF entrainment / detrainment rate outputs (UDR_KF, DDR_KF, UER_KF, DER_KF, TIMEC_KF)"),
     ("physics", "ra_sw_eclipse"): (0, "solar eclipse in the shortwave radiation (ECOBSC, ECMASK)"),
     ("diags", "solar_diagnostics"): (0, "solar diagnostics (radiation_driver's Solar_step every step, SZA, CLRNIDX ...)"),
-    ("fdda", "grid_fdda"): (0, "grid nudging"),
-    ("fdda", "grid_sfdda"): (0, "surface grid nudging"),
+    ("fdda", "grid_sfdda"): (0, "surface grid nudging (needs wrfsfdda_d0N from OBSGRID)"),
     ("fdda", "obs_nudge_opt"): (0, "observation nudging"),
     ("fire", "ifire"): (0, "wildland fire model"),
     ("stoch", "multi_perturb"): (0, "stochastic multi-physics perturbations"),
@@ -606,7 +605,33 @@ NO_EFFECT_OPTIONS = {
     "tc": "tc.exe (bogus vortex) only",
     # radiation_driver reads it only with cu_physics = 10 (KF-CuP, rejected)
     "shallowcu_forced_ra": "KF-CuP (cu_physics = 10) only",
+    # grid nudging: the spectral nudging options (grid_fdda = 2, rejected) and the surface analysis nudging ones
+    # (grid_sfdda, rejected; check_a_mundo zeroes the sgfdda end and interval without it)
+    **{k: "spectral nudging (grid_fdda = 2) only" for k in (
+        "gph", "if_no_pbl_nudging_ph", "if_zfac_ph", "k_zfac_ph", "dk_zfac_uv", "dk_zfac_t", "dk_zfac_ph",
+        "dk_zfac_q", "xwavenum", "ywavenum", "ktrop")},
+    **{k: "surface analysis nudging (grid_sfdda) only" for k in (
+        "guv_sfc", "gt_sfc", "gq_sfc", "rinblw", "sgfdda_inname", "sgfdda_interval", "sgfdda_interval_d",
+        "sgfdda_interval_h", "sgfdda_interval_m", "sgfdda_interval_s", "sgfdda_interval_y", "sgfdda_begin_y",
+        "sgfdda_begin_d", "sgfdda_begin_h", "sgfdda_begin_m", "sgfdda_begin_s", "sgfdda_end_y", "sgfdda_end_d",
+        "sgfdda_end_h", "sgfdda_end_m", "sgfdda_end_s", "io_form_sgfdda")},
+    # analysis nudging options without grid_fdda (check_a_mundo zeroes the gfdda end and interval; STEPFG of the
+    # restart file comes from namelist.input)
+    **{k: "grid_fdda = 1 only" for k in (
+        "gfdda_inname", "io_form_gfdda", "gfdda_interval", "gfdda_interval_d", "gfdda_interval_h", "gfdda_interval_m",
+        "gfdda_interval_s", "gfdda_interval_y", "gfdda_begin_y", "gfdda_begin_d", "gfdda_begin_h", "gfdda_begin_m",
+        "gfdda_begin_s", "gfdda_end_y", "gfdda_end_d", "gfdda_end_h", "gfdda_end_m", "gfdda_end_s", "guv", "gt", "gq",
+        "fgdt", "fgdtzero", "if_no_pbl_nudging_uv", "if_no_pbl_nudging_t", "if_no_pbl_nudging_q", "if_zfac_uv",
+        "k_zfac_uv", "if_zfac_t", "k_zfac_t", "if_zfac_q", "k_zfac_q", "if_ramping", "dtramp_min")},
 }
+
+# grid nudging (grid_fdda = 1, PSUFDDAGD): the &fdda options CPPWRF reads, with WRF's Registry defaults (all
+# max_domains entries but if_ramping and dtramp_min, domain 1's)
+FDDA_OPTIONS = (
+    ("gfdda_interval_m", 0), ("gfdda_end_h", 0), ("guv", 0.0), ("gt", 0.0), ("gq", 0.0), ("fgdt", 0.0),
+    ("fgdtzero", 0), ("if_no_pbl_nudging_uv", 0), ("if_no_pbl_nudging_t", 0), ("if_no_pbl_nudging_q", 0),
+    ("if_zfac_uv", 0), ("k_zfac_uv", 0), ("if_zfac_t", 0), ("k_zfac_t", 0), ("if_zfac_q", 0), ("k_zfac_q", 0),
+)
 
 
 def _same_value(v: Any, default: Any) -> bool:
@@ -735,6 +760,79 @@ class WrfTranslator:
                 if key in ("km_opt", "diff_opt") and default == -1:
                     default = vals[0]
                 vals.extend([default] * (self._max_dom - len(vals)))
+
+    def translate_fdda(self, sections: Dict[str, Dict[str, Any]], max_dom: int, has_physics_suite: bool,
+                       case_name: str):
+        """grid_fdda = 1 (analysis nudging, phys/module_fddagd_driver.F + module_fdda_psufddagd.F) to [fdda], a
+        nest's own entries to [d0N] fdda_*; the analyses come from real.exe's wrffdda_d0N (auxinput10)."""
+        n = max(1, max_dom)
+        gf = [self.get_dom_opt("fdda", "grid_fdda", d, 0, fallback_d0=False) for d in range(n)]
+        if all(v == 0 for v in gf):
+            return
+        for d, v in enumerate(gf):
+            if v == 2:
+                self.error(f"WRF grid_fdda = 2 (spectral nudging) is not supported by CPPWRF (domain {d + 1}).")
+            elif v not in (0, 1):
+                self.error(f"WRF grid_fdda = {v} is not supported; CPPWRF supports 0 and 1 (domain {d + 1}).")
+        if case_name != "real" or not has_physics_suite:
+            self.error("WRF grid_fdda = 1 needs a real-data case with the physics suite in CPPWRF.")
+        if self.get_opt("domains", "use_adaptive_time_step", False):
+            self.error("WRF grid_fdda = 1 with use_adaptive_time_step is not supported by CPPWRF.")
+        if self.get_opt("fdda", "io_form_gfdda", 2) != 2:
+            self.error("WRF grid_fdda = 1 needs io_form_gfdda = 2 (NetCDF) in CPPWRF.")
+        for d in range(n):
+            if gf[d] != 1:
+                continue
+            dv = lambda k, df=0: self.get_dom_opt("fdda", k, d, df, fallback_d0=False)
+            # fddagd_driver's fatal checks (module_fddagd_driver.F:353-424)
+            for u in ("y", "d", "h", "m", "s"):
+                if dv(f"gfdda_begin_{u}") != 0:
+                    self.error("WRF currently assumes analysis nudging starts at the model start time and so analysis "
+                               f"nudging start time cannot be specified via gfdda_begin_{u} (domain {d + 1}).")
+            for u in ("y", "d", "m", "s"):
+                if dv(f"gfdda_end_{u}") != 0:
+                    self.error(f"The option gfdda_end_{u} is ignored, use gfdda_end_h instead (WRF stops; domain {d + 1}).")
+            for u in ("y", "d", "h", "s"):
+                if dv(f"gfdda_interval_{u}") != 0:
+                    self.error(f"The option gfdda_interval_{u} is ignored, use gfdda_interval_m instead (WRF stops; "
+                               f"domain {d + 1}).")
+            # set_timekeeping_alarms: gfdda_begin / gfdda_end (minutes) set the auxinput10 alarm when the _m entry is 0
+            for k in ("gfdda_begin", "gfdda_end"):
+                if dv(k) != 0:
+                    self.error(f"WRF {k} = {dv(k)} (minutes) is not supported; CPPWRF reads gfdda_end_h.")
+            if dv("gfdda_interval_m") <= 0:
+                self.error(f"In grid FDDA, gfdda_interval_m must be > 0 (WRF stops; domain {d + 1}).")
+            self.get_dom_opt("fdda", "gfdda_interval", d, 0, fallback_d0=False)  # ignored: gfdda_interval_m > 0
+            for k, name in (("guv", "Guv"), ("gt", "Gt"), ("gq", "Gq")):
+                if float(dv(k, 0.0)) < 0.0:
+                    self.error(f"In grid FDDA, {name} must be positive (WRF stops; domain {d + 1}).")
+        fd: Dict[str, Any] = {"grid_fdda": gf[0]}
+        for k, df in FDDA_OPTIONS:
+            fd[k] = self.get_dom_opt("fdda", k, 0, df, fallback_d0=False)
+        fd["if_ramping"] = self.get_opt("fdda", "if_ramping", 0)
+        fd["dtramp_min"] = self.get_opt("fdda", "dtramp_min", 0.0)
+        sections["fdda"] = fd
+        for d in range(1, n):
+            tag = f"d{d + 1:02d}"
+            if gf[d] != gf[0]:
+                sections.setdefault(tag, {})["fdda_grid_fdda"] = gf[d]
+            for k, df in FDDA_OPTIONS:
+                v = self.get_dom_opt("fdda", k, d, df, fallback_d0=False)
+                if v != fd[k]:
+                    sections.setdefault(tag, {})[f"fdda_{k}"] = v
+        # auxinput10_inname = gfdda_inname (default "gfdda_d<domain>"); real.exe writes wrffdda_d0N
+        inname = str(self.get_opt("fdda", "gfdda_inname", "gfdda_d<domain>")).strip("'\"")
+        if "<domain>" not in inname and n > 1 and any(v == 1 for v in gf[1:]):
+            self.error(f"WRF gfdda_inname = '{inname}' without <domain> names one file for every domain.")
+        if inname != "wrffdda_d<domain>":
+            for d in range(n):
+                if gf[d] != 1:
+                    continue
+                name = inname.replace("<domain>", f"{d + 1:02d}")
+                if d == 0:
+                    sections.setdefault("real", {})["wrffdda"] = name
+                else:
+                    sections.setdefault(f"d{d + 1:02d}", {})["wrffdda"] = name
 
     def history_seconds(self, d: int) -> int:
         """History interval of domain index d in seconds (set_timekeeping_alarms.inc; 0: none)."""
@@ -2433,6 +2531,8 @@ class WrfTranslator:
                     tss_0 = self.get_dom_opt("dynamics", "time_step_sound", 0, 0)
                     if tss_d != tss_0:
                         sections[tag]["time_step_sound"] = tss_d
+
+        self.translate_fdda(sections, max_dom, has_physics_suite, case_name)
 
         # 15. Check for unused / ignored options
         wrf_groups = {g for g, _ in WRF_NAMELIST_OPTIONS}  # a group WRF does not read is not checked (WRF skips it)

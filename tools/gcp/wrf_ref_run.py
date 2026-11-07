@@ -9,7 +9,7 @@ time_control.history_interval_s, one history file), and DEST/run_NAME/steps: the
 with history every step. Both run wrf.exe (in parallel) unless --prepare-only. Special keys: run.real=EXE:DIR,...
 makes the inputs first: real.exe (EXE, next to WRFEXE) runs in run_NAME on the met_em files of RUNS/DIR,... (the
 first directory holding a file name gives it) with the same namelist, and both runs read its wrfinput / wrfbdy
-instead of BASE's; run.steps=0 leaves the 3-step run out (long references). run.segment=S runs wrf.exe in parts of
+(/ wrflowinp / wrffdda) instead of BASE's; run.steps=0 leaves the 3-step run out (long references). run.segment=S runs wrf.exe in parts of
 S seconds, each resumed from the previous part's wrfrst files (WRF's own restart; for runs longer than a spot VM
 lasts), and merges each domain's history files into the first part's (each part but the last runs one history
 interval past its end, so that the history frames and wrfrst files at the part's end come from within the run as in
@@ -31,7 +31,7 @@ sets = [a.split("=", 1) for a in args[5:]]
 special = {k: v for k, v in sets if k in ("run.real", "run.steps", "run.segment")}
 sets = [(k, v) for k, v in sets if k not in special]
 src = os.path.join(runs, base)
-INPUTS = r"(wrfinput.*|wrfbdy.*|wrflowinp.*)$"
+INPUTS = r"(wrfinput.*|wrfbdy.*|wrflowinp.*|wrffdda.*)$"
 
 
 def setkey(nl, sec, key, val):  # as tools/gcp/matrix_variant.py (keeping the line breaks)

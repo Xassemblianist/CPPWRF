@@ -32,6 +32,7 @@ _TILED = [
     ("real_p4_r8_fp64_cpu", "2x2"),
     ("real_p6_r8_fp64_cpu", "1x3"),
     ("real_kesskf_r8_fp64_cpu", "3x1"),
+    ("real_fd2_r8_fp64_cpu", "2x2"),
     ("real_mynnx1_r8_fp64_cpu", "3x1"),
     ("ideal_quarter_ss_k2_fp64_cpu", "2x2"),
     ("ideal_squall2d_x_fp64_cpu", "3x1"),

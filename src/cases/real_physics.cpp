@@ -110,6 +110,9 @@ void init_real_physics(const io::Config&, Model&) { throw std::runtime_error("co
 void read_wrflowinp(const std::string&, const std::string&, phys::driver::PhysicsSuite&) {
   throw std::runtime_error("sst_update needs NetCDF");
 }
+void read_wrffdda(const std::string&, const std::string&, phys::driver::PhysicsSuite&) {
+  throw std::runtime_error("grid_fdda needs NetCDF");
+}
 #else
 namespace {
 class NcIn {
@@ -189,6 +192,61 @@ void read_wrflowinp(const std::string& path, const std::string& date, phys::driv
   nc_close(id);
 }
 
+// med_auxinput_in for auxinput10 (gfdda_inname, wrffdda_d0N): the record at `date` overwrites the members of the
+// 4-D arrays fdda3d and fdda2d (grid_fdda = 1: U/V/T/Q/PH_NDG_OLD/NEW on the mass dimensions, MU_NDG_OLD/NEW)
+void read_wrffdda(const std::string& path, const std::string& date, phys::driver::PhysicsSuite& su) {
+  int id = -1;
+  if (nc_open(path.c_str(), NC_NOWRITE, &id) != NC_NOERR) throw std::runtime_error("grid_fdda: cannot open " + path);
+  int vt = -1, dims[2];
+  std::size_t nt = 0, sl = 0;
+  if (nc_inq_varid(id, "Times", &vt) != NC_NOERR) {
+    nc_close(id);
+    throw std::runtime_error("grid_fdda: " + path + " has no Times");
+  }
+  nc_inq_vardimid(id, vt, dims);
+  nc_inq_dimlen(id, dims[0], &nt);
+  nc_inq_dimlen(id, dims[1], &sl);
+  long rec = -1;
+  for (std::size_t t = 0; t < nt && rec < 0; ++t) {
+    std::string s(sl, '\0');
+    const std::size_t st[2] = {t, 0}, ct[2] = {1, sl};
+    nc_get_vara_text(id, vt, st, ct, s.data());
+    if (s.compare(0, date.size(), date) == 0) rec = long(t);
+  }
+  if (rec < 0) {
+    nc_close(id);
+    throw std::runtime_error("grid_fdda: " + path + " has no record for " + date);
+  }
+  const Layout& L = su.t_ndg_old.layout();
+  const int nx = L.nx, ny = L.ny, nz = L.nz;
+  const std::pair<const char*, Field3*> f3[] = {
+      {"U_NDG_OLD", &su.u_ndg_old}, {"V_NDG_OLD", &su.v_ndg_old}, {"T_NDG_OLD", &su.t_ndg_old},
+      {"Q_NDG_OLD", &su.q_ndg_old}, {"PH_NDG_OLD", &su.ph_ndg_old}, {"U_NDG_NEW", &su.u_ndg_new},
+      {"V_NDG_NEW", &su.v_ndg_new}, {"T_NDG_NEW", &su.t_ndg_new}, {"Q_NDG_NEW", &su.q_ndg_new},
+      {"PH_NDG_NEW", &su.ph_ndg_new}};
+  std::vector<double> buf(std::size_t(nx) * ny * nz);
+  for (const auto& [name, f] : f3) {
+    int v = -1;
+    const std::size_t st[4] = {std::size_t(rec), 0, 0, 0}, ct[4] = {1, std::size_t(nz), std::size_t(ny), std::size_t(nx)};
+    if (nc_inq_varid(id, name, &v) != NC_NOERR || nc_get_vara_double(id, v, st, ct, buf.data()) != NC_NOERR) {
+      nc_close(id);
+      throw std::runtime_error(std::string("grid_fdda: cannot read ") + name + " of " + path);
+    }
+    f->fill_host([&](int i, int j, int k) { return buf[i + std::size_t(nx) * (j + std::size_t(ny) * k)]; });
+  }
+  const std::pair<const char*, Field2*> f2[] = {{"MU_NDG_OLD", &su.mu_ndg_old}, {"MU_NDG_NEW", &su.mu_ndg_new}};
+  for (const auto& [name, f] : f2) {
+    int v = -1;
+    const std::size_t st[4] = {std::size_t(rec), 0, 0, 0}, ct[4] = {1, std::size_t(ny), 1, std::size_t(nx)};
+    if (nc_inq_varid(id, name, &v) != NC_NOERR || nc_get_vara_double(id, v, st, ct, buf.data()) != NC_NOERR) {
+      nc_close(id);
+      throw std::runtime_error(std::string("grid_fdda: cannot read ") + name + " of " + path);
+    }
+    f->fill_host([&](int i, int j, int) { return buf[i + std::size_t(nx) * j]; });
+  }
+  nc_close(id);
+}
+
 void init_real_physics(const io::Config& cfg, Model& m) {
   using phys::driver::PhysicsSuite;
   using phys::driver::SuiteOptions;
@@ -250,6 +308,31 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   o.fractional_seaice = int(cfg.get_int("phys.fractional_seaice", 0));
   o.tice2tsk_if2cold = cfg.get_bool("phys.tice2tsk_if2cold", false);
   o.sst_update = int(cfg.get_int("phys.sst_update", 0));
+  // grid (analysis) nudging, this domain's entries (namelist &fdda; gfdda_interval_m / gfdda_end_h are WRF's
+  // auxinput10_interval_m / auxinput10_end_h; if_ramping and dtramp_min are domain 1's)
+  o.fdda.grid_fdda = int(cfg.get_int("fdda.grid_fdda", 0));
+  o.fdda.interval_m = int(cfg.get_int("fdda.gfdda_interval_m", 0));
+  o.fdda.end_h = int(cfg.get_int("fdda.gfdda_end_h", 0));
+  o.fdda.if_no_pbl_nudging_uv = int(cfg.get_int("fdda.if_no_pbl_nudging_uv", 0));
+  o.fdda.if_no_pbl_nudging_t = int(cfg.get_int("fdda.if_no_pbl_nudging_t", 0));
+  o.fdda.if_no_pbl_nudging_q = int(cfg.get_int("fdda.if_no_pbl_nudging_q", 0));
+  o.fdda.if_zfac_uv = int(cfg.get_int("fdda.if_zfac_uv", 0));
+  o.fdda.k_zfac_uv = int(cfg.get_int("fdda.k_zfac_uv", 0));
+  o.fdda.if_zfac_t = int(cfg.get_int("fdda.if_zfac_t", 0));
+  o.fdda.k_zfac_t = int(cfg.get_int("fdda.k_zfac_t", 0));
+  o.fdda.if_zfac_q = int(cfg.get_int("fdda.if_zfac_q", 0));
+  o.fdda.k_zfac_q = int(cfg.get_int("fdda.k_zfac_q", 0));
+  o.fdda.guv = cfg.get_double("fdda.guv", 0.0);
+  o.fdda.gt = cfg.get_double("fdda.gt", 0.0);
+  o.fdda.gq = cfg.get_double("fdda.gq", 0.0);
+  o.fdda.if_ramping = int(cfg.get_int("fdda.if_ramping", 0));
+  o.fdda.dtramp_min = cfg.get_double("fdda.dtramp_min", 0.0);
+  o.fdda.fgdt = cfg.get_double("fdda.fgdt", 0.0);
+  o.fdda.fgdtzero = int(cfg.get_int("fdda.fgdtzero", 0));
+  if (int(cfg.get_int("fdda.grid_sfdda", 0)) != 0)
+    throw std::runtime_error("grid_sfdda (surface analysis nudging) is not supported: it needs wrfsfdda_d0N from OBSGRID");
+  if (o.fdda.grid_fdda != 0 && cfg.get_bool("time.adaptive", false))
+    throw std::runtime_error("grid_fdda with the adaptive time step (use_adaptive_time_step) is not supported");
   o.bucket_mm = cfg.get_double("phys.bucket_mm", -1.0);  // diagnostic_output_calc (module_diag_misc.F)
   o.bucket_j = cfg.get_double("phys.bucket_j", -1.0);
   o.prec_acc_dt = cfg.get_double("phys.prec_acc_dt", 0.0);  // this domain's entry (minutes)

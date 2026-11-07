@@ -1205,6 +1205,63 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertEqual(sec["d02"]["phys_auxinput4_interval"], 0)
         self.assertEqual(sec["d02"]["wrflowinp"], "lowinp_d02")
 
+    FDDA_PHYS = "&physics mp_physics = 2*6, sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, bl_pbl_physics = 2*1 /\n"
+
+    def test_grid_fdda(self):
+        # grid_fdda = 1 (PSUFDDAGD): the &fdda options to [fdda], a nest's own entries to [d02] fdda_*, the auxinput10
+        # file name from gfdda_inname (real.exe writes wrffdda_d0N; WRF's default name is gfdda_d<domain>)
+        text = self.NEST + self.FDDA_PHYS + (
+            "&fdda grid_fdda = 1, 1, gfdda_inname = 'wrffdda_d<domain>', gfdda_interval_m = 360, 360,"
+            " gfdda_end_h = 6, 3, io_form_gfdda = 2, guv = 0.0003, 0.0006, gt = 0.0003, 0.0003, gq = 0.0003, 0.0003,"
+            " fgdt = 3, 3, if_no_pbl_nudging_uv = 1, 1, if_zfac_t = 1, 1, k_zfac_t = 5, 5, if_ramping = 1,"
+            " dtramp_min = -30. /\n")
+        t, sec = self.translate(text)
+        self.assertEqual(t.errors, [])
+        f = sec["fdda"]
+        self.assertEqual((f["grid_fdda"], f["gfdda_interval_m"], f["gfdda_end_h"]), (1, 360, 6))
+        self.assertEqual((f["guv"], f["fgdt"], f["if_no_pbl_nudging_uv"], f["k_zfac_t"]), (0.0003, 3, 1, 5))
+        self.assertEqual((f["if_ramping"], f["dtramp_min"]), (1, -30.0))
+        self.assertEqual(sec["d02"]["fdda_guv"], 0.0006)
+        self.assertEqual(sec["d02"]["fdda_gfdda_end_h"], 3)
+        self.assertNotIn("fdda_gt", sec["d02"])
+        self.assertNotIn("wrffdda", sec.get("real", {}))
+        # the default name: the model reads gfdda_d01 / gfdda_d02 from real.dir
+        t, sec = self.translate(text.replace("gfdda_inname = 'wrffdda_d<domain>',", ""))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["real"]["wrffdda"], "gfdda_d01")
+        self.assertEqual(sec["d02"]["wrffdda"], "gfdda_d02")
+        # grid_fdda = 1 on the nest only
+        t, sec = self.translate(text.replace("grid_fdda = 1, 1", "grid_fdda = 0, 1"))
+        self.assertEqual(t.errors, [])
+        self.assertEqual((sec["fdda"]["grid_fdda"], sec["d02"]["fdda_grid_fdda"]), (0, 1))
+        # without grid_fdda the &fdda options have no effect (check_a_mundo zeroes the gfdda end and interval)
+        t, sec = self.translate(text.replace("grid_fdda = 1, 1", "grid_fdda = 0, 0"))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("fdda", sec)
+
+    def test_grid_fdda_errors(self):
+        base = ("&fdda grid_fdda = 1, 1, gfdda_inname = 'wrffdda_d<domain>', gfdda_interval_m = 360, 360,"
+                " gfdda_end_h = 6, 6, guv = 0.0003, 0.0003 X /\n")
+        for extra, expected in [
+                (", grid_fdda = 2, 1", "grid_fdda = 2 (spectral nudging)"),
+                (", grid_sfdda = 1, 1", "grid_sfdda"),
+                (", gfdda_begin_h = 1, 1", "gfdda_begin_h"),
+                (", gfdda_end_d = 1, 1", "gfdda_end_d is ignored"),
+                (", gfdda_interval_h = 6, 6", "gfdda_interval_h is ignored"),
+                (", gfdda_interval_m = 0, 360", "gfdda_interval_m must be > 0"),
+                (", gt = -0.1, 0.0003", "Gt must be positive"),
+                (", io_form_gfdda = 0", "io_form_gfdda = 2"),
+                (", gfdda_end = 360, 360", "gfdda_end = 360"),
+                (", gfdda_inname = 'analyses'", "without <domain>")]:
+            t, _ = self.translate(self.NEST + self.FDDA_PHYS + base.replace(" X", extra))
+            self.assertTrue(any(expected in e for e in t.errors), (extra, t.errors))
+        # the physics suite and no adaptive time step
+        t, _ = self.translate(self.NEST + base.replace(" X", ""))
+        self.assertTrue(any("needs a real-data case with the physics suite" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST.replace("time_step = 60,", "time_step = 60, use_adaptive_time_step = .true.,")
+                              + self.FDDA_PHYS + base.replace(" X", ""))
+        self.assertTrue(any("grid_fdda = 1 with use_adaptive_time_step" in e for e in t.errors), t.errors)
+
     def test_buckets_and_prec_acc(self):
         # diagnostic_output_calc: bucket_mm, bucket_J (one entry) and prec_acc_dt (every domain's entry; check_a_mundo's
         # prec_acc_opt = 1 when some domain has prec_acc_dt > 0); a nest's missing entry is the Registry default 0

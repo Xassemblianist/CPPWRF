@@ -65,6 +65,21 @@ class IntField2 {
   int* buf_ = nullptr;
 };
 
+// &fdda options of the analysis nudging (grid_fdda = 1: phys/module_fddagd_driver.F, module_fdda_psufddagd.F; WRF
+// Registry defaults). The analyses come from wrffdda_d0N (auxinput10, real.exe with grid_fdda = 1).
+struct FddaOptions {
+  int grid_fdda = 0;                // 0 or 1 (PSUFDDAGD); 2 (spectral nudging) is not ported
+  int interval_m = 0;               // auxinput10_interval_m (gfdda_interval_m): minutes between the analyses
+  int end_h = 0;                    // auxinput10_end_h (gfdda_end_h): end of the nudging, hours from the start
+  int if_no_pbl_nudging_uv = 0, if_no_pbl_nudging_t = 0, if_no_pbl_nudging_q = 0;
+  int if_zfac_uv = 0, k_zfac_uv = 0, if_zfac_t = 0, k_zfac_t = 0, if_zfac_q = 0, k_zfac_q = 0;
+  double guv = 0, gt = 0, gq = 0;   // nudging coefficients [s-1]
+  int if_ramping = 0;               // 1: ramp the nudging down over dtramp_min minutes around end_h
+  double dtramp_min = 0;
+  double fgdt = 0;                  // minutes between the nudging calls (0: every step; STEPFG)
+  int fgdtzero = 0;                 // 1: the tendencies are 0 between the calls
+};
+
 // Namelist options of the P1/P2 suite (WRF Registry defaults unless noted).
 struct SuiteOptions {
   int sf_sfclay_physics = 1;     // 1 = SFCLAYREVSCHEME, 2 = MYJSFCSCHEME, 5 = MYNNSFCSCHEME
@@ -123,6 +138,7 @@ struct SuiteOptions {
   // (minutes, WRF's clwrfH)
   int output_diagnostics = 0;
   int auxhist3_interval = 0;
+  FddaOptions fdda;  // grid nudging (fddagd_driver)
 };
 
 class PhysicsSuite : public dyn::ColumnPhysics {
@@ -146,6 +162,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // surface layer skips its z/L iteration at itimestep 1 when it is set (module_sf_mynnsfc_land.F90 etc.)
   bool restart_flag = false;
   int stepbl = 1;      // WRF grid%stepbl (set_physics_rconfigs: nint(bldt*60/dt), >= 1)
+  int stepfg = 1;      // WRF grid%stepfg (fg_init: max(nint(fgdt*60/dt), 1))
   int stepcu = 1;      // WRF grid%stepcu (cu_init: max(nint(cudt*60/dt), 1))
   // use_adaptive_time_step: solve_em's adapt_step_flag (the drivers run by their activation times, not by the
   // step counts), the time of the step start since the simulation start (WRF's clock: XTIME, julian, curr_secs)
@@ -215,6 +232,12 @@ class PhysicsSuite : public dyn::ColumnPhysics {
         regime_hold;
   };
   std::unique_ptr<SeaIceFields> sea_;
+  // grid_fdda = 1 (allocated then): the analyses before and after the current time (WRF fdda3d / fdda2d members
+  // U_NDG_OLD ... MU_NDG_NEW from wrffdda; mass-sized as WRF's 4-D array: u at i < nx, v at j < ny, ph at k < nz)
+  // and HFX_FDDA (the pseudo radiative heat flux of the theta nudging); the tendencies are in pt
+  Field3 u_ndg_old, v_ndg_old, t_ndg_old, q_ndg_old, ph_ndg_old, u_ndg_new, v_ndg_new, t_ndg_new, q_ndg_new,
+      ph_ndg_new, hfx_fdda;
+  Field2 mu_ndg_old, mu_ndg_new;
   Field3 w0avg, cldfra_dp, cldfra_sh, qc_cu, qi_cu, gd_cloud, gd_cloud2, gd_cloud_a, gd_cloud2_a, gd_cldfr;  // cumulus 3D state and diagnostics
   // every persistent field above, the physics tendencies and the phy_prep diagnostics (by WRF name)
   std::vector<const Field2*> fields2() const;
@@ -321,6 +344,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   void cumulus_driver(const dyn::State& s, const dyn::BaseState& b);
   void convtrans_prep(const dyn::State& s);
   void advance_ppt(const dyn::State& s);
+  void fddagd_driver(const dyn::State& s, const dyn::BaseState& b);
 };
 
 }  // namespace cppwrf::phys::driver
