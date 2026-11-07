@@ -8,13 +8,13 @@ program harn
   real(8), dimension(1,km) :: u, v, t, qv, qc, qi, qvf, tf, oz, om, ap
   real(8), dimension(1,km+1) :: zz, aph
   real(8) :: evap(1), hfx(1), dx(1), rn(1), d, dmax(7), rel
-  integer :: lndj(1), ios, col, nbad, nact, errflg, k, nb
+  integer :: lndj(1), ios, col, nbad, nact, nrain, errflg, k, nb
   character(len=256) :: fn, errmsg
   real(8), parameter :: rd = 287., cp = 7.*rd/2.
   call get_command_argument(1, fn)
   call cu_ntiedtke_init(cp, rd, 461.6d0, 2.5d6, 2.85d6, 3.5d5, 9.81d0, errmsg, errflg)
   open(10, file=trim(fn), access='stream', form='unformatted', status='old')
-  col = 0; nbad = 0; nact = 0; dmax = 0
+  col = 0; nbad = 0; nact = 0; nrain = 0; dmax = 0
   do
     read(10, iostat=ios) sc
     if (ios /= 0) exit
@@ -29,6 +29,7 @@ program harn
                          sc(4), dx, errmsg, errflg)
     ! active: WRF's scheme convects in this column (it rains, or t or qv differ from their inputs in any bit)
     if (rn(1) /= 0 .or. ndiff(t(1,:), a(:,3)) + ndiff(qv(1,:), a(:,4)) > 0) nact = nact + 1
+    if (rn(1) /= 0) nrain = nrain + 1
     ! tolerance 0: the same bits in every output (-0 differs from +0, NaN only equals the same NaN)
     nb = ndiff(u(1,:), outc(:,1)) + ndiff(v(1,:), outc(:,2)) + ndiff(t(1,:), outc(:,3)) + ndiff(qv(1,:), outc(:,4)) &
        + ndiff(qc(1,:), outc(:,5)) + ndiff(qi(1,:), outc(:,6)) + ndiff(rn, [rnc])
@@ -44,7 +45,7 @@ program harn
         ' tbot f/c', t(1,km), outc(km,3)
     end if
   end do
-  write(*,*) 'columns', col, ' active', nact, ' mismatching', nbad
+  write(*,*) 'columns', col, ' active', nact, ' mismatching', nbad, ' raining', nrain
 contains
   integer function ndiff(x, y)
     real(8), intent(in) :: x(:), y(:)
