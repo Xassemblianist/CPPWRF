@@ -81,9 +81,9 @@ std::shared_ptr<const phys::mp_thompson::ThompsonDeviceTables<real>> thompson_ta
                                                                                      bool force_read, bool aero) {
   using Tables = phys::mp_thompson::ThompsonDeviceTables<real>;
   static std::mutex m;
-  static std::map<std::tuple<std::string, bool, bool>, std::weak_ptr<const Tables>> made;
+  static std::map<std::tuple<std::string, bool, bool, int>, std::weak_ptr<const Tables>> made;
   std::lock_guard<std::mutex> lock(m);
-  std::weak_ptr<const Tables>& w = made[{dir, force_read, aero}];
+  std::weak_ptr<const Tables>& w = made[{dir, force_read, aero, current_device()}];  // one set per device (tiles)
   if (auto t = w.lock()) return t;
   phys::mp_thompson::ThompsonHostTables<real> h;
   phys::mp_thompson::init_thompson_tables(h, dir, force_read, aero);

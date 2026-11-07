@@ -500,6 +500,7 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
 
   if (stage_ == 1) {  // WRF small_step_prep (rk_step == 1): reset the external-mode filter
     V2 md = mudf.view();
+    const tile::Whole whole;  // a tile: its halo too (the neighbours' points read below are 0 in every tile)
     parallel_for(Range3D{-Grid::halo, nx + Grid::halo, -g.hy(), ny + g.hy(), 0, 1},
                  [=] CPPWRF_HD(int i, int j, int) { md(i, j) = 0; });
   }
@@ -551,6 +552,7 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
                                            c, dts, real(b.rdx), real(b.rdy), nz, it, n_small, do_y, b.msftx.view(),
                                            b.msfty.view(), b.msfuy.view(), b.msfvx_inv.view(), ed});
     {
+      const tile::Whole whole;  // (position along the edge, level) index space
       LaunchBatch<KSumEdge, 2> edge;  // ru_m and rv_m in one launch
       if (ed.x || ed.ox)
         edge.add(Range3D{0, ny, 0, nz, 0, 1}, KSumEdge{s.ru_m.view(), s.u_2.cview(), u_save.cview(), s.muu.cview(), c,

@@ -38,6 +38,8 @@ class DomainRunner {
 
   // Called after step n (1-based): step timing, diag, snapshot, wrfout, restart
   bool after_step(long n);
+  // after_step(n) reads the model's fields (output, diagnostics, restart): a tiled run gathers them first
+  bool reads_state(long n) const;
   // Called right after the solve of step n, before nests run and feed back (WRF's end of solve_em)
   void after_solve(long n);
   // Nested domains: WRF writes history in med_before_solve_io, i.e. a frame for step n at the start

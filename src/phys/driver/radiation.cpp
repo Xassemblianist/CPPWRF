@@ -58,9 +58,13 @@ struct KStageAll {
   double* d2[6];
   double* dht = nullptr;  // Dudhia: the terrain height
   BView2<const real> ht;
+  // a tile stages the whole rows of its patch (the batch's columns i + nx j are contiguous by row); a column it does
+  // not own gets the inputs of its nearest own column in the row (valid values; its results are not used)
+  int oi0 = -2147483647 - 1, oi1 = 2147483647;
   CPPWRF_HD void operator()(int i, int j, int k) const {
     const int col = i + nx * j;
     const std::size_t idx = std::size_t(k) * ncol + col;
+    i = i < oi0 ? oi0 : (i >= oi1 ? oi1 - 1 : i);
     d3w[0][idx] = double(f3w[0](i, j, k));
     d3w[1][idx] = double(f3w[1](i, j, k));
     if (k < nz) {
@@ -440,7 +444,16 @@ bool RadiationDriver::run(long itimestep, double xtime, double julian, int yr, c
     ks.f2[3] = in.xice->cview();   ks.d2[3] = q.xice;
     ks.f2[4] = in.snow->cview();   ks.d2[4] = q.snow;
     ks.f2[5] = in.albedo->cview(); ks.d2[5] = q.albedo;
-    parallel_for(Range3D{0, nx, 0, ny, 0, nz + 1}, ks);
+    // a tile: the rows of its patch, every column (the batch's column ranges below)
+    const int rj0 = tile::ctx.on ? std::max(tile::ctx.j0, 0) : 0, rj1 = tile::ctx.on ? std::min(tile::ctx.j1, ny) : ny;
+    if (tile::ctx.on) {
+      ks.oi0 = std::max(tile::ctx.i0, 0);
+      ks.oi1 = std::min(tile::ctx.i1, nx);
+    }
+    {
+      const tile::Whole rows;
+      parallel_for(Range3D{0, nx, rj0, rj1, 0, nz + 1}, ks);
+    }
     KRadColumn kc{};
     kc.nx = nx; kc.nz = nz; kc.ncol = ncol;
     kc.julian = julian; kc.xtime_mid = xtime + o_.radt * 0.5; kc.gmt = o_.gmt; kc.declin = declin;
@@ -468,9 +481,15 @@ bool RadiationDriver::run(long itimestep, double xtime, double julian, int yr, c
       kc.qccu = in.qc_cu->cview(); kc.qicu = in.qi_cu->cview();
       kc.cfdp = in.cldfra_dp->cview(); kc.cfsh = in.cldfra_sh->cview();
     }
-    column_for(Range2D{0, nx, 0, ny}, kc);
+    {
+      const tile::Whole rows;
+      column_for(Range2D{0, nx, rj0, rj1}, kc);
+    }
     LwBatchInput li{};
-    li.ncol = ncol; li.tsk = q.tsk; li.emiss = q.emiss; li.xland = q.xland; li.xice = q.xice; li.snow = q.snow;
+    li.ncol = ncol;
+    li.col_begin = rj0 * nx;  // a tile: the rows of its patch (the column index is i + nx j)
+    li.col_end = rj1 * nx;
+    li.tsk = q.tsk; li.emiss = q.emiss; li.xland = q.xland; li.xice = q.xice; li.snow = q.snow;
     li.p8w = q.p8w; li.t8w = q.t8w; li.p3d = q.p3d; li.pi3d = q.pi3d; li.t3d = q.t3d; li.qv = q.qv; li.cldfra = q.cf;
     li.o3 = q.o3; li.xlat = q.xlat_d; li.dz8w = q.dz;
     li.qc = in.qc ? q.qc : nullptr; li.qi = in.qi ? q.qi : nullptr; li.qs = in.qs ? q.qs : nullptr;
@@ -501,7 +520,7 @@ bool RadiationDriver::run(long itimestep, double xtime, double julian, int yr, c
                                 hqv.data(), in.qc ? hqc.data() : nullptr, in.qr ? hqr.data() : nullptr,
                                 in.qi ? hqi.data() : nullptr, in.qs ? hqs.data() : nullptr, hcf.data(), htsk.data(),
                                 hem.data(), in.qi != nullptr, lc.co2, lc.n2o, lc.ch4, cst::r_d, cst::g, o_.icloud,
-                                o_.warm_rain};
+                                o_.warm_rain, li.col_begin, li.col_end};
       std::vector<double> hr(n3), hrc(n3), hg(nc), ho(nc), zero(8 * nc, 0.0);
       rrtm_lw_batch(*q.rrtm, bi, q.rrtm_nlayers, hr.data(), hrc.data(), hg.data(), ho.data());
       copy_to_dev(q.rlw, hr.data(), n3 * sizeof(double));
@@ -520,7 +539,7 @@ bool RadiationDriver::run(long itimestep, double xtime, double julian, int yr, c
       column_for(Range2D{0, nx, 0, ny}, kd);
     } else {
       SwBatchInput si{};
-      si.ncol = ncol; si.coszen = q.cz; si.albedo = q.albedo; si.xland = q.xland; si.xice = q.xice; si.snow = q.snow;
+      si.ncol = ncol; si.col_begin = li.col_begin; si.col_end = li.col_end; si.coszen = q.cz; si.albedo = q.albedo; si.xland = q.xland; si.xice = q.xice; si.snow = q.snow;
       si.p8w = q.p8w; si.t8w = q.t8w; si.p3d = q.p3d; si.pi3d = q.pi3d; si.t3d = q.t3d; si.qv = q.qv; si.cldfra = q.cf;
       si.o3 = q.o3; si.xlat = q.xlat_d; si.dz8w = q.dz; si.qc = li.qc; si.qi = li.qi; si.qs = li.qs;
       si.re_cloud = li.re_cloud; si.re_ice = li.re_ice; si.re_snow = li.re_snow;
@@ -603,6 +622,9 @@ bool RadiationDriver::run(long itimestep, double xtime, double julian, int yr, c
       swd(diag ? 8 : 0, std::vector<real>(Lo2.total, real(0))),
       swsfc(out.swsfc[0] ? 10 : 0, std::vector<real>(Lo2.total, real(0)));
 
+  Range2D own{0, nx, 0, ny};
+  tile::clip(own);  // a tile: its own columns (the others' inputs are not set)
+  const int own_nx = own.i1 - own.i0, own_cols = own_nx * (own.j1 - own.j0);
 #pragma omp parallel
   {
     auto lws = std::make_unique<RrtmgLwWorkspace>();
@@ -614,8 +636,8 @@ bool RadiationDriver::run(long itimestep, double xtime, double julian, int yr, c
         zero(nz, 0.0), ccf(nz, 0.0), co3(nz, 0.0), rlw(nz), rlwc(nz), rsw(nz), rswc(nz), cqc(nz, 0.0),
         cqi(nz, 0.0), cqs(nz, 0.0), crec(nz), crei(nz), cres(nz), cqr(nz, 0.0), cqg(nz, 0.0);
 #pragma omp for schedule(dynamic, 16)
-    for (int c = 0; c < nx * ny; ++c) {
-      const int i = c % nx, j = c / nx;
+    for (int oc = 0; oc < own_cols; ++oc) {
+      const int i = own.i0 + oc % own_nx, j = own.j0 + oc / own_nx, c = i + nx * j;
       for (int k = 0; k <= nz; ++k) { cp8w[k] = pw[Lw.index(i, j, k)]; ct8w[k] = tw[Lt8.index(i, j, k)]; }
       for (int k = 0; k < nz; ++k) {
         const std::size_t q = Lm.index(i, j, k);

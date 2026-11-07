@@ -64,6 +64,7 @@ struct RrtmLwBatchInput {
   double co2, n2o, ch4, r_d, g;
   int icloud;
   bool warm_rain;
+  int col_begin = 0, col_end = -1;  // the columns computed: [col_begin, col_end) (-1: ncol); a tile's rows
 };
 void rrtm_lw_batch(const RrtmLwTables& t, const RrtmLwBatchInput& in, int nlayers, double* rth, double* rthc,
                    double* glw, double* olr);

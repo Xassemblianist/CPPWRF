@@ -2,6 +2,7 @@
 // PhysicsSuite::cumulus_driver, convtrans_prep and advance_ppt (WRF phys/module_cumulus_driver.F,
 // dyn_em/module_convtrans_prep.F, phys/module_physics_addtendc.F)
 #include "phys/driver/suite.hpp"
+#include "core/tiles.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -491,7 +492,8 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
     k.flag_qc = s.P_QC >= 0; k.flag_qi = s.P_QI >= 0;
     k.first = true;
     column_for(g_.columns(), k);
-    column_for(Range2D{0, 1, 0, g_.ny}, KRowAny{td_icum.cview(), td_row_icum.view(), g_.nx});
+    tile::gather(td_icum);  // tiles: the row's OR needs the row's every column
+    column_for_whole(Range2D{0, 1, 0, g_.ny}, KRowAny{td_icum.cview(), td_row_icum.view(), g_.nx});
     k.first = false;
     column_for(g_.columns(), k);
     return;

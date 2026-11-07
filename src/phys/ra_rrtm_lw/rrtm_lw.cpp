@@ -1126,8 +1126,9 @@ void rrtm_lw_batch(const RrtmLwTables& t, const RrtmLwBatchInput& in, int nlayer
     std::vector<double> p8w(nz + 1), t8w(nz + 1), p(nz), tt(nz), dz(nz), pi(nz), qv(nz), qc(nz), qr(nz), qi(nz),
         qs(nz), cf(nz), r(nz), rc(nz);
     std::string msg;
+    const int col_end = in.col_end < 0 ? ncol : in.col_end;
 #pragma omp for schedule(dynamic, 16)
-    for (int col = 0; col < ncol; ++col) {
+    for (int col = in.col_begin; col < col_end; ++col) {
       auto at = [&](int k) { return std::size_t(k) * std::size_t(ncol) + std::size_t(col); };
       for (int k = 0; k <= nz; ++k) {
         p8w[k] = in.p8w[at(k)];

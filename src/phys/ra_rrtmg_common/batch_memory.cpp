@@ -33,13 +33,15 @@ struct Buffer {
     bytes = 0;
   }
 };
-Buffer dbuf, ibuf;
-int users = 0;
+// per host thread: the tiles of a tiled run (src/core/tiles.cpp) run their radiation at the same time
+thread_local Buffer dbuf, ibuf;
+thread_local int users = 0;
 
 struct SharedCopy {
   std::vector<unsigned char> host;
   void* dev;
   int refs;
+  int device;
 };
 std::vector<SharedCopy> copies;
 
@@ -91,15 +93,16 @@ int* RrtmgScratch::i() const {
 void* rrtmg_shared_dev_copy(const void* host, std::size_t bytes) {
   std::lock_guard<std::mutex> lk(mtx);
   const auto* h = static_cast<const unsigned char*>(host);
+  const int device = current_device();
   for (SharedCopy& c : copies) {
-    if (c.host.size() == bytes && std::memcmp(c.host.data(), h, bytes) == 0) {
+    if (c.device == device && c.host.size() == bytes && std::memcmp(c.host.data(), h, bytes) == 0) {
       ++c.refs;
       return c.dev;
     }
   }
   void* d = dev_alloc(bytes);
   copy_to_dev(d, host, bytes);
-  copies.push_back(SharedCopy{std::vector<unsigned char>(h, h + bytes), d, 1});
+  copies.push_back(SharedCopy{std::vector<unsigned char>(h, h + bytes), d, 1, device});
   return d;
 }
 

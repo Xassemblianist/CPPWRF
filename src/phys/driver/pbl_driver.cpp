@@ -416,6 +416,8 @@ void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
     else
       column_for(cols, KMynnPblRunner<mynnedmf::kMaxLevels>{k});
 #endif
+    // qke_adv is diffused and advected in this step (WRF: the scalar halo exchange after the PBL)
+    if (k.has_qke_adv) tile::exchange(s.q_1[s.P_QKE_ADV], s.q_2[s.P_QKE_ADV]);
   }
   if (o_.gwd_opt == 1) {
     using namespace wrfc;

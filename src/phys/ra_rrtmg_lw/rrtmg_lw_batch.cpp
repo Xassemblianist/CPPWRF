@@ -146,8 +146,10 @@ void RrtmgLwBatch::run(const RrtmgLwCallConfig& c, const LwBatchInput& in, const
   if (c.nlayers != lay_.nl) throw std::runtime_error("RrtmgLwBatch: nlayers differs from the constructor's");
   double* const d = work_->d();
   int* const ip = work_->i();
-  for (int col0 = 0; col0 < in.ncol; col0 += chunk_) {
-    const int n = std::min(chunk_, in.ncol - col0);
+  const tile::Whole whole;  // (chunk column, x) index space
+  const int col_end = in.col_end < 0 ? in.ncol : in.col_end;
+  for (int col0 = in.col_begin; col0 < col_end; col0 += chunk_) {
+    const int n = std::min(chunk_, col_end - col0);
     const LwChunk ch{lay_, d, ip, n, col0};
     parallel_for(lw_range(n, 1), KLwPrep{ch, c, in, d_tables_, d_consts_, out.o3});
     parallel_for(lw_range(n, c.nlayers), KLwSetcoef{ch, in.tsk, d_tables_});

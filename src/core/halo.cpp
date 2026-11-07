@@ -100,7 +100,17 @@ struct HaloMulti {
   }
 };
 
+// Tiles: first the values the neighbouring tiles own near this tile's patch (and the periodic wrap's sources), then
+// the boundary fill on the whole halo (the halo lines' index space is not (i, j)): the points this tile owns get the
+// values of a run without tiles.
+void exchange_bases(const void* const* b, int n) {
+  if (tile::ctx.on && tile::hooks.exchange) tile::hooks.exchange(b, n);
+}
+
 void fill_impl(real* p, const Layout& L, const Grid& g, bool ux, bool vy, Parity px, Parity py) {
+  const void* const base = p - L.offset;
+  exchange_bases(&base, 1);
+  const tile::Whole whole;
   const int nk = L.nz;
   {  // x direction over interior rows
     HaloLine h{p, 1, L.sj, L.sk, g.nx, ux, g.bc_x == BC::Periodic, px != Parity::Even, g.flat_x(), px == Parity::OddFace};
@@ -116,6 +126,13 @@ void fill_impl(real* p, const Layout& L, const Grid& g, bool ux, bool vy, Parity
 }  // namespace
 
 static void fill_many(const std::vector<HaloField>& v, const Grid& g) {
+  if (tile::ctx.on) {
+    std::vector<const void*> b;
+    b.reserve(v.size());
+    for (const HaloField& f : v) b.push_back(f.p - f.L.offset);
+    exchange_bases(b.data(), int(b.size()));
+  }
+  const tile::Whole whole;
   for (std::size_t s0 = 0; s0 < v.size(); s0 += kMaxFields) {
     const int nf = int(std::min<std::size_t>(kMaxFields, v.size() - s0));
     HaloMulti hx{}, hy{};

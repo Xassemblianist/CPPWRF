@@ -15,6 +15,7 @@ namespace cppwrf::phys {
 
 struct LwBatchInput {
   int ncol;
+  int col_begin = 0, col_end = -1;  // the columns computed: [col_begin, col_end) (-1: ncol); a tile's rows
   const double *tsk, *emiss, *xland, *xice, *snow, *xlat;       // [ncol]
   const double *dz8w;                                           // [nz*ncol] m
   const double *p8w, *t8w;                                      // [(nz+1)*ncol] Pa, K

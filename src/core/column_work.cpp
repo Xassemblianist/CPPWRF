@@ -14,9 +14,10 @@ namespace cppwrf {
 
 #if defined(CPPWRF_USE_CUDA)
 namespace {
+// per host thread: the tiles of a tiled run (src/core/tiles.cpp) launch their column physics at the same time
 std::mutex mtx;
-char* buf = nullptr;
-std::size_t buf_bytes = 0;
+thread_local char* buf = nullptr;
+thread_local std::size_t buf_bytes = 0;
 // grows the buffer to `bytes` (its contents are not kept: every kernel writes its arrays before it reads them)
 void grow(std::size_t bytes) {
   if (bytes <= buf_bytes) return;

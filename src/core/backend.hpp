@@ -9,6 +9,7 @@
 // Ranges are half-open. Kernels are trivially-copyable structs, no virtuals/exceptions.
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <type_traits>
 #include <typeinfo>
 #include <stdexcept>
@@ -254,6 +255,67 @@ namespace cppwrf {
 struct Range3D { int i0, i1, j0, j1, k0, k1; };
 struct Range2D { int i0, i1, j0, j1; };
 
+// ---- tiles (src/core/tiles.*): one domain as several tiles, each a host thread with its own copy of every field, its
+// own stream and device; halos are exchanged between the tiles' copies ----
+// Inside a time step of a tiled run (tile::ctx.on) every launch over (i, j) is clipped to the points the calling tile
+// owns: its patch, extended to the array's end at the domain's edges (so the edge tiles own the faces nx / ny and the
+// lateral halos). Launches whose index space is not (i, j) (halo lines, boundary rings, column batches) run on the
+// whole range under tile::Whole. Off (no tiles, and outside the step): every range as given.
+namespace tile {
+struct Ctx {
+  bool on = false;
+  int i0 = 0, i1 = 0, j0 = 0, j1 = 0;  // owned i0 <= i < i1, j0 <= j < j1 (INT_MIN / INT_MAX at the domain's edges)
+};
+inline thread_local Ctx ctx;
+inline thread_local bool in_step = false;  // this thread is inside a time step (tiles and the check's reference run)
+inline void clip(Range3D& r) {
+  if (!ctx.on) return;
+  r.i0 = r.i0 > ctx.i0 ? r.i0 : ctx.i0; r.i1 = r.i1 < ctx.i1 ? r.i1 : ctx.i1;
+  r.j0 = r.j0 > ctx.j0 ? r.j0 : ctx.j0; r.j1 = r.j1 < ctx.j1 ? r.j1 : ctx.j1;
+}
+inline void clip(Range2D& r) {
+  if (!ctx.on) return;
+  r.i0 = r.i0 > ctx.i0 ? r.i0 : ctx.i0; r.i1 = r.i1 < ctx.i1 ? r.i1 : ctx.i1;
+  r.j0 = r.j0 > ctx.j0 ? r.j0 : ctx.j0; r.j1 = r.j1 < ctx.j1 ? r.j1 : ctx.j1;
+}
+// The x (axis 0) or y (axis 1) faces of the cells of r the tile owns, up to the face after its last cell (the next
+// tile owns that face; this tile computes its flux again from the values around it): launch under Whole. No tiles:
+// the faces of r's cells.
+inline Range3D faces_of(Range3D cells, int axis) {
+  clip(cells);
+  if (axis == 0) ++cells.i1;
+  else ++cells.j1;
+  return cells;
+}
+// the launches in this scope run on their whole range (every tile computes every point; those it does not own are
+// overwritten by the next exchange)
+class Whole {
+ public:
+  Whole() : saved_(ctx.on) { ctx.on = false; }
+  ~Whole() { ctx.on = saved_; }
+  Whole(const Whole&) = delete;
+  Whole& operator=(const Whole&) = delete;
+
+ private:
+  bool saved_;
+};
+// set by the tile runner (src/core/tiles.cpp); null without tiles
+struct Hooks {
+  bool multi = false;                                   // several tiles in this process
+  void (*check)(const char* what) = nullptr;            // CPPWRF_TILE_CHECK: after every launch inside a step
+  double (*max)(double v) = nullptr;                    // the maximum over the tiles (collective)
+  void (*exchange)(const void* const* bases, int n) = nullptr;  // halo exchange of registered fields (collective)
+};
+inline Hooks hooks;
+// halo exchange of the fields whose allocations hold these pointers (views' data); see tile::exchange (field.hpp)
+inline void exchange_ptrs(std::initializer_list<const void*> ps) {
+  if (ctx.on && hooks.exchange) hooks.exchange(ps.begin(), int(ps.size()));
+}
+inline void after_launch(const char* what) {
+  if (hooks.check && in_step) hooks.check(what);
+}
+}  // namespace tile
+
 // ---- memory (implemented in backend.cpp) ----
 void* dev_alloc(std::size_t bytes);   // zero-initialised
 void dev_free(void* p);
@@ -261,6 +323,7 @@ void copy_to_host(void* dst, const void* src, std::size_t bytes);
 void copy_to_dev(void* dst, const void* src, std::size_t bytes);
 void copy_dev(void* dst, const void* src, std::size_t bytes);
 void dev_sync();
+int current_device();  // the calling thread's CUDA device (0 on the CPU)
 const char* backend_name();
 // CPPWRF_MEMINFO=1: prints the device memory in use and the stack (local memory) reserved per GPU thread
 void device_memory_report(const char* when);
@@ -349,14 +412,16 @@ template <class F, bool MAX> __global__ void kred(F f, Range3D r, double* part) 
 }
 }  // namespace detail
 
-template <class K> void parallel_for(const Range3D& r, const K& k) {
+template <class K> void parallel_for(const Range3D& r0, const K& k) {
   static_assert(__nv_is_extended_host_device_lambda_closure_type(K) || std::is_trivially_copyable_v<K>,
                 "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
+  Range3D r = r0;
+  tile::clip(r);
   if (r.i1 <= r.i0 || r.j1 <= r.j0 || r.k1 <= r.k0) return;
   const unsigned int by = (r.j1 - r.j0 == 1) ? 1u : 2u;
   dim3 b(64, by, 1);
   dim3 g((r.i1 - r.i0 + 63) / 64, (r.j1 - r.j0 + by - 1) / by, r.k1 - r.k0);
-  static const bool reserved = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k3d<K>), typeid(K).name()), true);
+  static thread_local const bool reserved = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k3d<K>), typeid(K).name()), true);
   (void)reserved;
   const bool kt = ktime::on();
   if (kt) ktime::begin();
@@ -364,14 +429,16 @@ template <class K> void parallel_for(const Range3D& r, const K& k) {
   cuda_check_launch("parallel_for");
   if (kt) ktime::end(typeid(K).name());
 }
-template <class K> void column_for(const Range2D& r, const K& k) {
+template <class K> void column_for(const Range2D& r0, const K& k) {
   static_assert(__nv_is_extended_host_device_lambda_closure_type(K) || std::is_trivially_copyable_v<K>,
                 "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
+  Range2D r = r0;
+  tile::clip(r);
   if (r.i1 <= r.i0 || r.j1 <= r.j0) return;
   static const ColumnBlock cb = column_block();
   dim3 b(cb.x, cb.y, 1);
   dim3 g((r.i1 - r.i0 + cb.x - 1) / cb.x, (r.j1 - r.j0 + cb.y - 1) / cb.y, 1);
-  static const bool reserved = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k2d<K>), typeid(K).name()), true);
+  static thread_local const bool reserved = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k2d<K>), typeid(K).name()), true);
   (void)reserved;
   const bool kt = ktime::on();
   if (kt) ktime::begin();
@@ -381,19 +448,34 @@ template <class K> void column_for(const Range2D& r, const K& k) {
 }
 #endif  // __CUDACC__
 #else   // ---- CPU / OpenMP ----
-template <class K> void parallel_for(const Range3D& r, const K& k) {
+template <class K> void parallel_for(const Range3D& r0, const K& k) {
   static_assert(std::is_trivially_copyable_v<K>, "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
+  Range3D r = r0;
+  tile::clip(r);
 #pragma omp parallel for collapse(2) schedule(static)
   for (int kk = r.k0; kk < r.k1; ++kk)
     for (int j = r.j0; j < r.j1; ++j)
 #pragma omp simd
       for (int i = r.i0; i < r.i1; ++i) k(i, j, kk);
+  tile::after_launch(typeid(K).name());
 }
-template <class K> void column_for(const Range2D& r, const K& k) {
+template <class K> void column_for(const Range2D& r0, const K& k) {
   static_assert(std::is_trivially_copyable_v<K>, "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
+  Range2D r = r0;
+  tile::clip(r);
 #pragma omp parallel for collapse(2) schedule(static)
   for (int j = r.j0; j < r.j1; ++j)
     for (int i = r.i0; i < r.i1; ++i) k(i, j);
+  tile::after_launch(typeid(K).name());
+}
+#endif
+
+#if !defined(CPPWRF_USE_CUDA) || defined(__CUDACC__)
+// column_for on the whole range also in a tiled step: launches whose index is not the point they write (the copies of
+// an edge row or column, (0, j) or (i, 0) for the points (nx, j), (i, ny)); every tile writes every point of the edge
+template <class K> void column_for_whole(const Range2D& r, const K& k) {
+  const tile::Whole whole;
+  column_for(r, k);
 }
 #endif
 
@@ -493,11 +575,13 @@ template <class K, int N = 8> class LaunchBatch {
 #if defined(CPPWRF_USE_CUDA)
   static_assert(sizeof(detail::BatchArgs<K, N>) <= 32000, "kernel parameters too large: use a smaller batch");
   ~LaunchBatch() { run(); }
-  void add(const Range3D& r, const K& k) {
+  void add(const Range3D& r0, const K& k) {
     if constexpr (!Fusable<K>) {
-      parallel_for(r, k);
+      parallel_for(r0, k);
       return;
     }
+    Range3D r = r0;
+    tile::clip(r);
     if (detail::range_empty(r)) return;
     a_.k[a_.n] = k;
     a_.r[a_.n] = r;
@@ -539,7 +623,8 @@ template <class... K> void parallel_fused(const Part<K>&... parts) {
   static_assert(sizeof(Args) <= 32000, "kernel parameters too large");
   Args a{};
   detail::LaunchShape s;
-  detail::fused_fill(a, s, parts...);
+  const auto clipped = [](auto p) { tile::clip(p.r); return p; };
+  detail::fused_fill(a, s, clipped(parts)...);
   if (s.nz == 0) return;
   const unsigned int by = s.by();
   const dim3 b(64, by, 1), g(s.gx, (s.nj + by - 1) / by, s.nz);
@@ -646,7 +731,27 @@ class Reducer {
   int max_k_;
   double* dpart_ = nullptr;  // device partials (CUDA) or unused
   std::vector<double> hpart_;
-  template <class F, bool MAX> double run(const Range3D& r, const F& f) {
+  // inside a tiled step: the maximum over the calling tile's points, then over the tiles (every tile gets the
+  // maximum of the whole range; a maximum does not depend on the order). A sum needs the whole domain: the tile
+  // runner gathers the fields and sums outside the step.
+  template <class F, bool MAX> double run(const Range3D& r0, const F& f) {
+    if (tile::ctx.on) {
+      if constexpr (!MAX) throw std::logic_error("Reducer::sum inside a tiled time step");
+      Range3D r = r0;
+      tile::clip(r);
+      const tile::Ctx saved = tile::ctx;
+      tile::ctx.on = false;
+      double v = -1e308;
+      try {
+        v = run<F, MAX>(r, f);
+      } catch (...) {
+        tile::ctx = saved;
+        throw;
+      }
+      tile::ctx = saved;
+      return tile::hooks.max ? tile::hooks.max(v) : v;
+    }
+    const Range3D& r = r0;
     int nk = r.k1 - r.k0;
     if (nk <= 0) return MAX ? -1e308 : 0.0;
     if (nk > max_k_) throw std::runtime_error("Reducer: k range exceeds max_k");

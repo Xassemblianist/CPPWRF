@@ -122,7 +122,10 @@ inline std::size_t column_for_threads(int ni, int nj) {
 // f(chunk, work) for chunks of rows of r whose columns' work arrays (bytes_per_col) fit the buffer (one chunk when
 // it holds every column); work is the buffer of column_for(chunk, ...)'s threads
 template <class F>
-void column_work_chunks(const Range2D& r, std::size_t bytes_per_col, F f) {
+void column_work_chunks(const Range2D& r0, std::size_t bytes_per_col, F f) {
+  // a tile's own columns: the chunks' column and level kernels map (i, j) to the same work slots (ColumnSlots)
+  Range2D r = r0;
+  tile::clip(r);
   if (r.i1 <= r.i0 || r.j1 <= r.j0) return;
   const int ni = r.i1 - r.i0, nj = r.j1 - r.j0;
   const std::size_t bpc = detail::column_work_bpc(bytes_per_col > 0 ? bytes_per_col : 1);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #ifdef CPPWRF_HAVE_NETCDF
 #include "cases/wrf_history.hpp"
+#include "core/tiles.hpp"
 #include "core/strings.hpp"
 
 #include <netcdf.h>
@@ -396,6 +397,7 @@ void WrfHistory::first_rk_prep() {
   pp.use_theta_m = m_.st->P_QV >= 0 ? 1 : 0;
   pp.mut_from_mu = true;
   phys::driver::run_phy_prep(*m_.st, *m_.base, *prep_, pp);
+  tile::gather(prep_->p_hyd);  // inside a tiled step: every tile's points
   std::vector<double> ph;
   if (copy_field(prep_->p_hyd, {std::size_t(m_.g.nz), std::size_t(m_.g.ny), std::size_t(m_.g.nx)}, ph))
     p_hyd_snap_[n] = std::move(ph);

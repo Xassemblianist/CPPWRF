@@ -313,6 +313,10 @@ void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const 
   const Grid& g = g_;
   const VCoef c = VCoef::from(b);
   const Range3D mr = g.mass_cells();
+  // the x, y faces and the w levels of the cells (a tile: of its cells, faces_of)
+  const Range3D xf = tile::faces_of(mr, 0), yf = tile::faces_of(mr, 1);
+  Range3D zf{0, g.nx, 0, g.ny, 0, g.nz + 1};
+  tile::clip(zf);
   const bool do_y = !g.two_d();
   const real hup = p_.h_adv_order == 5 ? real(1) : real(0), vup = p_.v_adv_order == 3 ? real(1) : real(0);
   // debug (CPPWRF_VM_DUMP): the qv advection tendency * msfty
@@ -333,15 +337,16 @@ void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const 
     if (!pd) {
 #if defined(CPPWRF_DOUBLE)
       {  // the face fluxes once (into the PD work fields, unused here)
+        const tile::Whole whole;  // the ranges xf, yf, zf of the tile's cells
         LaunchBatch<KFaceX, kBatch> fx;
         LaunchBatch<KFaceY, kBatch> fy;
         LaunchBatch<KFaceZ, kBatch> fz;
         for (int m = 0; m < nb; ++m) {
           Work& w = *work_[m];
           const Fluxes fl = fluxes(species(m));
-          fx.add(Range3D{0, g.nx + 1, 0, g.ny, 0, g.nz}, KFaceX{fl, w.dhx.view()});
-          if (do_y) fy.add(Range3D{0, g.nx, 0, g.ny + 1, 0, g.nz}, KFaceY{fl, w.dhy.view()});
-          fz.add(Range3D{0, g.nx, 0, g.ny, 0, g.nz + 1}, KFaceZ{fl, w.dhz.view()});
+          fx.add(xf, KFaceX{fl, w.dhx.view()});
+          if (do_y) fy.add(yf, KFaceY{fl, w.dhy.view()});
+          fz.add(zf, KFaceZ{fl, w.dhz.view()});
         }
         fx.run();
         fy.run();
@@ -377,15 +382,16 @@ void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const 
       pre.run();
       fill_halos(q1s, g);
       {
+        const tile::Whole whole;  // the ranges xf, yf, zf of the tile's cells
         LaunchBatch<KFacePDX, kBatch> fx;
         LaunchBatch<KFacePDY, kBatch> fy;
         LaunchBatch<KFacePDZ, kBatch> fz;
         for (int m = 0; m < nb; ++m) {
           Work& w = *work_[m];
           const Fluxes fl = fluxes(species(m));
-          fx.add(Range3D{0, g.nx + 1, 0, g.ny, 0, g.nz}, KFacePDX{fl, w.dhx.view(), w.lox.view()});
-          if (do_y) fy.add(Range3D{0, g.nx, 0, g.ny + 1, 0, g.nz}, KFacePDY{fl, w.dhy.view(), w.loy.view()});
-          fz.add(Range3D{0, g.nx, 0, g.ny, 0, g.nz + 1}, KFacePDZ{fl, w.dhz.view(), w.loz.view()});
+          fx.add(xf, KFacePDX{fl, w.dhx.view(), w.lox.view()});
+          if (do_y) fy.add(yf, KFacePDY{fl, w.dhy.view(), w.loy.view()});
+          fz.add(zf, KFacePDZ{fl, w.dhz.view(), w.loz.view()});
         }
         fx.run();
         fy.run();

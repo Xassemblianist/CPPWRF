@@ -13,7 +13,7 @@ void julgmt(const std::string& date, int& julyr, int& julday, double& gmt) {
             mi = std::atoi(date.substr(14, 2).c_str()), sec = std::atoi(date.substr(17, 2).c_str());
   static const int mdays[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
   // DATA MMD (implicitly SAVE): MMD(2) = 29 from the first leap-year date of the program on
-  static bool feb29 = false;
+  static thread_local bool feb29 = false;  // per host thread: each tile of a tiled run is one program
   if ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) feb29 = true;
   julday = dd;
   for (int k = 1; k < m; ++k) julday += mdays[k - 1] + (k == 2 && feb29 ? 1 : 0);

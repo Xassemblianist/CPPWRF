@@ -71,7 +71,8 @@ void cuda_check_launch(const char* where) {
 #endif
 }
 void* cuda_stream_raw() {
-  static cudaStream_t s = [] {
+  // one per host thread: the tiles of a tiled run (src/core/tiles.cpp) each launch on their own stream
+  thread_local cudaStream_t s = [] {
     cudaStream_t t = nullptr;
     ck(cudaStreamCreate(&t), "cudaStreamCreate");  // blocking: orders with any work on the legacy stream 0
     return t;
@@ -88,6 +89,7 @@ int graphs_mode() {  // 0 off, 1 on, 2 on with the counts at exit
     return 0;  // a device synchronisation after every launch cannot be captured
 #endif
     if (ktime::on()) return 0;
+    if (tile::hooks.multi) return 0;  // tiles: the halo exchanges synchronise the tiles' streams from the host
     const char* e = std::getenv("CPPWRF_GRAPHS");
     if (!e || !*e) return 1;
     if (std::strcmp(e, "stats") == 0) return 2;
@@ -200,8 +202,8 @@ struct Graphs {
     in_step = false;
   }
 };
-Graphs& graphs() {  // never destroyed: device memory may be freed by static objects at exit
-  static Graphs* gs = new Graphs;
+Graphs& graphs() {  // never destroyed: device memory may be freed by static objects at exit; one per host thread
+  thread_local Graphs* gs = new Graphs;
   return *gs;
 }
 struct GraphStats {
@@ -264,8 +266,11 @@ void reserve_local_memory(const void* kernel, const char* kernel_type) {
   cudaFuncAttributes a{};
   ck(cudaFuncGetAttributes(&a, kernel), "cudaFuncGetAttributes");
   static std::mutex m;
-  static std::size_t reserved = 0;  // the largest frame of the process's launches (one device)
+  static std::map<int, std::size_t> reserved_on;  // per device: the largest frame of the process's launches
+  int cur = 0;
+  ck(cudaGetDevice(&cur), "cudaGetDevice");
   std::lock_guard<std::mutex> lk(m);
+  std::size_t& reserved = reserved_on[cur];
   if (a.localSizeBytes <= reserved) return;
   std::size_t limit = 0;
   ck(cudaDeviceGetLimit(&limit, cudaLimitStackSize), "cudaDeviceGetLimit");
@@ -348,6 +353,11 @@ void dev_sync() {
   ck(cudaDeviceSynchronize(), "sync");
   sync_end();
 }
+int current_device() {
+  int d = 0;
+  ck(cudaGetDevice(&d), "cudaGetDevice");
+  return d;
+}
 const char* backend_name() { return "cuda"; }
 void device_memory_report(const char* when) {
   static const bool on = [] { const char* e = std::getenv("CPPWRF_MEMINFO"); return e && *e && *e != '0'; }();
@@ -403,6 +413,7 @@ void copy_to_host(void* d, const void* s, std::size_t n) { par_copy(d, s, n); }
 void copy_to_dev(void* d, const void* s, std::size_t n) { par_copy(d, s, n); }
 void copy_dev(void* d, const void* s, std::size_t n) { par_copy(d, s, n); }
 void dev_sync() {}
+int current_device() { return 0; }
 const char* backend_name() { return "cpu"; }
 void device_memory_report(const char*) {}
 StepScope::StepScope(const void*) {}

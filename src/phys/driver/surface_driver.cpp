@@ -2,6 +2,7 @@
 // PhysicsSuite::surface_driver (WRF phys/module_surface_driver.F)
 #include "phys/driver/suite.hpp"
 #include "phys/sf_mynn/mynnsfc.hpp"
+#include "core/tiles.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -1285,7 +1286,8 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
         std::fclose(fp);
       }
       noah::run_noah(nk, cols);
-      column_for(Range2D{0, 1, cols.j0, cols.j1}, KNoahRcLast{n_active.cview(), n_rclast.view(), cols.i0, cols.i1});
+      tile::gather(n_active, n_rc);  // tiles: the glacial points' RS reads the points before them in WRF's order
+      column_for_whole(Range2D{0, 1, cols.j0, cols.j1}, KNoahRcLast{n_active.cview(), n_rclast.view(), cols.i0, cols.i1});
       column_for(cols, KNoahRs{n_rc.cview(), n_active.cview(), n_ice.cview(), n_rclast.cview(), rs.view(), cols.i0,
                                cols.j0});
       if (do_ndump) {

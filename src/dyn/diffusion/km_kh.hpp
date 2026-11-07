@@ -601,7 +601,7 @@ inline void calculate_km_kh(const DiffusionParams& p,
                            xkmh, xkmv, xkhh, xkhv, dx, dy, p.c_s, p.prandtl, p.diff_opt, nz});
 
     if (p.specified) {
-      column_for(Range2D{0, 1, 0, ny}, [=] CPPWRF_HD (int, int j) {
+      column_for_whole(Range2D{0, 1, 0, ny}, [=] CPPWRF_HD (int, int j) {
         for (int k = 0; k < nz; ++k) {
           xkmh(0, j, k) = real(0);
           xkmh(nx - 1, j, k) = real(0);
@@ -613,7 +613,7 @@ inline void calculate_km_kh(const DiffusionParams& p,
           xkhv(nx - 1, j, k) = real(0);
         }
       });
-      column_for(Range2D{0, nx, 0, 1}, [=] CPPWRF_HD (int i, int) {
+      column_for_whole(Range2D{0, nx, 0, 1}, [=] CPPWRF_HD (int i, int) {
         for (int k = 0; k < nz; ++k) {
           xkmh(i, 0, k) = real(0);
           xkmh(i, ny - 1, k) = real(0);

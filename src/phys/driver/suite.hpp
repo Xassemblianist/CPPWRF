@@ -53,6 +53,7 @@ class IntField2 {
   const std::string& name() const { return name_; }
   const Layout& layout() const { return L_; }
   int* data() const { return buf_ + L_.offset; }
+  const void* base() const { return buf_; }
   View2<int> view() const { return {data(), int(L_.sj)}; }
   View2<const int> cview() const { return {data(), int(L_.sj)}; }
   void upload(const std::vector<int>& h);   // whole buffer (layout total)

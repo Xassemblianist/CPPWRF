@@ -26,8 +26,13 @@ namespace cppwrf::phys::driver {
 // ------------------------------------------------------------------ IntField2
 IntField2::IntField2(const Grid& g, std::string name)
     : name_(std::move(name)), L_(Layout::make(g, Stagger::M, 2)),
-      buf_(static_cast<int*>(dev_alloc(L_.total * sizeof(int)))) {}
-IntField2::~IntField2() { dev_free(buf_); }
+      buf_(static_cast<int*>(dev_alloc(L_.total * sizeof(int)))) {
+  if (tile::track) tile::track->add(buf_, L_, int(sizeof(int)), name_);
+}
+IntField2::~IntField2() {
+  if (buf_ && tile::track) tile::track->remove(buf_);
+  dev_free(buf_);
+}
 IntField2::IntField2(IntField2&& o) noexcept : name_(std::move(o.name_)), L_(o.L_), buf_(o.buf_) { o.buf_ = nullptr; }
 IntField2& IntField2::operator=(IntField2&& o) noexcept {
   std::swap(name_, o.name_);

@@ -699,7 +699,10 @@ void LargeStep::prep(State& s, const BaseState& b) const {
   // mu_2: WRF does not refresh its halo before rk_step_prep (calc_ww_cp reads it); the halo column
   // follows small_step_finish there, and the boundary copy only after small_step_prep
   if (!g.specified()) fill_halos({s.u_2, s.v_2, s.w_2, s.t_2, s.ph_2, s.p, s.al, s.mu_2}, g);
-  else fill_halos({&s.u_2, &s.v_2, &s.w_2, &s.t_2, &s.ph_2, &s.p, &s.al}, g);
+  else {
+    fill_halos({&s.u_2, &s.v_2, &s.w_2, &s.t_2, &s.ph_2, &s.p, &s.al}, g);
+    tile::exchange(s.mu_2);  // tiles: the neighbours' points (a run without tiles reads them as they are)
+  }
   VCoef c = VCoef::from(b);
   parallel_for(Range3D{0, g.nx + 1, 0, nyv, 0, 1},
                KMu{s.mu_2.cview(), b.mub.view(), s.mut.view(), s.muu.view(), s.muv.view(), g.nx, g.ny, nyv,
@@ -769,8 +772,12 @@ namespace {
 // (i0 .. i1), fy over the y faces (j0 .. j1), fz over zr
 template <class K>
 void tend_with_faces(const LargeStep::FaceScratch& f, const Range3D& r, const Range3D& zr, bool do_y, K k) {
-  parallel_for(Range3D{r.i0, r.i1 + 1, r.j0, r.j1, r.k0, r.k1}, KFace<K, 0>{k, f.v[0]});
-  if (do_y) parallel_for(Range3D{r.i0, r.i1, r.j0, r.j1 + 1, r.k0, r.k1}, KFace<K, 1>{k, f.v[1]});
+  {
+    const Range3D xf = tile::faces_of(r, 0), yf = tile::faces_of(r, 1);
+    const tile::Whole faces;  // a tile: the faces of its cells
+    parallel_for(xf, KFace<K, 0>{k, f.v[0]});
+    if (do_y) parallel_for(yf, KFace<K, 1>{k, f.v[1]});
+  }
   parallel_for(zr, KFace<K, 2>{k, f.v[2]});
   k.fxs = C3{f.v[0].p, f.v[0].sj, f.v[0].sk};
   k.fys = C3{f.v[1].p, f.v[1].sj, f.v[1].sk};

@@ -53,11 +53,24 @@ struct Layout {
   std::size_t index(int i, int j, int k) const { return std::size_t(offset + i * si + j * sj + k * sk); }
 };
 
+namespace tile {
+// The registry of a tile thread's fields (src/core/tiles.cpp): every field the thread allocates, in allocation order,
+// so that the n-th field of one tile is the n-th field of every other tile (they run the same code). Null without tiles.
+struct Track {
+  void (*add)(const void* base, const Layout& L, int esz, const std::string& name);
+  void (*remove)(const void* base);
+};
+inline thread_local const Track* track = nullptr;
+}  // namespace tile
+
 class Buffer {
  public:
   Buffer() = default;
   explicit Buffer(std::size_t n) : n_(n), p_(static_cast<real*>(dev_alloc(n * sizeof(real)))) {}
-  ~Buffer() { dev_free(p_); }
+  ~Buffer() {
+    if (p_ && tile::track) tile::track->remove(p_);
+    dev_free(p_);
+  }
   Buffer(Buffer&& o) noexcept : n_(o.n_), p_(o.p_) { o.p_ = nullptr; o.n_ = 0; }
   Buffer& operator=(Buffer&& o) noexcept { std::swap(n_, o.n_); std::swap(p_, o.p_); return *this; }
   Buffer(const Buffer&) = delete;
@@ -75,8 +88,11 @@ template <int R> class FieldT {
  public:
   FieldT() = default;
   FieldT(const Grid& g, Stagger s, std::string name)
-      : name_(std::move(name)), st_(s), L_(Layout::make(g, s, R)), buf_(L_.total) {}
+      : name_(std::move(name)), st_(s), L_(Layout::make(g, s, R)), buf_(L_.total) {
+    if (tile::track) tile::track->add(buf_.get(), L_, int(sizeof(real)), name_);
+  }
   const std::string& name() const { return name_; }
+  const void* base() const { return buf_.get(); }  // the allocation (halo exchange between tiles)
   Stagger stagger() const { return st_; }
   const Layout& layout() const { return L_; }
   real* data() const { return buf_.get() + L_.offset; }  // element (0,0,0)
@@ -121,8 +137,11 @@ template <int R> class BaseFieldT {
  public:
   BaseFieldT() = default;
   BaseFieldT(const Grid& g, Stagger s, std::string name, bool uniform)
-      : name_(std::move(name)), st_(s), uniform_(uniform), L_(Layout::make(g, s, R, uniform)), buf_(L_.total) {}
+      : name_(std::move(name)), st_(s), uniform_(uniform), L_(Layout::make(g, s, R, uniform)), buf_(L_.total) {
+    if (tile::track && !uniform_) tile::track->add(buf_.get(), L_, int(sizeof(real)), name_);
+  }
   bool uniform() const { return uniform_; }
+  const void* base() const { return buf_.get(); }
   const Layout& layout() const { return L_; }
   real* data() const { return buf_.get() + L_.offset; }
   auto view() const {
@@ -182,5 +201,24 @@ class Array1 {
   std::vector<double> h_;
   Buffer buf_;
 };
+
+namespace tile {
+// Halo exchange of fields between the tiles inside a tiled time step (no-op otherwise): every tile's copy of each field
+// gets the values its neighbours own within Grid::halo points of its own patch (and the periodic wrap's sources).
+// Collective: every tile calls it with the same fields.
+template <class... F>
+void exchange(const F&... f) {
+  if (!ctx.on || !hooks.exchange) return;
+  const void* const b[] = {f.base()...};
+  hooks.exchange(b, int(sizeof...(F)));
+}
+template <class F>
+void exchange(const std::vector<F>& fs) {
+  if (!ctx.on || !hooks.exchange || fs.empty()) return;
+  std::vector<const void*> b;
+  for (const F& f : fs) b.push_back(f.base());
+  hooks.exchange(b.data(), int(b.size()));
+}
+}  // namespace tile
 
 }  // namespace cppwrf

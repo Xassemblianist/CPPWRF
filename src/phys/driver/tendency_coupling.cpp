@@ -174,8 +174,11 @@ void update_phy_ten(dyn::Tendencies& t, PhysicsTendencies& pt, const dyn::State&
                     const CouplingFlags& f) {
   const Range3D ar = a2a_range(g);
   // periodic: i-1 / j-1 neighbours of the momentum tendencies (before the additions, which only read them)
+  // (tiles: the neighbours' points also with specified boundaries, as WRF's HALO_EM_PHYS_PBL / _CU)
   if (f.pbl && !g.specified()) fill_halos({&pt.rublten, &pt.rvblten}, g);
+  else if (f.pbl) tile::exchange(pt.rublten, pt.rvblten);
   if ((f.cu_physics == 16 || f.cu_physics == 6) && !g.specified()) fill_halos({&pt.rucuten, &pt.rvcuten}, g);
+  else if (f.cu_physics == 16 || f.cu_physics == 6) tile::exchange(pt.rucuten, pt.rvcuten);
   AddLaunches add;
   if (f.radiation) add.add(ar, KAdd::A2A, t.t_tendf, pt.rthraten);  // phy_ra_ten
   if (f.pbl) {  // phy_bl_ten, YSUSCHEME

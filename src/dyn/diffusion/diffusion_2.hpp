@@ -616,6 +616,8 @@ inline void horizontal_diffusion_2(const DiffusionParams& p,
   int j23_e = bdy_ye ? ny : ny + 1;
   parallel_for(Range3D{i23_s, i23_e, j23_s, j23_e, 0, nz + 1},
                KCalTitau23{rho, xkmv, defor23, fnm, fnp, titau23, nz});
+  // tiles: the stresses the neighbours computed (the tendencies below read them around each point)
+  tile::exchange_ptrs({titau11.p, titau22.p, titau33.p, titau12.p, titau13.p, titau23.p});
 
   // 2. Horizontal diffusion of U
   int iu_s = (!p.periodic_x && bdy_xs) ? 1 : 0;
@@ -703,6 +705,7 @@ inline void cal_titau_vert(View3<const real> rho,
   int j23_e = bdy_ye ? ny : ny + 1;
   parallel_for(Range3D{i23_s, i23_e, j23_s, j23_e, 0, nz + 1},
                KCalTitau23{rho, xkmv, defor23, fnm, fnp, titau23, nz});
+  tile::exchange_ptrs({titau33.p, titau13.p, titau23.p});  // tiles: the neighbours' stresses
 }
 
 inline void vertical_diffusion_2(const DiffusionParams& p,

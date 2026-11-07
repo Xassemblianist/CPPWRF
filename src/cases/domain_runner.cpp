@@ -885,6 +885,15 @@ void DomainRunner::read_aux4(long s) {
 }
 #endif
 
+bool DomainRunner::reads_state(long n) const {
+  if (m_.adapt || n == m_.nsteps || (nonfinite_every_step_ && !nonfinite_seen_)) return true;
+  if (n % diag_iv_ == 0 || n % out_iv_ == 0 || hist_due(n) || aux3_due(n)) return true;
+#ifdef CPPWRF_HAVE_NETCDF
+  if (rst_iv_s_ > 0 && rst_due(n)) return true;
+#endif
+  return false;
+}
+
 bool DomainRunner::after_step(long n) {
   step_time += std::chrono::duration<double>(std::chrono::steady_clock::now() - step_start_).count();
   if (m_.adapt) m_.advance_clock();

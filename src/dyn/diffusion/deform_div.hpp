@@ -281,34 +281,35 @@ inline void cal_deform_and_div(const DiffusionParams& p,
                        fnm, fnp, dn, dnw, cf1, cf2, cf3, defor12,
                        rdx, rdy, nx, ny, nz, p.periodic_x, p.periodic_y});
 
+  if (p.periodic_x || p.periodic_y) tile::exchange_ptrs({defor12.p});  // tiles: the wrap's sources
   if (p.periodic_x) {
-    column_for(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
+    column_for_whole(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
       for (int k = 0; k < nz; ++k) defor12(nx, j, k) = defor12(0, j, k);
     });
   } else if (bxs) {
-    column_for(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
+    column_for_whole(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
       for (int k = 0; k < nz; ++k) defor12(0, j, k) = defor12(1, j, k);
     });
   }
 
   if (p.periodic_y) {
-    column_for(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
+    column_for_whole(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
       for (int k = 0; k < nz; ++k) defor12(i, ny, k) = defor12(i, 0, k);
     });
   } else if (bys) {
-    column_for(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
+    column_for_whole(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
       for (int k = 0; k < nz; ++k) defor12(i, 0, k) = defor12(i, 1, k);
     });
   }
 
   if (bxe) {
-    column_for(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
+    column_for_whole(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
       for (int k = 0; k < nz; ++k) defor12(nx, j, k) = defor12(nx - 1, j, k);
     });
   }
 
   if (bye) {
-    column_for(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
+    column_for_whole(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
       for (int k = 0; k < nz; ++k) defor12(i, ny, k) = defor12(i, ny - 1, k);
     });
   }
@@ -324,7 +325,8 @@ inline void cal_deform_and_div(const DiffusionParams& p,
              KDeform13{u, w, zx, rdz, msfux, msfuy, msfty, u_base, defor13, rdx, nx, nz, p.periodic_x, p.mix_full_fields});
 
   if (p.periodic_x) {
-    column_for(Range2D{0, 1, 0, ny}, [=] CPPWRF_HD (int, int j) {
+    tile::exchange_ptrs({defor13.p});  // tiles: the wrap's sources
+    column_for_whole(Range2D{0, 1, 0, ny}, [=] CPPWRF_HD (int, int j) {
       for (int k = 0; k <= nz; ++k) defor13(nx, j, k) = defor13(0, j, k);
     });
   }
@@ -340,7 +342,8 @@ inline void cal_deform_and_div(const DiffusionParams& p,
              KDeform23{v, w, zy, rdz, msfvx, msfvy, msftx, v_base, defor23, rdy, ny, nz, p.periodic_y, p.mix_full_fields});
 
   if (p.periodic_y) {
-    column_for(Range2D{0, nx, 0, 1}, [=] CPPWRF_HD (int i, int) {
+    tile::exchange_ptrs({defor23.p});  // tiles: the wrap's sources
+    column_for_whole(Range2D{0, nx, 0, 1}, [=] CPPWRF_HD (int i, int) {
       for (int k = 0; k <= nz; ++k) defor23(i, ny, k) = defor23(i, 0, k);
     });
   }
@@ -350,33 +353,35 @@ inline void cal_deform_and_div(const DiffusionParams& p,
   // from the next ones, in the order xs, ys, xe, ye
   const bool exe = !p.periodic_x, eye = !p.periodic_y;
   if (bxs)
-    column_for(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
+    column_for_whole(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
       for (int k = 0; k <= nz; ++k) {
         defor13(0, j, k) = defor13(1, j, k);
         defor23(0, j, k) = defor23(1, j, k);
       }
     });
   if (bys)
-    column_for(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
+    column_for_whole(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
       for (int k = 0; k <= nz; ++k) {
         defor13(i, 0, k) = defor13(i, 1, k);
         defor23(i, 0, k) = defor23(i, 1, k);
       }
     });
   if (exe)
-    column_for(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
+    column_for_whole(Range2D{0, 1, 0, ny + 1}, [=] CPPWRF_HD (int, int j) {
       for (int k = 0; k <= nz; ++k) {
         defor13(nx, j, k) = defor13(nx - 1, j, k);
         defor23(nx, j, k) = defor23(nx - 1, j, k);
       }
     });
   if (eye)
-    column_for(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
+    column_for_whole(Range2D{0, nx + 1, 0, 1}, [=] CPPWRF_HD (int i, int) {
       for (int k = 0; k <= nz; ++k) {
         defor13(i, ny, k) = defor13(i, ny - 1, k);
         defor23(i, ny, k) = defor23(i, ny - 1, k);
       }
     });
+  // tiles: the neighbours' deformations and divergence (WRF's HALO_EM_TKE_D before the eddy viscosities)
+  tile::exchange_ptrs({defor11.p, defor22.p, defor33.p, defor12.p, defor13.p, defor23.p, div.p});
 }
 
 }  // namespace cppwrf::dyn::diffusion
