@@ -21,9 +21,10 @@ for n in 2 4; do
     "$BUILD_DIR/cppwrf" "$REPO_ROOT/configs/real_p7_r8.ini" --set run.run_time=$((60 * n)) --set output.dir="$WORK/out" > run$n.log 2>&1
   r=$(./harness nt$n.bin | tail -1)
   echo "step $n: $r"
-  # "columns N active A mismatching M raining R": columns > 0, active > 0, none mismatching
-  echo "$r" | awk '$1 == "columns" && $3 == "active" && $5 == "mismatching" {ok = $2 > 0 && $4 > 0 && $6 == 0} END {exit !ok}' ||
-    { echo "step $n: FAIL (no columns, no active column or mismatching columns)"; fail=1; }
+  # "columns N active A mismatching M raining R": columns > 0, active > 0, none mismatching, some raining (t or qv
+  # change in every column, so only rain shows that convection ran)
+  echo "$r" | awk '$1 == "columns" && $3 == "active" && $5 == "mismatching" && $7 == "raining" {ok = $2 > 0 && $4 > 0 && $6 == 0 && $8 > 0} END {exit !ok}' ||
+    { echo "step $n: FAIL (no columns, no active or raining column, or mismatching columns)"; fail=1; }
 done
 cd /; rm -rf "$WORK"
 [ $fail = 0 ] && echo "PASS" || { echo "FAIL"; exit 1; }
