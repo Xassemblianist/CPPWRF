@@ -7,7 +7,7 @@ from cases.common import WR  # noqa: F401
 
 _D = "2026-10-12_00:00:00"
 _T = {"U": 0.0, "V": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0, "HFX_FDDA": 0.0}
-_T9 = {"U": 0.0, "V": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0, "HFX_FDDA": 0.0, "REGIME": 0.0}
+_T9 = _T  # REGIME is in the restart stream only
 _TN = {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "HFX_FDDA")}
 # the [fdda] options of FD2 ... FD7 (the namelists of their WRF runs: tools/colab/colab_wrfref.sh refs, B03 report)
 _FD2 = ["fdda.if_no_pbl_nudging_uv=1", "fdda.if_no_pbl_nudging_t=1", "fdda.if_no_pbl_nudging_q=1", "fdda.if_zfac_uv=1",

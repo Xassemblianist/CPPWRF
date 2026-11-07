@@ -178,7 +178,7 @@ enforce them:
 ## 4. From WRF Inputs to wrfout
 
 A CPPWRF real-data run needs what wrf.exe needs: `namelist.input`, `wrfinput_d0N` and `wrfbdy_d01` (from WRF's
-real.exe or from `cppwrf_real`), `wrflowinp_d0N` with `sst_update = 1`, and the table files of WRF's `run/`
+real.exe or from `cppwrf_real`), `wrflowinp_d0N` with `sst_update = 1`, `wrffdda_d0N` with `grid_fdda = 1`, and the table files of WRF's `run/`
 directory. The RRTMG tables come with CPPWRF (`data/rrtmg`); everything else is read from WRF's `run/` directory, so
 download WRF v4.8.0's source (WRF itself does not need to be built).
 
@@ -344,6 +344,10 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `iofields_filename` | the output streams as in WRF; lines that change an input stream (wrfinput, wrflowinp) are errors |
 | `output_diagnostics`, `auxhist3_interval`, `io_form_auxhist3`, `frames_per_auxhist3`, `auxhist3_outname` | 0, 1 (with column physics, not with the adaptive time step) |
 | `auxinput4_interval`, `io_form_auxinput4`, `auxinput4_inname` | with `sst_update = 1` (wrflowinp) |
+| **&fdda** | |
+| `grid_fdda` | 0, 1 (analysis nudging toward `wrffdda_d0N`, per domain; real-data runs with column physics, not with the adaptive time step) |
+| `gfdda_inname`, `gfdda_interval_m`, `gfdda_end_h`, `io_form_gfdda` | the file name (`wrffdda_d<domain>` is real.exe's; WRF's default is `gfdda_d<domain>`), minutes between the analyses (> 0), the end of the nudging in hours; 2. WRF stops with `gfdda_begin_*`, `gfdda_end_y/d/m/s` or `gfdda_interval_y/d/h/s`, and so does the translation |
+| `guv`, `gt`, `gq`, `fgdt`, `fgdtzero`, `if_no_pbl_nudging_uv/t/q`, `if_zfac_uv/t/q`, `k_zfac_uv/t/q`, `if_ramping`, `dtramp_min` | any (per domain but `if_ramping`, `dtramp_min`); `guv`, `gt`, `gq` >= 0 |
 | **&domains** | |
 | `time_step`, `time_step_fract_num/den` | any stable step |
 | `max_dom`, `e_we`, `e_sn`, `e_vert`, `dx`, `dy`, `parent_id`, `i_parent_start`, `j_parent_start`, `parent_grid_ratio`, `parent_time_step_ratio` | static nests (section 6) |
@@ -407,8 +411,8 @@ an error, never silently:
 | the Dudhia shortwave with Grell-Freitas and `cu_rad_feedback` | wrf.exe writes NaN cloud fractions there |
 | `ra_lw_physics` / `ra_sw_physics` other than 0, 1, 4; a longwave scheme without a shortwave scheme or the reverse; `aer_opt` != 0 | not ported; wrf.exe stops |
 | `nwp_diagnostics`, `do_avgflx_em`, `do_avgflx_cugd` and the other diagnostic packages | not ported (diagnostic_output_nwp, cal_helicity, the averaged fluxes) |
-| `iau`, `dyn_lightning_option`, `topo_wind`, `slope_rad`, `topo_shading`, `swint_opt`, `seaice_thickness_opt`, `seaice_snowdepth_opt`, `ra_call_offset`, `shalwater_z0`, `scm_force_flux`, FDDA (`grid_fdda`, `obs_nudge_opt`), stochastic physics, chemistry | not ported |
-| the adaptive time step with nests, `sst_update`, ideal cases or `output_diagnostics` | not ported |
+| `iau`, `dyn_lightning_option`, `topo_wind`, `slope_rad`, `topo_shading`, `swint_opt`, `seaice_thickness_opt`, `seaice_snowdepth_opt`, `ra_call_offset`, `shalwater_z0`, `scm_force_flux`, spectral nudging (`grid_fdda = 2`), surface analysis nudging (`grid_sfdda`: OBSGRID's `wrfsfdda_d0N`), observation nudging (`obs_nudge_opt`), stochastic physics, chemistry | not ported |
+| the adaptive time step with nests, `sst_update`, `grid_fdda`, ideal cases or `output_diagnostics` | not ported |
 | a wind across a symmetric wall (ideal cases) | WRF's solution breaks down within a minute there (the wall keeps the normal velocity while the sign of `muu` flips) |
 | real-data runs with `periodic_*`, `open_*` or `symmetric_*` sides | WRF's channel set-up is not ported; WRF stops with the others |
 
@@ -614,7 +618,7 @@ WRF. CPPWRF writes NetCDF (`io_form_history = 2` and `io_form_restart = 2`); oth
 11, parallel NetCDF) are errors; `use_netcdf_classic = .true.` writes NetCDF classic files, as in WRF. WRF writes no auxiliary history or input streams by default (every
 `io_form_auxhistN` / `io_form_auxinputN` is 0). The auxhist3 stream of `output_diagnostics = 1` is written
 (`io_form_auxhist3 = 2`, `auxhist3_outname`, `frames_per_auxhist3`; identical to WRF's in CPU FP64 builds);
-another auxhist stream with an interval and an io_form is an error. Other stream options (auxinput streams other than sst_update's wrflowinp, auxinput4) are
+another auxhist stream with an interval and an io_form is an error. Other stream options (auxinput streams other than sst_update's wrflowinp, auxinput4, and grid_fdda's wrffdda, auxinput10) are
 errors when they change what wrf.exe reads or writes. ndown.exe (one-way
 nesting from a parent run's wrfout) is not part of CPPWRF.
 
@@ -625,6 +629,7 @@ nesting from a parent run's wrfout) is not part of CPPWRF.
 | input (`wrfinput_d0N`, stream i:0) | read at the start of every domain | from real.exe or cppwrf_real |
 | boundary (`wrfbdy_d01`) | read for domain 1 every `interval_seconds` | from real.exe or cppwrf_real |
 | auxinput4 (`wrflowinp_d0N`) | read with `sst_update = 1` every `auxinput4_interval` | from real.exe or cppwrf_real |
+| auxinput10 (`wrffdda_d0N`) | read with `grid_fdda = 1` at the start and every `gfdda_interval_m` up to `gfdda_end_h` | from real.exe or cppwrf_real (`gfdda_inname`) |
 | history (h:0) | written every `history_interval` per domain | `wrfout_d0N_<date>` (`history_outname`, `frames_per_outfile`, `iofields_filename`) |
 | restart (r) | written every `restart_interval` for every domain | `wrfrst_d0N_<date>` (`rst_outname`) and CPPWRF's `restart_<step>.nc` |
 | auxhist3 (h:3) | written with `output_diagnostics = 1` every `auxhist3_interval` | `auxhist3_d0N_<date>` (`auxhist3_outname`, `frames_per_auxhist3`) |
