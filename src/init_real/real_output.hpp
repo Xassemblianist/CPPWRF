@@ -123,8 +123,8 @@ class WrfFddaWriter {
       if (u == std::string::npos) return false;
       const Analysis& a = n.compare(u, 8, "_NDG_OLD") == 0 ? old : nw;
       const std::string f = n.substr(0, u);
-      if (f == "MU") {  // (south_north, one_stag, west_east)
-        out = nc_order(a.mu, int(v.dimlens[2]), int(v.dimlens[0]));
+      if (f == "MU") {  // fdda2d (XZY, Z = one_stag): NetCDF (one_stag = 1, south_north, west_east)
+        out = nc_order(a.mu, int(v.dimlens[2]), int(v.dimlens[1]));
         return true;
       }
       const F3<T>* x = f == "U" ? &a.u : f == "V" ? &a.v : f == "T" ? &a.t : f == "Q" ? &a.q : f == "PH" ? &a.ph : nullptr;

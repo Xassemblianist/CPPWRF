@@ -676,9 +676,9 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
   }
   for (const Field2* f : f2_)
     if (f->name() == vn && copy_field(*f, dims, out)) return true;
-  if ((vn == "mu_ndg_old" || vn == "mu_ndg_new") && dims.size() == 3 && dims[1] == 1)  // fdda2d: (j, one_stag, i)
+  if ((vn == "mu_ndg_old" || vn == "mu_ndg_new") && dims.size() == 3 && dims[0] == 1)  // fdda2d: (one_stag, j, i)
     for (const Field2* f : f2_)
-      if (f->name() == vn && copy_field(*f, {dims[0], dims[2]}, out)) return true;
+      if (f->name() == vn && copy_field(*f, {dims[1], dims[2]}, out)) return true;
   for (const Field3* f : f3_)
     if (f->name() == vn && copy_field(*f, dims, out)) return true;
   if (prep_)  // phy_prep of a run without column physics (first_rk_step_part1 runs it every step)

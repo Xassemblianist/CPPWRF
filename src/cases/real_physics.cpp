@@ -237,7 +237,7 @@ void read_wrffdda(const std::string& path, const std::string& date, phys::driver
   const std::pair<const char*, Field2*> f2[] = {{"MU_NDG_OLD", &su.mu_ndg_old}, {"MU_NDG_NEW", &su.mu_ndg_new}};
   for (const auto& [name, f] : f2) {
     int v = -1;
-    const std::size_t st[4] = {std::size_t(rec), 0, 0, 0}, ct[4] = {1, std::size_t(ny), 1, std::size_t(nx)};
+    const std::size_t st[4] = {std::size_t(rec), 0, 0, 0}, ct[4] = {1, 1, std::size_t(ny), std::size_t(nx)};
     if (nc_inq_varid(id, name, &v) != NC_NOERR || nc_get_vara_double(id, v, st, ct, buf.data()) != NC_NOERR) {
       nc_close(id);
       throw std::runtime_error(std::string("grid_fdda: cannot read ") + name + " of " + path);

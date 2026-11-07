@@ -143,11 +143,11 @@ void read_wrfrst(const std::string& path, io_netcdf::RestartMeta& meta, std::vec
     nc_inq_vardimid(id, var, dids.data());
     std::vector<std::size_t> len(static_cast<std::size_t>(nd));
     for (int d = 0; d < nd; ++d) nc_inq_dimlen(id, dids[std::size_t(d)], &len[std::size_t(d)]);
-    // (Time, [k,] j, i); a 2-D field of the fdda2d array (MU_NDG_OLD/NEW): (Time, j, one_stag = 1, i)
-    const bool onestag = nd == 4 && len[2] == 1 && v.nz <= 1 && int(len[1]) == v.ny && int(len[3]) == v.nx;
+    // (Time, [k,] j, i); a 2-D field of the fdda2d array (MU_NDG_OLD/NEW): (Time, one_stag = 1, j, i)
+    const bool onestag = nd == 4 && len[1] == 1 && v.nz <= 1 && int(len[2]) == v.ny && int(len[3]) == v.nx;
     if (onestag) {
-      const std::size_t st4[4] = {0, 0, 0, 0}, ct4[4] = {1, len[1], 1, len[3]};
-      buf.resize(len[1] * len[3]);
+      const std::size_t st4[4] = {0, 0, 0, 0}, ct4[4] = {1, 1, len[2], len[3]};
+      buf.resize(len[2] * len[3]);
       if (nc_get_vara_double(id, var, st4, ct4, buf.data()) != NC_NOERR)
         throw std::runtime_error("wrfrst: cannot read " + v.name);
       real* d = static_cast<real*>(const_cast<void*>(v.data));
