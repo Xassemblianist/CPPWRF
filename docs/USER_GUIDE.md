@@ -755,6 +755,12 @@ CPPWRF_GCP_BUCKET=cppwrf-data-244589 timeout 14400 tools/colab/colab_suite.sh --
   2.41's source and `tools/libmvec_proof.cpp` (N random inputs, default 10^10, every rcpps input class at every
   exponent and the edge values equal to libmvec bit for bit), and two deliberate faults that the unit test must
   catch.
+- `tools/colab/colab_regression.sh [--mode update|check]` runs the legacy regression tool (`tools/regression`:
+  CPU FP32 and FP64 builds, ctest, the ideal cases of `configs/`, `tests/verify/verify.py check` and the goldens)
+  in the same chroot with the suite's build flags (`tools/colab/regression_body.sh`; default `--gpu G4`, no data
+  tars). `--mode update` makes new goldens (`update_golden.sh --quick --no-gpu`, in OUT/golden, to copy into
+  `tools/regression/golden`) and runs `run.sh --quick --no-gpu` against them a second time; `--mode check` runs
+  `run.sh` against the goldens of the commit. The goldens come from this environment, not from a workstation.
 
 ```bash
 # once: the Drive remote (browser login; scope drive.file), then the tars of vm_data.txt to Drive
