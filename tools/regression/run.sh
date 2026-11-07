@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # CPPWRF regression runner
 # Usage: tools/regression/run.sh [--quick|--full] [--gpu]
+# Environment: CPPWRF_REG_CMAKE_ARGS (extra cmake configure arguments, split at blanks, e.g. the suite's
+# "-DCPPWRF_NATIVE=OFF -DCMAKE_CXX_FLAGS=-march=skylake" that tools/colab/regression_body.sh uses for the goldens),
+# CPPWRF_REG_BUILD_JOBS (parallel build jobs, default 4), CPPWRF_REG_COMMIT (the commit to name when the tree is
+# not a git checkout, e.g. a git archive).
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,8 +35,8 @@ GOLDEN_DIR="${SCRIPT_DIR}/golden"
 mkdir -p "${LOG_DIR}" "${RUNS_DIR}" "${GOLDEN_DIR}"
 
 DATE_STR="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
-GIT_SHORT="$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")"
+GIT_COMMIT="${CPPWRF_REG_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo "unknown")}"
+GIT_SHORT="$(echo "${GIT_COMMIT}" | cut -c1-7)"
 
 echo "=========================================================="
 echo "CPPWRF Regression Suite"
@@ -86,8 +90,10 @@ echo "--- 1. Building configurations & running CTest (wrapped in tools/heavy.sh)
 for tgt in "${TARGETS[@]}"; do
   IFS=: read -r bdir cuda dbl backend prec <<< "$tgt"
   echo ">> Building ${bdir} (CUDA=${cuda}, DOUBLE=${dbl})..."
-  "${REPO_ROOT}/tools/heavy.sh" cmake -S . -B "${bdir}" -G Ninja -DCPPWRF_ENABLE_CUDA="${cuda}" -DCPPWRF_DOUBLE="${dbl}" > "${LOG_DIR}/${bdir}.cmake.log" 2>&1
-  if "${REPO_ROOT}/tools/heavy.sh" cmake --build "${bdir}" -j4 > "${LOG_DIR}/${bdir}.build.log" 2>&1; then
+  # shellcheck disable=SC2086  # CPPWRF_REG_CMAKE_ARGS: blank-separated arguments
+  "${REPO_ROOT}/tools/heavy.sh" cmake -S . -B "${bdir}" -G Ninja -DCPPWRF_ENABLE_CUDA="${cuda}" -DCPPWRF_DOUBLE="${dbl}" \
+    ${CPPWRF_REG_CMAKE_ARGS:-} > "${LOG_DIR}/${bdir}.cmake.log" 2>&1
+  if "${REPO_ROOT}/tools/heavy.sh" cmake --build "${bdir}" -j"${CPPWRF_REG_BUILD_JOBS:-4}" > "${LOG_DIR}/${bdir}.build.log" 2>&1; then
     BUILD_STATUS["${bdir}"]="PASS"
     echo "   Build: PASS"
   else

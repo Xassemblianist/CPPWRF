@@ -5,6 +5,11 @@ Checks diag.csv (excluding timing columns) and the final snapshot.
 Tolerances:
   FP64: rtol=1e-12, atol=1e-12
   FP32: rtol=1e-5,  atol=1e-5
+diag.csv is text: its values carry at most the significant digits the writer stored. Each diag.csv comparison
+gets at least half a unit in the last stored digit, rtol_diag = max(rtol, 0.5 * 10**(1 - D)), where D is the
+smaller of the two files' largest significant-digit count (a %.9g file: D = 9; the shortest round-trip form that
+DiagWriter writes since 4c6efdf: up to 17 digits, D >= 16, so rtol_diag = rtol). The snapshots are binary and keep
+rtol. On a failure the commit the goldens were made at (golden/COMMIT) is printed.
 """
 import csv
 import glob
@@ -22,6 +27,22 @@ def read_diag(d):
     if not rows:
         raise ValueError(f"{path} is empty")
     return rows
+
+def sig_digits(text):
+    """Significant digits of a decimal number as written (1.50e+03 -> 3, -0.00120 -> 3, 20 -> 2)."""
+    m = text.strip().lstrip("+-").lower().split("e")[0].replace(".", "").lstrip("0")
+    return len(m) if m.isdigit() else 0
+
+def file_digits(rows, cols):
+    """The largest significant-digit count of a diag.csv's values in cols (its writer's precision)."""
+    return max((sig_digits(r[c]) for r in rows for c in cols), default=0)
+
+def golden_commit(golden_dir):
+    for path in (os.path.join(golden_dir, "COMMIT"), os.path.join(os.path.dirname(os.path.abspath(golden_dir)), "COMMIT")):
+        if os.path.exists(path):
+            with open(path) as f:
+                return f.read().strip()
+    return "unknown (no golden/COMMIT)"
 
 def find_last_step(d):
     files = glob.glob(os.path.join(d, "snap_*.json"))
@@ -71,11 +92,17 @@ def compare(run_dir, golden_dir, prec="float32"):
 
     # Skip nondeterministic timing column 'wall_s'
     cols_to_check = [c for c in run_diag[0].keys() if c != "wall_s"]
+    if set(cols_to_check) - set(gold_diag[0].keys()):
+        print(f"FAIL: diag.csv columns differ: run {list(run_diag[0].keys())} gold {list(gold_diag[0].keys())}")
+        return 1
+    digits = min(file_digits(run_diag, cols_to_check), file_digits(gold_diag, cols_to_check))
+    rtol_diag = max(rtol, 0.5 * 10.0 ** (1 - digits)) if digits > 0 else rtol
+    print(f"diag.csv: {digits} significant digits stored, rtol {rtol_diag:.1e} (snapshots: rtol {rtol:.0e})")
     for row_idx, (r_row, g_row) in enumerate(zip(run_diag, gold_diag)):
         for c in cols_to_check:
             val_r = float(r_row[c])
             val_g = float(g_row[c])
-            if not np.isclose(val_r, val_g, rtol=rtol, atol=atol):
+            if not np.isclose(val_r, val_g, rtol=rtol_diag, atol=atol):
                 diff = abs(val_r - val_g)
                 print(f"FAIL: diag.csv mismatch at row {row_idx}, col '{c}': run={val_r} gold={val_g} diff={diff:.3e}")
                 return 1
@@ -115,4 +142,7 @@ if __name__ == "__main__":
         print("usage: compare_golden.py <run_dir> <golden_dir> [precision]")
         sys.exit(2)
     p = sys.argv[3] if len(sys.argv) > 3 else "float32"
-    sys.exit(compare(sys.argv[1], sys.argv[2], p))
+    rc = compare(sys.argv[1], sys.argv[2], p)
+    if rc != 0:
+        print(f"golden made at commit {golden_commit(sys.argv[2])} (tools/regression/update_golden.sh refreshes it)")
+    sys.exit(rc)

@@ -37,7 +37,7 @@ GOLDEN_DIR="${SCRIPT_DIR}/golden"
 RUNS_DIR="${SCRIPT_DIR}/runs"
 mkdir -p "${GOLDEN_DIR}"
 
-GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || echo "unknown")"
+GIT_COMMIT="${CPPWRF_REG_COMMIT:-$(git rev-parse HEAD 2>/dev/null || echo "unknown")}"
 DATE_STR="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
 echo "${GIT_COMMIT}" > "${GOLDEN_DIR}/COMMIT"
