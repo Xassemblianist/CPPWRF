@@ -432,7 +432,9 @@ bool WrfHistory::from_wrfinput(const std::string& name, std::size_t n, std::vect
 }
 
 bool WrfHistory::out_value(const wrf_io::OutVar& v, std::vector<double>& out) {
-  const std::string& vn = v.var ? v.var->varname : v.name;
+  // a member of the fdda3d / fdda2d arrays (U_NDG_OLD, ..., MU_NDG_NEW): the member's name (the suite field's)
+  const bool fdda = v.member && (v.member->array == "fdda3d" || v.member->array == "fdda2d");
+  const std::string& vn = fdda ? v.member->member : v.var ? v.var->varname : v.name;
   const std::size_t nd = v.dimnames.size();
   if (jrep_ == 1 || nd < 2 || v.dimnames[nd - 2].rfind("south_north", 0) != 0) return value(v.name, vn, v.dimlens, out);
   std::vector<std::size_t> d = v.dimlens;

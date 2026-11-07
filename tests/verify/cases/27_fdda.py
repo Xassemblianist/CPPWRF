@@ -63,8 +63,8 @@ CASES = [
     ("real_fdn_r8_fp64_cpu", "cpu_dp", "configs/real_fdn_r8.ini", [],
      {d: f"{WR}/run_FDN_r8/steps/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 180, _TN),
     ("real_fdn_r8_fp64_cpu_1h", "cpu_dp", "configs/real_fdn_r8.ini",
-     ["real.dir=" + f"{WR}/run_FDN_r8", "run.run_time=3600", "output.out_interval=10", "output.diag_interval=10",
-      "d02.out_interval=30", "d02.diag_interval=30"],
+     ["real.dir=" + f"{WR}/run_FDN_r8", "phys.table_dir=" + f"{WR}/run_FDN_r8", "run.run_time=3600",
+      "output.out_interval=10", "output.diag_interval=10", "d02.out_interval=30", "d02.diag_interval=30"],
      {d: f"{WR}/run_FDN_r8/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 3600, _TN),
 ]
 
