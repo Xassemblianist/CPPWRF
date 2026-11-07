@@ -17,7 +17,9 @@ The port (`src/phys/cu_ntiedtke/ntiedtke.hpp`) is checked against WRF's own obje
        . tests/phys/wrf_fortran.sh; wrf_need r8d8; wrf_fortran harness tests/phys/cu_ntiedtke/harness.f90
        ./harness nt.bin                 # columns whose u, v, t, qv, qc, qi or rain differ (any bit)
 
-   `run_test.sh` (ctest `diff_phys_cu_ntiedtke`) does both for steps 2 and 4 of P7: every column identical.
+   `run_test.sh` (ctest `diff_phys_cu_ntiedtke`) does both for steps 2 and 4 of P7: every column identical,
+   and some columns active at each step (the harness counts the columns where WRF's scheme rains or
+   changes t or qv; a replay where nothing convects would not test the scheme).
 
 3. `sensitivity.f90 nt.bin <column> <eps>` applies 500 random relative perturbations of size eps to
    one column's inputs and reports the largest change of the convective temperature change. At step 4

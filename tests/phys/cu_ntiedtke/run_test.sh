@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # New Tiedtke column replay: CPPWRF's cu_ntiedtke_run inputs/outputs of P7 (steps 2 and 4) through WRF
 # v4.8.0's cu_ntiedtke_run (the -r8 -fdefault-double-8 build that made the P7 references, WRF_R8D8_DIR;
-# tests/phys/wrf_fortran.sh); every output of every column identical (same bits).
+# tests/phys/wrf_fortran.sh); every output of every column identical (same bits), and at each step some columns
+# active (WRF's scheme rains there or changes t or qv), so that the replay exercises the convection.
 #   usage: run_test.sh [BUILD_DIR]   (needs CPPWRF_WRF_RUNS and WRF_R8D8_DIR, a WRF -r8 -double-8 build)
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,7 +21,9 @@ for n in 2 4; do
     "$BUILD_DIR/cppwrf" "$REPO_ROOT/configs/real_p7_r8.ini" --set run.run_time=$((60 * n)) --set output.dir="$WORK/out" > run$n.log 2>&1
   r=$(./harness nt$n.bin | tail -1)
   echo "step $n: $r"
-  echo "$r" | awk '{exit !($2 > 0 && $NF == 0)}' || fail=1  # columns > 0, none mismatching
+  # "columns N active A mismatching M": columns > 0, active > 0, none mismatching
+  echo "$r" | awk '$1 == "columns" && $3 == "active" && $5 == "mismatching" {ok = $2 > 0 && $4 > 0 && $6 == 0} END {exit !ok}' ||
+    { echo "step $n: FAIL (no columns, no active column or mismatching columns)"; fail=1; }
 done
 cd /; rm -rf "$WORK"
 [ $fail = 0 ] && echo "PASS" || { echo "FAIL"; exit 1; }
