@@ -81,4 +81,4 @@ STATUS = [
 
 # the data tars (tests/verify/vm_data.txt) each case reads, in that file's order (tests/verify/case_data.py
 # derives them from the tars' file lists; tools/colab/colab_suite.sh --cases fetches only these)
-DATA = {c[0]: 'port_b03_data.tar' for c in CASES}
+DATA = {c[0]: 'port_b03n_data.tar' if c[0].startswith('real_fdn') else 'port_b03_data.tar' for c in CASES}

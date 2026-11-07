@@ -23,10 +23,11 @@ port_c25_data.tar
 port_c25b_data.tar
 port_a09_data.tar
 port_a10_data.tar
-# grid nudging (grid_fdda = 1): the FD* / FDN references and inputs (wrffdda_d0N) of the suite cases, and the
-# files test's fd1 / fdn references (run, restart and resumed directories)
+# grid nudging (grid_fdda = 1): the FD1 ... FD9 and the FDN references and inputs (wrffdda_d0N) of the suite cases,
+# and the files test's fd1 / fdn references (run, restart and resumed directories)
 port_b03_data.tar
-port_b03_files.tar
+port_b03n_data.tar
+port_b03n_files.tar
 # run_P3_r8's inputs and 1 h reference (the 60 min frame, every variable) for real_p3_r8_fp64_cuda_1h (the CPU case
 # reads run_P3_r8/steps)
 port_g01_data.tar
