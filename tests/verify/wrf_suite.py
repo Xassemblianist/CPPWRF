@@ -33,6 +33,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -110,7 +111,18 @@ def slow(sets):
     return "suite.slow" in sets
 
 
+# netCDF4-python (1.7) releases the GIL in its netCDF-C calls and netCDF-C / HDF5 are not thread-safe: the case
+# threads' in-process reads of the references and outputs (exact_case, restarted_case) take this lock (two restarted
+# cases starting together read their references at once: "NetCDF: HDF error", "XTIME not found", a segfault)
+_NC = threading.RLock()
+
+
 def exact_case(refs, out, t, sets):
+    with _NC:
+        return _exact_case(refs, out, t, sets)
+
+
+def _exact_case(refs, out, t, sets):
     """Tolerance-0 comparison of the wrfout files in `out` (out/<domain> for nests; a list of directories: their
     files together, a later directory's frame replacing an earlier one's) with the references {domain: wrfout}:
     (differences, summary)."""
@@ -161,7 +173,7 @@ def restarted_case(b, cfg, sets, refs, t, mid, out):
     import exact
     first, resumed = os.path.join(out, "a_first"), os.path.join(out, "b_resumed")  # sorted: resumed frames win
     w0 = next(iter(refs.values()))
-    with netCDF4.Dataset(w0) as ds:
+    with _NC, netCDF4.Dataset(w0) as ds:
         at = [exact.text(ds["Times"], i).decode() for i, x in enumerate(ds["XTIME"][:]) if abs(float(x) * 60.0 - mid) < 1e-6]
     if not at:
         return [f"{w0} has no frame at the restart time {mid:g}s"], ""
@@ -189,9 +201,10 @@ def restarted_case(b, cfg, sets, refs, t, mid, out):
         if not os.path.exists(wr) or not mine:
             bad.append(f"{d}: no wrfrst_{d}_{at[0]} from {'WRF' if not os.path.exists(wr) else 'CPPWRF'}")
             continue
-        with netCDF4.Dataset(wr) as ds:
-            noise = [x for x, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")) if q not in ds.variables]
-        dif, _ = exact.compare_stream(mine, [wr])
+        with _NC:
+            with netCDF4.Dataset(wr) as ds:
+                noise = [x for x, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")) if q not in ds.variables]
+            dif, _ = exact.compare_stream(mine, [wr])
         bad += [f"{d}.wrfrst.{k}: {v}" for k, v in dif.items() if k not in noise]
     return bad, f"{what}, restarted at {mid:g}s (wrfrst identical)" if not bad else what
 
