@@ -31,6 +31,8 @@ port_b03n_files.tar
 # the ACM2 PBL / Pleim-Xiu surface layer references (ACM1, ACM7, ACMB, ACMN) and their inputs (tests/verify/cases/28_acm.py)
 port_c16_data.tar
 port_c04_data.tar
+# the skin SST / deep soil temperature update references (SKV, SKU, SKN) and their inputs (tests/verify/cases/47_sstskin.py)
+port_a11_data.tar
 # run_P3_r8's inputs and 1 h reference (the 60 min frame, every variable) for real_p3_r8_fp64_cuda_1h (the CPU case
 # reads run_P3_r8/steps)
 port_g01_data.tar
