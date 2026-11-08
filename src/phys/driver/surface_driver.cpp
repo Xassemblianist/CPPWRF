@@ -15,6 +15,7 @@
 #include "phys/fogdes/fogdes.hpp"
 #include "phys/lsm_noah/noah.hpp"
 #include "phys/lsm_slab/slab.hpp"
+#include "phys/sf_pxsfclay/pxsfclay.hpp"
 
 #include "phys/driver/suite_internal.hpp"
 
@@ -941,7 +942,8 @@ struct KSeaiceLsmPost {
 
 }  // namespace
 
-// module_surface_driver.F surface_driver for SFCLAYREVSCHEME / MYJSFCSCHEME + LSMSCHEME / NOAHMPSCHEME
+// module_surface_driver.F surface_driver for SFCLAYREVSCHEME / MYJSFCSCHEME / MYNNSFCSCHEME / PXSFCSCHEME + SLABSCHEME /
+// LSMSCHEME / NOAHMPSCHEME
 void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) {
   const Range2D cols = g_.columns();
   const int nz = g_.nz;
@@ -1106,6 +1108,25 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
     k.isfflx = o_.isfflx;
     k.sfcflux_land = o_.sf_mynn_sfcflux_land; k.sfcflux_water = o_.sf_mynn_sfcflux_water;
     k.xice_threshold = xice_threshold;
+    column_for(cols, k);
+  } else if (o_.sf_sfclay_physics == 7) {
+    // PXSFCLAY (module_surface_driver.F:2207-2235, fractional_seaice = 0: level kts of u_phytmp, v_phytmp, t_phy,
+    // th_phy, qv_curr, P3D = p_phy (grid%p_hyd), dz8w; DX = the namelist dx; R = r_d, ROVCP = rcp). U10 / V10 are its
+    // only 10 m / 2 m diagnostics; CH, USTM, FM, FH, TH2, T2, Q2 are not written
+    using namespace wrfc;
+    pxsfclay::PxSfclayKernel k{};
+    k.us = slice0(u_phytmp); k.vs = slice0(v_phytmp); k.t1d = slice0(prep.t_phy); k.theta1 = slice0(prep.th_phy);
+    k.qv1d = slice0(s.q_2[s.P_QV]); k.p1d = slice0(prep.p_hyd); k.dz8w1d = slice0(prep.dz8w);
+    k.psfcpa = psfc.cview(); k.pblh = pblh.cview(); k.mavail = mavail.cview(); k.xland = xland.cview();
+    k.tg = tsk.cview();
+    k.chs = chs.view(); k.chs2 = chs2.view(); k.cqs2 = cqs2.view(); k.cpm = cpm.view(); k.rmol = rmol.view();
+    k.znt = znt.view(); k.ust = ust.view(); k.zol = zol.view(); k.mol = mol.view(); k.regime = regime.view();
+    k.psim = psim.view(); k.psih = psih.view(); k.hfx = hfx.view(); k.qfx = qfx.view(); k.u10 = u10.view();
+    k.v10 = v10.view(); k.flhc = flhc.view(); k.flqc = flqc.view(); k.qgh = qgh.view(); k.qsfc = qsfc.view();
+    k.lh = lh.view(); k.gz1oz0 = gz1oz0.view(); k.wspd = wspd.view(); k.br = br.view();
+    k.cp = cp; k.g = g; k.rovcp = rcp; k.r = r_d; k.xlv = xlv; k.dx = real(g_.dx);
+    k.svp1 = svp1; k.svp2 = svp2; k.svp3 = svp3; k.svpt0 = svpt0; k.ep1 = ep_1; k.ep2 = ep_2; k.karman = karman;
+    k.itimestep = int(itimestep); k.nx = g_.nx;
     column_for(cols, k);
   }
 

@@ -655,6 +655,37 @@ class TestValidationAndWarnings(unittest.TestCase):
             err, _ = phys(extra)
             self.assertIn(msg, " ".join(err), extra)
 
+    def test_acm2_pleim_xiu(self):
+        # bl_pbl_physics = 7 (module_bl_acm.F) over sf_sfclay_physics = 1 or 7 (module_physics_init: 'use sfclay or
+        # pxsfc scheme for this pbl option'), with qc and qi; the Pleim-Xiu surface layer with ACM2 and Noah; the PX
+        # land surface (sf_surface_physics = 7) is not ported
+        def phys(sfc, pbl, extra="", mp=6, lsm=2):
+            t = WrfTranslator(parse_namelist(real_case(f"""
+            &time_control /
+            &domains time_step = 60 /
+            &physics mp_physics = {mp}, sf_sfclay_physics = {sfc}, sf_surface_physics = {lsm}, bl_pbl_physics = {pbl}{extra} /
+            &dynamics /
+            """)))
+            gen = t.translate()
+            return t.errors, gen.get("phys", {})
+        for sfc in (1, 7):
+            err, p = phys(sfc, 7)
+            self.assertEqual(err, [])
+            self.assertEqual((p["sf_sfclay_physics"], p["bl_pbl_physics"]), (sfc, 7))
+        err, p = phys(7, 7, ", bldt = 3")
+        self.assertEqual((err, p["bldt"]), ([], 3))
+        for args, msg in (((2, 7), "needs sf_sfclay_physics = 1 or 7"), ((5, 7), "needs sf_sfclay_physics = 1 or 7"),
+                          ((7, 1), "sf_sfclay_physics = 7 (Pleim-Xiu) is supported with"),
+                          ((7, 0), "sf_sfclay_physics = 7 (Pleim-Xiu) is supported with"),
+                          ((7, 7, "", 1), "needs a microphysics with qc and qi"),
+                          ((1, 7, "", 0), "needs a microphysics with qc and qi"),
+                          ((7, 7, "", 6, 4), "sf_sfclay_physics = 7 (Pleim-Xiu) is supported with"),
+                          ((7, 7, ", fractional_seaice = 1"), "fractional_seaice = 1"),
+                          ((7, 7, ", isfflx = 0"), "sf_sfclay_physics = 7 with isfflx = 0"),
+                          ((7, 7, ", num_soil_layers = 2", 6, 7), "sf_surface_physics = 7 (Pleim-Xiu land surface")):
+            err, _ = phys(*args)
+            self.assertIn(msg, " ".join(err), args)
+
     def test_force_read_thompson(self):
         def phys(mp, extra):
             t = WrfTranslator(parse_namelist(real_case(f"""

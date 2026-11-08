@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <stdexcept>
 
+#include "phys/bl_acm/acm.hpp"
 #include "phys/bl_gwdo/gwdo.hpp"
 #include "phys/bl_myj/myjpbl.hpp"
 #include "phys/bl_mynn/mynnedmf.hpp"
@@ -282,10 +283,12 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
       chklowq(g, Stagger::M, "chklowq"), qgh(g, Stagger::M, "qgh"), chs(g, Stagger::M, "chs"),
       chs2(g, Stagger::M, "chs2"), cqs2(g, Stagger::M, "cqs2"), cpm(g, Stagger::M, "cpm"),
       u_phytmp(g, Stagger::M, "u_phytmp"), v_phytmp(g, Stagger::M, "v_phytmp"), t1_lag_(g, Stagger::M, "t1_lag"), coszen(g, Stagger::M, "coszen"), rthratenlw(g, Stagger::M, "rthratenlw"), rthratensw(g, Stagger::M, "rthratensw"), rthratenlwc(g, Stagger::M, "rthratenlwc"), rthratenswc(g, Stagger::M, "rthratenswc"), o3rad(g, Stagger::M, "o3rad"), lwcf(g, Stagger::M, "lwcf"), swcf(g, Stagger::M, "swcf"), hrang(g, Stagger::M, "hrang"), uratx(g, Stagger::M, "uratx"), vratx(g, Stagger::M, "vratx"), tratx(g, Stagger::M, "tratx"), ra(g, Stagger::M, "ra"), rs(g, Stagger::M, "rs"), shall(g, Stagger::M, "shall"), lwupt(g, Stagger::M, "lwupt"), lwuptc(g, Stagger::M, "lwuptc"), lwdnt(g, Stagger::M, "lwdnt"), lwdntc(g, Stagger::M, "lwdntc"), lwupb(g, Stagger::M, "lwupb"), lwupbc(g, Stagger::M, "lwupbc"), lwdnb(g, Stagger::M, "lwdnb"), lwdnbc(g, Stagger::M, "lwdnbc"), olr(g, Stagger::M, "olr"), swupt(g, Stagger::M, "swupt"), swuptc(g, Stagger::M, "swuptc"), swdnt(g, Stagger::M, "swdnt"), swdntc(g, Stagger::M, "swdntc"), swupb(g, Stagger::M, "swupb"), swupbc(g, Stagger::M, "swupbc"), swdnb(g, Stagger::M, "swdnb"), swdnbc(g, Stagger::M, "swdnbc"), swvisdir(g, Stagger::M, "swvisdir"), swvisdif(g, Stagger::M, "swvisdif"), swnirdir(g, Stagger::M, "swnirdir"), swnirdif(g, Stagger::M, "swnirdif"), swddir(g, Stagger::M, "swddir"), swddni(g, Stagger::M, "swddni"), swddif(g, Stagger::M, "swddif"), swddirc(g, Stagger::M, "swddirc"), swddnic(g, Stagger::M, "swddnic"), diffuse_frac(g, Stagger::M, "diffuse_frac"), aclwupt(g, Stagger::M, "aclwupt"), aclwuptc(g, Stagger::M, "aclwuptc"), aclwdnt(g, Stagger::M, "aclwdnt"), aclwdntc(g, Stagger::M, "aclwdntc"), aclwupb(g, Stagger::M, "aclwupb"), aclwupbc(g, Stagger::M, "aclwupbc"), aclwdnb(g, Stagger::M, "aclwdnb"), aclwdnbc(g, Stagger::M, "aclwdnbc"), acswupt(g, Stagger::M, "acswupt"), acswuptc(g, Stagger::M, "acswuptc"), acswdnt(g, Stagger::M, "acswdnt"), acswdntc(g, Stagger::M, "acswdntc"), acswupb(g, Stagger::M, "acswupb"), acswupbc(g, Stagger::M, "acswupbc"), acswdnb(g, Stagger::M, "acswdnb"), acswdnbc(g, Stagger::M, "acswdnbc"), g_(g), gs_(g), o_(o) {
-  if ((o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 2 && o.sf_sfclay_physics != 5) ||
+  if ((o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 2 && o.sf_sfclay_physics != 5 && o.sf_sfclay_physics != 7) ||
       (o.sf_surface_physics != 1 && o.sf_surface_physics != 2 && o.sf_surface_physics != 4) ||
-      (o.bl_pbl_physics != 0 && o.bl_pbl_physics != 1 && o.bl_pbl_physics != 2 && o.bl_pbl_physics != 5))
-    throw std::runtime_error("PhysicsSuite: only sf_sfclay_physics=1|2|5, sf_surface_physics=1|2|4, bl_pbl_physics=0|1|2|5");
+      (o.bl_pbl_physics != 0 && o.bl_pbl_physics != 1 && o.bl_pbl_physics != 2 && o.bl_pbl_physics != 5 &&
+       o.bl_pbl_physics != 7))
+    throw std::runtime_error("PhysicsSuite: only sf_sfclay_physics=1|2|5|7, sf_surface_physics=1|2|4, "
+                             "bl_pbl_physics=0|1|2|5|7 (the PX land surface, sf_surface_physics=7, is not ported)");
   // module_physics_init: MYNNPBLSCHEME needs mynnsfc, sfclay or myjsfc (isfc 5, 1 or 2: all of the above).
   // The sea-ice wrappers of sfclayrev / MYJSFC are verified with YSU / MYJ only (no MYNN reference with sea ice)
   if (o.bl_pbl_physics == 5 && o.fractional_seaice == 1)
@@ -326,6 +329,15 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: bl_pbl_physics=1 (YSU) needs sf_sfclay_physics=1, as WRF");
   if (o.bl_pbl_physics == 2 && o.sf_sfclay_physics != 2)
     throw std::runtime_error("PhysicsSuite: bl_pbl_physics=2 (MYJ) needs sf_sfclay_physics=2, as WRF");
+  // ACMPBLSCHEME: 'use sfclay or pxsfc scheme for this pbl option' (isfc 1 or 7)
+  if (o.bl_pbl_physics == 7 && o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 7)
+    throw std::runtime_error("PhysicsSuite: bl_pbl_physics=7 (ACM2) needs sf_sfclay_physics=1 or 7, as WRF");
+  // the Pleim-Xiu surface layer is ported with the ACM2 PBL and the Noah LSM (the proven combination; WRF also runs it
+  // under MYNN's or no PBL scheme, and its sea-ice wrapper PXSFCLAY_SEAICE_WRAPPER is not ported)
+  if (o.sf_sfclay_physics == 7 && (o.bl_pbl_physics != 7 || o.sf_surface_physics != 2 || o.fractional_seaice != 0 ||
+                                   o.isfflx == 0))
+    throw std::runtime_error("PhysicsSuite: sf_sfclay_physics=7 (Pleim-Xiu) is supported with bl_pbl_physics=7, "
+                             "sf_surface_physics=2, fractional_seaice=0 and isfflx=1 only");
   // isfflx 0 skips the LSMs, the only writers of CHKLOWQ (uninitialised in WRF), which MYJPBL reads
   if (o.bl_pbl_physics == 2 && o.isfflx == 0)
     throw std::runtime_error("PhysicsSuite: bl_pbl_physics=2 (MYJ) with isfflx=0 is not supported (WRF reads an "
@@ -413,6 +425,8 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: nz exceeds the YSU column limit");
   if (o.bl_pbl_physics == 5 && g.nz > mynnedmf::kMaxLevels)
     throw std::runtime_error("PhysicsSuite: nz exceeds the MYNN-EDMF column limit");
+  if (o.bl_pbl_physics == 7 && g.nz > acm::kMaxLevels)
+    throw std::runtime_error("PhysicsSuite: nz exceeds the ACM2 column limit");
   if (o.bl_pbl_physics == 2 && g.nz > myjpbl::kMaxLevels)
     throw std::runtime_error("PhysicsSuite: nz exceeds the MYJ column limit");
   if (o.sf_sfclay_physics == 2 && g.nz > sf_myjsfc::kMaxLevels)

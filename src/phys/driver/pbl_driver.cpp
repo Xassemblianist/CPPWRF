@@ -2,6 +2,7 @@
 // PhysicsSuite::pbl_driver (WRF phys/module_pbl_driver.F)
 #include "phys/driver/suite.hpp"
 
+#include "phys/bl_acm/acm.hpp"
 #include "phys/bl_gwdo/gwdo.hpp"
 #include "phys/bl_myj/myjpbl.hpp"
 #include "phys/bl_mynn/mynnedmf.hpp"
@@ -323,7 +324,7 @@ struct KBlFogdes {
 };
 }  // namespace
 
-// module_pbl_driver.F pbl_driver for YSUSCHEME / MYJPBLSCHEME
+// module_pbl_driver.F pbl_driver for YSUSCHEME / MYJPBLSCHEME / MYNNPBLSCHEME / ACMPBLSCHEME
 void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
   if (o_.bl_pbl_physics == 0) return;  // module_pbl_driver: no PBL scheme (surface fluxes reach diff_opt 2)
   const Range2D cols = g_.columns();
@@ -418,6 +419,31 @@ void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
 #endif
     // qke_adv is diffused and advected in this step (WRF: the scalar halo exchange after the PBL)
     if (k.has_qke_adv) tile::exchange(s.q_1[s.P_QKE_ADV], s.q_2[s.P_QKE_ADV]);
+  } else if (o_.bl_pbl_physics == 7) {
+    // ACMPBLSCHEME (module_pbl_driver.F:1619-1645: XTIME=itimestep, DTPBL=dtbl, U3D=u_phytmp, V3D=v_phytmp,
+    // TH3D=th_phy, T3D=t_phy, QV3D / QC3D / QI3D = qv_curr / qc_curr / qi_curr, RR3D=rho, EP1=ep_1, G=g, RD=r_d,
+    // CPD=cp; PP3D, PSFC, TSK, GZ1OZ0, PSIM and MUT are passed but not read). WRF stops without qc_curr ('Lack
+    // arguments to call ACM2 pbl') and reads an absent qi_curr without ice.
+    using namespace wrfc;
+    if (!flag_qc || !flag_qi)
+      throw std::runtime_error("bl_pbl_physics=7 (ACM2): the microphysics must carry qc and qi (WRF passes qc_curr "
+                               "and qi_curr to ACMPBL)");
+    acm::AcmKernel k{};
+    k.us = u_phytmp.cview(); k.vs = v_phytmp.cview(); k.theta = prep.th_phy.cview(); k.tt = prep.t_phy.cview();
+    k.qvs = s.q_2[s.P_QV].cview(); k.qcs = s.q_2[s.P_QC].cview(); k.qis = s.q_2[s.P_QI].cview();
+    k.dzf = prep.dz8w.cview(); k.densx = prep.rho.cview();
+    k.ust = ust.cview(); k.hfx = hfx.cview(); k.qfx = qfx.cview(); k.wspd = wspd.cview();
+    k.pbl = pblh.view(); k.regime = regime.view(); k.rmol = rmol.view(); k.klpbl = kpbl.view();
+    k.exch_h = exch_h.view(); k.exch_m = exch_m.view();
+    k.utnp = pt.rublten.view(); k.vtnp = pt.rvblten.view(); k.ttnp = pt.rthblten.view();
+    k.qvtnp = pt.rqvblten.view(); k.qctnp = pt.rqcblten.view(); k.qitnp = pt.rqiblten.view();
+    k.dtpbl = dtbl; k.ep1 = ep_1; k.g = g; k.rd = r_d; k.cpd = cp;
+    k.xtime = int(itimestep); k.nz = g_.nz; k.nx = g_.nx;
+    if (g_.nz <= 48)
+      column_for(cols, acm::AcmRunner<48>{k});
+    else
+      column_for(cols, acm::AcmRunner<acm::kMaxLevels>{k});
+    fatal_check();
   }
   if (o_.gwd_opt == 1) {
     using namespace wrfc;

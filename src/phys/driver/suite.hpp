@@ -82,9 +82,9 @@ struct FddaOptions {
 
 // Namelist options of the P1/P2 suite (WRF Registry defaults unless noted).
 struct SuiteOptions {
-  int sf_sfclay_physics = 1;     // 1 = SFCLAYREVSCHEME, 2 = MYJSFCSCHEME, 5 = MYNNSFCSCHEME
+  int sf_sfclay_physics = 1;     // 1 = SFCLAYREVSCHEME, 2 = MYJSFCSCHEME, 5 = MYNNSFCSCHEME, 7 = PXSFCSCHEME
   int sf_surface_physics = 2;    // 1 = SLABSCHEME, 2 = LSMSCHEME (Noah), 4 = NOAHMPSCHEME (Noah-MP v5.1.2)
-  int bl_pbl_physics = 1;        // 1 = YSUSCHEME, 2 = MYJPBLSCHEME, 5 = MYNNPBLSCHEME
+  int bl_pbl_physics = 1;        // 1 = YSUSCHEME, 2 = MYJPBLSCHEME, 5 = MYNNPBLSCHEME, 7 = ACMPBLSCHEME
   int icloud_bl = 1;             // MYNN subgrid clouds in the radiation (CLDFRA_BL, QC_BL, QI_BL)
   mynnedmf::Options mynn;        // bl_mynn_* options of the MYNN-EDMF PBL
   int bl_mynn_mixscalars = 0;    // MYNN mixing of WRF's generic scalar (not connected in WRF: no effect)

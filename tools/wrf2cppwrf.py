@@ -316,6 +316,7 @@ SUPPORTED_OPTIONS = {
         1: "Revised MM5 surface layer (sfclayrev)",
         2: "Eta similarity surface layer (MYJ)",
         5: "MYNN surface layer",
+        7: "Pleim-Xiu surface layer (with the ACM2 PBL and Noah)",
     },
     "sf_surface_physics": {
         0: "None / off",
@@ -328,6 +329,7 @@ SUPPORTED_OPTIONS = {
         1: "YSU (Yonsei University) planetary boundary layer",
         2: "MYJ (Mellor-Yamada-Janjic) planetary boundary layer",
         5: "MYNN-EDMF planetary boundary layer",
+        7: "ACM2 (Asymmetric Convective Model 2) planetary boundary layer",
     },
     "cu_physics": {
         0: "None / off",
@@ -1905,6 +1907,27 @@ class WrfTranslator:
                 if bl_pbl == 2 and sf_sfclay != 2:
                     self.error("WRF bl_pbl_physics = 2 (MYJ) needs sf_sfclay_physics = 2 "
                                "(module_physics_init: use myjsfc scheme for this pbl option).")
+                # module_physics_init.F pbl_select: ACM2 needs isfc = 1 (sfclay) or 7 (pxsfc); module_pbl_driver passes
+                # qc_curr (fatal 'Lack arguments to call ACM2 pbl' without it) and qi_curr (read without ice)
+                if bl_pbl == 7 and sf_sfclay not in (1, 7):
+                    self.error("WRF bl_pbl_physics = 7 (ACM2) needs sf_sfclay_physics = 1 or 7 "
+                               "(module_physics_init: use sfclay or pxsfc scheme for this pbl option).")
+                if bl_pbl == 7 and mp_physics not in (6, 8, 28):
+                    self.error("WRF bl_pbl_physics = 7 (ACM2) needs a microphysics with qc and qi (mp_physics 6, 8 or "
+                               "28): WRF stops without qc and reads an absent qi otherwise.")
+                # the Pleim-Xiu surface layer is ported with ACM2 and Noah (the combination with a WRF reference); its
+                # sea-ice wrapper (PXSFCLAY_SEAICE_WRAPPER) is not ported
+                if sf_sfclay == 7 and (bl_pbl != 7 or sf_surface != 2):
+                    self.error("WRF sf_sfclay_physics = 7 (Pleim-Xiu) is supported with bl_pbl_physics = 7 (ACM2) and "
+                               "sf_surface_physics = 2 (Noah) only.")
+                if sf_sfclay == 7 and fsi == 1:
+                    self.error("WRF sf_sfclay_physics = 7 with fractional_seaice = 1 (PXSFCLAY_SEAICE_WRAPPER) is not "
+                               "supported by CPPWRF.")
+                if sf_sfclay == 7 and self.get_opt("physics", "isfflx", 1) == 0:
+                    self.error("WRF sf_sfclay_physics = 7 with isfflx = 0 is not supported by CPPWRF.")
+                if sf_surface == 7:
+                    self.error("WRF sf_surface_physics = 7 (Pleim-Xiu land surface, 2 soil layers, pxlsm_* options and "
+                               "soil nudging) is not supported by CPPWRF.")
                 if bl_pbl == 5:
                     icb = self.get_opt("physics", "icloud_bl", 1)
                     if icb not in (0, 1):

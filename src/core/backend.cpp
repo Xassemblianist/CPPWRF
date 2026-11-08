@@ -461,6 +461,7 @@ const char* fatal_message(int code) {
     case kFatalNoahUrbanLai:
       return "rdlai2d: an urban point with VEGFRA = 0 and LAI <= 0 is not supported (WRF's SFLX sets SHDFAC = 0.05, "
              "skips CANRES for XLAI = 0 and uses the plant coefficient PC of the previous land point, an undefined value)";
+    case kFatalAcmRibx: return " RIBX never exceeds RIC";
     default: return "unknown fatal condition in a physics kernel";
   }
 }
