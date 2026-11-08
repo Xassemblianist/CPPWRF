@@ -428,21 +428,21 @@ void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
     if (!flag_qc || !flag_qi)
       throw std::runtime_error("bl_pbl_physics=7 (ACM2): the microphysics must carry qc and qi (WRF passes qc_curr "
                                "and qi_curr to ACMPBL)");
-    acm::AcmKernel k{};
-    k.us = u_phytmp.cview(); k.vs = v_phytmp.cview(); k.theta = prep.th_phy.cview(); k.tt = prep.t_phy.cview();
-    k.qvs = s.q_2[s.P_QV].cview(); k.qcs = s.q_2[s.P_QC].cview(); k.qis = s.q_2[s.P_QI].cview();
-    k.dzf = prep.dz8w.cview(); k.densx = prep.rho.cview();
-    k.ust = ust.cview(); k.hfx = hfx.cview(); k.qfx = qfx.cview(); k.wspd = wspd.cview();
-    k.pbl = pblh.view(); k.regime = regime.view(); k.rmol = rmol.view(); k.klpbl = kpbl.view();
-    k.exch_h = exch_h.view(); k.exch_m = exch_m.view();
-    k.utnp = pt.rublten.view(); k.vtnp = pt.rvblten.view(); k.ttnp = pt.rthblten.view();
-    k.qvtnp = pt.rqvblten.view(); k.qctnp = pt.rqcblten.view(); k.qitnp = pt.rqiblten.view();
-    k.dtpbl = dtbl; k.ep1 = ep_1; k.g = g; k.rd = r_d; k.cpd = cp;
-    k.xtime = int(itimestep); k.nz = g_.nz; k.nx = g_.nx;
+    acm::AcmKernel ka{};
+    ka.us = u_phytmp.cview(); ka.vs = v_phytmp.cview(); ka.theta = prep.th_phy.cview(); ka.tt = prep.t_phy.cview();
+    ka.qvs = s.q_2[s.P_QV].cview(); ka.qcs = s.q_2[s.P_QC].cview(); ka.qis = s.q_2[s.P_QI].cview();
+    ka.dzf = prep.dz8w.cview(); ka.densx = prep.rho.cview();
+    ka.ust = ust.cview(); ka.hfx = hfx.cview(); ka.qfx = qfx.cview(); ka.wspd = wspd.cview();
+    ka.pbl = pblh.view(); ka.regime = regime.view(); ka.rmol = rmol.view(); ka.klpbl = kpbl.view();
+    ka.exch_h = exch_h.view(); ka.exch_m = exch_m.view();
+    ka.utnp = pt.rublten.view(); ka.vtnp = pt.rvblten.view(); ka.ttnp = pt.rthblten.view();
+    ka.qvtnp = pt.rqvblten.view(); ka.qctnp = pt.rqcblten.view(); ka.qitnp = pt.rqiblten.view();
+    ka.dtpbl = dtbl; ka.ep1 = ep_1; ka.g = g; ka.rd = r_d; ka.cpd = cp;
+    ka.xtime = int(itimestep); ka.nz = g_.nz; ka.nx = g_.nx;
     if (g_.nz <= 48)
-      column_for(cols, acm::AcmRunner<48>{k});
+      column_for(cols, acm::AcmRunner<48>{ka});
     else
-      column_for(cols, acm::AcmRunner<acm::kMaxLevels>{k});
+      column_for(cols, acm::AcmRunner<acm::kMaxLevels>{ka});
     fatal_check();
   }
   if (o_.gwd_opt == 1) {
