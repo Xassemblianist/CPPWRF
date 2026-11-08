@@ -377,6 +377,28 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   }
   if (o.fractional_seaice == 1) sea_ = std::make_unique<SeaIceFields>(g);
   if (o.sst_update == 1) xicem = Field2(g, Stagger::M, "xicem");
+  // sst_skin / tmn_update: surface_driver every step (module_surface_driver.F:1855-1895). Ported with the Noah LSM
+  // (the reference runs); check_a_mundo stops tmn_update = 1 with lagday = 1
+  if (o.sst_skin != 0 && o.sst_skin != 1) throw std::runtime_error("PhysicsSuite: sst_skin must be 0 or 1");
+  if (o.tmn_update != 0 && o.tmn_update != 1) throw std::runtime_error("PhysicsSuite: tmn_update must be 0 or 1");
+  if ((o.sst_skin == 1 || o.tmn_update == 1) && o.sf_surface_physics != 2)
+    throw std::runtime_error("PhysicsSuite: sst_skin = 1 and tmn_update = 1 are supported with the Noah LSM "
+                             "(sf_surface_physics = 2) only");
+  if (o.tmn_update == 1 && o.lagday == 1) throw std::runtime_error("--- ERROR: Using tmn_update=1 requires lagday=150 ");
+  if (o.tmn_update == 1 && o.lagday < 1) throw std::runtime_error("PhysicsSuite: lagday must be at least 1");
+  if (o.sst_skin == 1) {
+    if (!sst.layout().total) sst = Field2(g, Stagger::M, "sst");
+    sstsk = Field2(g, Stagger::M, "sstsk");
+    dtw = Field2(g, Stagger::M, "dtw");
+  }
+  if (o.tmn_update == 1) {
+    tyr = Field2(g, Stagger::M, "tyr");
+    tyra = Field2(g, Stagger::M, "tyra");
+    tdly = Field2(g, Stagger::M, "tdly");
+    Grid gl = g;
+    gl.nz = o.lagday;
+    tlag = Field3(gl, Stagger::M, "tlag");
+  }
   // grid nudging: package psufddagd (grid_fdda == 1); fddagdinit's checks (module_fdda_psufddagd.F)
   if (o.fdda.grid_fdda != 0 && o.fdda.grid_fdda != 1)
     throw std::runtime_error("PhysicsSuite: grid_fdda = " + std::to_string(o.fdda.grid_fdda) +
@@ -623,6 +645,29 @@ void PhysicsSuite::init_radiation(const std::vector<double>& xlat, const std::ve
   rad_ = std::make_unique<RadiationDriver>(g_, o_.rad, xlat, xlong);
 }
 
+namespace {
+// phy_init (module_physics_init.F:1287-1301): the tmn_update state from TMN
+struct KTmnUpdateInit {
+  C2 tmn;
+  V2 tyr, tyra, tdly;
+  V3 tlag;
+  int lagday;
+  CPPWRF_HD void operator()(int i, int j) const {
+    tyr(i, j) = tmn(i, j);
+    tyra(i, j) = real(0.0);
+    tdly(i, j) = real(0.0);
+    for (int n = 0; n < lagday; ++n) tlag(i, j, n) = tmn(i, j);
+  }
+};
+}  // namespace
+
+void PhysicsSuite::init_tmn_update() {
+  if (o_.tmn_update != 1) return;
+  nyear = 1;
+  nday = real(0.);
+  column_for(g_.columns(), KTmnUpdateInit{tmn.cview(), tyr.view(), tyra.view(), tdly.view(), tlag.view(), o_.lagday});
+}
+
 void PhysicsSuite::init_noahmp(bool fndsnowh) {
   if (o_.sf_surface_physics != 4) return;
   noahmp::NoahmpInitKernel k{};
@@ -730,6 +775,13 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
     v.emplace_back("sfc_tsk_save", &tsk_save);
   }
   if (o_.sst_update == 1) v.emplace_back("sfc_xicem", &xicem);
+  if (o_.sst_skin == 1) {
+    if (o_.fractional_seaice != 1 && o_.sst_update != 1) v.emplace_back("sfc_sst", &sst);
+    v.emplace_back("sfc_sstsk", &sstsk);
+    v.emplace_back("sfc_dtw", &dtw);
+  }
+  if (o_.tmn_update == 1)
+    for (Field2* f : {&tyr, &tyra, &tdly}) v.emplace_back("sfc_" + f->name(), f);
   if (o_.sf_surface_physics == 1) {  // THC and CAPG are restart fields (phy_init does not run landuse_init then)
     v.emplace_back("sfc_thc", &thc);
     v.emplace_back("sfc_capg", &capg);
@@ -765,6 +817,7 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
                     &pt.rucuten, &pt.rvcuten, &pt.rthcuten, &pt.rqvcuten, &pt.rqccuten, &pt.rqrcuten,
                     &pt.rqicuten, &pt.rqscuten})
     v.emplace_back("sfc_" + f->name(), f);
+  if (o_.tmn_update == 1) v.emplace_back("sfc_tlag", &tlag);
   if (o_.sf_sfclay_physics == 2 || o_.bl_pbl_physics == 2) {
     v.emplace_back("sfc_tke_pbl", &tke_pbl);
     v.emplace_back("sfc_el_pbl", &el_pbl);
@@ -1005,6 +1058,11 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
     v.insert(v.end(), {&maxwidth, &maxmf, &ztop_plume, &excess_h, &excess_q});
   if (o_.fractional_seaice == 1 || o_.sst_update == 1) v.insert(v.end(), {&sst, &tsk_save});
   if (o_.sst_update == 1) v.push_back(&xicem);
+  if (o_.sst_skin == 1) {
+    if (o_.fractional_seaice != 1 && o_.sst_update != 1) v.push_back(&sst);
+    v.insert(v.end(), {&sstsk, &dtw});
+  }
+  if (o_.tmn_update == 1) v.insert(v.end(), {&tyr, &tyra, &tdly});
   if (o_.prec_acc_opt) v.insert(v.end(), {&prec_acc_c, &prec_acc_nc, &snow_acc_nc});
   v.insert(v.end(), clwrf_.begin(), clwrf_.end());
   if (o_.sf_surface_physics == 1) v.push_back(&capg);  // THC: phy_init's landuse_init value (WrfHistory)
@@ -1018,6 +1076,7 @@ std::vector<const Field3*> PhysicsSuite::fields3() const {
     v.insert(v.end(), {&tsnoxy, &snicexy, &snliqxy, &zsnsoxy, &albsoildirxy, &albsoildifxy, &smoiseq, &acc_etranixy});
   }
   if (o_.gwd_opt == 1) v.insert(v.end(), {&dtaux3d, &dtauy3d});
+  if (o_.tmn_update == 1) v.push_back(&tlag);
   if (o_.bl_pbl_physics == 5) {
     v.insert(v.end(), {&qke, &tsq, &qsq, &cov, &sh3d, &sm3d, &qc_bl, &qi_bl, &cldfra_bl});
     if (o_.bl_mynn_output > 0) v.insert(v.end(), {&edmf_a, &edmf_w, &edmf_thl, &edmf_qt, &edmf_ent, &edmf_qc});

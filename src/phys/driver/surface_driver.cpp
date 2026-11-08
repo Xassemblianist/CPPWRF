@@ -719,6 +719,117 @@ struct KSstUpdate {
   }
 };
 
+// sst_skin = 1, every surface_driver call (module_surface_driver.F:1855-1883): without sst_update the water points'
+// TSK and top soil level take the SST; sst_skin_update (module_sf_sstskin.F, Zeng and Beljaars 2005) gives the skin
+// SST from the bulk temperature TSK with the warm layer DTW of the previous call and the cool skin, from the previous
+// step's GLW, GSW, HFX, QFX, UST and the last SSTSK (0 at the first call: WRF's initial value); TSK = SSTSK over water.
+// The constants are those gfortran folds in WRF's object (sqrt(rho/rhow), 16 g, znuw**3, zkw**2, zk g, 5 z1 g,
+// 1/(rhow cw), f1, (an+1)/an, an+1); MAX / MIN in the operand order of its maxsd / minsd
+struct KSstSkin {
+  C2 xland, glw, gsw, hfx, qfx, ust, emiss, sst;
+  V2 tsk, dtw1, sstsk;
+  V3 tslb;
+  real dt, stbolt;
+  bool sst_update;
+  CPPWRF_HD void operator()(int i, int j) const {
+    if (xland(i, j) > real(1.5) && !sst_update) {
+      tsk(i, j) = sst(i, j);
+      tslb(i, j, 0) = sst(i, j);
+    }
+    if (xland(i, j) >= real(1.5)) {
+      constexpr real rhowcw = real(4294750.);                  // rhow * cw
+      constexpr real sqrt_rho_rhow = real(0x1.184c0ffddaa3cp-5);  // sqrt(rho / rhow)
+      constexpr real c16g = real(0x1.399999999999ap+7);        // 16. * g
+      constexpr real znuw3 = real(0x1.2725dd1d243abp-60);      // znuw**3
+      constexpr real zkw2 = real(0x1.61150bc41c975p-46);       // zkw**2
+      constexpr real rrhowcw = real(0x1.f40679ebb91fep-23);    // 1. / (rhow * cw)
+      constexpr real f1 = real(0x1.4535d67ccd09bp-1);          // 1. - 0.27 exp(-2.8 z1) - 0.45 exp(-0.07 z1)
+      constexpr real zkg = real(0x1.f5c28f5c28f5dp+1);         // zk * g
+      constexpr real c5z1g = real(147.);                       // 5. * z1 * g
+      constexpr real an = real(.3), z1 = real(3.), zk = real(.4), znuw = real(1.e-6), zkw = real(1.4e-7);
+      constexpr real an1an = real(0x1.1555555555556p+2);       // (an + 1.) / an
+      constexpr real an1 = real(0x1.4cccccccccccdp+0);         // an + 1.
+      auto mx = [](real a, real b) { return a > b ? a : b; };  // maxsd / minsd with a as the destination
+      auto mn = [](real a, real b) { return a < b ? a : b; };
+      const real s = sstsk(i, j);
+      const real s2 = s * s;
+      const real qo = glw(i, j) - emiss(i, j) * stbolt * (s2 * s2) - real(2.5e6) * qfx(i, j) - hfx(i, j);
+      const real swo = gsw(i, j);
+      const real us = mx(real(0.01), ust(i, j));
+      const real tb = tsk(i, j) - real(273.15);
+      const real dtwo = dtw1(i, j);
+      const real delt = dt;
+      const real q = qo / rhowcw;
+      const real sw = swo / rhowcw;
+      // cool skin
+      real alw = real(1.e-5) * mx(tb, real(1.));
+      const real con4 = c16g * alw * znuw3 / zkw2;
+      real usw = sqrt_rho_rhow * us;
+      const real usw2 = usw * usw;
+      const real con5 = con4 / (usw2 * usw2);
+      const real q2 = mx(-q, rrhowcw);
+      const real zlan = real(6.) / libm::pow(real(1.) + libm::pow(con5 * q2, real(0.75)), real(0.333));
+      const real dep = zlan * znuw / usw;  // skin layer depth (m)
+      real fs = real(0.065) + real(11.) * dep - (real(6.6e-5) / dep) * (real(1.) - libm::exp(-(dep / real(8.e-4))));
+      fs = mx(fs, real(0.01));  // fraction of the solar radiation absorbed in the sublayer
+      real dtc = dep * (q + sw * fs) / zkw;
+      dtc = mn(dtc, real(0.));
+      // warm layer (X. Zeng)
+      alw = real(1.e-5) * mx(tb, real(1.));
+      const real con2 = zkg * alw;
+      real qn = q + sw * f1;
+      usw = sqrt_rho_rhow * us;
+      if (dtwo > real(0.) && qn < real(0.)) {
+        const real con1 = std::sqrt(c5z1g * alw / an);
+        const real qn1 = std::sqrt(dtwo) * (usw * usw) / con1;
+        qn = mx(qn1, qn);
+      }
+      const real zeta = z1 * con2 * qn / (usw * usw * usw);
+      const real phi = zeta > real(0.) ? real(1.) + real(5.) * zeta : real(1.) / std::sqrt(real(1.) - real(16.) * zeta);
+      const real con3 = zk * usw / (z1 * phi);
+      real dtw = (dtwo + an1an * (q + sw * f1) * delt / z1) / (real(1.) + an1 * con3 * delt);  // all of the SW flux
+      dtw = mx(dtw, real(0.));
+      const real ts = tb + dtw + dtc;
+      sstsk(i, j) = ts + real(273.15);  // ts (C) to sstsk (K)
+      dtw1(i, j) = dtw;                 // dtw in C
+    }
+    if (xland(i, j) > real(1.5)) tsk(i, j) = sstsk(i, j);
+  }
+};
+
+// tmn_update = 1, every surface_driver call (module_sf_tmnupdate.F): TDLY += TSK dt; at the end of a day (the host
+// tests julian) TMN = tconst TYR + (1 - tconst) mean(TLAG), TLAG shifted with TDLY / NDAY last, TDLY = 0, and either the
+// year's end (TYR = TYRA / NYEAR, TYRA = 0) or TYRA += TLAG(lagday)
+struct KTmnAccum {
+  C2 tsk;
+  V2 tdly;
+  real dt;
+  CPPWRF_HD void operator()(int i, int j) const { tdly(i, j) = tdly(i, j) + tsk(i, j) * dt; }
+};
+struct KTmnDay {
+  V2 tmn, tyr, tyra, tdly;
+  V3 tlag;
+  real nday, ryear;  // NDAY; NYEAR as REAL
+  int lagday;
+  bool year_end;
+  CPPWRF_HD void operator()(int i, int j) const {
+    constexpr real tconst = real(0.6), tconst1 = real(0x1.999999999999ap-2);  // 1. - tconst (folded)
+    real tprior = real(0.0);
+    for (int n = 0; n < lagday; ++n) tprior = tprior + tlag(i, j, n);
+    tprior = tprior / real(lagday);
+    tmn(i, j) = tconst * tyr(i, j) + tconst1 * tprior;
+    for (int n = 0; n < lagday - 1; ++n) tlag(i, j, n) = tlag(i, j, n + 1);
+    tlag(i, j, lagday - 1) = tdly(i, j) / nday;
+    tdly(i, j) = real(0.0);
+    if (year_end) {
+      tyr(i, j) = tyra(i, j) / ryear;
+      tyra(i, j) = real(0.0);
+    } else {
+      tyra(i, j) = tyra(i, j) + tlag(i, j, lagday - 1);
+    }
+  }
+};
+
 // end of surface_driver: RAINBL reset, Q2 limited over land
 struct KSfcEnd {
   V2 rainbl, q2;
@@ -956,6 +1067,30 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
                                 snow.view(), snowc.view(), snowh.view(), ivgtyp.view(), isltyp.view(), tslb.view(),
                                 smois.view(), sh2o.view(), xice_threshold, real(o_.seaice_albedo_default),
                                 o_.num_soil_layers, o_.isice, o_.iswater, o_.fractional_seaice == 1});
+  if (o_.sst_skin == 1)  // every call, before the run_param test
+    column_for(cols, KSstSkin{xland.cview(), glw.cview(), gsw.cview(), hfx.cview(), qfx.cview(), ust.cview(),
+                              emiss.cview(), sst.cview(), tsk.view(), dtw.view(), sstsk.view(), tslb.view(),
+                              real(g_.dt), wrfc::stbolt, o_.sst_update == 1});
+  if (o_.tmn_update == 1) {  // tmnupdate (module_sf_tmnupdate.F) with grid%julian of the step start and its year
+    const real dt = real(g_.dt);
+    column_for(cols, KTmnAccum{tsk.cview(), tdly.view(), dt});
+    nday = nday + real(1.) * dt;
+    const double jd = adapt_step_flag ? wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, elapsed)
+                                      : wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, double(itimestep - 1) * g_.dt);
+    const int yr = adapt_step_flag ? wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, elapsed)
+                                   : wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, double(itimestep - 1) * g_.dt);
+    const real julian_in = real(jd);
+    const real yrday = yr % 4 == 0 ? real(366.) : real(365.);  // mod(yr, 4) only (no NO_LEAP_CALENDAR)
+    const real deltat = (julian_in - real(std::lround(julian_in))) * real(24.) * real(3600.);
+    if (std::abs(deltat) <= dt / real(2.)) {  // the end of a day
+      const real julian = (julian_in - real(1.)) + dt / real(86400.);
+      const bool year_end = (yrday - julian) <= real(1.);
+      column_for(cols, KTmnDay{tmn.view(), tyr.view(), tyra.view(), tdly.view(), tlag.view(), nday, real(nyear),
+                               o_.lagday, year_end});
+      nday = real(0.);
+      nyear = year_end ? 0 : nyear + 1;
+    }
+  }
   // run_param: itimestep == 1, bldt == 0 or stepbl == 1, mod(itimestep, stepbl) == 0; with the adaptive time step
   // curr_secs >= bldtacttime instead of the step count (the PBL driver, called after this one, moves bldtacttime)
   bool run_param = itimestep == 1 || o_.bldt == 0 || stepbl == 1;

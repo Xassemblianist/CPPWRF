@@ -110,6 +110,11 @@ struct SuiteOptions {
   int fractional_seaice = 0;
   bool tice2tsk_if2cold = false;  // fractional_seaice: ice temperature = min(TSK, 273.15)
   int sst_update = 0;             // 1: SST, SEAICE, VEGFRA, ALBBCK, LAI from wrflowinp (read_lowinp)
+  // 1: skin SST over water (module_sf_sstskin.F, Zeng and Beljaars 2005: warm layer and cool skin), TSK = SSTSK
+  int sst_skin = 0;
+  // 1: TMN from the daily mean TSK of the last lagday days and the annual mean (module_sf_tmnupdate.F)
+  int tmn_update = 0;
+  int lagday = 150;               // days of TLAG (Registry default; check_a_mundo stops tmn_update = 1 with 1)
   int use_theta_m = 1;
   int ysu_topdown_pblmix = 1;
   int isftcflx = 0, iz0tlnd = 0, shalwater_z0 = 0, scm_force_flux = 0;
@@ -221,6 +226,15 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // fractional_seaice = 1 or sst_update = 1: SST (the surface layer wrappers raise it to 271.4 under ice)
   // and TSK_SAVE; sst_update = 1: XICEM, the sea ice of the previous surface_driver call
   Field2 sst, tsk_save, xicem;
+  // sst_skin = 1: SSTSK (skin SST, K) and DTW (warm layer temperature difference, C); tmn_update = 1: TYR (annual
+  // mean TSK of the previous year), TYRA (sum of the daily means of the current year), TDLY (TSK * dt summed over
+  // the current day), TLAG (i, j, n = 1..lagday: the daily means of the last lagday days) and the scalars NYEAR
+  // (days in TYRA) and NDAY (seconds in TDLY); restart fields (Registry SSTSK rhd, DTW r, TYR ... TLAG rd, NYEAR
+  // and NDAY r)
+  Field2 sstsk, dtw, tyr, tyra, tdly;
+  Field3 tlag;
+  int nyear = 0;
+  real nday = 0;
   // the open-water halves of the sea-ice points (module_surface_driver.F *_SEA and *_HOLD locals)
   struct SeaIceFields {
     explicit SeaIceFields(const Grid& g);
@@ -281,6 +295,9 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   Field3 *re_cloud_ = nullptr, *re_ice_ = nullptr, *re_snow_ = nullptr;
   // radiation needs latitude/longitude (wrfinput XLAT/XLONG, i + nx*j); call before the first step
   void init_radiation(const std::vector<double>& xlat, const std::vector<double>& xlong);
+  // phy_init with tmn_update = 1 (module_physics_init.F:1287-1301, not on restarts): NYEAR = 1, NDAY = 0, TYR = TMN,
+  // TYRA = TDLY = 0, TLAG(n) = TMN; call after TMN holds the input's values
+  void init_tmn_update();
   // Noah-MP initialization (NoahmpWRFinit -> NoahmpInitMain + NoahmpSnowInitMain)
   void init_noahmp(bool fndsnowh);
   // WSM6 effective radii (PhysicsCoupling, has_reqc = has_reqi = has_reqs = 1) seen by the radiation

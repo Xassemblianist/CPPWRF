@@ -904,6 +904,31 @@ class TestValidationAndWarnings(unittest.TestCase):
         self.assertEqual(sec["phys"]["auxinput4_interval"], 180)
         self.assertEqual(sec["real"]["wrflowinp"], "lowinp_d01")
 
+    def test_sst_skin_tmn_update(self):
+        """sst_skin = 1 and tmn_update = 1 (with lagday) with Noah; the other LSMs, lagday = 1, values other than 0 / 1
+        and the adaptive time step are errors; lagday without tmn_update stays an unported option."""
+        base = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, sf_sfclay_physics = 1,\n"
+                " sf_surface_physics = {lsm}, bl_pbl_physics = 1, {opts} /\n")
+        t = WrfTranslator(parse_namelist(real_case(base.format(lsm=2, opts="sst_skin = 1, tmn_update = 1"))))
+        sec = t.translate()
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["sst_skin"], 1)
+        self.assertEqual(sec["phys"]["tmn_update"], 1)
+        self.assertNotIn("lagday", sec["phys"])
+        t = WrfTranslator(parse_namelist(real_case(base.format(lsm=2, opts="tmn_update = 1, lagday = 5"))))
+        sec = t.translate()
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["lagday"], 5)
+        self.assertNotIn("sst_skin", sec["phys"])
+        for lsm, opts, err in ((4, "sst_skin = 1", "sst_skin = 1 is supported with sf_surface_physics = 2"),
+                               (1, "tmn_update = 1", "tmn_update = 1 is supported with sf_surface_physics = 2"),
+                               (2, "tmn_update = 1, lagday = 1", "requires lagday=150"),
+                               (2, "sst_skin = 2", "sst_skin = 2 is not supported"),
+                               (2, "lagday = 5", "lagday = [5] is not supported")):
+            t = WrfTranslator(parse_namelist(real_case(base.format(lsm=lsm, opts=opts))))
+            t.translate()
+            self.assertIn(err, " ".join(t.errors), f"{lsm} {opts}: {t.errors}")
+
     def test_physics_suite_tropical_keeps_explicit_values(self):
         text = ("&time_control /\n&domains time_step = 60 /\n"
                 "&physics physics_suite = 'tropical', cu_physics = 1 /\n")

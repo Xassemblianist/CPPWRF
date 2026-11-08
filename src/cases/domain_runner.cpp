@@ -444,6 +444,8 @@ void DomainRunner::load_restart_file(const std::string& path) {
     }
   }
 
+  if (m_.suite && m_.suite->options().tmn_update == 1 && !wrf_file)  // NYEAR / NDAY: WRF's restart stream only
+    throw std::runtime_error("tmn_update: resume from the wrfrst file of the run, not " + path);
   if (m_.adapt && !wrf_file)  // the adaptive state (LAST_DT_SEC, ...) is in WRF's restart stream only
     throw std::runtime_error("time.adaptive: resume from the wrfrst file of the run, not " + path);
   if (wrf_file) {
@@ -524,6 +526,10 @@ void DomainRunner::load_restart_file(const std::string& path) {
       aux3_ring_at_start_ = ring3 == 1 ? 1 : 0;
     }
     if (m_.suite) m_.suite->nsteps = int(wrf_scalar(path, "NSTEPS"));  // grid%nsteps (clwrf_output_calc)
+    if (m_.suite && m_.suite->options().tmn_update == 1) {  // tmnupdate's NYEAR and NDAY (Registry r)
+      m_.suite->nyear = int(std::lround(wrf_scalar(path, "NYEAR")));
+      m_.suite->nday = real(wrf_scalar(path, "NDAY"));
+    }
   }
 
   for (const auto& t : targets3) {

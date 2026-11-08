@@ -445,8 +445,6 @@ DEFAULT_ONLY_OPTIONS = {
     # physics and surface options of WRF's drivers that CPPWRF does not port (they change results or the output)
     ("physics", "ua_phys"): (False, "UA Noah snow physics"),
     ("physics", "sf_surface_mosaic"): (0, "Noah mosaic land use"),
-    ("physics", "tmn_update"): (0, "deep soil temperature update"),
-    ("physics", "sst_skin"): (0, "skin SST"),
     ("physics", "sf_ocean_physics"): (0, "ocean mixed layer / 3-D ocean model"),
     ("physics", "omlcall"): (0, "ocean mixed layer"),
     ("physics", "aercu_opt"): (0, "aerosol-aware cumulus"),
@@ -1821,6 +1819,28 @@ class WrfTranslator:
                             sections.setdefault(tag, {})["phys_auxinput4_interval"] = iv_d
                         if inname != "wrflowinp_d<domain>":
                             sections.setdefault(tag, {})["wrflowinp"] = inname.replace("<domain>", f"{d + 1:02d}")
+                # skin SST (module_sf_sstskin.F) and the deep soil temperature update (module_sf_tmnupdate.F): one
+                # value for every domain (Registry entries 1), ported with the Noah LSM; check_a_mundo stops
+                # tmn_update = 1 with lagday = 1
+                for sk_key in ("sst_skin", "tmn_update"):
+                    sk_val = self.get_opt("physics", sk_key, 0)
+                    if sk_val not in (0, 1):
+                        self.error(f"WRF {sk_key} = {sk_val} is not supported; CPPWRF supports 0 and 1.")
+                    elif sk_val == 1:
+                        if sf_surface != 2:
+                            self.error(f"WRF {sk_key} = 1 is supported with sf_surface_physics = 2 (Noah) only "
+                                       "(no reference run with the other land surface models).")
+                        if self.get_opt("domains", "use_adaptive_time_step", False):
+                            self.error(f"WRF {sk_key} = 1 with use_adaptive_time_step is not supported by CPPWRF.")
+                        sections["phys"][sk_key] = 1
+                if self.get_opt("physics", "tmn_update", 0) == 1:
+                    lagday = self.get_opt("physics", "lagday", 150)
+                    if lagday == 1:
+                        self.error("--- ERROR: Using tmn_update=1 requires lagday=150 (WRF's check_a_mundo).")
+                    elif not isinstance(lagday, int) or lagday < 1:
+                        self.error(f"WRF lagday = {lagday} is not a number of days.")
+                    elif lagday != 150:
+                        sections["phys"]["lagday"] = lagday
                 # sea-ice parameters: CPPWRF runs with WRF's defaults only (no reference run with others)
                 for si_key, si_def in (("seaice_albedo_default", 0.65), ("seaice_thickness_default", 3.0),
                                        ("seaice_snowdepth_max", 1.e10), ("seaice_snowdepth_min", 0.001)):

@@ -173,6 +173,9 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
     c.set("cu_physics", std::to_string(o.cu_physics));
     c.set("ra_lw_physics", std::to_string(o.rad.ra_lw_physics));
     c.set("ra_sw_physics", std::to_string(o.rad.ra_sw_physics));
+    c.set("sst_skin", std::to_string(o.sst_skin));  // lagday: the levels of wrfrst's TLAG
+    c.set("tmn_update", std::to_string(o.tmn_update));
+    c.set("lagday", std::to_string(o.lagday));
     c.set("num_soil_layers", std::to_string(o.num_soil_layers));
     c.set("ishallow", std::to_string(o.ishallow)); c.set("isfflx", std::to_string(o.isfflx));
     c.set("convtrans_avglen_m", str(o.convtrans_avglen_m));
@@ -515,6 +518,10 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
   }
   if (name == "ITIMESTEP") { out.assign(1, double(step_)); return true; }
   if (name == "NSTEPS" && m_.suite) { out.assign(1, double(m_.suite->nsteps)); return true; }  // clwrf_output_calc
+  if ((name == "NYEAR" || name == "NDAY") && m_.suite && m_.suite->options().tmn_update == 1) {  // tmnupdate
+    out.assign(1, name == "NYEAR" ? double(m_.suite->nyear) : double(m_.suite->nday));
+    return true;
+  }
   if (m_.suite && dims.size() == 2) {
     const phys::driver::IntField2* fi = nullptr;
     if (name == "KPBL") fi = &m_.suite->kpbl;

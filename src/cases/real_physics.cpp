@@ -308,6 +308,11 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   o.fractional_seaice = int(cfg.get_int("phys.fractional_seaice", 0));
   o.tice2tsk_if2cold = cfg.get_bool("phys.tice2tsk_if2cold", false);
   o.sst_update = int(cfg.get_int("phys.sst_update", 0));
+  o.sst_skin = int(cfg.get_int("phys.sst_skin", 0));        // skin SST (module_sf_sstskin.F)
+  o.tmn_update = int(cfg.get_int("phys.tmn_update", 0));    // deep soil temperature update (module_sf_tmnupdate.F)
+  o.lagday = int(cfg.get_int("phys.lagday", 150));
+  if ((o.sst_skin != 0 || o.tmn_update != 0) && cfg.get_bool("time.adaptive", false))
+    throw std::runtime_error("sst_skin / tmn_update with the adaptive time step (use_adaptive_time_step) are not supported");
   // grid (analysis) nudging, this domain's entries (namelist &fdda; gfdda_interval_m / gfdda_end_h are WRF's
   // auxinput10_interval_m / auxinput10_end_h; if_ramping and dtramp_min are domain 1's)
   o.fdda.grid_fdda = int(cfg.get_int("fdda.grid_fdda", 0));
@@ -434,9 +439,10 @@ void init_real_physics(const io::Config& cfg, Model& m) {
       put2(*f, rd2(n));
     }
   }
-  if (o.fractional_seaice == 1 || o.sst_update == 1) put2(su.sst, rd2("SST"));
+  if (o.fractional_seaice == 1 || o.sst_update == 1 || o.sst_skin == 1) put2(su.sst, rd2("SST"));
   if (o.fractional_seaice == 1) put2(su.tsk_save, rd2("TSK"));  // phy_init: TSK_SAVE = TSK
   if (o.sst_update == 1) put2(su.xicem, xice);                    // landuse_init: XICEM = XICE
+  su.init_tmn_update();  // phy_init (tmn_update = 1): TYR, TLAG = the input's TMN, before the LSM's init
   put2(su.water_depth, in.has("WATER_DEPTH") ? rd2("WATER_DEPTH") : std::vector<double>(n2, 0.0));
   const std::pair<const char*, Field2*> diag[] = {{"T2", &su.t2}, {"TH2", &su.th2}, {"Q2", &su.q2},
                                                    {"U10", &su.u10}, {"V10", &su.v10}, {"PSFC", &su.psfc}};
