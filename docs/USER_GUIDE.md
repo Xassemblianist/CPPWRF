@@ -376,9 +376,9 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `use_mp_re`, `mp_tend_lim`, `do_radar_ref`, `force_read_thompson` | 0, 1; any; 0, 1; `.false.`, `.true.` |
 | `cu_physics`, `cudt` | 0, 1 (Kain-Fritsch; `kfeta_trigger` 1, 3), 3 (Grell-Freitas-Li; `ishallow` 0, 1, `clos_choice` 0-16), 6 (Tiedtke), 16 (New Tiedtke); per domain |
 | `cu_rad_feedback`, `shallowcu_forced_ra`, `convtrans_avglen_m` | per domain (KF and GF clouds in RRTMG) |
-| `bl_pbl_physics`, `bldt` | 0, 1 (YSU; `ysu_topdown_pblmix` 0, 1), 2 (MYJ), 5 (MYNN-EDMF, below) |
+| `bl_pbl_physics`, `bldt` | 0, 1 (YSU; `ysu_topdown_pblmix` 0, 1), 2 (MYJ), 5 (MYNN-EDMF, below), 7 (ACM2, over the surface layer 1 or 7; a microphysics with qc and qi: `mp_physics` 6, 8, 28) |
 | `bl_mynn_*`, `tke_budget`, `icloud_bl` | `tkeadvect`, `cloudpdf` -2..2, `mixlength` 0..2, `closure` 2.5 / 2.6 / 3.0, `edmf` 0 / 1, `edmf_mom`, `edmf_tke`, `cloudmix`, `mixqt`, `ess`, `mixscalars`, `output` 0 / 1, `tke_budget` 0 / 1, `icloud_bl` 0 / 1 |
-| `sf_sfclay_physics` | 0, 1 (revised MM5; `isfflx` 0, 1, `isftcflx` 0-2, `iz0tlnd` 0-2, `kim_tofd`, `tofd_factor`), 2 (Eta), 5 (MYNN; `sf_mynn_sfcflux_land` 0-3, `sf_mynn_sfcflux_water` 0-4) |
+| `sf_sfclay_physics` | 0, 1 (revised MM5; `isfflx` 0, 1, `isftcflx` 0-2, `iz0tlnd` 0-2, `kim_tofd`, `tofd_factor`), 2 (Eta), 5 (MYNN; `sf_mynn_sfcflux_land` 0-3, `sf_mynn_sfcflux_water` 0-4), 7 (Pleim-Xiu, with ACM2 and Noah, `fractional_seaice` 0, `isfflx` 1) |
 | `grav_settling` | 0, 1, 2 |
 | `sf_surface_physics`, `num_soil_layers` | 0, 1 (5-layer thermal diffusion, 5 layers; `ifsnow`), 2 (Noah, 4 layers; `opt_thcnd` 1, 2), 4 (Noah-MP v5.1.2, default `&noah_mp` options, one domain) |
 | `rdmaxalb`, `usemonalb`, `rdlai2d`, `fractional_seaice`, `sst_update` | any; any; Noah; 0, 1; 0, 1 |
@@ -402,9 +402,10 @@ an error, never silently:
 | `km_opt` 5 (SMS-3DTKE) | not ported |
 | `mp_physics` other than 0, 1, 6, 8, 28 | not ported |
 | `cu_physics` other than 0, 1, 3, 6, 16 | not ported |
-| `bl_pbl_physics` other than 0, 1, 2, 5; `shcu_physics` | not ported |
+| `bl_pbl_physics` other than 0, 1, 2, 5, 7; `shcu_physics` | not ported |
 | `sf_sfclay_physics` 91 and other values; `sf_urban_physics`, `sf_lake_physics` | not ported |
-| `sf_surface_physics` 3, 5, 7, 8 (RUC, CLM, PX, SSiB) | not ported |
+| `sf_sfclay_physics` 7 without ACM2 or Noah, with `fractional_seaice = 1` or `isfflx = 0` | not ported (the Pleim-Xiu surface layer is verified with ACM2 and Noah; its sea-ice wrapper is not ported) |
+| `sf_surface_physics` 3, 5, 7, 8 (RUC, CLM, PX, SSiB); the `pxlsm_*` options and PX soil nudging | not ported (PX needs real.exe's 2-layer soil and its own state, LANDUSEF / SOILCTOP / SOILCBOT input and tables) |
 | Noah-MP options other than the defaults (crop, irrigation, tile drainage, ...) | not ported |
 | MYNN with `fractional_seaice = 1`; `bl_mynn_edmf` 2, `bl_mynn_edmf_dd`, `bl_mynn_mixnumcon`, `bl_mynn_mixaerosols` 0, `bl_mynn_output` 2, other `bl_mynn_closure` values, `sf_mynn_sfcflux_land` 4 / `_water` 5 | not ported |
 | `mp_physics = 28` with `wif_input_opt = 2`, `use_aero_icbc`, `qna_update`, `dust_emis`, nests or MYNN | not ported |
@@ -552,13 +553,13 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[phys]` | `mp_tend_lim` | double | `10.0` | Heating rate limiter for microphysics ($K/s$) | `mp_tend_lim` |
 | `[phys]` | `wif_input_opt` | integer | `0` | mp_physics = 28: 0 and 1 run alike (real.exe needs 1), 2 (black-carbon aerosols) is an error | `wif_input_opt` |
 | `[phys]` | `force_read_thompson` | bool | `false` | Thompson: `qr_acr_qg_V4.dat`, `qr_acr_qsV2.dat` and `freezeH2O.dat` must be in `table_dir` (else an error, as WRF stops) instead of being computed | `force_read_thompson` |
-| `[phys]` | `sf_sfclay_physics` | integer | `1` | Surface layer formulation (0 = off, 1 = Revised MM5 / sfclayrev, 2 = Eta / MYJ, 5 = MYNN) | `sf_sfclay_physics` |
+| `[phys]` | `sf_sfclay_physics` | integer | `1` | Surface layer formulation (0 = off, 1 = Revised MM5 / sfclayrev, 2 = Eta / MYJ, 5 = MYNN, 7 = Pleim-Xiu with ACM2 and Noah) | `sf_sfclay_physics` |
 | `[phys]` | `isfflx`, `kim_tofd`, `tofd_factor` | int/bool/double | `1`, `false`, `0.003` | Surface heat/moisture flux switch and turbulent orographic form drag options | `isfflx`, `kim_tofd`, `tofd_factor` |
 | `[phys]` | `sf_surface_physics`, `num_soil_layers`, `rdmaxalb`, `usemonalb`, `rdlai2d` | int/bool | `2`, `4`, `true`, `false`, `false` | Land surface model (0 = off, 1 = 5-layer thermal diffusion (slab; not with `fractional_seaice = 1`), 2 = Unified Noah, 4 = Noah-MP v5.1.2, not with nests: wrf.exe 4.8.0 aborts), soil layers (4; 5 for the slab), snow albedo source, background albedo from wrfinput `ALBBCK` instead of LANDUSE.TBL / VEGPARM.TBL (snow-covered points start with `SNOALB`), Noah LAI from wrfinput `LAI` instead of VEGPARM.TBL | `sf_surface_physics`, `num_soil_layers`, `rdmaxalb`, `usemonalb`, `rdlai2d` |
 | `[phys]` | `dveg`, `opt_*`, `soiltstep` | int/double | WRF defaults | Noah-MP sub-options when `sf_surface_physics = 4` (`dveg=4`, `opt_crs=1`, `opt_btr=1`, `opt_runsrf=3`, `opt_runsub=3`, `opt_sfc=1`, `opt_frz=1`, `opt_inf=1`, `opt_rad=3`, `opt_alb=2`, `opt_snf=1`, `opt_tbot=2`, `opt_stc=1`, `opt_gla=1`, `opt_rsf=1`, `opt_soil=1`, `opt_pedo=1`, `opt_crop=0`, `opt_irr=0`, `opt_irrm=0`, `opt_infdv=0`, `opt_tdrn=0`, `opt_tksno=1`, `opt_compact=2`, `opt_scf=1`, `opt_wetland=0`, `soiltstep=0.0`) | `&noah_mp` options |
 | `[phys]` | `ifsnow` | integer | `1` | Slab (`sf_surface_physics = 1`): 1 limits the skin and top soil temperatures under snow to 273.16 K, 0 does not | `ifsnow` |
 | `[phys]` | `opt_thcnd` | integer | `1` | Noah soil thermal conductivity (1 = Peters-Lidard, 2 = McCumber-Pielke for soil types 3 and 4) | `opt_thcnd` |
-| `[phys]` | `bl_pbl_physics`, `bldt`, `ysu_topdown_pblmix` | int/double | `1`, `0.0`, `1` | Planetary boundary layer scheme (0 = off, 1 = YSU with surface layer 1, 2 = MYJ with surface layer 2, 5 = MYNN-EDMF with surface layer 1, 2 or 5; MYNN not with `fractional_seaice = 1`), call interval (min), YSU top-down mixing | `bl_pbl_physics`, `bldt`, `ysu_topdown_pblmix` |
+| `[phys]` | `bl_pbl_physics`, `bldt`, `ysu_topdown_pblmix` | int/double | `1`, `0.0`, `1` | Planetary boundary layer scheme (0 = off, 1 = YSU with surface layer 1, 2 = MYJ with surface layer 2, 5 = MYNN-EDMF with surface layer 1, 2 or 5; MYNN not with `fractional_seaice = 1`; 7 = ACM2 with surface layer 1 or 7, needs qc and qi), call interval (min), YSU top-down mixing | `bl_pbl_physics`, `bldt`, `ysu_topdown_pblmix` |
 | `[phys]` | `bl_mynn_tkeadvect`, `bl_mynn_cloudpdf`, `bl_mynn_mixlength`, `bl_mynn_closure`, `bl_mynn_edmf`, `bl_mynn_edmf_mom`, `bl_mynn_edmf_tke`, `bl_mynn_cloudmix`, `bl_mynn_mixqt`, `bl_mynn_ess`, `bl_mynn_mixscalars`, `bl_mynn_output`, `tke_budget` | bool/int/double | WRF defaults (`false`, `2`, `1`, `2.6`, `1`, `1`, `0`, `1`, `0`, `1`, `0`, `0`, `0`) | MYNN-EDMF options (`bl_pbl_physics = 5`): advected QKE, subgrid cloud PDF (`-2..2`), mixing length (`0..2`), closure level (`2.5`, `2.6`, `3.0`), mass flux (`0, 1`), momentum / TKE transport by the plumes, cloud water / ice mixing, total-water mixing, mixing-length form, WRF's unconnected scalar mixing, EDMF_* output and TKE budget fields (`0, 1`); one value for all domains | same names |
 | `[phys]` | `sf_mynn_sfcflux_land`, `sf_mynn_sfcflux_water` | integer | `0`, `1` | MYNN surface layer (`sf_sfclay_physics = 5`) roughness / thermal roughness forms over land (`0..3`) and water (`0..4`) | same names |
 | `[phys]` | `grav_settling` | integer | `0` | Fog water deposition (1: settling velocity from qc, 2: Katata et al. by land-use class; USGS or MODIFIED_IGBP_MODIS_NOAH land use, needs qc, a PBL scheme and a surface layer) | `grav_settling` |

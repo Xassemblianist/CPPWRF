@@ -15,7 +15,7 @@ is verified against WRF, and the current results. All numbers come from `tests/v
 | Diffusion | diff_opt 1 with km_opt 1 (constant K), 3 (3-D Smagorinsky) and 4 (2-D Smagorinsky); diff_opt 2 with km_opt 2 (1.5-order TKE, advected TKE); 6th-order diffusion (diff_6th_opt 1, 2) |
 | Microphysics | Kessler (1), WSM6 (6, with effective radii), Thompson (8), aerosol-aware Thompson (28: aer_init_opt 0, wif_input_opt 0 / 1; single domain, not with MYNN) |
 | Cumulus | Kain-Fritsch (1), Grell-Freitas-Li (3, deep and shallow), Tiedtke (6), New Tiedtke (16) |
-| PBL, surface layer, land surface | YSU (1), MYJ (2), MYNN-EDMF (5, icloud_bl 0 / 1, with the surface layers 1, 2 and 5; bl_mynn_tkeadvect, bl_mynn_cloudpdf -2..2, bl_mynn_mixlength 0..2, bl_mynn_closure 2.5 / 2.6 / 3.0, bl_mynn_edmf 0 / 1, bl_mynn_edmf_mom, bl_mynn_edmf_tke, bl_mynn_cloudmix, bl_mynn_mixqt, bl_mynn_ess, bl_mynn_mixscalars, bl_mynn_output 0 / 1, tke_budget 0 / 1), MYNN surface layer options sf_mynn_sfcflux_land 0..3 and sf_mynn_sfcflux_water 0..4, fog deposition (grav_settling 1, 2), revised MM5 surface layer (1), Eta surface layer (2), MYNN surface layer (5), 5-layer thermal diffusion (1, ifsnow 0 / 1; also in cppwrf_real), Noah LSM (2, including glacial and sea-ice points; usemonalb and rdlai2d: background albedo and LAI from wrfinput), Noah-MP v5.1.2 (4, default options), fractional sea ice (fractional_seaice = 1), SST update (sst_update = 1, wrflowinp), gravity wave drag (gwd_opt = 1, GWDO) |
+| PBL, surface layer, land surface | YSU (1), MYJ (2), ACM2 (7, over the surface layer 1 or 7), MYNN-EDMF (5, icloud_bl 0 / 1, with the surface layers 1, 2 and 5; bl_mynn_tkeadvect, bl_mynn_cloudpdf -2..2, bl_mynn_mixlength 0..2, bl_mynn_closure 2.5 / 2.6 / 3.0, bl_mynn_edmf 0 / 1, bl_mynn_edmf_mom, bl_mynn_edmf_tke, bl_mynn_cloudmix, bl_mynn_mixqt, bl_mynn_ess, bl_mynn_mixscalars, bl_mynn_output 0 / 1, tke_budget 0 / 1), MYNN surface layer options sf_mynn_sfcflux_land 0..3 and sf_mynn_sfcflux_water 0..4, fog deposition (grav_settling 1, 2), revised MM5 surface layer (1), Eta surface layer (2), MYNN surface layer (5), Pleim-Xiu surface layer (7, with ACM2 and Noah), 5-layer thermal diffusion (1, ifsnow 0 / 1; also in cppwrf_real), Noah LSM (2, including glacial and sea-ice points; usemonalb and rdlai2d: background albedo and LAI from wrfinput), Noah-MP v5.1.2 (4, default options), fractional sea ice (fractional_seaice = 1), SST update (sst_update = 1, wrflowinp), gravity wave drag (gwd_opt = 1, GWDO) |
 | Radiation | RRTMG LW and SW (4), RRTM LW (1, with RRTMG or Dudhia SW), Dudhia SW (1, with RRTMG or RRTM LW; swrad_scat), CAM ozone and greenhouse gases, cal_cldfra1, McICA (cldovrlp 1-5) and clear sky only (cldovrlp 0), cumulus clouds in the radiation (cu_rad_feedback: Kain-Fritsch, Grell-Freitas; no effect with Tiedtke / New Tiedtke as in WRF) |
 | Nudging | grid (analysis) nudging, grid_fdda = 1 (PSUFDDAGD: guv, gt, gq, if_no_pbl_nudging_uv / t / q, if_zfac_* / k_zfac_*, fgdt, fgdtzero, if_ramping / dtramp_min, gfdda_end_h, gfdda_interval_m, per domain; wrffdda_d0N from real.exe or cppwrf_real; restarts, nests) |
 | Nesting | static one-way and two-way nests (interp_fcn_sint, bdy_interp1, copy_fcn feedback, sm121/smdsm smoothers, blend_terrain, adjust_tempqv) |
@@ -110,6 +110,10 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | FD7 | FD1 nudging until 12 h (the 6 h analyses read during the run) | 7 h |
 | FD9 | P9 (MYJ surface layer, REGIME from PBLH) with grid nudging | 1 h |
 | FDN | N3 with grid nudging on both domains (wrffdda_d02) | 1 h |
+| ACM1 | P4 with the ACM2 PBL over the revised MM5 surface layer (bl_pbl_physics 7; restarted at 30 min) | 1 h |
+| ACM7 | P4 with ACM2 over the Pleim-Xiu surface layer (sf_sfclay_physics 7; restarted at 30 min) | 1 h |
+| ACMB | ACM7 with bldt 3 | 1 h |
+| ACMN | N3 with ACM2 and the Pleim-Xiu surface layer on both domains | 1 h |
 | P6 | P5 with Thompson | 1 h |
 | P7 | P2 with New Tiedtke | 1 h |
 | P8 | P2 with Grell-Freitas-Li (deep and shallow) | 1 h |
@@ -172,7 +176,7 @@ P1 with Noah-MP and the two-way nest N3s (1 h, both domains) and em_quarter_ss (
 threads are bit-identical to serial WRF on c3 (Sapphire Rapids) and n2 machines (`run.threads` in
 tools/gcp/gcp_matrix.sh). The required build flags are in [USER_GUIDE.md](USER_GUIDE.md#required-flags-and-determinism).
 
-Restarts reproduce an uninterrupted run bit for bit (P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1; P1 also in FP32 on the GPU), and a run
+Restarts reproduce an uninterrupted run bit for bit (P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, ACM7, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1; P1 also in FP32 on the GPU), and a run
 resumed from WRF's own wrfrst files continues as WRF does (also the two-way physics nest N3, both domains).
 The restart variants of tests/verify/matrix_restart_io.txt (tools/gcp/gcp_matrix.sh) write restart files in the
 middle of a run and resume both models from WRF's: the wrfrst files of the straight and the resumed runs (data and
@@ -226,7 +230,7 @@ single-precision runs (relative L2 at 1 h):
 | N1 (1 h) | FP32 vs WRF FP32 | 1.9e-4 (d01), 2.8e-4 (d02) | 3.6e-3 / 4.7e-3 | 6.5e-7 / 9.7e-7 | 2.0e-5 / 3.1e-5 |
 
 On the GPU a run restarted after its first step reproduces the uninterrupted run bit for bit
-(restart_<case>_fp64_cuda for P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1), and the
+(restart_<case>_fp64_cuda for P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, ACM7, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1), and the
 wrfout / wrfrst files of a GPU run (P1, P4, MYNN, N2, also resumed from WRF's wrfrst) have WRF's variables,
 dimensions, attributes, global attributes and times (run_wrf_files_test.sh with CPPWRF_FILES_NO_VALUES=1).
 
@@ -291,7 +295,7 @@ serial compression). Wall times, GPU memory and the details are in docs/PERF.md.
 
 ## Not yet implemented
 
-the Dudhia shortwave with cu_rad_feedback and Grell-Freitas (wrf.exe writes NaN cloud fractions there), sf_sfclay_physics 91, km_opt 5, the MYNN PBL with fractional_seaice = 1, the MYNN options bl_mynn_edmf 2, bl_mynn_edmf_dd, bl_mynn_mixnumcon, bl_mynn_mixaerosols 0, bl_mynn_output 2, other bl_mynn_closure values and the GFS surface-layer forms (sf_mynn_sfcflux_land 4, sf_mynn_sfcflux_water 5), Noah-MP options other than the defaults (and crop/irrigation/
+the Dudhia shortwave with cu_rad_feedback and Grell-Freitas (wrf.exe writes NaN cloud fractions there), the PX land surface (sf_surface_physics 7, pxlsm_* options and PX soil nudging), the Pleim-Xiu surface layer without ACM2 or Noah or with fractional_seaice = 1, sf_sfclay_physics 91, km_opt 5, the MYNN PBL with fractional_seaice = 1, the MYNN options bl_mynn_edmf 2, bl_mynn_edmf_dd, bl_mynn_mixnumcon, bl_mynn_mixaerosols 0, bl_mynn_output 2, other bl_mynn_closure values and the GFS surface-layer forms (sf_mynn_sfcflux_land 4, sf_mynn_sfcflux_water 5), Noah-MP options other than the defaults (and crop/irrigation/
 tile drainage), the adaptive time step with nests, sst_update, grid_fdda or ideal cases, spectral nudging (grid_fdda = 2),
 surface analysis nudging (grid_sfdda, needs OBSGRID's wrfsfdda_d0N), observation nudging (obs_nudge_opt), moving nests, ndown.exe (one-way nesting from a parent run's wrfout), I/O forms other than NetCDF
 (io_form 2) and auxiliary history / input streams other than sst_update's wrflowinp and grid_fdda's wrffdda (WRF writes none by default),
