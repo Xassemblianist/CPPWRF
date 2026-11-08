@@ -114,6 +114,9 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | ACM7 | P4 with ACM2 over the Pleim-Xiu surface layer (sf_sfclay_physics 7; restarted at 30 min) | 1 h |
 | ACMB | ACM7 with bldt 3 | 1 h |
 | ACMN | N3 with ACM2 and the Pleim-Xiu surface layer on both domains | 1 h |
+| MORR | P4 with the Morrison two-moment microphysics (mp_physics 10, hail) and KF (restarted at 30 min) | 1 h |
+| MORG | P4 with Morrison with graupel (morr_rimed_ice 0), no cumulus | 1 h |
+| MORN | N3 with Morrison on both domains | 1 h |
 | P6 | P5 with Thompson | 1 h |
 | P7 | P2 with New Tiedtke | 1 h |
 | P8 | P2 with Grell-Freitas-Li (deep and shallow) | 1 h |
@@ -176,7 +179,7 @@ P1 with Noah-MP and the two-way nest N3s (1 h, both domains) and em_quarter_ss (
 threads are bit-identical to serial WRF on c3 (Sapphire Rapids) and n2 machines (`run.threads` in
 tools/gcp/gcp_matrix.sh). The required build flags are in [USER_GUIDE.md](USER_GUIDE.md#required-flags-and-determinism).
 
-Restarts reproduce an uninterrupted run bit for bit (P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, ACM7, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1; P1 also in FP32 on the GPU), and a run
+Restarts reproduce an uninterrupted run bit for bit (P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, ACM7, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1, MORR; P1 also in FP32 on the GPU), and a run
 resumed from WRF's own wrfrst files continues as WRF does (also the two-way physics nest N3, both domains).
 The restart variants of tests/verify/matrix_restart_io.txt (tools/gcp/gcp_matrix.sh) write restart files in the
 middle of a run and resume both models from WRF's: the wrfrst files of the straight and the resumed runs (data and
