@@ -328,6 +328,7 @@ Model Model::build(const io::Config& cfg) {
     pp.mp_physics = int(cfg.get_int("phys.mp_physics", 0));
     pp.mp_tend_lim = real(cfg.get_double("phys.mp_tend_lim", 10.0));
     pp.hail_opt = int(cfg.get_int("phys.hail_opt", 0));
+    pp.morr_rimed_ice = int(cfg.get_int("phys.morr_rimed_ice", 1));
     pp.table_dir = cfg.get_string("phys.table_dir", cfg.get_string("real.dir", ""));
     pp.force_read_thompson = cfg.get_bool("phys.force_read_thompson", false);
     // REFL_10CM (WSM6, Thompson; Kessler and no microphysics leave it 0)
@@ -353,11 +354,20 @@ Model Model::build(const io::Config& cfg) {
         throw std::runtime_error("phys.mp_physics = 28 with the MYNN PBL (aerosol mixing, bl_mynn_mixaerosols) is "
                                  "not ported");
     }
+    if (pp.mp_physics == 10) {  // Morrison two-moment without WRF-Chem: constant droplet number (no progn)
+      if (cname != "real") throw std::runtime_error("phys.mp_physics = 10: real-data runs only");
+      if (cfg.get_int("phys.progn", 0) != 0)
+        throw std::runtime_error("phys.progn = 1 (prognostic droplet number QNDROP, prescribe_aerosol_mixactivate) is "
+                                 "not ported");
+    }
     if (pp.mp_physics != 0) m.rk->enable_physics(pp);
     if (pp.mp_physics == 28) init_real_aerosols(cfg, m);  // thompson_init (phy_init), also before a restart load
     if (wants_column_physics(cfg)) {
       if (cname != "real") throw std::runtime_error("phys.sf_*/bl_pbl_physics: real-data runs only");
       init_real_physics(cfg, m);
+      // Morrison reads the cumulus scheme's RQRCUTEN, RQSCUTEN, RQICUTEN (zero without one), as WRF's driver passes
+      if (pp.mp_physics == 10)
+        m.rk->physics()->set_cumulus_tendencies(&m.suite->pt.rqrcuten, &m.suite->pt.rqscuten, &m.suite->pt.rqicuten);
     } else if (cfg.get_int("phys.ra_lw_physics", 0) != 0 || cfg.get_int("phys.ra_sw_physics", 0) != 0) {
       // radiation is part of the column physics suite: without it ra_* would be silently ignored
       throw std::runtime_error("phys.ra_lw/ra_sw_physics without surface-layer, land-surface, PBL or cumulus physics "

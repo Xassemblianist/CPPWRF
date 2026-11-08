@@ -15,6 +15,7 @@
 #include "core/limits.hpp"
 #include "core/vm_dump.hpp"
 #include "phys/mp_kessler/kessler.hpp"
+#include "phys/mp_morrison/morrison.hpp"
 #include "phys/mp_thompson/thompson.hpp"
 #include "phys/mp_wsm6/wsm6.hpp"
 #include "phys/phys_constants.hpp"
@@ -100,8 +101,9 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
       th_phy(g, Stagger::M, "th_phy"), rho(g, Stagger::M, "rho"), pii(g, Stagger::M, "pii"), z(g, Stagger::M, "z"),
       dz8w(g, Stagger::M, "dz8w"), qv_diabatic(g, Stagger::M, "qv_diabatic"), qc_diabatic(g, Stagger::M, "qc_diabatic"),
       p_phy(g, Stagger::M, "p_phy") {
-  if (p_.mp_physics != 0 && p_.mp_physics != 1 && p_.mp_physics != 6 && p_.mp_physics != 8 && p_.mp_physics != 28)
-    throw std::runtime_error("phys.mp_physics must be 0, 1, 6, 8 or 28");
+  if (p_.mp_physics != 0 && p_.mp_physics != 1 && p_.mp_physics != 6 && p_.mp_physics != 8 && p_.mp_physics != 10 &&
+      p_.mp_physics != 28)
+    throw std::runtime_error("phys.mp_physics must be 0, 1, 6, 8, 10 or 28");
   if (p_.mp_physics == 1) check_limit("Kessler", "nz", g.nz, phys::kessler::kMaxLevels);
   if (p_.do_radar_ref != 0 && p_.do_radar_ref != 1) throw std::runtime_error("phys.do_radar_ref must be 0 or 1");
   if (p_.microp_re) {  // phy_init: background values RE_QC_BG, RE_QI_BG, RE_QS_BG
@@ -138,6 +140,23 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
           wp_.pi * wp_.denr / real(6.), real(3.), real(0.), wp_.pi * wp_.dens / real(6.), real(3.), real(0.),
           wp_.pi * wp_.deng / real(6.), real(3.), real(0.)));
   }
+  if (p_.mp_physics == 10) {
+    check_limit("Morrison", "nz", g.nz, phys::mp_morrison::kMaxLevels);
+    if (p_.do_radar_ref != 0)
+      throw std::runtime_error("phys.do_radar_ref = 1 with mp_physics = 10 (Morrison's refl10cm_hm) is not ported");
+    if (p_.morr_rimed_ice != 0 && p_.morr_rimed_ice != 1) throw std::runtime_error("phys.morr_rimed_ice must be 0 or 1");
+    snownc = Field2(g, Stagger::M, "snownc");
+    snowncv = Field2(g, Stagger::M, "snowncv");
+    graupelnc = Field2(g, Stagger::M, "graupelnc");
+    graupelncv = Field2(g, Stagger::M, "graupelncv");
+    sr = Field2(g, Stagger::M, "sr");
+    // phy_init: morr_two_moment_init(morr_rimed_ice), once
+    morr_ = phys::mp_morrison::morrison_init<real>(p_.morr_rimed_ice);
+    {  // the column arrays' work buffer on the GPU, for step()'s mp_cols
+      const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
+      phys::mp_morrison::morrison_reserve<real>(Range2D{sx, g.nx - sx, sy, g.ny - sy}, g.nz);
+    }
+  }
   if (p_.do_radar_ref == 1 && (p_.mp_physics == 6 || thompson())) refl_10cm = Field3(g, Stagger::M, "refl_10cm");
   if (thompson()) {
     check_limit("Thompson", "nz", g.nz, phys::mp_thompson::kMaxLevels);
@@ -171,6 +190,9 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
     throw std::runtime_error("mp_physics = 6 (WSM6) needs qv, qc, qr, qi, qs, qg");
   if (thompson() && (s.P_QI < 0 || s.P_QS < 0 || s.P_QG < 0 || s.P_QNI < 0 || s.P_QNR < 0))
     throw std::runtime_error("mp_physics = 8 / 28 (Thompson) needs qv, qc, qr, qi, qs, qg, qni, qnr");
+  if (p_.mp_physics == 10 &&
+      (s.P_QI < 0 || s.P_QS < 0 || s.P_QG < 0 || s.P_QNI < 0 || s.P_QNS < 0 || s.P_QNR < 0 || s.P_QNG < 0))
+    throw std::runtime_error("mp_physics = 10 (Morrison) needs qv, qc, qr, qi, qs, qg, qni, qns, qnr, qng");
   if (p_.mp_physics == 28 && (s.P_QNC < 0 || s.P_QNWFA < 0 || s.P_QNIFA < 0 || s.P_QNBCA < 0))
     throw std::runtime_error("mp_physics = 28 (Thompson aerosol aware) also needs qnc, qnwfa, qnifa, qnbca");
   const Grid& g = g_;
@@ -254,6 +276,24 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
     vmdump::dump("vm_mp_out", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS],
                                   &s.q_2[s.P_QG], &s.q_2[s.P_QNI], &s.q_2[s.P_QNR]},
                  {&rainnc, &rainncv, &snownc, &snowncv, &graupelnc, &graupelncv, &sr});
+  } else if (p_.mp_physics == 10) {
+    // debug (CPPWRF_VM_DUMP): Morrison inputs and outputs, for a replay through WRF's mp_morr_two_moment
+    vmdump::dump("vm_mp_in", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS],
+                                 &s.q_2[s.P_QG], &s.q_2[s.P_QNI], &s.q_2[s.P_QNS], &s.q_2[s.P_QNR], &s.q_2[s.P_QNG],
+                                 &pii, &p_phy, &dz8w},
+                 {&rainnc, &rainncv, &snownc, &snowncv, &graupelnc, &graupelncv, &sr});
+    const bool cu = cu_qr_ && cu_qs_ && cu_qi_;
+    phys::mp_morrison::run_morrison<real>(
+        morr_, dt, mp_cols, g.nz, th_phy.view(), qv.view(), s.q_2[s.P_QC].view(), s.q_2[s.P_QR].view(),
+        s.q_2[s.P_QI].view(), s.q_2[s.P_QS].view(), s.q_2[s.P_QG].view(), s.q_2[s.P_QNI].view(),
+        s.q_2[s.P_QNS].view(), s.q_2[s.P_QNR].view(), s.q_2[s.P_QNG].view(), pii.cview(), p_phy.cview(),
+        dz8w.cview(), cu ? cu_qr_->cview() : View3<const real>{}, cu ? cu_qs_->cview() : View3<const real>{},
+        cu ? cu_qi_->cview() : View3<const real>{}, rainnc.view(), rainncv.view(), snownc.view(), snowncv.view(),
+        graupelnc.view(), graupelncv.view(), sr.view());
+    vmdump::dump("vm_mp_out", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS],
+                                  &s.q_2[s.P_QG], &s.q_2[s.P_QNI], &s.q_2[s.P_QNS], &s.q_2[s.P_QNR],
+                                  &s.q_2[s.P_QNG]},
+                 {&rainnc, &rainncv, &snownc, &snowncv, &graupelnc, &graupelncv, &sr});
   } else {
     column_for(mp_cols,
                phys::kessler::KesslerKernel{th_phy.view(), qv.view(), s.q_2[s.P_QC].view(), s.q_2[s.P_QR].view(),
@@ -267,7 +307,7 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
                                        qc_diabatic.view(), dt, p_.mp_tend_lim, s.P_QC >= 0});
   std::vector<Field3*> fs{&s.t_2, &s.h_diabatic};
   for (int n = 0; n < s.n_moist; ++n) fs.push_back(&s.q_2[n]);
-  for (int n : {s.P_QNI, s.P_QNR, s.P_QNC, s.P_QNWFA, s.P_QNIFA, s.P_QNBCA})
+  for (int n : {s.P_QNI, s.P_QNS, s.P_QNR, s.P_QNG, s.P_QNC, s.P_QNWFA, s.P_QNIFA, s.P_QNBCA})
     if (n >= 0) fs.push_back(&s.q_2[n]);
   fill_halos(fs, g);
 }

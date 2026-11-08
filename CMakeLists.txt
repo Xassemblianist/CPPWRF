@@ -111,9 +111,11 @@ list(APPEND CPPWRF_SOURCES
   ${CMAKE_SOURCE_DIR}/src/phys/cu_kf/kf.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/cu_kf/kf_tables.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/mp_thompson/thompson.cpp
-  ${CMAKE_SOURCE_DIR}/src/phys/mp_thompson/thompson_tables.cpp)
+  ${CMAKE_SOURCE_DIR}/src/phys/mp_thompson/thompson_tables.cpp
+  ${CMAKE_SOURCE_DIR}/src/phys/mp_morrison/morrison.cpp)
 set_source_files_properties(
   ${CMAKE_SOURCE_DIR}/src/phys/mp_thompson/thompson.cpp
+  ${CMAKE_SOURCE_DIR}/src/phys/mp_morrison/morrison.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/suite.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/surface_driver.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/driver/pbl_driver.cpp

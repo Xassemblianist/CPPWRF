@@ -686,6 +686,44 @@ class TestValidationAndWarnings(unittest.TestCase):
             err, _ = phys(*args)
             self.assertIn(msg, " ".join(err), args)
 
+    def test_morrison_two_moment(self):
+        # mp_physics = 10 (module_mp_morr_two_moment.F): moist qv qc qr qi qs qg and scalar qni qns qnr qng (Registry
+        # package morr_two_moment); morr_rimed_ice = 1 (default, hail) or graupel for any other value; not ported:
+        # mp_physics = 40, progn = 1, do_radar_ref = 1 with Morrison, the ideal cases
+        def tr(extra="", mp=10, case=real_case, cu=1):
+            t = WrfTranslator(parse_namelist(case(f"""
+            &time_control /
+            &domains time_step = 60 /
+            &physics mp_physics = {mp}, sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1,
+                     cu_physics = {cu}{extra} /
+            &dynamics /
+            """)))
+            gen = t.translate()
+            return t, gen
+        t, g = tr()
+        self.assertEqual(t.errors, [])
+        self.assertEqual(g["moist"]["species"], "qv,qc,qr,qi,qs,qg,qni,qns,qnr,qng")
+        self.assertEqual(g["phys"]["mp_physics"], 10)
+        self.assertNotIn("morr_rimed_ice", g["phys"])
+        for v, note in (("0", False), ("2", True)):
+            t, g = tr(f", morr_rimed_ice = {v}", cu=0)
+            self.assertEqual(t.errors, [], v)
+            self.assertEqual(g["phys"]["morr_rimed_ice"], 0, v)
+            self.assertEqual(any("graupel" in n for n in t.notices), note, v)
+        t, g = tr(", morr_rimed_ice = 0", mp=6)  # read by Morrison only
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("morr_rimed_ice", g["phys"])
+        for args, msg in (((", do_radar_ref = 1",), "do_radar_ref = 1 with mp_physics = 10"),
+                          ((", progn = 1",), "progn = [1]"),
+                          (("", 40), "mp_physics = 40 (Morrison with aerosols"),
+                          ((", progn = 1", 6), "progn = [1]")):
+            t, _ = tr(*args)
+            self.assertIn(msg, " ".join(t.errors), args)
+        t = WrfTranslator(parse_namelist(complete("&time_control /\n&domains time_step = 6 /\n"
+                                                   "&physics mp_physics = 10 /\n")), override_case="quarter_ss")
+        t.translate()
+        self.assertIn("mp_physics = 10 (Morrison two-moment) is supported for real-data runs only", " ".join(t.errors))
+
     def test_force_read_thompson(self):
         def phys(mp, extra):
             t = WrfTranslator(parse_namelist(real_case(f"""

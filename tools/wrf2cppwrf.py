@@ -309,6 +309,7 @@ SUPPORTED_OPTIONS = {
         1: "Kessler warm-rain",
         6: "WSM6 6-class single-moment",
         8: "Thompson",
+        10: "Morrison two-moment (morr_rimed_ice 0 / 1, constant droplet number: progn = 0)",
         28: "Thompson aerosol-aware (aer_init_opt = 0, wif_input_opt 0 / 1)",
     },
     "sf_sfclay_physics": {
@@ -1610,6 +1611,8 @@ class WrfTranslator:
                 sections["moist"]["species"] = "qv,qc,qr,qi,qs,qg,qni,qnr"
             elif mp_physics == 28:  # Registry package thompsonaero: scalar qni, qnr, qnc, qnwfa, qnifa, qnbca
                 sections["moist"]["species"] = "qv,qc,qr,qi,qs,qg,qni,qnr,qnc,qnwfa,qnifa,qnbca"
+            elif mp_physics == 10:  # Registry package morr_two_moment: scalar qni, qns, qnr, qng
+                sections["moist"]["species"] = "qv,qc,qr,qi,qs,qg,qni,qns,qnr,qng"
             elif mp_physics == 6:
                 sections["moist"]["species"] = "qv, qc, qr, qi, qs, qg" if not has_physics_suite else "qv,qc,qr,qi,qs,qg"
             elif mp_physics == 1:
@@ -1619,6 +1622,8 @@ class WrfTranslator:
         elif mp_physics > 0 or case_name in ("quarter_ss", "squall2d"):
             if mp_physics == 28:
                 self.error("WRF mp_physics = 28 (aerosol-aware Thompson) is supported for real-data runs only.")
+            if mp_physics == 10:
+                self.error("WRF mp_physics = 10 (Morrison two-moment) is supported for real-data runs only.")
             sections["moist"] = {}
             if mp_physics == 8:
                 sections["moist"]["species"] = "qv,qc,qr,qi,qs,qg,qni,qnr"
@@ -1642,7 +1647,17 @@ class WrfTranslator:
             sections["phys"] = {}
             if mp_physics != 0:
                 sections["phys"]["mp_physics"] = mp_physics
-                self.check_supported("mp_physics", mp_physics)
+                if mp_physics == 40:
+                    self.error("WRF mp_physics = 40 (Morrison with aerosols, module_mp_morr_two_moment_aero.F: predicted "
+                               "droplet number, KZH and MSKF coupling) is not supported by CPPWRF.")
+                else:
+                    self.check_supported("mp_physics", mp_physics)
+            # progn = 1: prognostic droplet number QNDROP (prescribe_aerosol_mixactivate; Morrison then predicts the
+            # droplet number, iinum = 0); WRF stops with it for the other schemes
+            progn = self.get_opt_list("physics", "progn")[:max(1, max_dom)]
+            if any(v not in (0, None) for v in progn):
+                self.error(f"WRF progn = {progn} (prognostic cloud droplet number, module_mixactivate.F) is not "
+                           f"supported by CPPWRF.")
             # thompson_init (qr_acr_qg, qr_acr_qs, freezeH2O): a missing or unreadable .dat table is fatal
             # instead of computed; write_thompson_tables only writes the computed tables (no effect on results)
             if self.get_opt("physics", "force_read_thompson", False) and mp_physics in (8, 28):
@@ -1662,6 +1677,21 @@ class WrfTranslator:
                 if self._max_dom > 1:
                     self.error("WRF mp_physics = 28 with nests is not supported by CPPWRF.")
             self.get_opt("physics", "write_thompson_tables", True)
+            # morr_two_moment_init: IHAIL = 1 (hail) if morr_rimed_ice = 1 (WRF's default), else 0 (graupel); the
+            # option is read by Morrison (10, 40) only
+            rimed = self.get_opt("physics", "morr_rimed_ice", 1)
+            if mp_physics == 10:
+                if rimed != 1:
+                    sections["phys"]["morr_rimed_ice"] = 0
+                    if rimed != 0:
+                        self.notice(f"Option &physics.morr_rimed_ice = {rimed}: graupel (morr_two_moment_init sets "
+                                    f"IHAIL = 1 only for morr_rimed_ice = 1).")
+                # refl10cm_hm computes in DOUBLE PRECISION (REAL*16 in a plain -r8 build): not ported
+                if self.get_opt("physics", "do_radar_ref", 0) == 1:
+                    self.error("WRF do_radar_ref = 1 with mp_physics = 10 (Morrison's refl10cm_hm) is not supported "
+                               "by CPPWRF.")
+            elif rimed != 1:
+                self.notice(f"Option &physics.morr_rimed_ice = {rimed}: no effect without Morrison (mp_physics 10).")
 
             if has_physics_suite:
                 sections["phys"]["sf_sfclay_physics"] = sf_sfclay

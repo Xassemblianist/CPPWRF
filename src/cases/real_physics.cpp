@@ -547,7 +547,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   if (auto* pc = m.rk->physics(); pc && pc->params().microp_re)
     su.set_effective_radii(&pc->re_cloud, &pc->re_ice, &pc->re_snow);
   if (auto* pc = m.rk->physics(); pc && pc->params().mp_physics != 0) {
-    const bool has_ice_precip = pc->params().mp_physics == 6 || pc->thompson();
+    const bool has_ice_precip = pc->ice_precip();
     su.set_microphysics_accum(&pc->rainnc);
     su.set_microphysics_precip(&pc->rainncv, has_ice_precip ? &pc->sr : nullptr,
                                has_ice_precip ? &pc->snowncv : nullptr,

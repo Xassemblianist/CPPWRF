@@ -25,7 +25,7 @@ Tendencies::Tendencies(const Grid& g)
 
 int State::add_scalar(const Grid& g, const std::string& name, bool moist) {
   if (name == "qni" || name == "qnr" || name == "qnc" || name == "qnwfa" || name == "qnifa" || name == "qnbca" ||
-      name == "tke" || name == "qke_adv")
+      name == "qns" || name == "qng" || name == "tke" || name == "qke_adv")
     moist = false;  // number concentrations [#/kg], TKE and 2*TKE are not 'moist'
   for (auto& n : q_names)
     if (n == name) throw std::runtime_error("duplicate scalar '" + name + "'");
@@ -49,6 +49,8 @@ int State::add_scalar(const Grid& g, const std::string& name, bool moist) {
   }
   if (name == "qni") P_QNI = idx;
   if (name == "qnr") P_QNR = idx;
+  if (name == "qns") P_QNS = idx;
+  if (name == "qng") P_QNG = idx;
   if (name == "qnc") P_QNC = idx;
   if (name == "qnwfa") P_QNWFA = idx;
   if (name == "qnifa") P_QNIFA = idx;

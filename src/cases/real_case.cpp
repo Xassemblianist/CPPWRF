@@ -311,6 +311,8 @@ void init_real_case(const io::Config& cfg, Model& m) {
     std::vector<double> extra_q;
     if (nm == "qni") extra_q = read_var_if_present(wi_path, "QNICE", qv.size());
     else if (nm == "qnr") extra_q = read_var_if_present(wi_path, "QNRAIN", qv.size());
+    else if (nm == "qns") extra_q = read_var_if_present(wi_path, "QNSNOW", qv.size());
+    else if (nm == "qng") extra_q = read_var_if_present(wi_path, "QNGRAUPEL", qv.size());
     else if (nm == "qnc") extra_q = read_var_if_present(wi_path, "QNCLOUD", qv.size());
     else if (nm == "qnwfa") extra_q = read_var_if_present(wi_path, "QNWFA", qv.size());
     else if (nm == "qnifa") extra_q = read_var_if_present(wi_path, "QNIFA", qv.size());

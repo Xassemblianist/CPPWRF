@@ -11,6 +11,7 @@
 
 #include "core/field.hpp"
 #include "dyn/state.hpp"
+#include "phys/mp_morrison/morrison.hpp"
 #include "phys/mp_radar/radar.hpp"
 #include "phys/mp_thompson/thompson_tables.hpp"
 #include "phys/mp_wsm6/wsm6.hpp"
@@ -18,8 +19,9 @@
 namespace cppwrf::dyn {
 
 struct PhysicsParams {
-  int mp_physics = 0;        // 0 = none, 1 = Kessler, 6 = WSM6, 8 = Thompson, 28 = aerosol-aware Thompson
+  int mp_physics = 0;        // 0 = none, 1 = Kessler, 6 = WSM6, 8 = Thompson, 10 = Morrison, 28 = aerosol-aware Thompson
   int hail_opt = 0;          // WSM6 graupel (0) or hail (1) parameters, WRF namelist hail_opt
+  int morr_rimed_ice = 1;    // Morrison: dense precipitating ice is hail (1, WRF's default) or graupel (0)
   real mp_tend_lim = 10;     // K/s, WRF namelist mp_tend_lim (limit on the mp heating rate)
   std::string table_dir;     // Thompson: WRF's qr_acr_qg_V4.dat, qr_acr_qsV2.dat, freezeH2O.dat if there
   bool force_read_thompson = false;  // WRF namelist force_read_thompson: those files must be there
@@ -38,10 +40,17 @@ class PhysicsCoupling {
   void init_aerosols(State& s, const BaseState& b);
   const PhysicsParams& params() const { return p_; }
   bool thompson() const { return p_.mp_physics == 8 || p_.mp_physics == 28; }
+  // the schemes with snow and graupel accumulations (SNOWNC, GRAUPELNC) and SR: WSM6, Thompson, Morrison
+  bool ice_precip() const { return p_.mp_physics == 6 || p_.mp_physics == 10 || thompson(); }
+  // Morrison: the cumulus scheme's decoupled tendencies RQRCUTEN, RQSCUTEN, RQICUTEN (phy_prep_part2 has run when
+  // the microphysics runs); without cumulus WRF passes its zero arrays
+  void set_cumulus_tendencies(const Field3* qr, const Field3* qs, const Field3* qi) {
+    cu_qr_ = qr; cu_qs_ = qs; cu_qi_ = qi;
+  }
   // WRF grid fields moist_physics_prep/finish_em leave (rho, qv_diabatic, qc_diabatic), by WRF name
   std::vector<const Field3*> fields() const;
   Field2 rainnc, rainncv;  // accumulated / last-step grid-scale precipitation [mm]
-  Field2 snownc, snowncv, graupelnc, graupelncv, sr;  // WSM6/Thompson: snow, graupel [mm]; sr = frozen fraction
+  Field2 snownc, snowncv, graupelnc, graupelncv, sr;  // WSM6/Thompson/Morrison: snow, graupel [mm]; sr = frozen fraction
   Field3 re_cloud, re_ice, re_snow;  // microp_re: effective radii [m] (RE_QC_BG ... before the first call)
   Field2 qnwfa2d, qnifa2d;  // mp_physics = 28: surface emission of water- / ice-friendly aerosols [#/kg/s]
   // do_radar_ref = 1 with WSM6 / Thompson: 10-cm radar reflectivity [dBZ], 0 until the first history step and
@@ -62,6 +71,8 @@ class PhysicsCoupling {
   // Thompson lookup tables (thompson_init), device-resident: one set shared by all domains, as WRF's
   std::shared_ptr<const phys::mp_thompson::ThompsonDeviceTables<real>> tp_;
   std::shared_ptr<const phys::radar::RadarDeviceTables<real>> radar_;  // radar_init of WSM6 / Thompson
+  phys::mp_morrison::MorrisonParams<real> morr_{};  // morr_two_moment_init's constants
+  const Field3 *cu_qr_ = nullptr, *cu_qs_ = nullptr, *cu_qi_ = nullptr;  // Morrison: RQRCUTEN, RQSCUTEN, RQICUTEN
 };
 
 }  // namespace cppwrf::dyn
