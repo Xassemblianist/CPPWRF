@@ -13,10 +13,10 @@ tolerance 0 (NaN equals only NaN, -0 differs from +0).
 
 | Check | Scope |
 |---|---|
-| Model runs against WRF (`tests/verify/wrf_suite.py`) | 192 cases: 113 CPU FP64 and 64 GPU FP64 cases at tolerance 0, 15 GPU FP32 cases by relative L2; 8 of them are the 24 h and 72 h runs of `--slow` |
-| Restarts | 33 checks: a run restarted from its own restart files equals the uninterrupted run (15 CPU and 15 GPU FP64 configurations, also one FP32), and the Straka checks |
-| WRF output files | the wrfout and wrfrst files of the CPU FP64 runs equal WRF's in values, variables, dimensions, attributes and global attributes (31 runs), also when resumed from WRF's wrfrst files; the wrfout files of WRF's ideal cases (11 runs) |
-| GPU FP64 | the 64 GPU FP64 cases and 15 GPU restart checks (79 runs) at tolerance 0 on NVIDIA L4 (sm_89), RTX PRO 6000 Blackwell (sm_120) and A100 (sm_80) |
+| Model runs against WRF (`tests/verify/wrf_suite.py`) | 242 cases: 153 CPU FP64 and 71 GPU FP64 cases at tolerance 0, 18 GPU FP32 cases by relative L2; 8 of them are the 24 h and 72 h runs of `--slow` |
+| Restarts | a run restarted from its own restart files equals the uninterrupted run: 17 CPU and 17 GPU FP64 configurations, also one FP32, and the Straka checks |
+| WRF output files | the wrfout and wrfrst files of the CPU FP64 runs equal WRF's in values, variables, dimensions, attributes and global attributes (66 runs), also when resumed from WRF's wrfrst files; the wrfout files of WRF's ideal cases (14 runs) |
+| GPU FP64 | the 71 GPU FP64 cases and 17 GPU restart checks (88 runs) at tolerance 0 on NVIDIA RTX PRO 6000 Blackwell (sm_120); earlier subsets also on L4 (sm_89) and A100 (sm_80) |
 | Schemes against WRF's own objects | the differential tests (`ctest -L diff`) link each scheme's driver to the objects of the WRF build that made the references: Kessler, WSM6, Thompson, YSU, MYJ, MYNN, the surface layers, Noah, Noah-MP, Kain-Fritsch, diffusion, nest numerics, the physics driver, Grell-Freitas and New Tiedtke column replays |
 | real.exe | `cppwrf_real` output equals real.exe's for 43 cases (single domains, nests, `sst_update`, hybrid and hypsometric options) |
 | Namelist variants | several hundred 3-minute and 1-hour variants of the namelist options against WRF (docs/STATUS.md, "Namelist variants") |
@@ -59,7 +59,7 @@ time per simulated hour against WRF v4.8.0 at its fastest MPI layout on the same
 
 MPI runs (a run is one process: OpenMP threads or one GPU), moving nests, vertical nest refinement, ndown.exe, I/O
 forms other than NetCDF, and the options listed in docs/USER_GUIDE.md ("Rejected Options and Why"): urban and lake
-models, other microphysics, cumulus, PBL and land surface schemes, Noah-MP's non-default options, FDDA, stochastic
+models, other microphysics, cumulus, PBL and land surface schemes (among them the Pleim-Xiu land surface model), Noah-MP's non-default options, spectral and observation nudging, stochastic
 physics, chemistry, the adaptive time step with nests. Each is rejected with an error by the translator and the model.
 
 ## Requirements

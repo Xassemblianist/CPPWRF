@@ -17,17 +17,19 @@ give the exact verified scope.
   `damp_opt` 1-3; the adaptive time step for single-domain real-data runs.
 - Diffusion: `diff_opt` 1 and 2 with `km_opt` 1-4 (constant K, 1.5-order TKE, 3-D and 2-D Smagorinsky),
   6th-order diffusion (`diff_6th_opt` 1, 2).
-- Microphysics: Kessler (1), WSM6 (6), Thompson (8), aerosol-aware Thompson (28); radar reflectivity
-  (`do_radar_ref`).
+- Microphysics: Kessler (1), WSM6 (6), Thompson (8), Morrison two-moment (10, `morr_rimed_ice` 0 / 1),
+  aerosol-aware Thompson (28); radar reflectivity (`do_radar_ref`).
 - Cumulus: Kain-Fritsch (1), Grell-Freitas-Li (3), Tiedtke (6), New Tiedtke (16); cumulus clouds in the radiation
   (`cu_rad_feedback`).
-- PBL and surface layer: YSU (1), MYJ (2), MYNN-EDMF (5) with its options; revised MM5 (1), Eta (2) and MYNN (5)
-  surface layers; fog deposition (`grav_settling`); gravity wave drag (`gwd_opt` 1).
+- PBL and surface layer: YSU (1), MYJ (2), MYNN-EDMF (5) with its options, ACM2 (7); revised MM5 (1), Eta (2),
+  MYNN (5) and Pleim-Xiu (7) surface layers; fog deposition (`grav_settling`); gravity wave drag (`gwd_opt` 1).
 - Land surface: 5-layer thermal diffusion (1), Noah (2), Noah-MP v5.1.2 (4, default options); fractional sea ice,
   SST update (`sst_update`, wrflowinp).
 - Radiation: RRTMG LW and SW (4), RRTM LW (1), Dudhia SW (1); McICA (`cldovrlp` 0-5), CAM ozone and greenhouse
   gases.
 - Nests: static one-way and two-way nests (feedback, smoothing, terrain blending), several nests and nests in nests.
+- Four-dimensional data assimilation: grid analysis nudging (`grid_fdda = 1`, wrffdda_d0N).
+- Tiles: one domain as P x Q tiles (`run.tiles`) with the same bits as without tiles.
 - Diagnostics: accumulation buckets (`bucket_mm`, `bucket_J`), precipitation windows (`prec_acc_dt`),
   `output_diagnostics` (auxhist3).
 - Pre-processing: `cppwrf_real` (WRF's real.exe: wrfinput, wrfbdy, wrflowinp from WPS met_em files) and the port of

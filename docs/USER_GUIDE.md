@@ -44,7 +44,7 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files, for the 192 suite cases (real-data
+  process, in every variable and output time of the wrfout and wrfrst files, for the 242 suite cases (real-data
   domains in the mid-latitudes, the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
 - **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (79 GPU runs of the suite, on NVIDIA L4, RTX PRO

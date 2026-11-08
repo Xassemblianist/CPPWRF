@@ -4,7 +4,7 @@ Version 1.0.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
-(192 cases, 8 of them the slow 24 h and 72 h runs of `--slow`, and 33 restart / Straka checks, all passing) and
+(242 cases, 8 of them the slow 24 h and 72 h runs of `--slow`, and 34 restart checks plus the Straka checks, all passing) and
 `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
@@ -202,8 +202,8 @@ RQCBLTEN / RQIBLTEN in runs without qc / qi, and QZ0 / USTM at fractional sea-ic
 surface layer (restart fields). `cppwrf_real` output is identical to real.exe for 43 cases
 ([REAL.md](REAL.md)).
 
-CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (79 runs with the GPU
-restart cases: R1, T1, P1 to P9, A01 to A09, B01, C01, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
+CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (88 runs with the GPU
+restart cases: R1, T1, P1 to P9, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
 D0V, sst_update, hybrid, nest and ideal cases) passes with tolerance 0 (tests/verify/exact.py, every frame and variable of the history) on Colab's
 L4 (sm_89), RTX PRO 6000 Blackwell "G4" (sm_120) and A100 (sm_80); H100 was not available. The FP64 device code
 computes as WRF's gfortran real*8 build on x86-64:
