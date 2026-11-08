@@ -382,6 +382,7 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `grav_settling` | 0, 1, 2 |
 | `sf_surface_physics`, `num_soil_layers` | 0, 1 (5-layer thermal diffusion, 5 layers; `ifsnow`), 2 (Noah, 4 layers; `opt_thcnd` 1, 2), 4 (Noah-MP v5.1.2, default `&noah_mp` options, one domain) |
 | `rdmaxalb`, `usemonalb`, `rdlai2d`, `fractional_seaice`, `sst_update` | any; any; Noah; 0, 1; 0, 1 |
+| `sst_skin`, `tmn_update`, `lagday` | 0, 1 (skin SST over water, module_sf_sstskin.F); 0, 1 (TMN from the daily mean TSK, module_sf_tmnupdate.F); with `tmn_update = 1` any number of days but 1 (WRF stops there); one value for all domains, Noah (`sf_surface_physics = 2`) only |
 | `ra_lw_physics`, `ra_sw_physics`, `radt` | 0, 1 (RRTM LW / Dudhia SW, paired with each other or with RRTMG), 4 (RRTMG) |
 | `icloud`, `cldovrlp`, `idcor`, `o3input`, `ghg_input`, `aer_opt`, `swrad_scat` | 0, 1; 0-5; 0, 1; 0, 2; 0, 1; 0; any |
 | `bucket_mm`, `bucket_J`, `prec_acc_dt` | any (with column physics; `prec_acc_dt` per domain) |
@@ -414,7 +415,8 @@ an error, never silently:
 | `ra_lw_physics` / `ra_sw_physics` other than 0, 1, 4; a longwave scheme without a shortwave scheme or the reverse; `aer_opt` != 0 | not ported; wrf.exe stops |
 | `nwp_diagnostics`, `do_avgflx_em`, `do_avgflx_cugd` and the other diagnostic packages | not ported (diagnostic_output_nwp, cal_helicity, the averaged fluxes) |
 | `iau`, `dyn_lightning_option`, `topo_wind`, `slope_rad`, `topo_shading`, `swint_opt`, `seaice_thickness_opt`, `seaice_snowdepth_opt`, `ra_call_offset`, `shalwater_z0`, `scm_force_flux`, spectral nudging (`grid_fdda = 2`), surface analysis nudging (`grid_sfdda`: OBSGRID's `wrfsfdda_d0N`), observation nudging (`obs_nudge_opt`), stochastic physics, chemistry | not ported |
-| the adaptive time step with nests, `sst_update`, `grid_fdda`, ideal cases or `output_diagnostics` | not ported |
+| the adaptive time step with nests, `sst_update`, `sst_skin`, `tmn_update`, `grid_fdda`, ideal cases or `output_diagnostics` | not ported |
+| `sst_skin = 1` or `tmn_update = 1` with a land surface model other than Noah | not ported (no reference run); `tmn_update` resumes from wrfrst files only (NYEAR, NDAY) |
 | a wind across a symmetric wall (ideal cases) | WRF's solution breaks down within a minute there (the wall keeps the normal velocity while the sign of `muu` flips) |
 | real-data runs with `periodic_*`, `open_*` or `symmetric_*` sides | WRF's channel set-up is not ported; WRF stops with the others |
 
