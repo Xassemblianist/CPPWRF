@@ -6,7 +6,7 @@
 # statistics, the report and the figures come back.
 #
 #   CPPWRF_GCP_BUCKET=... tools/bench/colab_fp32.sh [--gpu G4|L4|A100] [--cases P4,P6,...] [--wps DIR] [--out DIR]
-#       [--hours H] [--rev REV] [--session NAME] [--keep]
+#       [--hours H] [--rev REV] [--session NAME] [--keep] [--no-suite]
 #
 # Cases: tools/bench/fp32_run.py's CASES (default all: P4, P6, P9, N3, V1, T1, SKV, MORR, ACM7 and L for 1 h; P4L
 # 72 h and N3L 24 h from the inputs of the suite's long references). The data tars come from Drive (else the bucket)
@@ -15,13 +15,13 @@
 # 9 GB). --wps: as tools/bench/colab_bench.sh (the large domain L is made on the runtime). --hours: the longest wait
 # (default 4); --gpu: the runtime (default G4; another one when no G4 is available). Results in OUT (default
 # ${CPPWRF_SCRATCH:-~/cppwrf_scratch}/colab/fp32_<date>): fp1/ (runs.jsonl, stats/*.jsonl, report_rmse.md,
-# report_max_abs.md, report_rel_l2.md, svg/, logs/, suite logs), usage.txt.
+# report_max_abs.md, report_rel_l2.md, svg/, logs/, suite logs), usage.txt. --no-suite: without the suite cases.
 # Exit 1 when the job failed.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${CPPWRF_GCP_BUCKET:?set CPPWRF_GCP_BUCKET}"
 BK=$CPPWRF_GCP_BUCKET
-GPU=G4 CASES=all WPS=$HOME/wrf_real/WPS-4.6.0 OUT= HOURS=4 REV=HEAD S= KEEP=0 NPROC= ANY_CPU=1
+SUITE=1 GPU=G4 CASES=all WPS=$HOME/wrf_real/WPS-4.6.0 OUT= HOURS=4 REV=HEAD S= KEEP=0 NPROC= ANY_CPU=1
 # P4, P9, V1, T1: suite_data.tar; P6: port_a06 / port_c01; N3: n3_data.tar; SKV: port_a11; MORR: port_c04; ACM7:
 # port_c16; the whole 1 h references (the fp64-ref pair and the suite's cuda_dp cases): v05_suite_refs.tar;
 # fp1_long.tar: the long cases' inputs (made on the runtime, below)
@@ -29,7 +29,7 @@ DATA=suite_data.tar,n3_data.tar,port_a06_data.tar,port_c01_data.tar,port_c16_dat
 while [ $# -gt 0 ]; do
   case $1 in
     --gpu) GPU=$2; shift 2 ;; --cases) CASES=$2; shift 2 ;; --wps) WPS=$2; shift 2 ;; --out) OUT=$2; shift 2 ;; --hours) HOURS=$2; shift 2 ;;
-    --rev) REV=$2; shift 2 ;; --session) S=$2; shift 2 ;; --keep) KEEP=1; shift ;;
+    --rev) REV=$2; shift 2 ;; --session) S=$2; shift 2 ;; --keep) KEEP=1; shift ;; --no-suite) SUITE=0; shift ;;
     *) sed -n '3,21p' "$0"; exit 2 ;;
   esac
 done
@@ -69,7 +69,7 @@ open(T + "/fp1_long.tar.ok", "w").close()
 print("LONG_OK", os.path.getsize(T + "/fp1_long.tar"), len(n))
 EOF
 cj_launch "$REPO/tools/bench/fp32_body.sh" "$DATA" "$CASES" "$STAMP"
-echo "import subprocess; subprocess.Popen('nohup bash /content/cpu/fp32_gpu.sh $STAMP > /dev/null 2>&1 &', shell=True); print('started')" |
+echo "import subprocess; subprocess.Popen('nohup bash /content/cpu/fp32_gpu.sh $STAMP $SUITE > /dev/null 2>&1 &', shell=True); print('started')" |
   rx 60 | grep started > /dev/null || echo "[colab_fp32] the GPU side did not start"
 bad=0
 cj_wait "$HOURS" ../fp1/out/fp1.log || bad=1

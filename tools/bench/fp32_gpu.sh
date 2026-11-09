@@ -3,7 +3,7 @@
 # The GPU side of tools/bench/colab_fp32.sh, on the Colab runtime itself (its Ubuntu with the CUDA toolkit), started
 # next to the chroot job (tools/bench/fp32_body.sh):
 #
-#   fp32_gpu.sh STAMP
+#   fp32_gpu.sh STAMP [SUITE]   (SUITE 0: no suite cases)
 #
 # Builds CPPWRF's CUDA FP32 (cuda) and FP64 (cuda_dp) release binaries from /content/cpu/src.tar.gz, waits until the
 # chroot job has prepared the cases (STAMP in /opt/fp1/prepared), links /opt/fp1, /opt/job and /opt/wrfbench to the
@@ -11,7 +11,7 @@
 # studied configurations (tests/verify/wrf_suite.py --cuda-dp: CPPWRF FP64 against the WRF real*8 references) and the
 # FP32 cases whose tolerances this study sets, from a tar made by tools/colab/stage_data.py --only (as a GPU proof
 # stages them); after the WRF runs (/opt/fp1/wrf_done) the statistics (fp32_run.py stats), then /opt/fp1/host_done.
-STAMP=$1
+STAMP=$1 SUITE=${2:-1}
 G=/content/fp1_gpu R=/content/deb13 F=/content/deb13/opt/fp1
 rm -rf $G && mkdir -p $G
 exec > $G/gpu.log 2>&1
@@ -50,6 +50,7 @@ echo "$(date +%H:%M:%S) GPU side: builds$st" >> $O/fp1.log
 cd $G/src || exit 1
 python3 tools/bench/fp32_run.py gpu $G
 D=/opt/job/data
+if [ "$SUITE" = 1 ]; then
 # CPPWRF FP64 = WRF real*8 at tolerance 0 (every variable of every compared frame) for the studied configurations
 CPPWRF_WRF_RUNS=$D/wrf_runs CPPWRF_WRF_REF=$D/wrf_ref OMP_NUM_THREADS=4 timeout 7200 python3 tests/verify/wrf_suite.py \
   --cuda-dp $G/build-cuda_dp/cppwrf --exact --allow-skip --out $G/suite_dp \
@@ -67,6 +68,7 @@ CPPWRF_WRF_RUNS=$G/fp32data/wrf_runs CPPWRF_WRF_REF=$G/fp32data/wrf_ref OMP_NUM_
   tests/verify/wrf_suite.py --cuda $G/build-cuda/cppwrf --only "$FP32C" --allow-skip --out $G/suite_sp > $O/suite_sp.log 2>&1
 echo "$(date +%H:%M:%S) GPU side: suite FP32 exit $?: $(tail -1 $O/suite_sp.log)" >> $O/fp1.log
 rm -rf $G/suite_sp $G/fp32data
+fi
 until [ -e /opt/fp1/wrf_done ]; do sleep 20; done
 python3 tools/bench/fp32_run.py stats
 cp $G/gpu.log $O/gpu_host.log 2> /dev/null
