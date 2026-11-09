@@ -33,7 +33,8 @@ if(TARGET cppwrf_real)
   # as built (install(TARGETS) would rewrite its RPATH; the binaries link system libraries only)
   install(PROGRAMS $<TARGET_FILE:cppwrf_real> DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime)
 endif()
-foreach(t cppwrf-wrf cppwrf-realexe cppwrf-check cppwrf-compare cppwrf-bench cppwrf-fit)
+foreach(t cppwrf-wrf cppwrf-realexe cppwrf-check cppwrf-compare cppwrf-bench cppwrf-fit cppwrf-post
+          cppwrf-verify-obs)
   if(EXISTS ${CMAKE_SOURCE_DIR}/tools/${t})
     install(PROGRAMS tools/${t} DESTINATION ${CMAKE_INSTALL_BINDIR} COMPONENT runtime)
   endif()
@@ -49,7 +50,8 @@ install(DIRECTORY configs/ DESTINATION ${CPPWRF_SHARE}/configs COMPONENT runtime
 install(DIRECTORY examples/ DESTINATION ${CPPWRF_SHARE}/examples COMPONENT runtime USE_SOURCE_PERMISSIONS)
 if(EXISTS ${CMAKE_SOURCE_DIR}/tools/completion/cppwrf.bash)
   # bash-completion loads a completion by the command's name: one copy per tool
-  foreach(t cppwrf-wrf cppwrf-realexe cppwrf-check cppwrf-compare cppwrf-bench cppwrf-fit)
+  foreach(t cppwrf-wrf cppwrf-realexe cppwrf-check cppwrf-compare cppwrf-bench cppwrf-fit cppwrf-post
+          cppwrf-verify-obs)
     install(FILES tools/completion/cppwrf.bash DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/bash-completion/completions
             RENAME ${t} COMPONENT runtime)
   endforeach()

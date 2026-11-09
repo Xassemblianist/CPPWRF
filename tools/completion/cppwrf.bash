@@ -14,14 +14,18 @@ _cppwrf_tool() {
     cppwrf-compare) opts="--variables --exact --json --no-metadata --all --version --help" ;;
     cppwrf-bench) opts="--modes --size --steps --threads --work --keep --json --save --no-save --version --help" ;;
     cppwrf-fit) opts="--grid --steps --dt --physics --radt --modes --bench --json --version --help" ;;
+    cppwrf-post) opts="--config --output-dir --format --jobs --list-fields --print-config --quiet --help" ;;
     *) opts="--version --help" ;;
   esac
   case $prev in
     --mode) COMPREPLY=($(compgen -W "$_cppwrf_modes" -- "$cur")); return ;;
     --modes) COMPREPLY=($(compgen -W "$_cppwrf_modes" -- "${cur##*,}")); return ;;
     --precision) COMPREPLY=($(compgen -W "float64 float32" -- "$cur")); return ;;
+    --format) COMPREPLY=($(compgen -W "netcdf grib2 both" -- "$cur")); return ;;
     --physics) COMPREPLY=($(compgen -W "none full" -- "$cur")); return ;;
-    --dir|--met-dir|--work) COMPREPLY=($(compgen -d -- "$cur")); return ;;
+    --dir|--met-dir|--work|--output-dir|-o) COMPREPLY=($(compgen -d -- "$cur")); return ;;
+    --config|-c) COMPREPLY=($(compgen -f -- "$cur")); return ;;
+    --jobs|-j) return ;;
     --exe|--bench|--save) COMPREPLY=($(compgen -f -- "$cur")); return ;;
     --threads|--steps|--size|--grid|--dt|--radt|--set|--variables|-v) return ;;
   esac
@@ -31,4 +35,5 @@ _cppwrf_tool() {
     COMPREPLY=($(compgen -f -- "$cur"))
   fi
 }
-complete -o filenames -F _cppwrf_tool cppwrf-wrf cppwrf-realexe cppwrf-check cppwrf-compare cppwrf-bench cppwrf-fit
+complete -o filenames -F _cppwrf_tool cppwrf-wrf cppwrf-realexe cppwrf-check cppwrf-compare cppwrf-bench cppwrf-fit cppwrf-post \
+  cppwrf-verify-obs

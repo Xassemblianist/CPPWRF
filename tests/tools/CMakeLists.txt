@@ -22,3 +22,10 @@ set_tests_properties(python_package PROPERTIES LABELS unit ENVIRONMENT "CPPWRF_T
 # docs/MIGRATING_FROM_WRF.md's option tables are the translator's (tools/gen_option_docs.py --check)
 add_test(NAME docs_options_current COMMAND python3 tools/gen_option_docs.py --check WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(docs_options_current PROPERTIES LABELS unit)
+# cppwrf-post (python/cppwrf/post): the port of wrf-python's diagnostics on fields with known answers; the GRIB2
+# encoder, projections, configuration and whole runs on synthetic wrfout files (no network, no GPU)
+add_test(NAME post_diagnostics COMMAND python3 -m unittest discover -s python/tests -p "test_post_diag.py"
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME post_output COMMAND python3 -m unittest discover -s python/tests -p "test_post_output.py"
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(post_diagnostics post_output PROPERTIES LABELS unit ENVIRONMENT "CPPWRF_TEST_DIR=${CMAKE_BINARY_DIR}")
