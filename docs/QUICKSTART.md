@@ -86,7 +86,7 @@ grep -q "SUCCESS COMPLETE WRF" rsl.out.0000 && echo done
 
 On an RTX PRO 6000 Blackwell, this 3-hour run of both domains took 15 s of stepping in `gpu-fp32` and 42 s in
 `gpu-fp64`. `cpu-fp64` took 222 to 273 s on 48 CPU threads. `cppwrf-bench` measures your own machine, and
-`cppwrf-fit namelist.input` estimates the memory and time of a run before you start it.
+`cppwrf-fit namelist.input` estimates the memory and time of a run before you start it (docs/TOOLS.md).
 
 An option that CPPWRF does not port stops `cppwrf-wrf` at start-up. The message names the option, its value and the
 values CPPWRF supports, and the exit status is nonzero. CPPWRF never ignores such an option silently.

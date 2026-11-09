@@ -25,6 +25,9 @@ xarray = ["xarray"]
 cppwrf-wrf = "cppwrf.dropin:wrf_main"
 cppwrf-realexe = "cppwrf.dropin:realexe_main"
 cppwrf-check = "cppwrf.dropin:check_main"
+cppwrf-compare = "cppwrf.compare:main"
+cppwrf-bench = "cppwrf.bench:main"
+cppwrf-fit = "cppwrf.fit:main"
 
 [project.urls]
 Homepage = "https://github.com/Xassemblianist/CPPWRF"

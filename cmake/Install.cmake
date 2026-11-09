@@ -48,8 +48,11 @@ install(FILES tests/verify/exact.py tests/verify/compare_real.py DESTINATION ${C
 install(DIRECTORY configs/ DESTINATION ${CPPWRF_SHARE}/configs COMPONENT runtime)
 install(DIRECTORY examples/ DESTINATION ${CPPWRF_SHARE}/examples COMPONENT runtime USE_SOURCE_PERMISSIONS)
 if(EXISTS ${CMAKE_SOURCE_DIR}/tools/completion/cppwrf.bash)
-  install(FILES tools/completion/cppwrf.bash DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/bash-completion/completions
-          RENAME cppwrf-wrf COMPONENT runtime)
+  # bash-completion loads a completion by the command's name: one copy per tool
+  foreach(t cppwrf-wrf cppwrf-realexe cppwrf-check cppwrf-compare cppwrf-bench cppwrf-fit)
+    install(FILES tools/completion/cppwrf.bash DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/bash-completion/completions
+            RENAME ${t} COMPONENT runtime)
+  endforeach()
 endif()
 install(FILES README.md CHANGELOG.md NOTICE.md DESTINATION ${CPPWRF_DOC} COMPONENT runtime)
 install(FILES LICENSE DESTINATION ${CPPWRF_DOC} RENAME LICENSE COMPONENT runtime)

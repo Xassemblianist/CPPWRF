@@ -28,6 +28,8 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
   names, `rsl` logs and `SUCCESS COMPLETE WRF`. `cppwrf-check namelist.input` says which options are ported.
 - **Python:** [docs/PYTHON.md](docs/PYTHON.md) covers `pip install ./python`: namelists, runs and wrfout files with
   diagnostics.
+- **Tools:** [docs/TOOLS.md](docs/TOOLS.md): `cppwrf-compare` compares two runs' output, `cppwrf-bench` measures
+  this machine, and `cppwrf-fit namelist.input` estimates a run's memory and time.
 
 ## What is ported
 

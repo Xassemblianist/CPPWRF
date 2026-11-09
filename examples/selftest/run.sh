@@ -5,12 +5,16 @@
 # must give expected_fp64.txt exactly (they are bit-identical); GPU FP32 gives its own hash and is checked for a
 # successful, finite run.
 #   examples/selftest/run.sh [cpu-fp64|gpu-fp64|gpu-fp32] [WORK]   (WORK: default a new temporary directory)
-# cppwrf-wrf from PATH, else the source tree's tools/; the binary as cppwrf-wrf finds it (CPPWRF_EXE, bin/, build*/).
+# cppwrf-wrf from PATH, else the source tree's tools/ or the installation's bin/; the binary as cppwrf-wrf finds it
+# (CPPWRF_EXE, bin/, build*/).
 set -euo pipefail
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 MODE=${1:-cpu-fp64}
 WORK=${2:-$(mktemp -d)}
-WRF=$(command -v cppwrf-wrf || echo "$HERE/../../tools/cppwrf-wrf")
+WRF=$(command -v cppwrf-wrf || true)
+for w in "$HERE/../../tools/cppwrf-wrf" "$HERE/../../../../bin/cppwrf-wrf"; do  # source tree, installation
+  [ -n "$WRF" ] || { [ -x "$w" ] && WRF=$w; }
+done
 mkdir -p "$WORK"
 cp "$HERE/namelist.input" "$HERE/input_sounding" "$WORK/"
 cd "$WORK"
