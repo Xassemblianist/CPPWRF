@@ -5,31 +5,32 @@
 # GPU (tools/bench/fp32_gpu.sh), the statistics computed on the runtime (tools/verify/fp32_accuracy.py); only the
 # statistics, the report and the figures come back.
 #
-#   CPPWRF_GCP_BUCKET=... tools/bench/colab_fp32.sh [--cases P4,P6,...] [--wps DIR] [--out DIR] [--hours H] [--rev REV]
-#       [--session NAME] [--keep]
+#   CPPWRF_GCP_BUCKET=... tools/bench/colab_fp32.sh [--gpu G4|L4|A100] [--cases P4,P6,...] [--wps DIR] [--out DIR]
+#       [--hours H] [--rev REV] [--session NAME] [--keep]
 #
 # Cases: tools/bench/fp32_run.py's CASES (default all: P4, P6, P9, N3, V1, T1, SKV, MORR, ACM7 and L for 1 h; P4L
 # 72 h and N3L 24 h from the inputs of the suite's long references). The data tars come from Drive (else the bucket)
 # as for tools/colab/colab_suite.sh; the long cases' inputs are the first members of the bucket's long72_data.tar
 # (run_P4_72h_r8) and long_data.tar (run_N3_24h_r8), read on the runtime with ranged reads (about 230 MB instead of
 # 9 GB). --wps: as tools/bench/colab_bench.sh (the large domain L is made on the runtime). --hours: the longest wait
-# (default 4). Results in OUT (default ${CPPWRF_SCRATCH:-~/cppwrf_scratch}/colab/fp32_<date>): fp1/ (runs.jsonl,
-# stats/*.jsonl, report_rmse.md, report_max_abs.md, report_rel_l2.md, svg/, logs/, suite logs), usage.txt.
+# (default 4); --gpu: the runtime (default G4; another one when no G4 is available). Results in OUT (default
+# ${CPPWRF_SCRATCH:-~/cppwrf_scratch}/colab/fp32_<date>): fp1/ (runs.jsonl, stats/*.jsonl, report_rmse.md,
+# report_max_abs.md, report_rel_l2.md, svg/, logs/, suite logs), usage.txt.
 # Exit 1 when the job failed.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${CPPWRF_GCP_BUCKET:?set CPPWRF_GCP_BUCKET}"
 BK=$CPPWRF_GCP_BUCKET
-CASES=all WPS=$HOME/wrf_real/WPS-4.6.0 OUT= HOURS=4 REV=HEAD S= KEEP=0 NPROC= ANY_CPU=1
+GPU=G4 CASES=all WPS=$HOME/wrf_real/WPS-4.6.0 OUT= HOURS=4 REV=HEAD S= KEEP=0 NPROC= ANY_CPU=1
 # P4, P9, V1, T1: suite_data.tar; P6: port_a06 / port_c01; N3: n3_data.tar; SKV: port_a11; MORR: port_c04; ACM7:
 # port_c16; the whole 1 h references (the fp64-ref pair and the suite's cuda_dp cases): v05_suite_refs.tar;
 # fp1_long.tar: the long cases' inputs (made on the runtime, below)
 DATA=suite_data.tar,n3_data.tar,port_a06_data.tar,port_c01_data.tar,port_c16_data.tar,port_c04_data.tar,port_a11_data.tar,v05_suite_refs.tar,v05_files_links.tar,fp1_long.tar
 while [ $# -gt 0 ]; do
   case $1 in
-    --cases) CASES=$2; shift 2 ;; --wps) WPS=$2; shift 2 ;; --out) OUT=$2; shift 2 ;; --hours) HOURS=$2; shift 2 ;;
+    --gpu) GPU=$2; shift 2 ;; --cases) CASES=$2; shift 2 ;; --wps) WPS=$2; shift 2 ;; --out) OUT=$2; shift 2 ;; --hours) HOURS=$2; shift 2 ;;
     --rev) REV=$2; shift 2 ;; --session) S=$2; shift 2 ;; --keep) KEEP=1; shift ;;
-    *) sed -n '3,20p' "$0"; exit 2 ;;
+    *) sed -n '3,21p' "$0"; exit 2 ;;
   esac
 done
 STAMP=$(date +%Y%m%d_%H%M%S)
@@ -46,7 +47,7 @@ tar czf "$OUT/wps.tar.gz" -C "$T" .; rm -rf "$T"
 echo "[colab_fp32] commit $(cat "$OUT/commit.txt"), cases $CASES, data $DATA"
 TAG=colab_fp32
 . "$REPO/tools/colab/colab_lib.sh"
-cj_start G4
+cj_start "$GPU"
 cj_send "$OUT/wps.tar.gz" in/wps.tar.gz
 cj_send "$REPO/tools/bench/fp32_gpu.sh" fp32_gpu.sh
 # the long cases' inputs: the leading members of two bucket tars (namelist, tables, wrfinput, wrfbdy), up to the
