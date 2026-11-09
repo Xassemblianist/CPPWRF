@@ -19,9 +19,6 @@ G = 9.81
 RD = 287.0
 CP = 7.0 * RD / 2.0
 P1000MB = 100000.0
-USSALR = 0.0065  # US standard atmosphere lapse rate, K m-1
-TC = 273.16 + 17.5
-PCONST = 10000.0
 
 
 def _get(ds, name):
@@ -71,33 +68,11 @@ def wind10(ds, earth: bool = True) -> Tuple[object, object]:
 def seaprs(z: np.ndarray, t: np.ndarray, p: np.ndarray, q: np.ndarray) -> np.ndarray:
     """Sea-level pressure (hPa) of columns (nz, ny, nx): wrf-python's DCOMPUTESEAPRS (fortran/wrf_user.f90, from RIP),
     statement for statement: height z (m), temperature t (K), pressure p (Pa), water vapour mixing ratio q (kg kg-1),
-    level 0 the lowest. Its interpolation to the level PCONST above the surface multiplies by log(plo / phi), as the
-    original does."""
-    nz = p.shape[0]
-    below = p < (p[0] - PCONST)[None]
-    if not below.any(axis=0).all():
-        raise ValueError("slp: error in finding 100 hPa up (a column without a level 100 hPa above its surface)")
-    level = below.argmax(axis=0) + 1  # Fortran's 1-based level
-    klo = np.maximum(level - 1, 1)
-    khi = np.minimum(klo + 1, nz - 1)
-    if (klo == khi).any():
-        raise ValueError("slp: trapping levels are weird (klo == khi)")
-    take = lambda a, k: np.take_along_axis(a, (k - 1)[None], axis=0)[0]  # noqa: E731
-    plo, phi = take(p, klo), take(p, khi)
-    tlo = take(t, klo) * (1.0 + 0.608 * take(q, klo))
-    thi = take(t, khi) * (1.0 + 0.608 * take(q, khi))
-    zlo, zhi = take(z, klo), take(z, khi)
-    p_at_pconst = p[0] - PCONST
-    t_at_pconst = thi - (thi - tlo) * np.log(p_at_pconst / phi) * np.log(plo / phi)
-    z_at_pconst = zhi - (zhi - zlo) * np.log(p_at_pconst / phi) * np.log(plo / phi)
-    t_surf = t_at_pconst * (p[0] / p_at_pconst) ** (USSALR * RD / G)
-    t_sea_level = t_at_pconst + USSALR * z_at_pconst
-    # ridiculous_mm5_test
-    l1 = t_sea_level < TC
-    l2 = t_surf <= TC
-    l3 = ~l1
-    t_sea_level = np.where(l2 & l3, TC, TC - 0.005 * (t_surf - TC) ** 2)
-    return 0.01 * (p[0] * np.exp((2.0 * G * z[0]) / (RD * (t_sea_level + t_surf))))
+    level 0 the lowest (cppwrf.post.wrfpy.seaprs). Its interpolation to the level PCONST above the surface multiplies
+    by log(plo / phi), as the original does."""
+    from .post.wrfpy import seaprs as _seaprs
+    return _seaprs(np.asarray(z, dtype=np.float64), np.asarray(t, dtype=np.float64),
+                   np.asarray(p, dtype=np.float64), np.asarray(q, dtype=np.float64))
 
 
 def slp(ds):

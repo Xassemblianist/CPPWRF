@@ -44,7 +44,8 @@ def seaprs_loop(z, t, p, q):
             ts = tc * (p[0, j, i] / pc) ** (GAMMA * R / G)
             tsl = tc + GAMMA * zc
             tsl = TC if (ts <= TC and not tsl < TC) else TC - 0.005 * (ts - TC) ** 2
-            out[j, i] = 0.01 * p[0, j, i] * math.exp(2 * G * z[0, j, i] / (R * (tsl + ts)))
+            # the Fortran's 0.01 is a default-real (single precision) literal
+            out[j, i] = float(np.float32(0.01)) * (p[0, j, i] * math.exp(2 * G * z[0, j, i] / (R * (tsl + ts))))
     return out
 
 

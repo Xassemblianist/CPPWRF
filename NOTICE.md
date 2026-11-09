@@ -78,6 +78,14 @@ and, on scholarly works associated with it: "The Noah-MP modeling system was dev
 Atmospheric Research (NCAR) with collaborations from university partners. NCAR is sponsored by the United States
 National Science Foundation."
 
+## wrf-python
+
+`python/cppwrf/post/wrfpy.py` and `frame.py` (cppwrf-post's diagnostics) are a numpy port of the Fortran routines
+and getters of wrf-python 1.3.4.1 (https://github.com/NCAR/wrf-python), Copyright 2019 University Corporation for
+Atmospheric Research, licensed under the Apache License 2.0 (licenses/WRF-PYTHON-LICENSE.txt). Many of those routines
+come from RIP (Mark Stoelinga) and NCL. `python/cppwrf/post/data/psadilookup.dat` is wrf-python's pseudoadiabat
+table, unchanged. The Apache License 2.0 is compatible with the GPL version 3 under which CPPWRF distributes the port.
+
 ## GNU C Library
 
 `src/core/glibc_math.hpp`, `src/core/glibc_math_tables.hpp`, `src/core/libmvec_x86.hpp` and
