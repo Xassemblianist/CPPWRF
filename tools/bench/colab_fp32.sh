@@ -54,7 +54,7 @@ cj_send "$REPO/tools/bench/fp32_gpu.sh" fp32_gpu.sh
 # first wrfout member (offsets from a listing of their headers), joined into one tar that the job unpacks as a cached
 # data tar
 cj_token || { echo "[colab_fp32] token upload failed"; exit 1; }
-rx 1800 <<EOF | grep -q LONG_OK || { echo "[colab_fp32] the long inputs were not fetched"; exit 1; }
+rx 1800 <<EOF | grep LONG_OK > /dev/null || { echo "[colab_fp32] the long inputs were not fetched"; exit 1; }
 import os, subprocess
 T = "/content/tars"; os.makedirs(T, exist_ok=True)
 with open(T + "/fp1_long.tar", "wb") as o:

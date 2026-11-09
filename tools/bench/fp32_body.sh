@@ -11,7 +11,7 @@
 # tools/bench/bench_run.py make-large); prepares the cases (tools/bench/fp32_run.py prepare: run directories, CPPWRF's
 # configurations, the GPU queue), writes STAMP to /opt/fp1/prepared for tools/bench/fp32_gpu.sh (CUDA builds, GPU
 # runs and the statistics, outside the chroot), runs the WRF runs (fp32_run.py wrf), waits for the GPU side
-# (/opt/fp1/host_done, at most 3 h) and packs /opt/fp1/out as J/fetch/fp1.tar.gz. Progress: /opt/fp1/out/fp1.log.
+# (/opt/fp1/host_done, at most 2 h) and packs /opt/fp1/out as J/fetch/fp1.tar.gz. Progress: /opt/fp1/out/fp1.log.
 J=$1 CASES=$2 STAMP=$3
 W=/opt/wrfbench F=/opt/fp1
 rm -rf $F && mkdir -p $W $F/out $J/fetch
@@ -109,8 +109,9 @@ else python3 tools/bench/fp32_run.py prepare "$CASES" >> $J/run.log 2>&1; fi
 echo "$STAMP" > $F/prepared
 L "prepared: $(grep -c . $F/gpu_queue.txt) GPU runs, $(grep -c '"case"' $F/wrf_plan.json) WRF runs"
 python3 tools/bench/fp32_run.py wrf >> $J/run.log 2>&1
+touch $F/wrf_done
 L "WRF runs done"
-for i in $(seq 1080); do [ -e $F/host_done ] && break; sleep 10; done
+for i in $(seq 720); do [ -e $F/host_done ] && break; sleep 10; done
 [ -e $F/host_done ] || { L "the GPU side did not finish"; echo "FP1_GPU_SIDE_UNFINISHED" >> $J/setup.out; }
 cp $J/run.log $J/wrf_build.log $J/wps.log $F/out/ 2> /dev/null
 tar czf $J/fetch/fp1.tar.gz -C $F out --transform 's,^out,fp1,' --exclude='*.nc'

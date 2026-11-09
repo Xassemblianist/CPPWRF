@@ -39,6 +39,7 @@ until [ "$(cat $F/prepared 2> /dev/null)" = "$STAMP" ]; do
   [ -e /content/cpu/done ] && exit 0
   sleep 10
 done
+trap 'touch $F/host_done' EXIT  # the chroot job waits for it
 ln -sfn $R/opt/fp1 /opt/fp1
 ln -sfn $R/opt/job /opt/job
 ln -sfn $R/opt/wrfbench /opt/wrfbench
@@ -69,5 +70,4 @@ rm -rf $G/suite_sp $G/fp32data
 until [ -e /opt/fp1/wrf_done ]; do sleep 20; done
 python3 tools/bench/fp32_run.py stats
 cp $G/gpu.log $O/gpu_host.log 2> /dev/null
-touch /opt/fp1/host_done
 exit 0
