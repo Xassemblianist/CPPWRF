@@ -5,8 +5,10 @@
   fp32_run.py prepare [CASE,...]  (chroot) the run directories /opt/fp1/runs/CASE/{wrf_*,cpp} with their namelists,
                                   CPPWRF's configuration (tools/wrf2cppwrf.py) and the GPU queue /opt/fp1/gpu_queue.txt
   fp32_run.py wrf                 (chroot) the WRF runs of the prepared cases, several at a time (at most SLOTS
-                                  processes: FP1_SLOTS, default 2/3 of the vCPUs, at most 32; an MPI run takes at
-                                  most half of them), one JSON line each in /opt/fp1/out/runs.jsonl; /opt/fp1/wrf_done at the end
+                                  processes: FP1_SLOTS, default 2/3 of the vCPUs, at most 32, or all of 16 or fewer;
+                                  an MPI run takes at most half of them, a third of 16 or fewer; the real*8 runs only
+                                  with 32 vCPUs or more), one JSON line each in /opt/fp1/out/runs.jsonl;
+                                  /opt/fp1/wrf_done at the end
   fp32_run.py gpu BUILD_DIR       (runtime) the GPU queue: BUILD_DIR/build-cuda (FP32) and build-cuda_dp (FP64)
   fp32_run.py stats               (runtime or chroot) tools/verify/fp32_accuracy.py compare for every pair of every
                                   case (/opt/fp1/out/stats/*.jsonl), then report (/opt/fp1/out/report_*.md, svg/)
@@ -38,7 +40,9 @@ W = "/opt/wrfbench"
 SRC = J + "/src"
 WR = J + "/data/wrf_runs"
 OUT = F + "/out"
-SLOTS = int(os.environ.get("FP1_SLOTS", str(max(4, min(32, (os.cpu_count() or 4) * 2 // 3)))))
+NCPU = os.cpu_count() or 4
+SLOTS = int(os.environ.get("FP1_SLOTS", str(min(32, NCPU * 2 // 3) if NCPU > 16 else NCPU)))
+CAP = SLOTS // 2 if NCPU > 16 else max(1, SLOTS // 3)  # the ranks of one MPI run
 sys.path.insert(0, SRC + "/tools/bench")
 
 # name: (BASE, hours, history minutes, extra namelist settings, WRF runs [(tag, precision, ranks, hours or None)])
@@ -141,11 +145,13 @@ def prepare(cases):
             log(f"{c}: no inputs ({b})")
             continue
         for tag, prec, ranks, hours in CASES[c][4]:
+            if prec == "r8" and NCPU < 32:  # the real*8 MPI runs only where the CPUs leave room for them
+                continue
             R = make_dir(c, f"wrf_{tag}", hours)
             if prec == "r4":
                 r4_tables(R)
             os.symlink(f"{W}/WRF-{prec}/main/wrf.exe", R + "/wrf.exe")
-            plan.append(dict(case=c, tag=tag, prec=prec, ranks=min(ranks, max(1, SLOTS // 2)), dir=R,
+            plan.append(dict(case=c, tag=tag, prec=prec, ranks=min(ranks, CAP), dir=R,
                              hours=hours or CASES[c][1]))
         R = make_dir(c, "cpp")
         t = subprocess.run([sys.executable, SRC + "/tools/wrf2cppwrf.py", R + "/namelist.input", "--real-dir", R,
