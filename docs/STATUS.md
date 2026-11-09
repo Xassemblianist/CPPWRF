@@ -132,7 +132,7 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | F1 / F2 | V2 with fractional sea ice (real.exe with fractional_seaice 1), sfclayrev + YSU / Eta + MYJ | 3 h |
 | D0 / D0V | WRF's default em_real namelist (physics_suite CONUS, fractional sea ice, gwd_opt 1, diff_opt 2 / km_opt 4, w_damping 0) on the P2 / V2 domains, configuration from tools/wrf2cppwrf.py | 6 h |
 | SU1 / SU2 | D0V with sst_update 1 (wrflowinp from real.exe, read every 6 h); SU2: changed sea ice at the start (water/ice transitions) | 7 h / 20 min |
-| SKV | V1 with the skin SST (sst_skin 1, without sst_update) and the deep soil temperature update (tmn_update 1; restarted at 3 h) | 6 h |
+| SKV | V1 with the skin SST (sst_skin 1, without sst_update) and the deep soil temperature update (tmn_update 1; restarted at 3 h, against WRF's run restarted there) | 6 h |
 | SKU | SU1 (sst_update 1, fractional sea ice) with sst_skin 1 and tmn_update 1 | 7 h |
 | SKN | N3 with sst_skin 1, tmn_update 1 and lagday 5 on both domains (restarted at 30 min) | 1 h |
 | HY1 | P1 with hypsometric_opt 1 (real.exe and wrf.exe) | 1 h |
