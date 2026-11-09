@@ -206,8 +206,11 @@ void init_real_case(const io::Config& cfg, Model& m) {
       throw std::runtime_error("input_wrf: mismatch between namelist and input file: namelist " + what + " = " +
                                std::to_string(nl) + ", input file " + std::to_string(file));
     };
-    for (const auto& [k, a] : {std::pair<const char*, const char*>{"real.e_we", "WEST-EAST_GRID_DIMENSION"},
-                               {"real.e_sn", "SOUTH-NORTH_GRID_DIMENSION"}, {"real.e_vert", "BOTTOM-TOP_GRID_DIMENSION"}})
+    static constexpr std::pair<const char*, const char*> dims[] = {  // a named array: nvcc 12.4 cannot deduce a
+        {"real.e_we", "WEST-EAST_GRID_DIMENSION"},                     // range-for over a braced list here
+        {"real.e_sn", "SOUTH-NORTH_GRID_DIMENSION"},
+        {"real.e_vert", "BOTTOM-TOP_GRID_DIMENSION"}};
+    for (const auto& [k, a] : dims)
       if (cfg.has(k) && cfg.get_int(k) != att(a, -1)) mismatch(std::string(k).substr(5), cfg.get_int(k), att(a, -1));
     if (cfg.has("real.num_land_cat")) {  // a missing or invalid NUM_LAND_CAT: 20 for MODIFIED_IGBP_MODIS_NOAH, else 24
       long n = att("NUM_LAND_CAT", 0);
@@ -222,10 +225,12 @@ void init_real_case(const io::Config& cfg, Model& m) {
       mismatch("sf_surface_physics", lsm, lsm_file);  // Noah and Noah-MP inputs are interchangeable
     const long gwd = cfg.get_int("dyn.gwd_opt", 0);
     if (gwd != 0 && att("GWD_OPT", gwd) != gwd) mismatch("gwd_opt", gwd, att("GWD_OPT", gwd));
-    if (cfg.get_bool("real.nested", false))  // a nest's start in its parent (the nest driver passes the namelist's)
-      for (const auto& [k, a] : {std::pair<const char*, const char*>{"real.i_parent_start", "I_PARENT_START"},
-                                 {"real.j_parent_start", "J_PARENT_START"}})
+    if (cfg.get_bool("real.nested", false)) {  // a nest's start in its parent (the nest driver passes the namelist's)
+      static constexpr std::pair<const char*, const char*> starts[] = {{"real.i_parent_start", "I_PARENT_START"},
+                                                                       {"real.j_parent_start", "J_PARENT_START"}};
+      for (const auto& [k, a] : starts)
         if (cfg.has(k) && cfg.get_int(k) != att(a, -1)) mismatch(std::string(k).substr(5), cfg.get_int(k), att(a, -1));
+    }
   }
   std::vector<double> pb(std::size_t(nx) * ny * nz), alb(pb.size()), t_init(pb.size());
   std::vector<double> mub(std::size_t(nx) * ny), phb(std::size_t(nx) * ny * (nz + 1));
