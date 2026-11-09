@@ -119,9 +119,10 @@ cmake -S . -B build-cpu-sp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -
 cmake --build build-cpu-sp -j "$(nproc)"
 ```
 
-Each build makes `cppwrf` (the model), `src/init_real/cppwrf_real` (real.exe) and the unit tests. The build
-directory records the path of `data/` (the RRTMG tables and the WRF I/O schema) as `CPPWRF_DATA_DIR`, so keep the
-source tree where it was built.
+Each build makes `cppwrf` (the model), `src/init_real/cppwrf_real` (real.exe) and the unit tests. A build tree
+reads `data/` (the RRTMG tables and the WRF I/O schema) from the source tree it was built from; `cmake --install`
+copies the data next to the installed binaries, which find it from their own location (docs/INSTALL.md), and the
+environment variable `CPPWRF_DATA_DIR` overrides both.
 
 ### CMake Options
 | CMake Option | Default | Description |

@@ -19,3 +19,6 @@ set_tests_properties(dropin_tools PROPERTIES LABELS unit ENVIRONMENT "${_dropin_
 # the Python package (python/cppwrf): namelists, Run with a stand-in binary, wrfout files and diagnostics
 add_test(NAME python_package COMMAND python3 -m unittest discover -s python/tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(python_package PROPERTIES LABELS unit ENVIRONMENT "CPPWRF_TEST_DIR=${CMAKE_BINARY_DIR}")
+# docs/MIGRATING_FROM_WRF.md's option tables are the translator's (tools/gen_option_docs.py --check)
+add_test(NAME docs_options_current COMMAND python3 tools/gen_option_docs.py --check WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(docs_options_current PROPERTIES LABELS unit)

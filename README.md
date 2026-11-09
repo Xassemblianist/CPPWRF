@@ -17,6 +17,18 @@ The port follows WRF statement by statement, and every result is checked against
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
 
+## Install, quick start, migrating from WRF
+
+- **Install:** [docs/INSTALL.md](docs/INSTALL.md) (builds, `cmake --install`, release tarballs, containers, the
+  self-test). Turkish: [docs/tr/KURULUM.md](docs/tr/KURULUM.md).
+- **Quick start:** [docs/QUICKSTART.md](docs/QUICKSTART.md) goes from GFS through WPS, `cppwrf-realexe` and
+  `cppwrf-wrf` to a map. Turkish: [docs/tr/HIZLI_BASLANGIC.md](docs/tr/HIZLI_BASLANGIC.md).
+- **Migrating from WRF:** [docs/MIGRATING_FROM_WRF.md](docs/MIGRATING_FROM_WRF.md) and [docs/FAQ.md](docs/FAQ.md).
+  In a WRF run directory, `cppwrf-wrf` replaces `wrf.exe` and `cppwrf-realexe` replaces `real.exe`: the same file
+  names, `rsl` logs and `SUCCESS COMPLETE WRF`. `cppwrf-check namelist.input` says which options are ported.
+- **Python:** [docs/PYTHON.md](docs/PYTHON.md) covers `pip install ./python`: namelists, runs and wrfout files with
+  diagnostics.
+
 ## What is ported
 
 | Area | WRF options |

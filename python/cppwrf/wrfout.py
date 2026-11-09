@@ -132,3 +132,19 @@ def open_wrfout(paths: Paths, domain: int = 1, variables: Optional[List[str]] = 
         except ImportError:
             xarray = False
     return _read_xarray(files, variables) if xarray else _read_numpy(files, variables)
+
+
+HASH_VARIABLES = ("U", "V", "W", "PH", "T", "MU", "P", "QVAPOR", "QCLOUD", "QRAIN")
+
+
+def values_hash(paths: Paths, domain: int = 1, frame: int = -1, variables=HASH_VARIABLES) -> str:
+    """SHA-256 of the values of a frame (default: the last) of the prognostic variables, as little-endian float64:
+    the same for files of identical values whatever the NetCDF library wrote around them (examples/selftest)."""
+    import hashlib
+    w = _read_numpy(wrfout_files(paths, domain), list(variables))
+    h = hashlib.sha256()
+    for name in variables:
+        if name in w and w.dims[name][:1] == ("Time",):
+            h.update(name.encode() + b"\0")
+            h.update(np.ascontiguousarray(w[name][frame], dtype="<f8").tobytes())
+    return h.hexdigest()
