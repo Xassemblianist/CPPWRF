@@ -208,8 +208,6 @@ CPPWRF runs these features only at WRF's default value (another value is an erro
 | `&physics.acc_phy_tend` | `0` | accumulated physics tendencies in the history output (ATHCUTEN, ...) |
 | `&physics.ua_phys` | `.false.` | UA Noah snow physics |
 | `&physics.sf_surface_mosaic` | `0` | Noah mosaic land use |
-| `&physics.tmn_update` | `0` | deep soil temperature update |
-| `&physics.sst_skin` | `0` | skin SST |
 | `&physics.sf_ocean_physics` | `0` | ocean mixed layer / 3-D ocean model |
 | `&physics.omlcall` | `0` | ocean mixed layer |
 | `&physics.aercu_opt` | `0` | aerosol-aware cumulus |
