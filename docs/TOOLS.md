@@ -1,9 +1,9 @@
 # CPPWRF user tools
 
 Besides the drop-ins `cppwrf-wrf`, `cppwrf-realexe` and `cppwrf-check` (docs/QUICKSTART.md,
-docs/MIGRATING_FROM_WRF.md), an installation has three tools for checking results and planning runs. All three are
+docs/MIGRATING_FROM_WRF.md), an installation has tools for checking results, planning runs and using the output. All are
 part of the `cppwrf` Python package (docs/PYTHON.md) and need only `numpy` and `netCDF4`. `--help` lists every
-option. A bash completion for all six tools is installed in `share/bash-completion/completions`; from a source tree,
+option. A bash completion for all the tools is installed in `share/bash-completion/completions`; from a source tree,
 `source tools/completion/cppwrf.bash`.
 
 ## cppwrf-compare: two sets of output files
@@ -87,3 +87,25 @@ other schemes cost differently. With physics the estimate rests on those factors
 against runs on another machine, so take it as a guide. On the
 CPU the physics memory factor is the GPU FP64 one (not measured on the CPU). The GPU modes use the same method but
 have not been measured against estimates yet.
+
+## cppwrf-post: forecaster fields as NetCDF and GRIB2
+
+```bash
+cppwrf-post run/wrfout_d01_* -o post --format both -j 4
+```
+
+Surface, pressure-level and height fields (2 m temperature and humidity, earth-relative wind, MSLP, precipitation
+and its type, clouds, CAPE / CIN, helicities, reflectivity, ...) computed with wrf-python's methods, one CF-1.8
+NetCDF and / or GRIB2 file per output time; a post.yaml / post.ini chooses fields, levels, units and packing.
+docs/POST.md.
+
+## cppwrf-verify-obs: a run against surface observations
+
+```bash
+cppwrf-verify-obs run/wrfout_d01_* -o verify
+cppwrf-verify-obs gpu/wrfout_d01_* --compare cpu/wrfout_d01_*
+```
+
+Downloads (and caches) the METARs (IEM) or ISD reports of the stations in the domain, or reads a CSV file; writes
+bias, MAE, RMSE, correlation, wind and precipitation scores per lead time and station, plots and a summary.
+docs/VERIFY_OBS.md.

@@ -30,6 +30,10 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
   diagnostics.
 - **Tools:** [docs/TOOLS.md](docs/TOOLS.md): `cppwrf-compare` compares two runs' output, `cppwrf-bench` measures
   this machine, and `cppwrf-fit namelist.input` estimates a run's memory and time.
+- **Post-processing:** [docs/POST.md](docs/POST.md): `cppwrf-post` writes forecaster fields (wrf-python's methods)
+  as CF NetCDF and GRIB2. Turkish: [docs/tr/SON_ISLEM.md](docs/tr/SON_ISLEM.md).
+- **Verification:** [docs/VERIFY_OBS.md](docs/VERIFY_OBS.md): `cppwrf-verify-obs` scores a run against METAR, ISD
+  or your own station observations. Turkish: [docs/tr/GOZLEM_DOGRULAMA.md](docs/tr/GOZLEM_DOGRULAMA.md).
 
 ## What is ported
 

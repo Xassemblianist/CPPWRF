@@ -86,6 +86,32 @@ first) with `.times`, `.attrs`, `.dims`, `.units`, `.lat` and `.lon`.
 
 With a Dataset they return DataArrays on its coordinates, with `WrfoutData` numpy arrays.
 
+## Post-processing: `cppwrf.post`
+
+`cppwrf-post`'s fields (docs/POST.md) from Python: wrf-python's diagnostics ported to numpy, written as CF NetCDF
+and / or GRIB2.
+
+```python
+from cppwrf import post
+from cppwrf.post.frame import Frame
+import netCDF4
+
+post.process("run/wrfout_d01_*", config="post.yaml", output_dir="post", fmt="both", jobs=4)  # -> paths written
+F = Frame(netCDF4.Dataset("run/wrfout_d01_2026-11-09_12:00:00"), 0)
+F.slp(), F.td2(), F.cape_2d(), F.srh(3000), F.uv10_earth()        # as wrf-python's getvar
+```
+
+## Verification against observations: `cppwrf.verify_obs`
+
+`cppwrf-verify-obs` (docs/VERIFY_OBS.md) from Python: ISD, IEM METAR or CSV observations, scores per variable,
+lead time and station.
+
+```python
+from cppwrf import verify_obs
+res = verify_obs.verify("run/wrfout_d01_*", obs_source="iem", output_dir="verify")
+res["overall"]["run"]["t2"]                  # n, bias, mae, rmse, corr, mean_obs, mean_fcst
+```
+
 ## Example: a run and a map of its last frame
 
 ```python
@@ -105,4 +131,5 @@ plt.colorbar(label="hPa"); plt.title(str(last.Time.values)[:16]); plt.savefig("s
 python3 -m unittest discover -s python/tests      # no GPU, no model, no data (a stand-in binary, generated files)
 ```
 
-ctest runs them as `python_package`.
+ctest runs them as `python_package`; the post-processing and verification tests also run on their own as
+`post_diagnostics`, `post_output` and `verify_obs`.

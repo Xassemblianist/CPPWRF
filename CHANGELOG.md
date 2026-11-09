@@ -3,6 +3,17 @@
 All notable changes of CPPWRF. Versions follow [Semantic Versioning](https://semver.org/): a change of the results of
 a verified configuration, of a configuration key or of an output file is a new major version.
 
+## Unreleased
+
+### Tools
+- `cppwrf-post` (docs/POST.md): forecaster fields from wrfout files with wrf-python's methods (ported to numpy,
+  identical to wrf-python on single precision files), written as CF-1.8 NetCDF and / or GRIB2 (Lambert, polar
+  stereographic, Mercator and latitude-longitude grids; WMO parameters; simple packing, JPEG 2000 / CCSDS through
+  ecCodes); a post.yaml / post.ini configuration.
+- `cppwrf-verify-obs` (docs/VERIFY_OBS.md): a run against surface observations (IEM METARs, NCEI ISD or a CSV
+  file), with continuous, wind and precipitation contingency scores per lead time and station, SVG plots, a
+  Markdown summary, and the comparison of two runs.
+
 ## 1.0.0
 
 The first release: a C++20 / CUDA port of WRF-ARW v4.8.0 whose CPU FP64 and GPU FP64 output is bit-identical to WRF
