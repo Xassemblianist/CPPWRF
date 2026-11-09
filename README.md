@@ -149,6 +149,7 @@ with WRF's `input_sounding`) and the suite's real-data cases, which read the WRF
   v1.0.0
 - [docs/STATUS.md](docs/STATUS.md): what is ported, how it is verified, every case and result
 - [docs/PERF.md](docs/PERF.md): the benchmark against WRF, the GPU profile and the performance roadmap
+- [docs/FP32_ACCURACY.md](docs/FP32_ACCURACY.md): how close GPU FP32 is to WRF real*8, against stock WRF real*4
 - [docs/PHYSICS_SUITE.md](docs/PHYSICS_SUITE.md), [docs/PHYSICS_DRIVER.md](docs/PHYSICS_DRIVER.md),
   [docs/PHYSICS_INTERFACE.md](docs/PHYSICS_INTERFACE.md): the physics port
 - [docs/NESTING.md](docs/NESTING.md), [docs/NEST_NUMERICS.md](docs/NEST_NUMERICS.md): nesting

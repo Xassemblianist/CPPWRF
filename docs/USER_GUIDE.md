@@ -49,8 +49,10 @@ updates, branches, constants and defaults. Every result is checked against WRF i
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
 - **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (79 GPU runs of the suite, on NVIDIA L4, RTX PRO
   6000 Blackwell and A100).
-- **GPU, FP32**: the fast mode; it differs from WRF's single-precision build by about as much as WRF's single and
-  double precision builds differ from each other.
+- **GPU, FP32**: the fast mode; its distance from WRF real*8 is that of stock WRF real*4 (measured at 1 h: 0.35 to
+  1.08 times WRF real*4's relative L2 difference from real*8; docs/FP32_ACCURACY.md). Use it for forecasts and
+  ensembles on GPUs with slow FP64; use FP64 when the answer must be WRF real*8's (verification, comparisons with
+  WRF runs, continuing a WRF run).
 
 Every WRF option is either ported identically or rejected with an error; nothing is silently ignored. Not ported:
 MPI runs (CPPWRF runs on one node: OpenMP threads or one GPU), moving nests, ndown.exe, I/O forms other than NetCDF,
@@ -473,8 +475,9 @@ CPU build.
   glibc's libm / libmvec algorithms on the device (`CPPWRF_CUDA_GLIBC_MATH`); this costs 0 to 7 % of the stepping
   time. Verified on L4 (sm_89), RTX PRO 6000 Blackwell (sm_120) and A100 (sm_80).
 - **FP32** (`-DCPPWRF_DOUBLE=OFF`): the fast mode, with CUDA's math library and FMA contraction (except in RRTMG's
-  batch kernels, Thompson and the physics drivers). Its difference from WRF's single-precision build is of the same
-  size as WRF's own single / double precision difference (docs/STATUS.md).
+  batch kernels, Thompson and the physics drivers). Its difference from WRF real*8 is of the size of stock WRF
+  real*4's (docs/FP32_ACCURACY.md: the measurement, its method and tools/verify/fp32_accuracy.py, which compares any
+  two sets of wrfout files).
 - **Memory:** the column physics keeps per-column arrays in thread-local memory, which CUDA reserves for every thread
   the GPU can hold, so the footprint grows with the GPU. `CPPWRF_MEMINFO=1` prints it. On an NVIDIA L4 (24 GB) a
   359 x 269 x 44 domain in FP64 needs about 9.3 GB with Thompson + MYNN-EDMF + RRTMG.
