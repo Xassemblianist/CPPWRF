@@ -66,7 +66,8 @@ class Interp(unittest.TestCase):
         f = 3.0 * np.log(p / 100.0) + 7.0  # linear in log p
         z = np.zeros_like(p)
         two = np.ones((2, 2))
-        out = w.vintrp(f, p, np.full_like(p, 280.0), z, z, two, two * 1000, two * 1000, p / 100.0, [850.0, 500.0, 1100.0],
+        out = w.vintrp(f, p, np.full_like(p, 280.0), z, z, two, two * 1000, two * 1000, p / 100.0,
+                       [850.0, 500.0, 1100.0],
                        logp=1)
         np.testing.assert_allclose(out[0], 3 * math.log(850.0) + 7, rtol=1e-13)
         np.testing.assert_allclose(out[1], 3 * math.log(500.0) + 7, rtol=1e-13)

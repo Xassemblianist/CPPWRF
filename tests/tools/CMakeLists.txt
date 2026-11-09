@@ -29,3 +29,8 @@ add_test(NAME post_diagnostics COMMAND python3 -m unittest discover -s python/te
 add_test(NAME post_output COMMAND python3 -m unittest discover -s python/tests -p "test_post_output.py"
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(post_diagnostics post_output PROPERTIES LABELS unit ENVIRONMENT "CPPWRF_TEST_DIR=${CMAKE_BINARY_DIR}")
+# cppwrf-verify-obs (python/cppwrf/verify_obs): ISD / METAR parsers on saved reports, scores, a whole verification of
+# synthetic files (no network; CPPWRF_NETWORK_TESTS=1 adds a small ISD and IEM download)
+add_test(NAME verify_obs COMMAND python3 -m unittest discover -s python/tests -p "test_verify_obs.py"
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(verify_obs PROPERTIES LABELS unit ENVIRONMENT "CPPWRF_TEST_DIR=${CMAKE_BINARY_DIR}")

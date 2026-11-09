@@ -1,0 +1,15 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""cppwrf-verify-obs: see python/cppwrf/verify_obs/ (the source tree's python/, an installed share/cppwrf/python, or the
+pip-installed package)."""
+import os
+import sys
+
+_here = os.path.dirname(os.path.realpath(__file__))
+for _p in (os.path.join(_here, "..", "python"), os.path.join(_here, "..", "share", "cppwrf", "python")):
+    if os.path.isfile(os.path.join(_p, "cppwrf", "verify_obs", "__init__.py")):
+        sys.path.insert(0, os.path.normpath(_p))
+        break
+from cppwrf.verify_obs import main  # noqa: E402
+
+sys.exit(main())

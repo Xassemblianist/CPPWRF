@@ -44,7 +44,7 @@ def _g(d, c, n, units, level=(1, 0, 0), level2=None, stat=None, sign=1.0, add_te
             "stat": stat, "sign": sign, "add_terrain": add_terrain}
 
 
-# -- unit conversions ---------------------------------------------------------------------------------------------------
+# -- unit conversions --------------------------------------------------------------------------------------------------
 
 _SCALE = {  # (from, to): factor; offsets below
     ("hPa", "Pa"): 100.0, ("Pa", "hPa"): 0.01, ("m s-1", "km h-1"): 3.6, ("km h-1", "m s-1"): 1 / 3.6,
@@ -75,7 +75,7 @@ def convert(a, src, dst):
     raise ValueError(f"no conversion from {src} to {dst}")
 
 
-# -- precipitation ------------------------------------------------------------------------------------------------------
+# -- precipitation -----------------------------------------------------------------------------------------------------
 
 
 def accumulations(frame):
@@ -119,7 +119,7 @@ def ptype(d, t2):
     return np.where(np.isfinite(tot) & (tot >= 0.1), out, np.nan)
 
 
-# -- the catalogue ------------------------------------------------------------------------------------------------------
+# -- the catalogue -----------------------------------------------------------------------------------------------------
 
 
 def _uv10(ctx):
@@ -265,11 +265,11 @@ def surface_products(opt):
                 "J kg-1", lambda c: _cape(c, "mu", 1), standard_name="atmosphere_convective_inhibition",
                 grib=_g(0, 7, 7, "J kg-1", (103, 0, 3000), (103, 0, 0), sign=-1.0), precision=0, needs=("QVAPOR",)),
         Product("LCL", "lifting condensation level of the most-unstable parcel, above ground (wrf-python cape_2d "
-                "lcl)", "m", lambda c: _cape(c, "mu", 2), grib=_g(0, 3, 5, "m", (5, 0, 0), add_terrain=True), precision=0,
-                needs=("QVAPOR",)),
+                "lcl)", "m", lambda c: _cape(c, "mu", 2), grib=_g(0, 3, 5, "m", (5, 0, 0), add_terrain=True),
+                precision=0, needs=("QVAPOR",)),
         Product("LFC", "level of free convection of the most-unstable parcel, above ground (wrf-python cape_2d "
-                "lfc)", "m", lambda c: _cape(c, "mu", 3), grib=_g(0, 3, 5, "m", (14, 0, 0), add_terrain=True), precision=0,
-                needs=("QVAPOR",)),
+                "lfc)", "m", lambda c: _cape(c, "mu", 3), grib=_g(0, 3, 5, "m", (14, 0, 0), add_terrain=True),
+                precision=0, needs=("QVAPOR",)),
         Product("SRH01", "0-1 km storm-relative helicity (wrf-python helicity)", "m2 s-2",
                 lambda c: c.frame.srh(1000.0).astype(np.float64), grib=_g(0, 7, 8, "m2 s-2", (103, 0, 1000),
                                                                          (103, 0, 0)), precision=1, needs=("U",)),

@@ -39,7 +39,9 @@ def cases(f, wrf):
         ("omg", lambda F: F.omega(), gv("omg")),
         ("avo", lambda F: F.avo(), gv("avo")),
         ("dbz", lambda F: F.dbz(), gv("dbz")),
-        ("dbz_varint_liqskin", lambda F: F.dbz(True, True), lambda: wrf.g_dbz.get_dbz(ds, use_varint=True, use_liqskin=True, meta=False)),  # getvar rejects them
+        # getvar rejects use_varint / use_liqskin: wrf-python's g_dbz.get_dbz directly
+        ("dbz_varint_liqskin", lambda F: F.dbz(True, True),
+         lambda: wrf.g_dbz.get_dbz(ds, use_varint=True, use_liqskin=True, meta=False)),
         ("mdbz", lambda F: F.dbz().max(axis=0), gv("mdbz")),
         ("cloudfrac_low", lambda F: F.cloudfrac()[0], lambda: gv("cloudfrac")()[0]),
         ("cloudfrac_mid", lambda F: F.cloudfrac()[1], lambda: gv("cloudfrac")()[1]),

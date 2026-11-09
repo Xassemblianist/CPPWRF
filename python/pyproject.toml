@@ -21,6 +21,7 @@ classifiers = [
 [project.optional-dependencies]
 xarray = ["xarray"]
 post = ["pyyaml", "eccodes"]
+verify = ["matplotlib"]
 
 [project.scripts]
 cppwrf-wrf = "cppwrf.dropin:wrf_main"
@@ -30,12 +31,13 @@ cppwrf-compare = "cppwrf.compare:main"
 cppwrf-bench = "cppwrf.bench:main"
 cppwrf-fit = "cppwrf.fit:main"
 cppwrf-post = "cppwrf.post:main"
+cppwrf-verify-obs = "cppwrf.verify_obs:main"
 
 [project.urls]
 Homepage = "https://github.com/Xassemblianist/CPPWRF"
 
 [tool.setuptools]
-packages = ["cppwrf", "cppwrf.post"]
+packages = ["cppwrf", "cppwrf.post", "cppwrf.verify_obs"]
 
 [tool.setuptools.package-data]
 "cppwrf.post" = ["data/*.dat"]
