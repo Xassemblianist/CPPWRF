@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 
+#include "core/data_dir.hpp"
 #include "init_real/met_em.hpp"
 #include "init_real/wrf_io_names.hpp"
 #include "init_real/real_domain.hpp"
@@ -141,7 +142,7 @@ static int run(const RealOptions& o, const Namelist& nl, const WrfSchema& sc, co
 
 int main(int argc, char** argv) {
   std::string nml = "namelist.input", met_dir = ".", out_dir = ".", prec = "double";
-  std::string schema = std::string(CPPWRF_DATA_DIR) + "/wrf_schema/wrf-4.8.0.tsv";
+  std::string schema = cppwrf::data_dir() + "/wrf_schema/wrf-4.8.0.tsv";
   for (int a = 1; a < argc; ++a) {
     std::string s = argv[a];
     auto next = [&]() -> std::string {

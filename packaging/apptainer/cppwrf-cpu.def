@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# CPPWRF, CPU build (FP64, bit-identical to WRF v4.8.0 real*8) on Debian 13; as packaging/docker/Dockerfile.cpu.
+# From the repository's top directory:
+#   apptainer build cppwrf-cpu.sif packaging/apptainer/cppwrf-cpu.def
+#   cd case && apptainer run ../cppwrf-cpu.sif --threads 8          # cppwrf-wrf in the current directory
+Bootstrap: docker
+From: debian:13.1-slim
+Stage: build
+
+%files
+    . /src
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends \
+        g++-14 cmake make libnetcdf-dev python3 python3-netcdf4 python3-numpy ca-certificates
+    cmake -S /src -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 \
+        -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON -DCPPWRF_NATIVE=OFF
+    cmake --build /build -j "$(nproc)" --target cppwrf cppwrf_real
+    cmake --install /build --prefix /opt/cppwrf
+
+Bootstrap: docker
+From: debian:13.1-slim
+Stage: final
+
+%files from build
+    /opt/cppwrf /opt/cppwrf
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends libnetcdf22 libgomp1 python3 python3-netcdf4 python3-numpy
+    rm -rf /var/lib/apt/lists/*
+
+%environment
+    export PATH=/opt/cppwrf/bin:$PATH
+    export PYTHONPATH=/opt/cppwrf/share/cppwrf/python
+
+%runscript
+    exec cppwrf-wrf "$@"
+
+%labels
+    org.opencontainers.image.title CPPWRF (CPU FP64)
+    org.opencontainers.image.version 1.0.0
+    org.opencontainers.image.licenses GPL-3.0-or-later

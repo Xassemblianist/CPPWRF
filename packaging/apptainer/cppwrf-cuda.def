@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# CPPWRF, CUDA builds (GPU FP32, GPU FP64) and the CPU FP64 build; as packaging/docker/Dockerfile.cuda (read its notes
+# on the driver and on glibc). From the repository's top directory:
+#   apptainer build cppwrf-cuda.sif packaging/apptainer/cppwrf-cuda.def
+#   cd case && apptainer run --nv ../cppwrf-cuda.sif --mode gpu-fp32
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-devel-ubuntu24.04
+Stage: build
+
+%files
+    . /src
+
+%post
+    CUDA_ARCHS="80;86;89;90;120"
+    apt-get update && apt-get install -y --no-install-recommends \
+        g++-14 cmake make libnetcdf-dev python3 python3-netcdf4 python3-numpy ca-certificates
+    for f in "gpu-fp32 ON OFF" "gpu-fp64 ON ON" "cpu-fp64 OFF ON"; do
+        set -- $f
+        cmake -S /src -B /build-$1 -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 \
+            -DCMAKE_CUDA_HOST_COMPILER=g++-14 -DCMAKE_CUDA_ARCHITECTURES="$CUDA_ARCHS" \
+            -DCPPWRF_ENABLE_CUDA=$2 -DCPPWRF_DOUBLE=$3 -DCPPWRF_NATIVE=OFF
+        cmake --build /build-$1 -j "$(nproc)" --target cppwrf cppwrf_real
+        cmake --install /build-$1 --prefix /opt/cppwrf
+    done
+    ln -sf cppwrf-gpu-fp32 /opt/cppwrf/bin/cppwrf
+
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-runtime-ubuntu24.04
+Stage: final
+
+%files from build
+    /opt/cppwrf /opt/cppwrf
+
+%post
+    apt-get update && apt-get install -y --no-install-recommends libnetcdf19t64 libgomp1 python3 python3-netcdf4 python3-numpy
+    rm -rf /var/lib/apt/lists/*
+
+%environment
+    export PATH=/opt/cppwrf/bin:$PATH
+    export PYTHONPATH=/opt/cppwrf/share/cppwrf/python
+
+%runscript
+    exec cppwrf-wrf "$@"
+
+%labels
+    org.opencontainers.image.title CPPWRF (CUDA)
+    org.opencontainers.image.version 1.0.0
+    org.opencontainers.image.licenses GPL-3.0-or-later

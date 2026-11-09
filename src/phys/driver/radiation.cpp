@@ -7,6 +7,7 @@
 #include <fstream>
 #include <stdexcept>
 
+#include "core/data_dir.hpp"
 #include "phys/phys_constants.hpp"
 #include "phys/ra_rrtm_lw/rrtm_lw.hpp"
 #include "phys/ra_rrtm_lw/rrtm_lw_tables.hpp"
@@ -308,14 +309,12 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
   if (rrtmg_lw) p_->lw = std::make_unique<RrtmgLwTables>();
   const bool rrtmg_sw = o.ra_sw_physics == 4;
   if (rrtmg_sw) p_->sw = std::make_unique<RrtmgSwTables>();
-  // RRTMG tables: phys.rrtmg_tables, then the copy in the source tree (data/rrtmg, CPPWRF_DATA_DIR)
+  // RRTMG tables: phys.table_dir, then CPPWRF's copy (data/rrtmg of the data directory, core/data_dir.hpp)
   auto table_file = [&](const std::string& name) {
     const std::string a = o.table_dir + "/" + name;
     if (std::ifstream(a).good()) return a;
-#ifdef CPPWRF_DATA_DIR
-    const std::string b = std::string(CPPWRF_DATA_DIR) + "/rrtmg/" + name;
+    const std::string b = data_dir() + "/rrtmg/" + name;
     if (std::ifstream(b).good()) return b;
-#endif
     throw std::runtime_error("radiation: cannot find " + name + " in " + o.table_dir + " or the data directory");
   };
   if (rrtmg_lw && !load_rrtmg_lw_tables(table_file("rrtmg_lw_tables.bin"), *p_->lw))

@@ -22,10 +22,8 @@
 #include "wrf_io/namelist.hpp"
 #include "wrf_io/stream_file.hpp"
 #include "wrf_io/wrf_schema.hpp"
+#include "core/data_dir.hpp"
 
-#ifndef CPPWRF_DATA_DIR
-#define CPPWRF_DATA_DIR "data"
-#endif
 
 namespace cppwrf::cases {
 
@@ -122,7 +120,7 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
                                                ? wrf_io::Namelist::read(nl_path)
                                                : wrf_io::Namelist::parse(""));
   schema_ = std::make_unique<wrf_io::WrfSchema>(wrf_io::WrfSchema::load(
-      cfg.get_string("output.wrf_schema", std::string(CPPWRF_DATA_DIR) + "/wrf_schema/wrf-4.8.0.tsv")));
+      cfg.get_string("output.wrf_schema", data_dir() + "/wrf_schema/wrf-4.8.0.tsv")));
   // the nest feedback (u= fields) does not depend on the I/O streams: the Registry masks before iofields_filename
   fb_schema_ = std::make_unique<wrf_io::WrfSchema>(*schema_);
   const int dom = domain_tag_.size() == 3 ? std::atoi(domain_tag_.c_str() + 1) : 1;

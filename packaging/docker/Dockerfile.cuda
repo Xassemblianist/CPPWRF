@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# CPPWRF, CUDA builds: GPU FP32 (the fast mode) and GPU FP64 (bit-identical to WRF real*8 in CPPWRF's proofs), both in
+# one image (cppwrf-wrf --mode gpu-fp32 | gpu-fp64), and the CPU FP64 build. From the repository's top directory:
+#   docker build -f packaging/docker/Dockerfile.cuda -t cppwrf:1.0.0-cuda .
+#   docker run --rm --gpus all -v "$PWD/case:/work" cppwrf:1.0.0-cuda cppwrf-wrf --mode gpu-fp32
+# CUDA_ARCHS: the GPU architectures (sm_120 needs CUDA >= 12.8); the host needs an NVIDIA driver for this CUDA
+# version (12.8: >= 570). The proofs of bit identity ran on Debian 13 (glibc 2.41); this image is Ubuntu 24.04
+# (glibc 2.39), whose libm the host code calls: check its FP64 output against the CPU build (docs/INSTALL.md).
+# Pin the bases by digest for a reproducible image.
+ARG CUDA_VERSION=12.8.1
+ARG UBUNTU=ubuntu24.04
+
+FROM nvidia/cuda:${CUDA_VERSION}-devel-${UBUNTU} AS build
+ARG CUDA_ARCHS="80;86;89;90;120"
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      g++-14 cmake make libnetcdf-dev python3 python3-netcdf4 python3-numpy ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+COPY . /src
+RUN for f in "gpu-fp32 ON OFF" "gpu-fp64 ON ON" "cpu-fp64 OFF ON"; do set -- $f; \
+      cmake -S /src -B /build-$1 -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 \
+        -DCMAKE_CUDA_HOST_COMPILER=g++-14 -DCMAKE_CUDA_ARCHITECTURES="${CUDA_ARCHS}" \
+        -DCPPWRF_ENABLE_CUDA=$2 -DCPPWRF_DOUBLE=$3 -DCPPWRF_NATIVE=OFF \
+      && cmake --build /build-$1 -j "$(nproc)" --target cppwrf cppwrf_real \
+      && cmake --install /build-$1 --prefix /opt/cppwrf || exit 1; \
+    done \
+    && ln -sf cppwrf-gpu-fp32 /opt/cppwrf/bin/cppwrf
+
+FROM nvidia/cuda:${CUDA_VERSION}-runtime-${UBUNTU}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libnetcdf19t64 libgomp1 python3 python3-netcdf4 python3-numpy \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/cppwrf /opt/cppwrf
+ENV PATH=/opt/cppwrf/bin:$PATH PYTHONPATH=/opt/cppwrf/share/cppwrf/python
+WORKDIR /work
+CMD ["cppwrf-wrf", "--mode", "gpu-fp32"]

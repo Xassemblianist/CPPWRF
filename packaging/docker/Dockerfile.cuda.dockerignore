@@ -1,0 +1,7 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# the build context of Dockerfile.cuda (BuildKit reads <Dockerfile>.dockerignore): the sources, not build trees or outputs
+.git
+build*/
+out/
+**/__pycache__
+python/*.egg-info

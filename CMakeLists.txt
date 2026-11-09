@@ -302,3 +302,6 @@ if(CPPWRF_DIFF_TESTS)
     endforeach()
   endif()
 endif()
+
+# cmake --install and CPack (cmake/Install.cmake)
+include(cmake/Install.cmake)
