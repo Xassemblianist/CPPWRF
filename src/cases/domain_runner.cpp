@@ -235,6 +235,13 @@ void check_native_restart(const std::string& path, const io_netcdf::RestartMeta&
 }
 #endif
 
+// WRF's timing label of an output file: "Writing <file name> for domain <I8>"
+std::string writing(const std::string& path, const std::string& tag) {
+  char b[64];
+  std::snprintf(b, sizeof b, " for domain %8d", std::stoi(tag.substr(1)));
+  return "Writing " + std::filesystem::path(path).filename().string() + b;
+}
+
 }  // namespace
 
 DomainRunner::DomainRunner(const io::Config& cfg, cases::Model& m, const std::string& out_dir,
@@ -642,7 +649,9 @@ void DomainRunner::prepare_output() {
       for (const Field3* f : m_.diff->fields()) f3.push_back(f);
       for (const Field2* f : m_.diff->fields2()) f2.push_back(f);
     }
-    wrfout_ = std::make_unique<WrfHistory>(cfg_, m_, out_dir_, domain_tag_, start_date_, f2, f3);
+    // output.wrf_dir: the directory of the WRF files (wrfout, wrfrst, auxhist; default: the domain's output directory)
+    wrfout_ = std::make_unique<WrfHistory>(cfg_, m_, cfg_.get_string("output.wrf_dir", out_dir_), domain_tag_,
+                                           start_date_, f2, f3);
     if (m_.rk) m_.rk->on_first_rk_prep = [this] { wrfout_->first_rk_prep(); };
   }
 #endif
@@ -703,6 +712,8 @@ bool DomainRunner::start() {
     if (hist_alarm_t_) hist_iv_t_ = wrf_time::make(hs);
   }
   stop_on_nonfinite_ = cfg_.get_bool("run.stop_on_nonfinite", true);
+  write_native_restart_ = cfg_.get_bool("restart.native", true);
+  wrf_timing_ = cfg_.get_bool("output.wrf_timing", false);
   // the non-finite check of every step (else on the diagnostic steps only, output.diag_interval)
   nonfinite_every_step_ = cfg_.get_bool("run.check_nonfinite_every_step", false);
   start_date_ = cfg_.get_string("run.start_date", !m_.start_date.empty() ? m_.start_date : "2000-01-01_00:00:00");
@@ -832,7 +843,15 @@ bool DomainRunner::start() {
   if (!do_diag(start_step)) return false;
   if (start_step == 0) do_snap(start_step);
   device_memory_report("after the setup");
+  wrf_tick_ = std::chrono::steady_clock::now();
   return true;
+}
+
+// WRF's end_timing: "Timing for <what>: <F10.5> elapsed seconds"
+void DomainRunner::wrf_timing_line(const std::string& what, std::chrono::steady_clock::time_point since) const {
+  const double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - since).count();
+  std::printf("Timing for %s: %10.5f elapsed seconds\n", what.c_str(), s);
+  std::fflush(stdout);
 }
 
 void DomainRunner::after_solve(long n) {
@@ -942,6 +961,13 @@ bool DomainRunner::reads_state(long n) const {
 bool DomainRunner::after_step(long n) {
   step_time += std::chrono::duration<double>(std::chrono::steady_clock::now() - step_start_).count();
   if (m_.adapt) m_.advance_clock();
+  if (wrf_timing_) {  // integrate: "main: time <current time> on domain <I3>" after the solve
+    char what[96];
+    std::snprintf(what, sizeof what, "main: time %s on domain %3d",
+                  wrf_io::add_seconds(start_date_, std::lround(time_s(n))).c_str(), std::stoi(domain_tag_.substr(1)));
+    wrf_timing_line(what, wrf_tick_);
+    wrf_tick_ = std::chrono::steady_clock::now();
+  }
   bool last = (n == m_.nsteps);
   if (nonfinite_every_step_ && !nonfinite_seen_) {  // run.check_nonfinite_every_step: the diagnostics' reductions
     const dyn::DiagRow r = dg_->compute(*m_.st, *m_.base);
@@ -1046,9 +1072,15 @@ void DomainRunner::do_snap(long n) {
   // step of a run that is not a multiple of history_interval (the native snapshot above keeps it)
   if (write_wrfout_ && wrfout_ && (n == 0 || hist_due(n))) {
     if (m_.adapt) wrfout_->set_exact_time(elapsed(n));
+    const auto t = std::chrono::steady_clock::now();
     wrfout_->write(n, time_s(n));
+    if (wrf_timing_) wrf_timing_line(writing(wrfout_->last_path(), domain_tag_), t);
   }
-  if (aux3_write_ && wrfout_ && (n == 0 || aux3_due(n))) wrfout_->write_auxhist3(n, time_s(n));
+  if (aux3_write_ && wrfout_ && (n == 0 || aux3_due(n))) {
+    const auto t = std::chrono::steady_clock::now();
+    wrfout_->write_auxhist3(n, time_s(n));
+    if (wrf_timing_) wrf_timing_line(writing(wrfout_->last_path(), domain_tag_), t);
+  }
 #endif
 }
 
@@ -1065,7 +1097,8 @@ void DomainRunner::do_restart(long n, bool ring) {
   char rst_name[64];
   std::snprintf(rst_name, sizeof(rst_name), "restart_%06ld.nc", n);
   std::string rst_path = out_dir_ + "/" + rst_name;
-  save_restart_file(rst_path, n, time_s(n));
+  const auto t_rst = std::chrono::steady_clock::now();
+  if (write_native_restart_) save_restart_file(rst_path, n, time_s(n));
   // wrfrst only when WRF's restart alarm rings, not at an off-interval last step; output_wrf writes the seconds
   // to the next ring as interval - (time - PrevRingTime) in whole seconds (share/output_wrf.F:413-435)
   if (wrfout_ && ring && m_.adapt) {
@@ -1082,6 +1115,7 @@ void DomainRunner::do_restart(long n, bool ring) {
     wrfout_->write_restart(n, n * m_.g.dt, double(hist_iv_) * m_.g.dt, double(hist_ref_) * m_.g.dt,
                            std::trunc(rst_iv_s_) - std::trunc(n * m_.g.dt - rst_prev_), aux4_first_s_);
   }
+  if (wrf_timing_ && wrfout_ && ring) wrf_timing_line(writing("restart", domain_tag_), t_rst);
 }
 #endif
 

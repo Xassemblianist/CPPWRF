@@ -79,7 +79,12 @@ def needs(name):
     case = next((c for c in wrf_suite.CASES if c[0] == name), None)
     if case:
         _, _, cfg, sets, wo, t, tol = case
-        dirs += config_paths(cfg, [s for s in sets if not s.startswith("suite.")])
+        if cfg.startswith("dropin:"):  # the run directory it copies, its namelist's directory, the linked files
+            src, nl_dir, links = wrf_suite.dropin_spec(cfg, sets)
+            dirs += [r for r in (rel(src), rel(nl_dir)) if r]
+            files.update({rel(f): True for f in links})
+        else:
+            dirs += config_paths(cfg, [s for s in sets if not s.startswith("suite.")])
         mid = wrf_suite.restart_at(sets)
         for w in (wo.values() if isinstance(wo, dict) else [wo]):
             r = rel(w)

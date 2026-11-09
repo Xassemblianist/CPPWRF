@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// cppwrf: ./cppwrf <config.ini> [--set section.key=value ...]
+// cppwrf: ./cppwrf <config.ini> [--set section.key=value ...] | --version
 #include <cstdio>
 #include <exception>
 #include <string>
@@ -9,6 +9,7 @@
 #include "cases/model.hpp"
 #include "cases/nest_driver.hpp"
 #include "core/backend.hpp"
+#include "core/precision.hpp"
 #include "core/tiles.hpp"
 #include "io/config.hpp"
 
@@ -46,6 +47,11 @@ static int run_tile(const io::Config& cfg0, const std::string& out_dir, int t) {
 }
 
 static int run(int argc, char** argv) {
+  if (argc == 2 && std::string(argv[1]) == "--version") {  // the drop-in tools choose the binary of a mode by it
+    std::printf("cppwrf %s commit %s backend %s precision %s\n", CPPWRF_VERSION, CPPWRF_COMMIT, backend_name(),
+                precision_name);
+    return 0;
+  }
   if (argc < 2) {
     std::fprintf(stderr, "usage: %s <config.ini> [--set section.key=value ...]\n", argv[0]);
     return 2;

@@ -141,6 +141,11 @@ class DomainRunner {
 
   std::chrono::steady_clock::time_point t0_;
   std::chrono::steady_clock::time_point step_start_;
+  // output.wrf_timing: WRF's "Timing for main" / "Timing for Writing" lines on stdout (the drop-in wrf.exe's log)
+  bool wrf_timing_ = false;
+  std::chrono::steady_clock::time_point wrf_tick_;
+  bool write_native_restart_ = true;  // restart.native: CPPWRF's own restart_<step>.nc next to the wrfrst files
+  void wrf_timing_line(const std::string& what, std::chrono::steady_clock::time_point since) const;
 
   std::unique_ptr<io::DiagWriter> diag_;
   std::unique_ptr<io::SnapshotWriter> snap_;

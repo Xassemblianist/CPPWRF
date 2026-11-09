@@ -230,7 +230,29 @@ run, but CPPWRF writes its own `restart_<step>.nc` at the last step of every dom
 
 ### Running from a WRF Run Directory
 
-In a directory prepared for wrf.exe (`namelist.input`, `wrfinput_d0N`, `wrfbdy_d01` and the `run/` tables):
+In a directory prepared for wrf.exe (`namelist.input`, `wrfinput_d0N`, `wrfbdy_d01` and the `run/` tables),
+`cppwrf-wrf` is the drop-in wrf.exe: it translates `namelist.input`, runs the model and writes WRF's files where wrf.exe
+writes them (`wrfout_d0N_<date>`, `wrfrst_d0N_<date>`, `auxhist3_d0N_<date>`, by `history_outname`, `rst_outname`,
+`auxhist3_outname`; every domain in the run directory), with the logs `rsl.out.0000` / `rsl.error.0000` (WRF's
+`Timing for main` and `Timing for Writing` lines, `d01 <date> wrf: SUCCESS COMPLETE WRF` at the end). `restart = .true.`
+resumes from `wrfrst_d01_<start date>` (`rst_inname`) as wrf.exe does. An option without a port stops it at start-up
+with WRF's `FATAL CALLED` block naming the option, its value and what is supported; any failure is a nonzero exit
+status. `cppwrf-realexe` is the drop-in real.exe (`met_em.d0N.*` in the directory, `real_em: SUCCESS COMPLETE REAL_EM
+INIT`) and `cppwrf-check namelist.input` lists, per option, whether it is ported, ignored or not ported, without
+running anything (exit status 0 when CPPWRF runs the namelist):
+
+```bash
+$CPPWRF/tools/cppwrf-check namelist.input
+$CPPWRF/tools/cppwrf-wrf --mode cpu-fp64 --threads $(nproc)   # or gpu-fp32, gpu-fp64
+grep -q "SUCCESS COMPLETE WRF" rsl.out.0000 && ls wrfout_d0*
+```
+
+`--mode` picks the binary by what `cppwrf --version` reports (from `--exe`, `CPPWRF_EXE`, the installed `bin/`, the
+source tree's `build*/` directories or `PATH`). CPPWRF's own files (the translated `run.ini`, `run.json`, `diag.csv`) go
+to `cppwrf_work/`; `--set section.key=value` passes a configuration key on, `--echo` copies the log to the terminal.
+The model runs as `cppwrf run.ini` does and the WRF files are byte for byte the same.
+
+By hand, the same run is:
 
 ```bash
 python3 $CPPWRF/tools/wrf2cppwrf.py namelist.input -o run.ini --format wrfout
@@ -582,6 +604,9 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[output]` | `auxhist3` | bool | `false` | WRF's auxhist3 files (`auxhist3_outname`, default `auxhist3_d<domain>_<date>`; `frames_per_auxhist3`) with the `output_diagnostics` fields every `phys.auxhist3_interval` minutes; needs `format = wrfout` or `both` | `io_form_auxhist3 = 2` |
 | `[restart]` | `interval` | double | `0.0` | Restart snapshot write frequency in seconds (0 = disabled) | `restart_interval` |
 | `[restart]` | `end` | double | `0.0` | No restart files after this time in seconds (0 = no end) | - |
+| `[restart]` | `native` | bool | `true` | Also write CPPWRF's own `restart_<step>.nc` files next to the WRF `wrfrst` files (`cppwrf-wrf` sets false) | - |
+| `[output]` | `wrf_dir` | string | `output.dir` (per domain) | Directory of the WRF files (wrfout, wrfrst, auxhist3) of every domain; `cppwrf-wrf` sets the run directory | the run directory |
+| `[output]` | `wrf_timing` | bool | `false` | Print WRF's `Timing for main` / `Timing for Writing` lines (the rsl logs of `cppwrf-wrf`) | - |
 | `[tracers]` | `names` | string list | `""` | Comma-separated names of passive scalar tracers | Tracer variables |
 | `[domains]` | `max_dom`, `feedback`, `smooth_option`, `save_topo_from_real`, `blend_width`, `spec_bdy_width` | integer | `1`, `1`, `2`, `1`, `5`, `5` | Multi-domain nesting count, two-way feedback (`0, 1`), feedback smoother (`0..2`), terrain blending | `&domains` / `&bdy_control` |
 | `[d02]`..`[d0N]` | `wrfinput`, `dt`, `out_interval`, `diag_interval`, `parent_id`, `i_parent_start`, `j_parent_start`, `parent_grid_ratio`, `parent_time_step_ratio` | string/int/double | *per-domain* | Child domain input file, timestep, output intervals, parent link, and per-domain dynamics overrides | `&domains` / `&time_control` / `&dynamics` |

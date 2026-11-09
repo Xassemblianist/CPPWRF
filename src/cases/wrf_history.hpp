@@ -75,6 +75,8 @@ class WrfHistory {
   // next ring)
   void set_exact_time(const wrf_time::Interval& t) { exact_ = t; has_exact_ = true; }
   void set_history_alarm(int ring, long secs) { hist_alarm_ring_ = ring; hist_alarm_secs_ = secs; }
+  // the file of the last write (write, write_auxhist3, write_restart), for the log
+  const std::string& last_path() const { return last_path_; }
 
  private:
   // value() of a stream variable; ideal x-z runs repeat the model's row (WRF: e_sn = 3, two identical rows)
@@ -92,7 +94,7 @@ class WrfHistory {
   std::unique_ptr<FeedbackCache> fb_cache_;
 
   const Model& m_;
-  std::string out_dir_, domain_tag_, start_date_, wrfinput_, hist_outname_, rst_outname_;
+  std::string out_dir_, domain_tag_, start_date_, wrfinput_, hist_outname_, rst_outname_, last_path_, hist_path_, aux3_path_;
   std::vector<const Field2*> f2_;
   std::vector<const Field3*> f3_;
   std::unique_ptr<wrf_io::Namelist> nl_;

@@ -58,6 +58,49 @@ def run(binary, cfg, sets, out):
     return r.returncode, r.stdout + r.stderr
 
 
+# a drop-in case (config "dropin:<WRF run directory>"): cppwrf-wrf in a copy of the run directory
+DROPIN_OUTPUT = re.compile(r"(wrfout|wrfrst|auxhist\d+)_d\d\d_.*|rsl\..*|.*\.log|namelist\.(input|output)|(wrf|real|ideal)\.exe")
+
+
+def dropin_spec(cfg, sets):
+    """A drop-in case's sources: the WRF run directory whose input files it links (every file but the outputs, the
+    logs, the executables and the namelists), the directory whose namelist.input and *.txt files (iofields) it copies
+    (suite.dropin_namelist=DIR, default the run directory) and further files it links (suite.dropin_link=FILE: a
+    restart run's wrfrst file)."""
+    src = cfg[len("dropin:"):]
+    nl_dir = next((x.split("=", 1)[1] for x in sets if x.startswith("suite.dropin_namelist=")), src)
+    return src, nl_dir, [x.split("=", 1)[1] for x in sets if x.startswith("suite.dropin_link=")]
+
+
+def dropin_run(binary, cfg, sets, out):
+    """cppwrf-wrf --exe binary in `out`, a WRF-style run directory made from the case's sources (dropin_spec); the
+    --set list (without suite.*) is passed on. (exit status, the end of rsl.error.0000 or the tool's output)."""
+    src, nl_dir, links = dropin_spec(cfg, sets)
+    shutil.rmtree(out, ignore_errors=True)
+    os.makedirs(out)
+    for f in sorted(os.listdir(src)):
+        if not DROPIN_OUTPUT.fullmatch(f):
+            os.symlink(os.path.realpath(os.path.join(src, f)), os.path.join(out, f))
+    for f in sorted(os.listdir(nl_dir)):
+        if f == "namelist.input" or f.endswith(".txt"):
+            if os.path.lexists(os.path.join(out, f)):
+                os.remove(os.path.join(out, f))
+            shutil.copyfile(os.path.join(nl_dir, f), os.path.join(out, f))
+    for f in links:
+        os.symlink(os.path.realpath(f), os.path.join(out, os.path.basename(f)))
+    cmd = [sys.executable, os.path.join(REPO, "tools", "cppwrf-wrf"), "--exe", binary, "--dir", out]
+    for x in sets:
+        if not x.startswith("suite."):
+            cmd += ["--set", x]
+    env = dict(os.environ, OMP_NUM_THREADS=os.environ.get("OMP_NUM_THREADS", "3"))
+    r = subprocess.run(cmd, env=env, capture_output=True, text=True)
+    rsl_out, rsl_err = os.path.join(out, "rsl.out.0000"), os.path.join(out, "rsl.error.0000")
+    log = open(rsl_err).read() if os.path.exists(rsl_err) else r.stdout + r.stderr
+    if r.returncode == 0 and not (os.path.exists(rsl_out) and "SUCCESS COMPLETE WRF" in open(rsl_out).read()):
+        return 1, "exit status 0 without SUCCESS COMPLETE WRF in rsl.out.0000"
+    return r.returncode, log
+
+
 def config_vs_namelist(cfg, sets, nml):
     """Options of the case's configuration (cfg and its --set) that differ from tools/wrf2cppwrf.py's translation of
     the namelist.input of the WRF run that made the reference (options both set; paths by their real path; the run
@@ -324,6 +367,14 @@ def main():
 
     def case(name, b, cfg, sets, refs, t, tol):
         out = os.path.join(a.out, name)
+        if cfg.startswith("dropin:"):  # cppwrf-wrf in a WRF run directory, its files against WRF's at tolerance 0
+            rc, log = dropin_run(b, cfg, sets, out)
+            if rc != 0:
+                return False, f"FAIL  {name:22s} drop-in run failed: {log[-200:]}"
+            bad, what = exact_case(refs, out, t, sets)
+            done(out, not bad)
+            return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact (cppwrf-wrf): {what}"
+                             + (f"  [{'; '.join(x[:300] for x in bad[:6])}{' ...' if len(bad) > 6 else ''}]" if bad else ""))
         mid = restart_at(sets)
         sets = [x for x in sets if not x.startswith("suite.")]
         exact = all(x == 0.0 for x in tol.values())

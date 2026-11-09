@@ -1130,6 +1130,7 @@ void WrfHistory::write_restart(long step, double time_sec, double history_interv
   const std::string date = date_of(time_sec);
   std::filesystem::create_directories(out_dir_);
   const std::string path = out_dir_ + "/" + wrf_io::stream_filename(rst_outname_, std::stoi(domain_tag_.substr(1)), date);
+  last_path_ = path;
   const Grid& g = m_.g;
   wrf_io::DomainAtts d = domain_atts();
   // output_wrf restart_only: the alarms WRF created (all but 26 and 54) at this time; the history alarm has
@@ -1213,6 +1214,7 @@ void WrfHistory::write(long step, double time_sec) {
     file_.reset();
     std::filesystem::create_directories(out_dir_);
     const std::string path = out_dir_ + "/" + wrf_io::stream_filename(hist_outname_, std::stoi(domain_tag_.substr(1)), date);
+    hist_path_ = path;
     const Grid& g = m_.g;
     const wrf_io::DomainAtts d = domain_atts();
     std::vector<wrf_io::OutVar> vars = schema_->history_vars(*wc_, g.nx + 1, g.ny * jrep_ + 1, g.nz + 1, int(sizeof(real)));
@@ -1225,6 +1227,7 @@ void WrfHistory::write(long step, double time_sec) {
     file_ = std::make_unique<wrf_io::StreamFile>(path, std::move(vars), *wc_, d, wrf_io::Stream::history,
                                                  !wc_->logical("use_netcdf_classic"));
   }
+  last_path_ = hist_path_;
   file_->write(date, [&](const wrf_io::OutVar& v, std::vector<double>& out) {
     return out_value(v, out);
   });
@@ -1242,6 +1245,7 @@ void WrfHistory::write_auxhist3(long step, double time_sec) {
     aux3_file_.reset();
     std::filesystem::create_directories(out_dir_);
     const std::string path = out_dir_ + "/" + wrf_io::stream_filename(aux3_outname_, std::stoi(domain_tag_.substr(1)), date);
+    aux3_path_ = path;
     const Grid& g = m_.g;
     std::vector<wrf_io::OutVar> vars = schema_->stream_vars(*wc_, g.nx + 1, g.ny * jrep_ + 1, g.nz + 1, int(sizeof(real)), 0, 3);
     for (wrf_io::OutVar& v : vars)
@@ -1253,6 +1257,7 @@ void WrfHistory::write_auxhist3(long step, double time_sec) {
     aux3_file_ = std::make_unique<wrf_io::StreamFile>(path, std::move(vars), *wc_, domain_atts(), wrf_io::Stream::history,
                                                       !wc_->logical("use_netcdf_classic"));
   }
+  last_path_ = aux3_path_;
   aux3_file_->write(date, [&](const wrf_io::OutVar& v, std::vector<double>& out) {
     return out_value(v, out);
   });

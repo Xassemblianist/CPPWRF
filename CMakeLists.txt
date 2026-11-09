@@ -247,6 +247,7 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/src/main.cpp)
   add_executable(cppwrf src/main.cpp)
   cppwrf_device_sources(src/main.cpp)
   target_link_libraries(cppwrf PRIVATE cppwrf_core)
+  target_compile_definitions(cppwrf PRIVATE CPPWRF_VERSION="${PROJECT_VERSION}" CPPWRF_COMMIT="${CPPWRF_COMMIT}")
 endif()
 
 # Unit tests (tests/unit/*.cpp; tests/unit/io belongs to cppwrf_io)
