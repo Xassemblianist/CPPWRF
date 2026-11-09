@@ -54,7 +54,8 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/tools/completion/cppwrf.bash)
             RENAME ${t} COMPONENT runtime)
   endforeach()
 endif()
-install(FILES README.md CHANGELOG.md NOTICE.md DESTINATION ${CPPWRF_DOC} COMPONENT runtime)
+install(FILES README.md CHANGELOG.md NOTICE.md CONTRIBUTING.md SECURITY.md CODE_OF_CONDUCT.md
+        DESTINATION ${CPPWRF_DOC} COMPONENT runtime)
 install(FILES LICENSE DESTINATION ${CPPWRF_DOC} RENAME LICENSE COMPONENT runtime)
 install(DIRECTORY licenses/ docs/ DESTINATION ${CPPWRF_DOC} COMPONENT runtime)
 

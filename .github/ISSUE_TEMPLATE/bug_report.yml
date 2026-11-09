@@ -1,0 +1,61 @@
+name: Bug report
+description: A crash, a wrong result, a difference from WRF, or a tool that misbehaves.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. A small case that shows the problem in a few steps helps the most.
+        Security problems go by e-mail instead (SECURITY.md).
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: The output of `cppwrf --version` (version, commit, backend, precision).
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - gpu-fp32
+        - gpu-fp64
+        - cpu-fp64
+        - cpu-fp32
+        - "not a model run: a tool, the Python package or the build"
+    validations:
+      required: true
+  - type: textarea
+    id: system
+    attributes:
+      label: System
+      description: OS, compiler, CUDA version, GPU or CPU; the CMake flags; or the release tarball / container used.
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The commands, and the namelist.input (attach it). For real-data cases, where the input comes from.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The output of `cppwrf-check namelist.input` and the end of `rsl.error.0000`.
+      render: text
+  - type: textarea
+    id: wrf
+    attributes:
+      label: Comparison with WRF
+      description: |
+        If CPPWRF and WRF differ: how WRF was built and run (real*4 or real*8, compiler, MPI or not), and the output
+        of `cppwrf-compare WRF_DIR CPPWRF_DIR`.

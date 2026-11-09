@@ -150,6 +150,12 @@ with WRF's `input_sounding`) and the suite's real-data cases, which read the WRF
 - [docs/NESTING.md](docs/NESTING.md), [docs/NEST_NUMERICS.md](docs/NEST_NUMERICS.md): nesting
 - [docs/REAL.md](docs/REAL.md): `cppwrf_real`
 
+## Contributing
+
+Bug reports, questions and requests for WRF options go to the issue tracker, with its templates. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for how changes are tested, [SECURITY.md](SECURITY.md) for reporting security
+problems, and the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## License
 
 GPL-3.0-or-later; see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md), which includes the WRF notice. WRF is

@@ -1,0 +1,29 @@
+name: Feature request
+description: A WRF option or scheme to port, or a new feature of the tools.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What do you need?
+      description: For a WRF option, its namelist name and value (e.g. `mp_physics = 8`) and what `cppwrf-check` says.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: What is it for?
+      description: The application, and the domain size and resolution, so the request can be prioritised.
+    validations:
+      required: true
+  - type: textarea
+    id: reference
+    attributes:
+      label: Reference runs
+      description: |
+        A port is accepted with a WRF v4.8.0 reference run to compare with. Can you share a case (namelist,
+        input files, WRF's output) that uses the option?
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else

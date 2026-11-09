@@ -1,0 +1,19 @@
+name: Question
+description: How to install, run or use CPPWRF.
+labels: [question]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        docs/INSTALL.md, docs/QUICKSTART.md, docs/FAQ.md and docs/MIGRATING_FROM_WRF.md answer many questions.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: The version (`cppwrf --version`), the system, and what you have tried.
