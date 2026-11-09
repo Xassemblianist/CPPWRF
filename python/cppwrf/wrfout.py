@@ -33,12 +33,15 @@ def wrfout_files(paths: Paths, domain: int = 1) -> List[str]:
 
 def decode_times(chars: np.ndarray) -> List[datetime.datetime]:
     """WRF's Times variable (Time x DateStrLen characters) as datetimes."""
-    out = []
-    for row in np.atleast_2d(chars):
-        s = b"".join(x if isinstance(x, bytes) else bytes(x) for x in row).decode() if row.dtype.kind == "S" \
-            else "".join(row)
-        out.append(datetime.datetime.strptime(s.strip("\x00 ")[:19], "%Y-%m-%d_%H:%M:%S"))
-    return out
+    a = np.asarray(chars)
+    if a.ndim == 1 and (a.dtype.kind == "O" or (a.dtype.kind == "S" and a.dtype.itemsize > 1)
+                        or (a.dtype.kind == "U" and a.dtype.itemsize > 4)):
+        # one string per time (xarray joins the DateStrLen characters when it reads the file)
+        rows = [x.decode() if isinstance(x, bytes) else str(x) for x in a]
+    else:
+        rows = [b"".join(x if isinstance(x, bytes) else bytes(x) for x in row).decode() if row.dtype.kind == "S"
+                else "".join(row) for row in np.atleast_2d(a)]
+    return [datetime.datetime.strptime(s.strip("\x00 ")[:19], "%Y-%m-%d_%H:%M:%S") for s in rows]
 
 
 class WrfoutData(dict):

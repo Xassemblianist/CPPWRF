@@ -7,7 +7,7 @@ if(TARGET cppwrf)
 endif()
 # the drop-in wrf.exe / real.exe and the namelist checker (tools/cppwrf-wrf, cppwrf-realexe, cppwrf-check): file names,
 # rsl logs, exit status on a tiny em_quarter_ss run in the build directory
-add_test(NAME dropin_tools COMMAND python3 -m unittest -v tests/tools/test_dropin.py WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+add_test(NAME dropin_tools COMMAND python3 -m unittest discover -v -s tests/tools -p test_dropin.py WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set(_dropin_env "CPPWRF_TEST_DIR=${CMAKE_BINARY_DIR}/dropin_test;OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 if(TARGET cppwrf)
   list(APPEND _dropin_env "CPPWRF_BIN=$<TARGET_FILE:cppwrf>")
