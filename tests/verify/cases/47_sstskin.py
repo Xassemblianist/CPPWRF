@@ -31,10 +31,12 @@ CASES = [
     ("real_skv_r8_fp64_cuda_1h", "cuda_dp", "configs/real_skv_r8.ini",
      ["real.dir=" + f"{WR}/run_SKV_r8", "run.run_time=3600", "output.out_interval=30", "output.diag_interval=30"],
      f"{WR}/run_SKV_r8/wrfout_d01_{_D}", 3600, _G),
-    # FP32 GPU against the real*8 run (no real*4 WRF run of SKV): bounds of the P4 FP32 case's order
+    # FP32 GPU against the real*8 run: about 3x the values measured on an L4 (sm_89) by tools/bench/colab_fp32.sh
+    # (2026-11-09, docs/FP32_ACCURACY.md): U 1.4e-3, W 8.2e-2, THM 1.3e-5, QV 3.7e-4 (tests/verify/compare_real.py
+    # reports no TSK: the study's wrfout statistics cover it)
     ("real_skv_fp32_1h", "cuda", "configs/real_skv_r8.ini",
      ["real.dir=" + f"{WR}/run_SKV_r8", "run.run_time=3600", "output.out_interval=30", "output.diag_interval=30"],
-     f"{WR}/run_SKV_r8/wrfout_d01_{_D}", 3600, {"U": 1e-2, "W": 2e-1, "THM": 1e-4, "QV": 1e-2}),
+     f"{WR}/run_SKV_r8/wrfout_d01_{_D}", 3600, {"U": 5e-3, "W": 3e-1, "THM": 4e-5, "QV": 2e-3}),
     # SKU = SU1 with sst_skin and tmn_update: 3 steps, 7 h (the 6 h wrflowinp update included)
     ("real_sku_r8_fp64_cpu", "cpu_dp", "configs/real_sku_r8.ini", [],
      f"{WR}/run_SKU_r8/steps/wrfout_d01_{_D}", 180, _T),

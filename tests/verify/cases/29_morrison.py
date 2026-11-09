@@ -24,9 +24,10 @@ CASES = [
      f"{WR}/run_MORR_r8/wrfout_d01_{_D}", 3600, _T),
     ("real_morr_r8_fp64_cuda_1h", "cuda_dp", "configs/real_morr_r8.ini", ["real.dir=" + f"{WR}/run_MORR_r8"] + _1H,
      f"{WR}/run_MORR_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "QNRAIN": 0.0}),
-    # FP32 GPU against the real*8 run (no real*4 WRF run of MORR): bounds of the P4 FP32 case's order
+    # FP32 GPU against the real*8 run: about 3x the values measured on an L4 (sm_89) by tools/bench/colab_fp32.sh
+    # (2026-11-09, docs/FP32_ACCURACY.md): U 2.6e-4, W 7.2e-3, THM 4.0e-6, QV 1.9e-4
     ("real_morr_fp32_1h", "cuda", "configs/real_morr_r8.ini", ["real.dir=" + f"{WR}/run_MORR_r8"] + _1H,
-     f"{WR}/run_MORR_r8/wrfout_d01_{_D}", 3600, {"U": 1e-2, "W": 2e-1, "THM": 1e-4, "QV": 1e-2}),
+     f"{WR}/run_MORR_r8/wrfout_d01_{_D}", 3600, {"U": 8e-4, "W": 3e-2, "THM": 2e-5, "QV": 6e-4}),
     # MORG = P4 with Morrison (graupel), no cumulus: 3 steps, 1 h
     ("real_morg_r8_fp64_cpu", "cpu_dp", "configs/real_morg_r8.ini", [],
      f"{WR}/run_MORG_r8/steps/wrfout_d01_{_D}", 180, _T),
