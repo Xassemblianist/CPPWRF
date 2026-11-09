@@ -95,15 +95,16 @@ class Logs:
         th.start()
         return th
 
-    def fatal(self, message: str) -> None:
-        """WRF's wrf_error_fatal block (both logs and the terminal's standard error)."""
+    def fatal(self, message: str, terminal: bool = True) -> None:
+        """WRF's wrf_error_fatal block (both logs and, with terminal, this process's standard error)."""
         block = ["-------------- FATAL CALLED ---------------", "FATAL CALLED FROM FILE:  <cppwrf>"]
         block += message.rstrip("\n").split("\n") + ["-------------------------------------------"]
         with self.lock:
             for b in block:
                 self.out.write(b + "\n")
                 self.err.write(b + "\n")
-                sys.stderr.write(b + "\n")
+                if terminal or self.echo:
+                    sys.stderr.write(b + "\n")
             self.out.flush()
             self.err.flush()
 
@@ -133,7 +134,12 @@ def run_logged(cmd: Sequence[str], cwd: str, env: dict, logs: Logs) -> int:
 
 
 def failure_message(logs: Logs, rc: int, what: str) -> str:
-    errs = [x for x in logs.tail if x.strip()]
+    return failure_message_from(logs.tail, rc, what)
+
+
+def failure_message_from(tail: Sequence[str], rc: int, what: str) -> str:
+    """The FATAL message of a failed binary: its error lines (the end of its standard error) and its exit status."""
+    errs = [x for x in tail if x.strip()]
     main = [x.split("error: ", 1)[1] if "error: " in x else x for x in errs if "error" in x.lower()] or errs[-3:]
     sig = f" (signal {-rc})" if rc < 0 else ""
     return "\n".join(main[-5:] + [f"{what} stopped with exit status {rc}{sig}"])

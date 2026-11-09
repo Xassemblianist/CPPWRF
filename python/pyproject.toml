@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# pip install ./python   (pure Python; the model binaries come from a CPPWRF build or install, docs/INSTALL.md)
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cppwrf"
+dynamic = ["version"]
+description = "CPPWRF (C++/CUDA port of WRF-ARW 4.8.0) from Python: namelists, drop-in runs, wrfout files"
+readme = "README.md"
+license = {text = "GPL-3.0-or-later"}
+requires-python = ">=3.9"
+dependencies = ["numpy", "netCDF4"]
+classifiers = [
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+  "Programming Language :: Python :: 3",
+  "Topic :: Scientific/Engineering :: Atmospheric Science",
+]
+
+[project.optional-dependencies]
+xarray = ["xarray"]
+
+[project.scripts]
+cppwrf-wrf = "cppwrf.dropin:wrf_main"
+cppwrf-realexe = "cppwrf.dropin:realexe_main"
+cppwrf-check = "cppwrf.dropin:check_main"
+
+[project.urls]
+Homepage = "https://github.com/Xassemblianist/CPPWRF"
+
+[tool.setuptools]
+packages = ["cppwrf"]
+
+[tool.setuptools.dynamic]
+version = {attr = "cppwrf._version.__version__"}

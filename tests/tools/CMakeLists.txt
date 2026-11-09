@@ -16,3 +16,6 @@ if(TARGET cppwrf_real)
   list(APPEND _dropin_env "CPPWRF_REAL_BIN=$<TARGET_FILE:cppwrf_real>")
 endif()
 set_tests_properties(dropin_tools PROPERTIES LABELS unit ENVIRONMENT "${_dropin_env}")
+# the Python package (python/cppwrf): namelists, Run with a stand-in binary, wrfout files and diagnostics
+add_test(NAME python_package COMMAND python3 -m unittest discover -s python/tests WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(python_package PROPERTIES LABELS unit ENVIRONMENT "CPPWRF_TEST_DIR=${CMAKE_BINARY_DIR}")
