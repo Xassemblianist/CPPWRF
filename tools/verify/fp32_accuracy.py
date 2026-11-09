@@ -209,8 +209,8 @@ def index(recs):
 
 
 def var_key(v):
-    b = v.split(">=")[0]
-    return (ORDER.index(b) if b in ORDER else len(ORDER), v)
+    b, _, th = v.partition(">=")
+    return (ORDER.index(b) if b in ORDER else len(ORDER), float(th[:-2]) if th else -1.0, v)
 
 
 def nearest(d, h):
