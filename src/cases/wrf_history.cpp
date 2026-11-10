@@ -646,8 +646,10 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
     out.assign(n, name == "AREA2D" ? double(dx * dy) : double(dx));
     return true;
   }
-  if (name == "XTIME") {  // the adaptive clock: minutesSinceSimulationStart of the exact time
-    out.assign(1, has_exact_ ? double(wrf_time::minutes<real>(exact_)) : time_sec_ / 60.0);
+  if (name == "XTIME") {  // the clock: minutesSinceSimulationStart of the exact time
+    out.assign(1, !has_exact_        ? time_sec_ / 60.0
+                  : exact_adaptive_ ? double(wrf_time::minutes<real>(exact_))
+                                    : wrf_time::minutes<double>(exact_));
     return true;
   }
   for (int q = 0; q < s.n_scalars(); ++q) {  // moist species and scalars under WRF's names
@@ -1117,7 +1119,7 @@ wrf_io::DomainAtts WrfHistory::domain_atts() {
 }
 
 std::string WrfHistory::date_of(double time_sec) const {
-  // the adaptive clock: wrf_timetoa of the time's whole seconds
+  // the clock: wrf_timetoa of the time's whole seconds
   return has_exact_ ? wrf_io::add_seconds(start_date_, long(exact_.S)) : wrf_io::add_seconds(start_date_, std::lround(time_sec));
 }
 

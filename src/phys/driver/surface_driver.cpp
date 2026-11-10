@@ -1075,10 +1075,8 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
     const real dt = real(g_.dt);
     column_for(cols, KTmnAccum{tsk.cview(), tdly.view(), dt});
     nday = nday + real(1.) * dt;
-    const double jd = adapt_step_flag ? wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, elapsed)
-                                      : wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, double(itimestep - 1) * g_.dt);
-    const int yr = adapt_step_flag ? wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, elapsed)
-                                   : wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, double(itimestep - 1) * g_.dt);
+    const double jd = wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());
+    const int yr = wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());
     const real julian_in = real(jd);
     const real yrday = yr % 4 == 0 ? real(366.) : real(365.);  // mod(yr, 4) only (no NO_LEAP_CALENDAR)
     const real deltat = (julian_in - real(std::lround(julian_in))) * real(24.) * real(3600.);
@@ -1507,8 +1505,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
                                 acgrdflx.view(), q2.view(), t2.view(), th2.view(), dtbl, dt});
     } else if (o_.sf_surface_physics == 4) {
       // ---- Noah-MP (NoahmpWRFmain -> NoahmpDriverMain, module_surface_driver.F:3134-3481) ----
-      const real julian_in = real(adapt_step_flag ? wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, elapsed)
-                                                  : wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, double(itimestep - 1) * g_.dt));
+      const real julian_in = real(wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start()));
       noahmp::NoahmpKernel nmp{};
       nmp.ivgtyp = ivgtyp.cview();
       nmp.isltyp = isltyp.cview();
@@ -1662,8 +1659,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       nmp.itimestep = int(itimestep);
       // YR: the year of the current time, which changes in a run past 31 December (Noah-MP's YEARLEN)
       nmp.yr = o_.rad.julyr <= 0 ? 2000
-               : adapt_step_flag ? wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, elapsed)
-                                 : wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, double(itimestep - 1) * g_.dt);
+               : wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());
       nmp.julian_in = julian_in;
       nmp.dtbl = dtbl;
       nmp.dx = real(g_.dx);

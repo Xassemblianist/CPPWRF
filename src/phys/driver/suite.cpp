@@ -283,6 +283,7 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
       chklowq(g, Stagger::M, "chklowq"), qgh(g, Stagger::M, "qgh"), chs(g, Stagger::M, "chs"),
       chs2(g, Stagger::M, "chs2"), cqs2(g, Stagger::M, "cqs2"), cpm(g, Stagger::M, "cpm"),
       u_phytmp(g, Stagger::M, "u_phytmp"), v_phytmp(g, Stagger::M, "v_phytmp"), t1_lag_(g, Stagger::M, "t1_lag"), coszen(g, Stagger::M, "coszen"), rthratenlw(g, Stagger::M, "rthratenlw"), rthratensw(g, Stagger::M, "rthratensw"), rthratenlwc(g, Stagger::M, "rthratenlwc"), rthratenswc(g, Stagger::M, "rthratenswc"), o3rad(g, Stagger::M, "o3rad"), lwcf(g, Stagger::M, "lwcf"), swcf(g, Stagger::M, "swcf"), hrang(g, Stagger::M, "hrang"), uratx(g, Stagger::M, "uratx"), vratx(g, Stagger::M, "vratx"), tratx(g, Stagger::M, "tratx"), ra(g, Stagger::M, "ra"), rs(g, Stagger::M, "rs"), shall(g, Stagger::M, "shall"), lwupt(g, Stagger::M, "lwupt"), lwuptc(g, Stagger::M, "lwuptc"), lwdnt(g, Stagger::M, "lwdnt"), lwdntc(g, Stagger::M, "lwdntc"), lwupb(g, Stagger::M, "lwupb"), lwupbc(g, Stagger::M, "lwupbc"), lwdnb(g, Stagger::M, "lwdnb"), lwdnbc(g, Stagger::M, "lwdnbc"), olr(g, Stagger::M, "olr"), swupt(g, Stagger::M, "swupt"), swuptc(g, Stagger::M, "swuptc"), swdnt(g, Stagger::M, "swdnt"), swdntc(g, Stagger::M, "swdntc"), swupb(g, Stagger::M, "swupb"), swupbc(g, Stagger::M, "swupbc"), swdnb(g, Stagger::M, "swdnb"), swdnbc(g, Stagger::M, "swdnbc"), swvisdir(g, Stagger::M, "swvisdir"), swvisdif(g, Stagger::M, "swvisdif"), swnirdir(g, Stagger::M, "swnirdir"), swnirdif(g, Stagger::M, "swnirdif"), swddir(g, Stagger::M, "swddir"), swddni(g, Stagger::M, "swddni"), swddif(g, Stagger::M, "swddif"), swddirc(g, Stagger::M, "swddirc"), swddnic(g, Stagger::M, "swddnic"), diffuse_frac(g, Stagger::M, "diffuse_frac"), aclwupt(g, Stagger::M, "aclwupt"), aclwuptc(g, Stagger::M, "aclwuptc"), aclwdnt(g, Stagger::M, "aclwdnt"), aclwdntc(g, Stagger::M, "aclwdntc"), aclwupb(g, Stagger::M, "aclwupb"), aclwupbc(g, Stagger::M, "aclwupbc"), aclwdnb(g, Stagger::M, "aclwdnb"), aclwdnbc(g, Stagger::M, "aclwdnbc"), acswupt(g, Stagger::M, "acswupt"), acswuptc(g, Stagger::M, "acswuptc"), acswdnt(g, Stagger::M, "acswdnt"), acswdntc(g, Stagger::M, "acswdntc"), acswupb(g, Stagger::M, "acswupb"), acswupbc(g, Stagger::M, "acswupbc"), acswdnb(g, Stagger::M, "acswdnb"), acswdnbc(g, Stagger::M, "acswdnbc"), g_(g), gs_(g), o_(o) {
+  dt_clock_ = wrf_time::from_seconds(g.dt);
   if ((o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 2 && o.sf_sfclay_physics != 5 && o.sf_sfclay_physics != 7) ||
       (o.sf_surface_physics != 1 && o.sf_surface_physics != 2 && o.sf_surface_physics != 4) ||
       (o.bl_pbl_physics != 0 && o.bl_pbl_physics != 1 && o.bl_pbl_physics != 2 && o.bl_pbl_physics != 5 &&
@@ -885,13 +886,11 @@ void PhysicsSuite::part1(dyn::State& s, const dyn::BaseState& b, dyn::Tendencies
   if (sr_mp_) sr.copy_from(*sr_mp_);
   run_phy_prep(s, b, prep, PhyPrepParams{o_.use_theta_m});
   if (rad_) {  // radiation_driver: xtime (minutes) and julian of the step start
-    // the adaptive time step: WRF's clock (grid%xtime = minutesSinceSimulationStart, grid%julian)
-    const double xtime = adapt_step_flag ? double(wrf_time::minutes<real>(elapsed)) : double(itimestep - 1) * g_.dt / 60.;
-    const double julian = adapt_step_flag ? wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, elapsed)
-                                          : wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, double(itimestep - 1) * g_.dt);
+    // WRF's clock (grid%xtime = minutesSinceSimulationStart, grid%julian = currentDayOfYearReal)
+    const double xtime = clock_xtime();
+    const double julian = wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());
     // YR: first_rk_step_part1's WRFU_TimeGet(currentTime, YY=yr), a new year after 31 December
-    const int yr = adapt_step_flag ? wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, elapsed)
-                                   : wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, double(itimestep - 1) * g_.dt);
+    const int yr = wrf_year(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());
     auto q = [&](int n) -> const Field3* { return n >= 0 ? &s.q_2[n] : nullptr; };
     RadiationInputs ri{&prep.t_phy, &prep.p_hyd, &prep.p_hyd_w, &prep.pi_phy, &prep.rho, &prep.dz8w,
                        &prep.t8w, &s.q_2[s.P_QV], q(s.P_QC), q(s.P_QI), q(s.P_QS), re_cloud_, re_ice_,
@@ -972,8 +971,7 @@ void PhysicsSuite::after_rk(const dyn::State& s, const dyn::BaseState& b) {
 void PhysicsSuite::after_all_rk_steps() {
   const bool prec = o_.prec_acc_dt > 0;
   if (!(o_.bucket_mm > 0) && !prec && o_.output_diagnostics != 1) return;
-  const real curr_secs2 = adapt_step_flag ? wrf_time::real_time<real>(run_now)
-                                          : real(double(itimestep - run_start_step - 1) * g_.dt);
+  const real curr_secs2 = wrf_time::real_time<real>(clock_since_run_start());  // solve_em: real_time(tmpTimeInterval2)
   const bool xtime0 = adapt_step_flag ? elapsed == wrf_time::Interval{} : itimestep == 1;
   KDiagOutputCalc k{};
   k.bucket = o_.bucket_mm > 0 && std::lround(curr_secs2) % 3600 == 0;
@@ -1009,7 +1007,7 @@ void PhysicsSuite::after_all_rk_steps() {
   if (o_.output_diagnostics != 1) return;
   // clwrf_output_calc (module_diagnostics_driver.F:769-834); xtime = minutesSinceSimulationStart of the step start
   const real dt = real(g_.dt);
-  const real xtime = wrf_time::minutes<real>(wrf_time::make(std::llround(double(itimestep - 1) * g_.dt)));
+  const real xtime = wrf_time::minutes<real>(clock_since_start());
   const long per = std::lround(real(o_.auxhist3_interval) * real(60.) / dt);  // NINT(clwrfH*60./dt)
   KClwrfOutputCalc c{};
   c.reinit = std::lround(curr_secs2 / dt) % per == 0;

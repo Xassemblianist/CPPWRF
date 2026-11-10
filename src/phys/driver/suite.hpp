@@ -163,6 +163,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   }
 
   long itimestep = 0;  // WRF grid%itimestep (incremented in part1, as solve_em does per step)
+  wrf_time::Interval dt_clock_;  // set_clock_step (the constructor: g.dt in whole seconds or a fraction)
   // WRF solve_em's restart_flag: the restart alarm rings at the end of this step (Is_alarm_tstep); the MYNN
   // surface layer skips its z/L iteration at itimestep 1 when it is set (module_sf_mynnsfc_land.F90 etc.)
   bool restart_flag = false;
@@ -178,6 +179,22 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // clock's time since the run's start (adaptive time step)
   long run_start_step = 0;
   wrf_time::Interval run_now;
+  // a fixed time step: the clock's step (Model::dt_clock), from which the clock values below come exactly
+  void set_clock_step(const wrf_time::Interval& dt) { dt_clock_ = dt; }
+  // WRF's clock at the start of this step: the time since the simulation start (domain_get_time_since_sim_start,
+  // from which grid%xtime and grid%julian come) and since this run's start (solve_em's curr_secs2); the adaptive time
+  // step's elapsed / run_now, else itimestep - 1 (- run_start_step) clock steps
+  wrf_time::Interval clock_since_start() const {
+    return adapt_step_flag ? elapsed : dt_clock_ * int(itimestep - 1);
+  }
+  wrf_time::Interval clock_since_run_start() const {
+    return adapt_step_flag ? run_now : dt_clock_ * int(itimestep - run_start_step - 1);
+  }
+  // grid%xtime (minutesSinceSimulationStart) of the step start; the FP32 build keeps the fixed time step's in double
+  double clock_xtime() const {
+    const wrf_time::Interval t = clock_since_start();
+    return adapt_step_flag ? double(wrf_time::minutes<real>(t)) : wrf_time::minutes<double>(t);
+  }
   real radtacttime = 0, bldtacttime = 0, cudtacttime = 0;
   // the large step of the coming step (adaptive time step)
   void set_dt(double dt);

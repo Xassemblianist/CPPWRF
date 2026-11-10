@@ -737,7 +737,10 @@ bool DomainRunner::start() {
     if (wrfout_)
       wrfout_->set_restart_time(m_.adapt ? wrf_time::real_time<double>(m_.sim_offset) : double(start_step) * g.dt);
     // med_before_solve_io writes an auxiliary history stream whose alarm the restart file left ringing
-    if (aux3_write_ && wrfout_ && aux3_ring_at_start_ == 1) wrfout_->write_auxhist3(start_step, time_s(start_step));
+    if (aux3_write_ && wrfout_ && aux3_ring_at_start_ == 1) {
+      wrfout_->set_exact_time(elapsed(start_step), m_.adapt != nullptr);
+      wrfout_->write_auxhist3(start_step, time_s(start_step));
+    }
   }
 #endif
   rst_prev_ = double(start_step) * g.dt;  // the alarm's PrevRingTime starts at the run's start (ESMF_Clock.F90:773)
@@ -1070,8 +1073,8 @@ void DomainRunner::do_snap(long n) {
 #ifdef CPPWRF_HAVE_NETCDF
   // WRF writes history only when the history alarm rings (med_last_solve_io): no extra frame at the last
   // step of a run that is not a multiple of history_interval (the native snapshot above keeps it)
+  if (wrfout_) wrfout_->set_exact_time(elapsed(n), m_.adapt != nullptr);  // XTIME and Times of the clock
   if (write_wrfout_ && wrfout_ && (n == 0 || hist_due(n))) {
-    if (m_.adapt) wrfout_->set_exact_time(elapsed(n));
     const auto t = std::chrono::steady_clock::now();
     wrfout_->write(n, time_s(n));
     if (wrf_timing_) wrf_timing_line(writing(wrfout_->last_path(), domain_tag_), t);
@@ -1111,6 +1114,7 @@ void DomainRunner::do_restart(long n, bool ring) {
     wrfout_->set_history_alarm(hring ? 1 : 0, hsecs);
     wrfout_->write_restart(n, time_s(n), 0.0, 0.0, double(rst_iv_t_.S - (t - rst_prev_t_).S), aux4_first_s_);
   } else if (wrfout_ && ring) {
+    wrfout_->set_exact_time(elapsed(n), false);
     wrfout_->set_auxhist3_alarm(double(aux3_iv_) * m_.g.dt, double(aux3_ref_) * m_.g.dt);
     wrfout_->write_restart(n, n * m_.g.dt, double(hist_iv_) * m_.g.dt, double(hist_ref_) * m_.g.dt,
                            std::trunc(rst_iv_s_) - std::trunc(n * m_.g.dt - rst_prev_), aux4_first_s_);

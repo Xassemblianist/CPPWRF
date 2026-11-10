@@ -310,6 +310,7 @@ Model Model::build(const io::Config& cfg) {
   if (cfg.has("dyn.legacy_diffusion"))
     throw std::runtime_error("dyn.legacy_diffusion was removed; use dyn.diff_opt = 1 (WRF horizontal/vertical_diffusion)");
   sp.h_adv_order = lp.h_adv_order; sp.v_adv_order = lp.v_adv_order;
+  m.dt_clock = wrf_time::from_seconds(g.dt, cfg.get_int("time.dt_den", 1));
   if (cfg.get_bool("time.adaptive", false)) init_adaptive(cfg, m, cname);
   // the adaptive time step sets time_step_sound = 0 (start_em.F:979)
   const int tss = m.adapt ? 0 : int(cfg.get_int("time.time_step_sound", 0));
@@ -405,6 +406,7 @@ Model Model::build(const io::Config& cfg) {
       m.rk->set_diffusion(m.diff.get());
     }
   }
+  if (m.suite) m.suite->set_clock_step(m.dt_clock);
   return m;
 }
 

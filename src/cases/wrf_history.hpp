@@ -70,10 +70,15 @@ class WrfHistory {
   void restart_slopes();
   // a run resumed from a restart file at time_sec: START_DATE is the restart time
   void set_restart_time(double time_sec) { restart_sec_ = time_sec; }
-  // adaptive time step: the exact time since the simulation start of the next write (Times = its whole seconds,
-  // XTIME = minutesSinceSimulationStart), and the history alarm of the next write_restart (ringing, seconds to the
-  // next ring)
-  void set_exact_time(const wrf_time::Interval& t) { exact_ = t; has_exact_ = true; }
+  // the clock's exact time since the simulation start of the next write (Times = its whole seconds, XTIME =
+  // minutesSinceSimulationStart; adaptive: the adaptive time step's clock, XTIME in real, else n fixed clock steps,
+  // XTIME in double as before in the FP32 build), and the history alarm of the next write_restart (adaptive time step:
+  // ringing, seconds to the next ring)
+  void set_exact_time(const wrf_time::Interval& t, bool adaptive = true) {
+    exact_ = t;
+    has_exact_ = true;
+    exact_adaptive_ = adaptive;
+  }
   void set_history_alarm(int ring, long secs) { hist_alarm_ring_ = ring; hist_alarm_secs_ = secs; }
   // the file of the last write (write, write_auxhist3, write_restart), for the log
   const std::string& last_path() const { return last_path_; }
@@ -124,6 +129,7 @@ class WrfHistory {
   double restart_sec_ = 0;
   double time_sec_ = 0;
   bool has_exact_ = false;
+  bool exact_adaptive_ = true;
   wrf_time::Interval exact_;
   int hist_alarm_ring_ = -1;
   long hist_alarm_secs_ = 0;

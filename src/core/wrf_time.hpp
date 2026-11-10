@@ -4,9 +4,12 @@
 // S + Sn/Sd in 8-byte integers, normalised after every operation. The adaptive time step (adapt_timestep_em.F)
 // computes dt and the model time with this arithmetic; the results (sums, rounded fractions, comparisons) are exact
 // and the conversion to a floating-point time (real_time) depends only on the value.
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdlib>
 #include <stdexcept>
+#include <string>
 
 namespace cppwrf::wrf_time {
 
@@ -148,6 +151,22 @@ template <class R>
 R real_time(const Interval& t) {
   if (std::llabs(t.Sd) < 1) return R(t.S);
   return R(t.S) + R(t.Sn) / R(t.Sd);
+}
+
+// a fixed time step of dt seconds as an interval S + Sn/Sd (ESMF_TimeIntervalSet(S=time_step, Sn=time_step_fract_num,
+// Sd=time_step_fract_den); a nest's: its parent's / parent_time_step_ratio, set_timekeeping.F:359-367): den is the
+// step's denominator (1: whole seconds; a nest: the product of the parent_time_step_ratios above it); a dt that is not
+// a multiple of 1/den takes the smallest denominator up to 100000 that gives it (to 1e-9 s)
+inline Interval from_seconds(double dt, std::int64_t den = 1) {
+  auto near = [dt](std::int64_t d) {
+    return std::fabs(dt * double(d) - std::round(dt * double(d))) <= 1e-9 * std::max(1.0, std::fabs(dt) * double(d));
+  };
+  std::int64_t d = den > 0 ? den : 1;
+  if (!near(d))
+    for (d = 1; d <= 100000 && !near(d); ++d) {}
+  if (d > 100000) throw std::runtime_error("time step " + std::to_string(dt) + " s is not a fraction of a second");
+  const std::int64_t n = std::llround(dt * double(d));
+  return d == 1 ? make(n) : make(n / d, n % d, d);
 }
 
 // domain_clock_get minutesSinceSimulationStart (WRF's XTIME): days*24*60 + seconds/60 + (Sn/Sd)/60

@@ -113,7 +113,11 @@ class DomainRunner {
     if (!m_.adapt) return double(n) * m_.g.dt;
     return wrf_time::real_time<double>(m_.sim_offset + t_end_[std::size_t(n - start_step)]);
   }
-  wrf_time::Interval elapsed(long n) const { return m_.sim_offset + t_end_[std::size_t(n - start_step)]; }
+  // the clock at the end of step n since the simulation start (a fixed time step: n clock steps)
+  wrf_time::Interval elapsed(long n) const {
+    if (!m_.adapt) return m_.dt_clock * int(n);
+    return m_.sim_offset + t_end_[std::size_t(n - start_step)];
+  }
   // sst_update: AUXINPUT4_ALARM rings at aux4_first_s_ + k * interval (from the start, or as the WRF restart file
   // set it) and at the restart time when a WRF restart file has it ringing (-1: a CPPWRF restart file, by the schedule)
   double aux4_first_s_ = 0.0;

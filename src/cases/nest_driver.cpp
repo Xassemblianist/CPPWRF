@@ -312,6 +312,9 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
         oss.precision(17);
         oss << "time.dt=" << child_dt;
         ov.push_back(oss.str());
+        // the clock's step: the parent's / parent_time_step_ratio exactly (set_timekeeping.F:365-367), whose
+        // denominator the model reads (Model::dt_clock)
+        ov.push_back("time.dt_den=" + std::to_string(parent_sp.cfg.get_int("time.dt_den", 1) * sp.parent_time_step_ratio));
       }
       // check_a_mundo: a nest's namelist dx / dy is dx(1) / dy(1) over the accumulated parent_grid_ratio
       // (get_moad_factor), whatever the namelist gives; input_wrf compares the nest's wrfinput with it

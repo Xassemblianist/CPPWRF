@@ -72,33 +72,9 @@ struct RadiationOutputs {
   Field2* swsfc[10] = {};
 };
 
-// grid%julian at the start of a step elapsed_s seconds after the simulation start (julyr, julday, gmt):
-// domain_clock_get's REAL(dayOfYear_r8) - 1 with dayOfYear_r8 = (seconds since 1 January of the current year)
-// / 86400 + 1 (ESMF_TimeGet); 0 again after a year change
-inline double wrf_julian(int julyr, int julday, double gmt, double elapsed_s) {
-  double s = double(julday - 1) * 86400.0 + double(std::llround(gmt * 3600.0)) + elapsed_s;
-  for (int yr = julyr;; ++yr) {
-    const double ylen = (((yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0) ? 366.0 : 365.0) * 86400.0;
-    if (s < ylen) break;
-    s -= ylen;
-  }
-  return (s / 86400.0 + 1.0) - 1.0;
-}
-
-// the year of that time (first_rk_step_part1: WRFU_TimeGet(currentTime, YY=yr)), the YR of surface_driver
-inline int wrf_year(int julyr, int julday, double gmt, double elapsed_s) {
-  double s = double(julday - 1) * 86400.0 + double(std::llround(gmt * 3600.0)) + elapsed_s;
-  int yr = julyr;
-  for (;; ++yr) {
-    const double ylen = (((yr % 4 == 0 && yr % 100 != 0) || yr % 400 == 0) ? 366.0 : 365.0) * 86400.0;
-    if (s < ylen) break;
-    s -= ylen;
-  }
-  return yr;
-}
-
-// the same for an exact time since the start (WRF's clock, the adaptive time step): ESMF_TimeGet's dayOfYear_r8 =
-// (S + Sn/Sd) / 86400 + 1 with the whole seconds S of the year
+// grid%julian at the start of a step, the clock's time el since the simulation start (julyr, julday, gmt):
+// domain_clock_get's REAL(dayOfYear_r8) - 1 with ESMF_TimeGet's dayOfYear_r8 = (S + Sn/Sd) / 86400 + 1, S the whole
+// seconds since 1 January of the current year (0 again after a year change)
 inline double wrf_julian(int julyr, int julday, double gmt, const wrf_time::Interval& el) {
   long long s = (long long)(julday - 1) * 86400 + std::llround(gmt * 3600.0) + el.S;
   for (int yr = julyr;; ++yr) {

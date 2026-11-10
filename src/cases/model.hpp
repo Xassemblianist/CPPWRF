@@ -53,6 +53,10 @@ struct Model {
 
   // ---- use_adaptive_time_step (time.adaptive = true): WRF's clock and adapt_timestep ----
   std::unique_ptr<AdaptTimeStep> adapt;  // null: a fixed time step
+  // a fixed time step: WRF's clock step (set_timekeeping.F: time_step + time_step_fract_num / den for d01, the
+  // parent's / parent_time_step_ratio for a nest; time.dt_den = that denominator, which the nest driver sets); the
+  // clock after n steps is n times it, exactly (ESMF_ClockAdvance)
+  wrf_time::Interval dt_clock;
   wrf_time::Interval now;         // current time - this run's start (the start of the coming step)
   wrf_time::Interval step_end;    // now + the step's dt (set by adapt_step)
   wrf_time::Interval sim_offset;  // this run's start - the simulation start (a resumed run: the restart time)

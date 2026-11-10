@@ -213,19 +213,9 @@ void PhysicsSuite::fddagd_driver(const dyn::State& s, const dyn::BaseState& b) {
     column_for(g_.columns(), KFddaRegime{regime.view(), pblh.cview(), prep.z_at_w.cview(), b.ht.view()});
 
   // fddagd: the step's times (XTIME since the simulation start; curr_mins2 since this run's start)
-  const double t0 = double(itimestep - 1) * g_.dt;
-  // the ESMF interval of the step start: whole seconds and a fraction Sn/Sd (a nest's dt = parent dt / ratio)
-  wrf_time::Interval t0i = wrf_time::make(std::llround(t0));
-  if (std::fabs(t0 - std::round(t0)) > 1e-9 * std::max(1.0, t0)) {
-    const std::int64_t whole = std::int64_t(std::floor(t0));
-    std::int64_t sd = 2;
-    while (sd < 100000 && std::fabs((t0 - double(whole)) * double(sd) - std::round((t0 - double(whole)) * double(sd))) > 1e-6)
-      ++sd;
-    if (sd >= 100000) throw std::runtime_error("grid_fdda: the step start time is not a fraction of a second");
-    t0i = wrf_time::make(whole, std::llround((t0 - double(whole)) * double(sd)), sd);
-  }
-  const real xtime = wrf_time::minutes<real>(t0i);
-  const real curr_mins2 = real(double(itimestep - run_start_step - 1) * g_.dt / 60.0);
+  const real xtime = wrf_time::minutes<real>(clock_since_start());
+  // solve_em: curr_mins2 = REAL(real_time_r8(current - start) / 60.0d0)
+  const real curr_mins2 = real(wrf_time::real_time<double>(clock_since_run_start()) / 60.0);
   const int end_h = f.end_h, end_h_sfc = 0;  // auxinput9_end_h: check_a_mundo sets it to 0 without grid_sfdda
   const real dtramp = real(f.dtramp_min);
   real actual_end_fdda_min = real(end_h) * real(60.0);
