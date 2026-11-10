@@ -6,7 +6,7 @@
 #
 #   CPPWRF_GCP_BUCKET=... tools/colab/colab_wrfref.sh REFS.txt [--gpu L4|A100|T4] [--data OBJ,...] [--files NAME,...]
 #       [--cases NAME,...] [--real NAME,...] [--runs DIR] [--out DIR] [--check-only] [--stage OBJ:CASE,...] [--hours H]
-#       [--rev REV] [--session NAME] [--keep]
+#       [--rev REV] [--session NAME] [--keep] [--head NAME=OBJ:BYTES[+OBJ:BYTES...]]
 #
 # REFS.txt: one reference per line "NAME BASE_RUN WRF_EXE section.key=value ..." as gcp_wrfref.sh's. The runtime makes
 # run_NAME and run_NAME/steps (tools/gcp/wrf_ref_run.py, in parallel), rst_NAME and rsm_NAME
@@ -21,22 +21,24 @@
 # of these wrf_suite.py cases (tools/colab/stage_data.py --whole) as the Drive object cppwrf-data/OBJ, which
 # colab_suite.sh --data OBJ then reads (nothing downloaded; the bucket token is read-only, so a GCP VM cannot read it).
 # --gpu, --hours (default 4), --rev, --session, --keep as colab_suite.sh. Only references whose WRF runs succeeded
-# are unpacked. Exit status 1 when a run failed, an input did not arrive, the build or a test failed, or the job did
-# not finish.
+# are unpacked. --head: the data tar NAME (list it in --data) made on the runtime from the leading BYTES of the bucket
+# tars OBJ (ranged reads, as tools/bench/colab_fp32.sh: e.g. the inputs at the start of long72_data.tar,
+# long72_data.tar:122625536 = run_P4_72h_r8's namelist, tables, wrfinput and wrfbdy). Exit status 1 when a run failed,
+# an input did not arrive, the build or a test failed, or the job did not finish.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${CPPWRF_GCP_BUCKET:?set CPPWRF_GCP_BUCKET}"
 BK=$CPPWRF_GCP_BUCKET
 REFS=$(readlink -f "$1"); shift
-GPU=L4 DATA=matrix_data.tar OUT= FILES= CASES= REALC= FETCH=1 RUNS=${CPPWRF_WRF_RUNS:-$HOME/wrf_real480} STAGE= HOURS=4 REV=HEAD S= KEEP=0 NPROC=
+GPU=L4 DATA=matrix_data.tar OUT= FILES= CASES= REALC= HEAD= FETCH=1 RUNS=${CPPWRF_WRF_RUNS:-$HOME/wrf_real480} STAGE= HOURS=4 REV=HEAD S= KEEP=0 NPROC=
 WRF_R8=${WRF_R8:-$HOME/wrf_real/WRF-4.8.0-r8/main/wrf.exe} WRF_R8D8=${WRF_R8D8:-$HOME/wrf_real/WRF-4.8.0-r8d8/main/wrf.exe}
 while [ $# -gt 0 ]; do
   case $1 in
     --gpu) GPU=$2; shift 2 ;; --data) DATA=$2; shift 2 ;; --out) OUT=$2; shift 2 ;;
     --files) FILES=$2; shift 2 ;; --cases) CASES=$2; shift 2 ;; --runs) RUNS=$2; shift 2 ;; --real) REALC=$2; shift 2 ;;
     --check-only) FETCH=0; shift ;; --stage) STAGE=$2; FETCH=0; shift 2 ;; --hours) HOURS=$2; shift 2 ;;
-    --rev) REV=$2; shift 2 ;; --session) S=$2; shift 2 ;; --keep) KEEP=1; shift ;;
-    *) sed -n '3,26p' "$0"; exit 2 ;;
+    --rev) REV=$2; shift 2 ;; --session) S=$2; shift 2 ;; --keep) KEEP=1; shift ;; --head) HEAD=$2; shift 2 ;;
+    *) sed -n '3,29p' "$0"; exit 2 ;;
   esac
 done
 case $GPU in L4|A100|T4) ;; *) echo "--gpu $GPU: only the Intel runtimes L4, A100, T4"; exit 2 ;; esac
@@ -53,6 +55,24 @@ TAG=colab_wrfref
 . "$REPO/tools/colab/colab_lib.sh"
 cj_start "$GPU"
 cj_send "$REFS" in/refs.txt
+if [ -n "$HEAD" ]; then  # the --head tar, cached in /content/tars as a fetched data tar
+  cj_token || { echo "[colab_wrfref] token upload failed"; exit 1; }
+  hname=${HEAD%%=*} hparts=${HEAD#*=}
+  rx 1800 <<EOF | grep HEAD_OK || { echo "[colab_wrfref] --head $hname: not made"; exit 1; }
+import os, subprocess
+T = "/content/tars"; os.makedirs(T, exist_ok=True)
+with open(T + "/$hname", "wb") as o:
+    for part in "$hparts".split("+"):
+        obj, end = part.split(":")
+        r = subprocess.run(["gcloud", "storage", "--access-token-file=/content/cpu/gcs.tok", "cat", "-r", f"0-{int(end) - 1}",
+                            "gs://$BK/" + obj], stdout=o)
+        assert r.returncode == 0 and o.tell() % 512 == 0, obj
+    o.write(b"\0" * 10240)
+n = subprocess.run(["tar", "tf", T + "/$hname"], capture_output=True, text=True).stdout.split()
+open(T + "/$hname.ok", "w").close()
+print("HEAD_OK", os.path.getsize(T + "/$hname"), len(n), " ".join(x for x in n if "wrfbdy" in x or "namelist" in x))
+EOF
+fi
 cj_launch "$REPO/tools/colab/wrfref_body.sh" "$DATA" "$FILES" "$CASES" "$STAGE" "$FETCH" "$REALC"
 cj_wait "$HOURS" refs.out
 cj_results
