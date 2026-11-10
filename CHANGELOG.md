@@ -5,6 +5,18 @@ a verified configuration, of a configuration key or of an output file is a new m
 
 ## Unreleased
 
+### Fixed
+- WRF's clock values on the fixed time step: the physics' xtime (radiation's coszen and hour angle, grid nudging),
+  julian and the year (radiation, tmn_update, Noah-MP), solve_em's curr_secs2 / curr_mins2 (buckets, prec_acc_dt,
+  grid nudging), clwrf's xtime and the history files' XTIME now come from the exact clock, n times the domain's
+  rational time step (a nest's: the parent's / parent_time_step_ratio), as WRF's ESMF clock gives them and as the
+  adaptive time step already did. Before, they were computed from (itimestep - 1) * dt, which differs in the last
+  bit past one day (XTIME = days*1440 + seconds/60; e.g. dt 16 s with radt 10 min, from the radiation call of
+  27.7 h on) and from the first steps on with a nest step that is a fraction of a second (a parent dt not divisible
+  by parent_time_step_ratio). New suite cases P4D16 (30 h, dt 16 s, radt 10 min) and N3D50 (N3 with d01 dt 50 s,
+  nest dt 50/3 s), CPU and CUDA FP64 at tolerance 0 (data port_af1_data.tar). Results of the suite's earlier cases
+  are unchanged.
+
 ### Tools and documentation
 - `cppwrf-post` (docs/POST.md): forecaster fields from wrfout files with wrf-python's methods (ported to numpy,
   identical to wrf-python on single precision files), written as CF-1.8 NetCDF and / or GRIB2 (Lambert, polar
