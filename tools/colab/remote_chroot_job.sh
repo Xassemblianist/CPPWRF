@@ -91,6 +91,33 @@ fetch() {
 }
 rm -f $T/*.failed
 DT0=$SECONDS
+# a runtime whose disk cannot hold the tars next to their unpacked files (the full suite needs about 2 x 100 GB; some
+# G4 runtimes have 113 GB): each tar streams from Drive straight into tar x, in DATA's order, and is not kept (a tar
+# cached by an earlier --keep run is unpacked from its file; one that is not on Drive is fetched, unpacked and deleted)
+DISK_GB=$(df -BG --output=size / | tail -1 | tr -dc 0-9)
+if [ "${CPPWRF_COLAB_STREAM:-auto}" = 1 ] || { [ "${CPPWRF_COLAB_STREAM:-auto}" = auto ] && [ "$DISK_GB" -lt 200 ]; }; then
+  echo "STREAM disk ${DISK_GB} GB: tars streamed from Drive, not kept" >> $C/data.txt
+  for t in ${DATA//,/ }; do
+    t0=$SECONDS
+    if [ -f "$T/$t.ok" ]; then
+      tar xf "$T/$t" -C $J/data && echo "TAR $t $(stat -c %s "$T/$t") $((SECONDS - t0)) cache" >> $C/data.txt ||
+        echo "DATA_FAILED $t (unpack)" >> $C/setup.out
+      continue
+    fi
+    ok=0
+    for i in 1 2 3; do
+      if rclone --config $C/rclone.conf cat "cppwrf-drive:cppwrf-data/$t" 2>> "$C/fetch_$t.log" | tar xf - -C $J/data &&
+         [ "${PIPESTATUS[0]}" = 0 ]; then ok=1; break; fi
+      sleep 30
+    done
+    if [ $ok = 1 ]; then echo "TAR $t 0 $((SECONDS - t0)) stream" >> $C/data.txt; continue; fi
+    fetch "$t"  # not on Drive: the bucket, then unpack and delete
+    if [ -e "$T/$t.ok" ]; then
+      tar xf "$T/$t" -C $J/data || echo "DATA_FAILED $t (unpack)" >> $C/setup.out
+      [ -e "$T/$t.todrive" ] || rm -f "$T/$t" "$T/$t.ok"
+    else echo "DATA_FAILED $t" >> $C/setup.out; fi
+  done
+else
 for t in ${DATA//,/ }; do
   while [ "$(jobs -rp | wc -l)" -ge 3 ]; do sleep 5; done
   fetch "$t" &
@@ -100,6 +127,7 @@ for t in ${DATA//,/ }; do
   if [ -e "$T/$t.ok" ]; then tar xf "$T/$t" -C $J/data || echo "DATA_FAILED $t (unpack)" >> $C/setup.out
   else echo "DATA_FAILED $t" >> $C/setup.out; fi
 done
+fi
 wait
 echo "DATA_TOTAL $((SECONDS - DT0)) s for $(echo ${DATA//,/ } | wc -w) tars (fetched and unpacked)" >> $C/data.txt
 rm -f $C/gcs.tok
