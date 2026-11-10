@@ -14,15 +14,15 @@ a verified configuration, of a configuration key or of an output file is a new m
   file), with continuous, wind and precipitation contingency scores per lead time and station, SVG plots, a
   Markdown summary, and the comparison of two runs.
 - docs/FP32_ACCURACY.md: how close GPU FP32 is to WRF real*8 compared with stock WRF real*4 (R = FP32's difference /
-  WRF real*4's; 0.35 to 1.08 at 1 h on six domains), the method of the full study and when to use FP32 or FP64.
+  WRF real*4's, measured on eleven domains at 1 h and over 24 h / 72 h), its method and when to use FP32 or FP64.
 - tools/verify/fp32_accuracy.py: max |d|, RMSE, relative L2 and bias of any two sets of wrfout files per frame and
   variable (surface fields, accumulated and hourly rain with category scores, 3-D state, hydrometeors), and the report
   of the ratio between pairs with growth figures (SVG).
 - tools/bench/colab_fp32.sh (with fp32_body.sh, fp32_gpu.sh, fp32_run.py): the study on one Colab runtime: WRF
   v4.8.0 real*4 and real*8 built from the release source, CPPWRF CUDA FP32 and FP64, twelve configurations
   (1 h; 24 h and 72 h from the suite's long reference inputs), statistics on the runtime.
-- The FP32 case real_skv_fp32_1h no longer lists TSK, which tests/verify/compare_real.py does not compare (the case
-  could only fail).
+- The FP32 cases real_acm7_fp32_1h, real_morr_fp32_1h and real_skv_fp32_1h have measured tolerances (about 3x the
+  values of the study); real_skv_fp32_1h no longer lists TSK, which tests/verify/compare_real.py does not compare.
 
 ## 1.0.0
 

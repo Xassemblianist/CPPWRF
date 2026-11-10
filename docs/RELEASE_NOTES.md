@@ -41,10 +41,11 @@ Google Colab G4 runtime, where the example's GPU FP64 output equalled the CPU FP
   2.41 and run in one process. WRF's own result changes with its MPI process layout, its compiler version
   (another gfortran vectorises other loops) and `-march` (FMA contraction).
 - GPU FP64 builds with `--fmad=false` and `CPPWRF_CUDA_GLIBC_MATH` (the CMake defaults).
-- GPU FP32 is not bit-identical to anything. Measured at 1 h on six domains (docs/FP32_ACCURACY.md), its relative
-  L2 difference from WRF real*8 is 0.35 to 1.08 times that of stock WRF real*4 (the usual production build) from WRF
-  real*8: as close as WRF real*4 or closer, the largest excess 8 % (T in a 5 km nest). The longer study (surface
-  fields, rain, 24 h and 72 h growth) is tools/bench/colab_fp32.sh's; docs/FP32_ACCURACY.md has its method.
+- GPU FP32 is not bit-identical to anything. docs/FP32_ACCURACY.md compares its difference from WRF real*8 with stock
+  WRF real*4's (the usual production build), R = FP32's / real*4's, over eleven domains at 1 h (and 24 h / 72 h):
+  in the KF / WSM6 / Thompson / MYJ, nest, Arctic and large-domain cases R is 0.4 to 1.1 for the state and surface
+  fields (as close as WRF real*4 or closer); with ACM2 + Pleim-Xiu, Morrison and the skin SST it is up to 2 (2.3 for
+  QVAPOR in ACM7) and higher for sparse hydrometeors: FP32 is then noticeably further from real*8 than WRF real*4.
 
 ## Performance
 

@@ -15,16 +15,11 @@ R <= 1: CPPWRF FP32 is at least as close to the double-precision answer as WRF's
 
 ## Status
 
-- **Measured (1 h, six domains, eight fields):** the benchmark of docs/PERF.md (tools/bench/colab_bench.sh, Colab G4,
-  CPPWRF b30ec5b) compared the relative L2 difference at 1 h of U, V, W, T, QVAPOR, PH, MU and PSFC. R is 0.35 to 1.08
-  (table below): CPPWRF FP32 is as close to WRF real*8 as WRF real*4 is, or closer, except in the two-way nest's d02,
-  where T, QVAPOR and PH are 1 to 8 % further.
-- **Not yet measured:** the full study of this page (tools/bench/colab_fp32.sh: twelve configurations, the surface
-  fields, rain and its categories, the hydrometeors, 24 h and 72 h growth). Its tooling is in the repository; the
-  first attempts (2026-11-09) found no Colab runtime (G4 and L4 "Service Unavailable" for two hours), so its tables
-  and figures are still to come. The section "Running the study" says how to make them.
+Measured (tools/bench/colab_fp32.sh, 2026-11-09/10): eleven domains at 1 h on a Colab L4, P4 for 72 h and N3 for
+24 h on a Colab G4; see "Results" and "Verdict". An earlier, smaller measurement (docs/PERF.md's benchmark: relative
+L2 of eight fields at 1 h, R 0.35 to 1.08) follows first.
 
-## The 1 h measurement (docs/PERF.md's benchmark)
+## Earlier: the 1 h measurement of docs/PERF.md's benchmark
 
 One Colab G4 runtime (AMD EPYC 9B45, RTX PRO 6000 Blackwell). WRF v4.8.0 real*4 and real*8 built from the release
 source with WRF's configure for GNU (gfortran 14.2, MPICH), each run at its fastest MPI layout (24 ranks, or 24 x 2 /
@@ -116,24 +111,173 @@ tools/verify/fp32_accuracy.py report p4.jsonl --metric rmse --svg-dir docs/img -
 ### Running the study
 
 ```bash
-CPPWRF_GCP_BUCKET=<bucket> tools/bench/colab_fp32.sh            # a Colab G4; --gpu L4 or A100 if no G4 is free
+# the 1 h cases (a G4; --gpu L4 or A100 if no G4 is free)
+CPPWRF_GCP_BUCKET=<bucket> tools/bench/colab_fp32.sh --cases P4,P6,P9,N3,V1,T1,SKV,MORR,ACM7,L
+# the long runs (24 h N3, 72 h P4), without the suite cases
+CPPWRF_GCP_BUCKET=<bucket> tools/bench/colab_fp32.sh --cases P4L,N3L --no-suite --hours 8
 ```
 
-One session: the WRF builds (about 13 minutes), WPS for L, the WRF runs several at a time (the long real*4 runs set
-the length: about 1 h on a G4), the GPU runs, the suite's tolerance-0 GPU FP64 cases of the studied configurations,
-the FP32 suite cases (staged with tools/colab/stage_data.py, as a GPU proof stages them) and the statistics, all on
-the runtime. Only the statistics, the three reports (`report_rmse.md`, `report_max_abs.md`, `report_rel_l2.md`) and
-the SVG figures come back. Expected cost on a G4: about 1.5 h, 15 compute units.
+Each session: the WRF builds (11 minutes on a G4, 29 on an L4), WPS for L, the WRF runs several at a time, the GPU
+runs, the suite's tolerance-0 GPU FP64 cases of the studied configurations and the FP32 suite cases (staged with
+tools/colab/stage_data.py, as a GPU proof stages them), then the statistics, all on the runtime. Only the
+statistics, the three reports (`report_rmse.md`, `report_max_abs.md`, `report_rel_l2.md`) and the SVG figures come
+back (3 MB). Measured: the 1 h part 70 minutes on an L4 (2.3 compute units; the one-process real*4 runs of L, N3,
+V1 and SKV take 25 minutes there), the long part 2.5 h on a G4 (about 25 units; P4L's 24 h in one process sets the
+length). Without a G4 the long part needs 5 to 6 h on a 12-vCPU runtime.
 
-### Results
+### Results: 1 h
 
-To be filled from the first run of tools/bench/colab_fp32.sh: the summary (median and largest R per case), the 1 h
-tables per case, the rain categories, the growth over 24 h (N3L) and 72 h (P4L) with the figures under docs/img, and
-the verdict per case with the likely cause wherever R > 1.
+Run 2026-11-09 on a Colab L4 runtime (Intel Xeon 2.2 GHz, 12 vCPUs; NVIDIA L4, sm_89; no G4 was free), CPPWRF
+54f3c0e + driver commits (no model change since b0c4309). WRF real*4 in one process for every case.
+
+**FP64 equals WRF real*8.** The suite's tolerance-0 GPU FP64 cases of the studied configurations (P4, P6, P9, V1 2 h,
+T1, N3, SKV, MORR, ACM7) passed on the same runtime (`SUITE PASS 9 FAIL 0`, every variable of every frame), and the
+`fp64-ref` pair (the study's own FP64 runs against the suite's references) is 0 in all 1221 records (every variable
+and frame of the 1 h runs). The FP64 runs are therefore WRF real*8.
+
+**R per case and variable** (RMSE over the domain at 1 h; bold: R > 1.1):
+
+| Case | T2 | Q2 | U10 | PSFC | HFX | PBLH | RAIN1H | T | QVAPOR | U | W | QCLOUD | QRAIN | QSNOW |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| P4 | 1.07 | 1.00 | 0.94 | 0.97 | 1.01 | **2.57** | 0.82 | 1.06 | 0.99 | 0.98 | 1.00 | 1.05 | 0.87 | 0.83 |
+| P6 | 0.51 | 0.62 | 0.39 | 0.92 | 0.45 | 0.37 | 0.23 | **1.13** | 1.05 | 0.87 | 1.10 | 0.65 | 0.95 | 0.73 |
+| P9 | 0.52 | **1.11** | 1.00 | 0.86 | 0.59 | **1.14** | - | 0.99 | **1.13** | 0.99 | 0.97 | - | - | - |
+| N3 d01 | 1.02 | 1.06 | 0.81 | 0.47 | 1.05 | 0.81 | 0.91 | 0.61 | 0.41 | 0.43 | 0.52 | 0.92 | 1.03 | 1.02 |
+| N3 d02 | 0.98 | 1.00 | 0.88 | 0.83 | 1.04 | 1.00 | 0.74 | 0.99 | 1.08 | 0.72 | 0.87 | 0.64 | 0.70 | 0.98 |
+| V1 | **1.10** | 1.02 | 0.96 | 0.85 | **1.10** | 1.02 | **1.17** | 1.05 | **1.11** | 1.04 | 1.02 | **1.63** | **1.14** | **2.27** |
+| T1 | - | 1.00 | - | 1.00 | - | - | - | 0.83 | **1.64** | 0.51 | 0.98 | - | - | - |
+| SKV | 1.08 | **1.15** | **1.28** | **1.14** | **1.16** | **1.49** | 1.09 | **1.12** | 0.93 | **1.21** | **1.23** | 1.07 | 1.03 | **1.52** |
+| MORR | 0.99 | 0.98 | 1.06 | 0.66 | 0.97 | 0.89 | **1.17** | **1.24** | 1.05 | 1.01 | 0.91 | **1.59** | **2.33** | **1.68** |
+| ACM7 | 1.01 | 0.92 | 0.86 | **1.26** | 0.97 | **1.23** | 0.83 | **1.99** | **2.32** | **1.57** | **1.23** | **2.14** | **1.38** | **1.87** |
+| L | 1.00 | 1.02 | 0.98 | 0.85 | 0.98 | 1.09 | 0.72 | 0.94 | 0.93 | 0.91 | 0.83 | 1.04 | 0.83 | 1.02 |
+
+Layout spread of WRF real*4 (rmse(r4 MPI vs r8) / rmse(r4 one process vs r8)):
+
+| Case | T2 | Q2 | U10 | PSFC | HFX | PBLH | RAIN1H | T | QVAPOR | U | W | QCLOUD | QRAIN | QSNOW |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| P4 d01 | 1.05 | 1.00 | 0.97 | 1.02 | 0.97 | **1.64** | 1.02 | **1.11** | 1.05 | 1.04 | 1.03 | **1.43** | 0.98 | **1.28** |
+| N3 d01 | 1.02 | 1.07 | 0.95 | 1.01 | 1.00 | **1.83** | 0.99 | 1.01 | 1.01 | 1.01 | 1.02 | 0.71 | 0.89 | 0.84 |
+| N3 d02 | 1.00 | 1.09 | 0.95 | 1.01 | 0.95 | **1.11** | 1.01 | 0.98 | 1.03 | 1.03 | 0.99 | 1.00 | **1.35** | 1.09 |
+
+Hourly rain >= 1 mm, fraction of points whose category differs (r4-r8 / fp32-r8; wet fraction):
+
+| Case | r4-r8 | fp32-r8 | wet |
+|---|---|---|---|
+| P4 | 0.0e+00 | 0.0e+00 | 0.005 |
+| P6 | 0.0e+00 | 0.0e+00 | 0.000 |
+| P9 | 0.0e+00 | 0.0e+00 | 0.000 |
+| N3 d01 | 0.0e+00 | 0.0e+00 | 0.005 |
+| N3 d02 | 0.0e+00 | 0.0e+00 | 0.000 |
+| V1 | 3.8e-04 | 5.7e-04 | 0.029 |
+| T1 | 0.0e+00 | 0.0e+00 | 0.000 |
+| SKV | 2.8e-04 | 3.8e-04 | 0.029 |
+| MORR | 0.0e+00 | 0.0e+00 | 0.005 |
+| ACM7 | 0.0e+00 | 0.0e+00 | 0.005 |
+| L | 5.2e-05 | 4.1e-05 | 0.002 |
+
+How to read it:
+- **The claim holds in 7 of the 11 domains** (P4, P6, P9, N3 d01 and d02, T1, L): median R 0.80 to 1.01, every
+  near-surface field within 1.1 except single threshold-driven fields (P4 PBLH 2.57, T1 QVAPOR 1.64; see below).
+  In P6 (Thompson) and N3's parent CPPWRF FP32 is clearly closer to real*8 than WRF real*4 (R 0.4 to 0.6 in many
+  fields).
+- **A single real*4 run is a noisy reference.** The same WRF real*4 executable with 4 MPI ranks instead of one
+  process changes the RMSE against real*8 by up to 1.83x (PBLH), 1.43x (QCLOUD) and 1.1x (T) at 1 h (second table).
+  R between about 0.7 and 1.4 for the 3-D state, and up to about 2 for PBLH and the hydrometeors, is within the
+  spread of WRF real*4 itself. P4's PBLH (2.57) and the scattered hydrometeor values of V1 and SKV are of this kind:
+  PBLH is a level index times a layer depth, so a few columns whose PBL top moves one level dominate its RMSE.
+- **Real excesses** beyond that spread:
+  - **ACM7** (ACM2 PBL over the Pleim-Xiu surface layer): T 1.99, QVAPOR 2.32, U 1.57, V 1.72, QCLOUD 2.14, the
+    other hydrometeors 1.4 to 2.7, while the surface fields stay at 0.86 to 1.26. CPPWRF FP32 is as far from WRF
+    real*4 as from real*8 (fp32-r4 ~ fp32-r8), so its single-precision arithmetic in this configuration perturbs the
+    state about twice as much as WRF real*4's in the first hour.
+  - **MORR** (Morrison): the hydrometeors (QRAIN 2.33, QGRAUP 7.9, QNRAIN 2.95, QNGRAUPEL 42) and T 1.24; the
+    absolute values are tiny (QGRAUP RMSE 2e-9 kg/kg, QNGRAUPEL 0.47 per kg) and the dynamics and surface fields are
+    at 0.66 to 1.06: a few points of graupel / hail that FP32 creates or removes where WRF real*4 does not.
+  - **SKV** (skin SST): median 1.16, the near-surface and 3-D fields 1.1 to 1.5. V1 without the skin SST is at
+    1.0 to 1.1 for the same fields, so the skin SST scheme's FP32 path adds a little.
+  - Likely causes (not verified): CUDA FP32 contracts multiply-adds (FMA) and uses CUDA's libm, while gfortran's
+    real*4 code has neither; schemes with iterations and thresholds (ACM2's PBL height and mixing, Pleim-Xiu's
+    stability iteration, Morrison's graupel / hail thresholds, the warm layer and cool skin) amplify such last-bit
+    differences. Candidate check and fixes (result-changing for FP32 only, so for a later release): run the CPU FP32
+    build of CPPWRF (no FMA, glibc's libm) on ACM7 / MORR / SKV against WRF real*4 to separate arithmetic from code
+    differences; then `--fmad=false` or double-precision accumulators in ACM2 / Pleim-Xiu / Morrison's FP32 kernels.
+- **Rain categories:** hourly rain >= 1 mm changes category at 0 to 6e-4 of the points; CPPWRF FP32 and WRF real*4
+  are within a factor 1.5 of each other (third table).
+- At 1 h every difference is small in absolute terms (T2 RMSE 0.01 to 0.04 K, U10 0.01 m/s, PSFC 0.05 to 0.2 Pa).
+
+### Results: 24 h and 72 h
+
+Run 2026-11-10 on a Colab G4 (AMD EPYC 9B45, 48 vCPUs; RTX PRO 6000 Blackwell, sm_120), the same commit. P4L:
+WRF real*4 with 8 MPI ranks for 72 h and in one process for 24 h; N3L: WRF real*4 with 12 ranks for 24 h; `r8n`:
+WRF real*8 with 8 / 12 ranks on this AMD CPU, i.e. the real*8 answer with its last bits perturbed (MPI layout,
+another libmvec log). History every hour.
+
+**R stays at 0.8 to 1.1 throughout** (RMSE ratios fp32-r8 / r4-r8, report summary):
+
+| Case | Domain | 1 h median R (largest) | end of run median R (largest) |
+|---|---|---|---|
+| P4L | d01 | 0.95 (QRAIN 1.13, Q2 1.13) | 72 h: 1.03 (QSNOW 1.30, QRAIN 1.18, QCLOUD 1.14) |
+| N3L | d01 | 0.83 (QICE 1.78, QGRAUP 1.49) | 24 h: 0.94 (QCLOUD 1.02) |
+| N3L | d02 | 0.94 (QCLOUD 1.11) | 24 h: 0.90 (QCLOUD 1.11) |
+
+**Chaotic growth makes all perturbations equal.** Within 6 to 12 hours every difference, whatever its origin,
+reaches the same size: WRF real*4 (either layout), CPPWRF FP32 and even WRF real*8 with only its last bits perturbed
+(`r8n`) are equally far from the real*8 answer. RMSE at 24 h / 72 h:
+
+P4L d01 at 24 h, RMSE (r4-r8 / r4s-r8 / r8n-r8 / fp32-r8):
+
+| T2 | U10 | PSFC | RAIN | T | QVAPOR | U | W |
+|---|---|---|---|---|---|---|---|
+| 0.147 / 0.138 / 0.136 / 0.15 | 0.227 / 0.224 / 0.26 / 0.225 | 5.2 / 4.72 / 5.3 / 5.02 | 0.788 / 0.774 / 0.734 / 0.762 | 0.135 / 0.122 / 0.139 / 0.133 | 5.25e-05 / 5.66e-05 / 5.64e-05 / 5.6e-05 | 0.291 / 0.273 / 0.302 / 0.282 | 0.025 / 0.0259 / 0.0258 / 0.0265 |
+
+P4L d01 at 72 h, RMSE (r4-r8 / r4s-r8 / r8n-r8 / fp32-r8):
+
+| T2 | U10 | PSFC | RAIN | T | QVAPOR | U | W |
+|---|---|---|---|---|---|---|---|
+| 0.136 / - / 0.136 / 0.138 | 0.178 / - / 0.179 / 0.168 | 3.66 / - / 3.98 / 3.87 | 2.01 / - / 1.92 / 2 | 0.0916 / - / 0.0925 / 0.0945 | 4.08e-05 / - / 4.23e-05 / 4.34e-05 | 0.207 / - / 0.211 / 0.215 | 0.0161 / - / 0.0158 / 0.016 |
+
+N3L d01 at 24 h, RMSE (r4-r8 / r8n-r8 / fp32-r8):
+
+| T2 | U10 | PSFC | RAIN | T | QVAPOR | U | W |
+|---|---|---|---|---|---|---|---|
+| 0.148 / 0.139 / 0.138 | 0.248 / 0.221 / 0.234 | 4.97 / 4.31 / 4.56 | 0.686 / 0.627 / 0.672 | 0.129 / 0.116 / 0.122 | 5.67e-05 / 5.13e-05 / 5.43e-05 | 0.297 / 0.269 / 0.271 | 0.0263 / 0.0258 / 0.0227 |
+
+N3L d02 at 24 h, RMSE (r4-r8 / r8n-r8 / fp32-r8):
+
+| T2 | U10 | PSFC | RAIN | T | QVAPOR | U | W |
+|---|---|---|---|---|---|---|---|
+| 0.305 / 0.26 / 0.277 | 0.485 / 0.357 / 0.397 | 6.89 / 5.38 / 5.26 | 1.27 / 1.33 / 1.32 | 0.213 / 0.191 / 0.205 | 0.00011 / 9.32e-05 / 0.000102 | 0.457 / 0.409 / 0.431 | 0.0454 / 0.0423 / 0.0423 |
+
+Hourly rain >= 1 mm changes category at 0.7 to 1.9 % of the points at 24 h (with 2 to 3 % of the points rainy) and
+24 h rain >= 10 mm at 1 to 3 %, alike for all pairs (P4L 72 h: r4-r8 1.33 %, fp32-r8 1.30 %, r8n-r8 1.42 %).
+
+![P4L: RMSE against WRF real*8 over 72 h](img/fp32_growth_p4l_d01.svg)
+
+![N3L d01: RMSE against WRF real*8 over 24 h](img/fp32_growth_n3l_d01.svg)
+
+![N3L d02 (5 km nest): RMSE against WRF real*8 over 24 h](img/fp32_growth_n3l_d02.svg)
+
+(Blue: WRF real*4; red: CPPWRF FP32; grey dashed: CPPWRF FP32 against WRF real*4; green dashed: WRF real*8 with
+perturbed last bits.)
+
+## Verdict
+
+- **FP64 is WRF real*8** at tolerance 0 in all studied configurations (suite cuda_dp cases and 1221 compared
+  variable-frames).
+- **GPU FP32 is as trustworthy as stock WRF real*4** for forecasts: after a few hours its difference from real*8 is
+  the chaotic spread that any last-bit perturbation reaches, even one in double precision (24 h / 72 h R 0.8 to
+  1.1; WRF real*4's own process layout moves the same numbers by up to 10 %).
+- **In the first hours** FP32 is as close to real*8 as WRF real*4 or closer for KF / WSM6 / YSU / Noah / RRTMG, Thompson,
+  MYJ, the nest, the Arctic, the tropics and the large domain. It is further than WRF real*4 (R 1.2 to 2.3 in the
+  3-D state and hydrometeors at 1 h) with ACM2 + Pleim-Xiu (ACM7), in Morrison's graupel / hail, and slightly
+  (R ~1.2) with the skin SST. Whether this persists beyond a few hours in those configurations was not measured
+  (the long runs use the P4 physics). Candidate causes and checks are listed under "Results: 1 h".
 
 ## When to use FP32 and when FP64
 
 - FP64 (CPU or GPU) when the answer must be WRF's: verification against WRF real*8, studies that compare against
   WRF runs, restarts that must continue a WRF run exactly.
 - GPU FP32 for production forecasts and ensembles on GPUs with slow FP64: on a G4 it steps 1.7 to 4.3 times faster
-  than GPU FP64 (docs/PERF.md). Its distance from WRF real*8 is that of WRF real*4, the build most WRF users run.
+  than GPU FP64 (docs/PERF.md). Beyond the first hours its distance from WRF real*8 is that of WRF real*4, the build
+  most WRF users run. For studies of the first hours with ACM2 / Pleim-Xiu, Morrison or the skin SST, prefer FP64
+  (or compare with it): there FP32 starts up to twice as far from real*8 as WRF real*4.

@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 454" width="900" height="454" font-family="sans-serif" font-size="11">
+<style>.bg{fill:#fff}.fg{fill:#222}.ax{stroke:#888;fill:none}.gr{stroke:#ddd}@media (prefers-color-scheme: dark){.bg{fill:#1b1b1b}.fg{fill:#ddd}.ax{stroke:#999}.gr{stroke:#3a3a3a}}</style>
+<rect class="bg" width="900" height="454"/>
+<line x1="10" y1="14" x2="32" y2="14" stroke="#7f7f7f" stroke-width="2" stroke-dasharray="4 3"/>
+<text class="fg" x="36" y="18">CPPWRF FP32 vs WRF real*4</text>
+<line x1="199.0" y1="14" x2="221.0" y2="14" stroke="#d62728" stroke-width="2"/>
+<text class="fg" x="225.0" y="18">CPPWRF FP32 vs WRF real*8</text>
+<line x1="388.0" y1="14" x2="410.0" y2="14" stroke="#1f77b4" stroke-width="2"/>
+<text class="fg" x="414.0" y="18">WRF real*4 vs WRF real*8</text>
+<line x1="570.8" y1="14" x2="592.8" y2="14" stroke="#2ca02c" stroke-width="2" stroke-dasharray="4 3"/>
+<text class="fg" x="596.8" y="18">WRF real*8 (MPI, other CPU) vs WRF real*8</text>
+<text class="fg" x="46" y="46" font-weight="bold">T2 (rmse)</text>
+<line class="gr" x1="46" y1="218.0" x2="290" y2="218.0"/>
+<text class="fg" x="42" y="222.0" text-anchor="end">1e-6</text>
+<line class="gr" x1="46" y1="190.3" x2="290" y2="190.3"/>
+<text class="fg" x="42" y="194.3" text-anchor="end">1e-5</text>
+<line class="gr" x1="46" y1="162.7" x2="290" y2="162.7"/>
+<text class="fg" x="42" y="166.7" text-anchor="end">1e-4</text>
+<line class="gr" x1="46" y1="135.0" x2="290" y2="135.0"/>
+<text class="fg" x="42" y="139.0" text-anchor="end">1e-3</text>
+<line class="gr" x1="46" y1="107.3" x2="290" y2="107.3"/>
+<text class="fg" x="42" y="111.3" text-anchor="end">1e-2</text>
+<line class="gr" x1="46" y1="79.7" x2="290" y2="79.7"/>
+<text class="fg" x="42" y="83.7" text-anchor="end">1e-1</text>
+<line class="gr" x1="46" y1="52.0" x2="290" y2="52.0"/>
+<text class="fg" x="42" y="56.0" text-anchor="end">1e0</text>
+<text class="fg" x="46.0" y="232" text-anchor="middle">0</text>
+<text class="fg" x="107.0" y="232" text-anchor="middle">6</text>
+<text class="fg" x="168.0" y="232" text-anchor="middle">12</text>
+<text class="fg" x="229.0" y="232" text-anchor="middle">18</text>
+<text class="fg" x="290.0" y="232" text-anchor="middle">24</text>
+<text class="fg" x="290" y="242" text-anchor="end">hours</text>
+<rect class="ax" x="46" y="52" width="244" height="166"/>
+<polyline fill="none" stroke="#7f7f7f" stroke-width="1.6" stroke-dasharray="4 3" points="46.0,197.2 56.2,92.1 66.3,91.9 76.5,90.8 86.7,89.3 96.8,90.3 107.0,93.4 117.2,92.9 127.3,92.9 137.5,88.7 147.7,87.0 157.8,84.3 168.0,81.5 178.2,78.1 188.3,78.7 198.5,81.4 208.7,79.3 218.8,78.5 229.0,76.9 239.2,76.3 249.3,77.0 259.5,76.7 269.7,76.1 279.8,76.4 290.0,75.7"/>
+<polyline fill="none" stroke="#d62728" stroke-width="1.6" points="46.0,204.2 56.2,91.9 66.3,92.4 76.5,91.9 86.7,90.5 96.8,91.5 107.0,95.0 117.2,94.6 127.3,92.9 137.5,90.6 147.7,88.1 157.8,84.7 168.0,81.1 178.2,78.4 188.3,77.6 198.5,79.9 208.7,79.8 218.8,78.7 229.0,76.9 239.2,76.6 249.3,76.8 259.5,76.9 269.7,75.9 279.8,75.1 290.0,75.8"/>
+<polyline fill="none" stroke="#1f77b4" stroke-width="1.6" points="46.0,198.5 56.2,91.9 66.3,91.9 76.5,91.0 86.7,89.3 96.8,91.3 107.0,93.8 117.2,93.2 127.3,91.9 137.5,88.7 147.7,86.1 157.8,84.0 168.0,80.3 178.2,77.6 188.3,77.0 198.5,79.9 208.7,79.1 218.8,78.4 229.0,78.0 239.2,77.0 249.3,77.1 259.5,76.9 269.7,76.2 279.8,75.1 290.0,75.0"/>
+<polyline fill="none" stroke="#2ca02c" stroke-width="1.6" stroke-dasharray="4 3" points="56.2,92.1 66.3,92.6 76.5,92.2 86.7,91.5 96.8,93.2 107.0,96.8 117.2,96.7 127.3,95.7 137.5,91.3 147.7,86.9 157.8,85.3 168.0,81.2 178.2,80.0 188.3,78.7 198.5,80.9 208.7,79.7 218.8,77.8 229.0,76.4 239.2,76.3 249.3,76.2 259.5,76.4 269.7,76.1 279.8,75.4 290.0,75.7"/>
+<text class="fg" x="346" y="46" font-weight="bold">U10 (rmse)</text>
+<line class="gr" x1="346" y1="218.0" x2="590" y2="218.0"/>
+<text class="fg" x="342" y="222.0" text-anchor="end">1e-8</text>
+<line class="gr" x1="346" y1="197.2" x2="590" y2="197.2"/>
+<text class="fg" x="342" y="201.2" text-anchor="end">1e-7</text>
+<line class="gr" x1="346" y1="176.5" x2="590" y2="176.5"/>
+<text class="fg" x="342" y="180.5" text-anchor="end">1e-6</text>
+<line class="gr" x1="346" y1="155.8" x2="590" y2="155.8"/>
+<text class="fg" x="342" y="159.8" text-anchor="end">1e-5</text>
+<line class="gr" x1="346" y1="135.0" x2="590" y2="135.0"/>
+<text class="fg" x="342" y="139.0" text-anchor="end">1e-4</text>
+<line class="gr" x1="346" y1="114.2" x2="590" y2="114.2"/>
+<text class="fg" x="342" y="118.2" text-anchor="end">1e-3</text>
+<line class="gr" x1="346" y1="93.5" x2="590" y2="93.5"/>
+<text class="fg" x="342" y="97.5" text-anchor="end">1e-2</text>
+<line class="gr" x1="346" y1="72.8" x2="590" y2="72.8"/>
+<text class="fg" x="342" y="76.8" text-anchor="end">1e-1</text>
+<line class="gr" x1="346" y1="52.0" x2="590" y2="52.0"/>
+<text class="fg" x="342" y="56.0" text-anchor="end">1e0</text>
+<text class="fg" x="346.0" y="232" text-anchor="middle">0</text>
+<text class="fg" x="407.0" y="232" text-anchor="middle">6</text>
+<text class="fg" x="468.0" y="232" text-anchor="middle">12</text>
+<text class="fg" x="529.0" y="232" text-anchor="middle">18</text>
+<text class="fg" x="590.0" y="232" text-anchor="middle">24</text>
+<text class="fg" x="590" y="242" text-anchor="end">hours</text>
+<rect class="ax" x="346" y="52" width="244" height="166"/>
+<polyline fill="none" stroke="#7f7f7f" stroke-width="1.6" stroke-dasharray="4 3" points="346.0,209.1 356.2,92.8 366.3,89.5 376.5,80.5 386.7,79.3 396.8,75.2 407.0,75.0 417.2,76.8 427.3,76.2 437.5,74.8 447.7,73.2 457.8,73.2 468.0,72.0 478.2,68.8 488.3,67.1 498.5,67.4 508.7,66.1 518.8,66.8 529.0,66.7 539.2,66.4 549.3,66.9 559.5,66.6 569.7,66.5 579.8,66.8 590.0,67.4"/>
+<polyline fill="none" stroke="#d62728" stroke-width="1.6" points="346.0,214.2 356.2,94.5 366.3,93.5 376.5,87.3 386.7,83.7 396.8,79.8 407.0,77.8 417.2,78.5 427.3,77.7 437.5,75.8 447.7,76.0 457.8,74.4 468.0,72.7 478.2,69.1 488.3,66.8 498.5,67.0 508.7,66.5 518.8,66.3 529.0,66.2 539.2,65.9 549.3,66.4 559.5,66.4 569.7,65.6 579.8,64.7 590.0,65.1"/>
+<polyline fill="none" stroke="#1f77b4" stroke-width="1.6" points="346.0,209.7 356.2,92.8 366.3,89.5 376.5,81.2 386.7,79.7 396.8,76.4 407.0,75.5 417.2,76.7 427.3,75.8 437.5,74.9 447.7,73.2 457.8,73.2 468.0,71.6 478.2,67.7 488.3,66.0 498.5,66.2 508.7,65.9 518.8,66.0 529.0,66.0 539.2,65.7 549.3,65.8 559.5,65.7 569.7,64.9 579.8,64.6 590.0,64.6"/>
+<polyline fill="none" stroke="#2ca02c" stroke-width="1.6" stroke-dasharray="4 3" points="356.2,94.8 366.3,94.3 376.5,89.9 386.7,85.3 396.8,80.5 407.0,80.1 417.2,80.0 427.3,79.4 437.5,77.6 447.7,75.7 457.8,75.1 468.0,72.7 478.2,69.1 488.3,67.6 498.5,67.3 508.7,66.7 518.8,66.3 529.0,65.8 539.2,65.9 549.3,67.7 559.5,67.6 569.7,66.0 579.8,65.8 590.0,65.6"/>
+<text class="fg" x="646" y="46" font-weight="bold">RAIN1H (rmse)</text>
+<line class="gr" x1="646" y1="218.0" x2="890" y2="218.0"/>
+<text class="fg" x="642" y="222.0" text-anchor="end">1e-4</text>
+<line class="gr" x1="646" y1="176.5" x2="890" y2="176.5"/>
+<text class="fg" x="642" y="180.5" text-anchor="end">1e-3</text>
+<line class="gr" x1="646" y1="135.0" x2="890" y2="135.0"/>
+<text class="fg" x="642" y="139.0" text-anchor="end">1e-2</text>
+<line class="gr" x1="646" y1="93.5" x2="890" y2="93.5"/>
+<text class="fg" x="642" y="97.5" text-anchor="end">1e-1</text>
+<line class="gr" x1="646" y1="52.0" x2="890" y2="52.0"/>
+<text class="fg" x="642" y="56.0" text-anchor="end">1e0</text>
+<text class="fg" x="646.0" y="232" text-anchor="middle">0</text>
+<text class="fg" x="707.0" y="232" text-anchor="middle">6</text>
+<text class="fg" x="768.0" y="232" text-anchor="middle">12</text>
+<text class="fg" x="829.0" y="232" text-anchor="middle">18</text>
+<text class="fg" x="890.0" y="232" text-anchor="middle">24</text>
+<text class="fg" x="890" y="242" text-anchor="end">hours</text>
+<rect class="ax" x="646" y="52" width="244" height="166"/>
+<polyline fill="none" stroke="#7f7f7f" stroke-width="1.6" stroke-dasharray="4 3" points="656.2,161.9 666.3,113.1 676.5,99.1 686.7,88.3 696.8,85.7 707.0,91.9 717.2,93.4 727.3,97.9 737.5,88.0 747.7,90.9 757.8,89.9 768.0,90.3 778.2,87.1 788.3,83.7 798.5,85.0 808.7,86.2 818.8,83.1 829.0,82.2 839.2,83.4 849.3,86.6 859.5,87.6 869.7,90.7 879.8,90.9 890.0,88.6"/>
+<polyline fill="none" stroke="#d62728" stroke-width="1.6" points="656.2,161.2 666.3,145.5 676.5,113.3 686.7,102.3 696.8,89.7 707.0,92.5 717.2,95.4 727.3,100.8 737.5,93.8 747.7,93.8 757.8,92.2 768.0,89.2 778.2,87.7 788.3,84.4 798.5,83.3 808.7,84.4 818.8,82.9 829.0,82.5 839.2,82.5 849.3,82.9 859.5,84.9 869.7,87.5 879.8,86.0 890.0,86.0"/>
+<polyline fill="none" stroke="#1f77b4" stroke-width="1.6" points="656.2,167.9 666.3,113.2 676.5,100.3 686.7,88.6 696.8,87.3 707.0,91.1 717.2,96.2 727.3,98.4 737.5,88.9 747.7,92.4 757.8,92.4 768.0,88.3 778.2,86.6 788.3,83.2 798.5,83.3 808.7,83.5 818.8,82.4 829.0,82.3 839.2,80.2 849.3,83.6 859.5,85.8 869.7,88.4 879.8,85.7 890.0,85.1"/>
+<polyline fill="none" stroke="#2ca02c" stroke-width="1.6" stroke-dasharray="4 3" points="656.2,180.4 666.3,151.1 676.5,120.5 686.7,108.2 696.8,99.8 707.0,98.0 717.2,99.4 727.3,103.8 737.5,92.4 747.7,90.8 757.8,92.1 768.0,90.0 778.2,87.5 788.3,84.8 798.5,86.3 808.7,83.6 818.8,82.2 829.0,83.1 839.2,82.4 849.3,82.8 859.5,85.8 869.7,89.3 879.8,86.7 890.0,84.7"/>
+<text class="fg" x="46" y="256" font-weight="bold">T (rmse)</text>
+<line class="gr" x1="46" y1="428.0" x2="290" y2="428.0"/>
+<text class="fg" x="42" y="432.0" text-anchor="end">1e-6</text>
+<line class="gr" x1="46" y1="400.3" x2="290" y2="400.3"/>
+<text class="fg" x="42" y="404.3" text-anchor="end">1e-5</text>
+<line class="gr" x1="46" y1="372.7" x2="290" y2="372.7"/>
+<text class="fg" x="42" y="376.7" text-anchor="end">1e-4</text>
+<line class="gr" x1="46" y1="345.0" x2="290" y2="345.0"/>
+<text class="fg" x="42" y="349.0" text-anchor="end">1e-3</text>
+<line class="gr" x1="46" y1="317.3" x2="290" y2="317.3"/>
+<text class="fg" x="42" y="321.3" text-anchor="end">1e-2</text>
+<line class="gr" x1="46" y1="289.7" x2="290" y2="289.7"/>
+<text class="fg" x="42" y="293.7" text-anchor="end">1e-1</text>
+<line class="gr" x1="46" y1="262.0" x2="290" y2="262.0"/>
+<text class="fg" x="42" y="266.0" text-anchor="end">1e0</text>
+<text class="fg" x="46.0" y="442" text-anchor="middle">0</text>
+<text class="fg" x="107.0" y="442" text-anchor="middle">6</text>
+<text class="fg" x="168.0" y="442" text-anchor="middle">12</text>
+<text class="fg" x="229.0" y="442" text-anchor="middle">18</text>
+<text class="fg" x="290.0" y="442" text-anchor="middle">24</text>
+<text class="fg" x="290" y="452" text-anchor="end">hours</text>
+<rect class="ax" x="46" y="262" width="244" height="166"/>
+<polyline fill="none" stroke="#7f7f7f" stroke-width="1.6" stroke-dasharray="4 3" points="56.2,332.2 66.3,322.0 76.5,310.1 86.7,303.7 96.8,300.4 107.0,299.8 117.2,299.9 127.3,299.4 137.5,298.3 147.7,297.5 157.8,296.7 168.0,295.2 178.2,293.4 188.3,292.1 198.5,291.8 208.7,291.2 218.8,290.0 229.0,288.9 239.2,288.8 249.3,288.7 259.5,288.6 269.7,288.7 279.8,288.9 290.0,288.7"/>
+<polyline fill="none" stroke="#d62728" stroke-width="1.6" points="46.0,419.8 56.2,339.0 66.3,331.5 76.5,319.2 86.7,310.8 96.8,305.2 107.0,302.8 117.2,301.7 127.3,301.0 137.5,299.9 147.7,298.9 157.8,297.7 168.0,295.5 178.2,293.8 188.3,291.9 198.5,291.1 208.7,290.4 218.8,288.8 229.0,287.4 239.2,287.1 249.3,287.4 259.5,287.5 269.7,287.3 279.8,287.1 290.0,287.3"/>
+<polyline fill="none" stroke="#1f77b4" stroke-width="1.6" points="46.0,419.8 56.2,333.2 66.3,322.2 76.5,311.2 86.7,304.8 96.8,301.6 107.0,301.0 117.2,300.9 127.3,300.5 137.5,298.9 147.7,297.7 157.8,297.0 168.0,294.9 178.2,293.2 188.3,291.4 198.5,290.9 208.7,289.9 218.8,288.5 229.0,287.2 239.2,286.7 249.3,286.8 259.5,286.9 269.7,286.6 279.8,286.5 290.0,286.6"/>
+<polyline fill="none" stroke="#2ca02c" stroke-width="1.6" stroke-dasharray="4 3" points="56.2,343.7 66.3,335.5 76.5,326.3 86.7,316.8 96.8,309.4 107.0,305.8 117.2,303.5 127.3,303.0 137.5,301.5 147.7,299.6 157.8,298.4 168.0,296.0 178.2,294.6 188.3,292.8 198.5,292.2 208.7,291.3 218.8,289.8 229.0,288.4 239.2,287.9 249.3,287.8 259.5,288.0 269.7,287.9 279.8,287.7 290.0,287.9"/>
+<text class="fg" x="346" y="256" font-weight="bold">U (rmse)</text>
+<line class="gr" x1="346" y1="428.0" x2="590" y2="428.0"/>
+<text class="fg" x="342" y="432.0" text-anchor="end">1e-7</text>
+<line class="gr" x1="346" y1="404.3" x2="590" y2="404.3"/>
+<text class="fg" x="342" y="408.3" text-anchor="end">1e-6</text>
+<line class="gr" x1="346" y1="380.6" x2="590" y2="380.6"/>
+<text class="fg" x="342" y="384.6" text-anchor="end">1e-5</text>
+<line class="gr" x1="346" y1="356.9" x2="590" y2="356.9"/>
+<text class="fg" x="342" y="360.9" text-anchor="end">1e-4</text>
+<line class="gr" x1="346" y1="333.1" x2="590" y2="333.1"/>
+<text class="fg" x="342" y="337.1" text-anchor="end">1e-3</text>
+<line class="gr" x1="346" y1="309.4" x2="590" y2="309.4"/>
+<text class="fg" x="342" y="313.4" text-anchor="end">1e-2</text>
+<line class="gr" x1="346" y1="285.7" x2="590" y2="285.7"/>
+<text class="fg" x="342" y="289.7" text-anchor="end">1e-1</text>
+<line class="gr" x1="346" y1="262.0" x2="590" y2="262.0"/>
+<text class="fg" x="342" y="266.0" text-anchor="end">1e0</text>
+<text class="fg" x="346.0" y="442" text-anchor="middle">0</text>
+<text class="fg" x="407.0" y="442" text-anchor="middle">6</text>
+<text class="fg" x="468.0" y="442" text-anchor="middle">12</text>
+<text class="fg" x="529.0" y="442" text-anchor="middle">18</text>
+<text class="fg" x="590.0" y="442" text-anchor="middle">24</text>
+<text class="fg" x="590" y="452" text-anchor="end">hours</text>
+<rect class="ax" x="346" y="262" width="244" height="166"/>
+<polyline fill="none" stroke="#7f7f7f" stroke-width="1.6" stroke-dasharray="4 3" points="346.0,418.0 356.2,315.4 366.3,307.1 376.5,296.2 386.7,292.2 396.8,289.8 407.0,289.6 417.2,289.8 427.3,289.6 437.5,288.2 447.7,287.5 457.8,286.9 468.0,285.7 478.2,283.5 488.3,281.9 498.5,280.8 508.7,280.1 518.8,279.6 529.0,279.0 539.2,278.7 549.3,278.8 559.5,278.6 569.7,278.3 579.8,277.8 590.0,277.3"/>
+<polyline fill="none" stroke="#d62728" stroke-width="1.6" points="346.0,417.5 356.2,324.4 366.3,316.5 376.5,303.7 386.7,298.9 396.8,294.1 407.0,292.1 417.2,291.5 427.3,291.1 437.5,289.6 447.7,289.1 457.8,287.9 468.0,286.5 478.2,283.9 488.3,281.7 498.5,280.6 508.7,280.0 518.8,279.1 529.0,278.6 539.2,278.4 549.3,278.3 559.5,278.2 569.7,276.9 579.8,275.8 590.0,275.4"/>
+<polyline fill="none" stroke="#1f77b4" stroke-width="1.6" points="346.0,416.5 356.2,315.8 366.3,307.3 376.5,297.1 386.7,293.0 396.8,290.9 407.0,290.4 417.2,290.7 427.3,290.1 437.5,288.4 447.7,287.8 457.8,287.2 468.0,285.4 478.2,283.0 488.3,281.1 498.5,280.1 508.7,279.3 518.8,278.6 529.0,278.1 539.2,277.7 549.3,277.6 559.5,277.5 569.7,276.5 579.8,275.4 590.0,274.5"/>
+<polyline fill="none" stroke="#2ca02c" stroke-width="1.6" stroke-dasharray="4 3" points="356.2,329.5 366.3,319.3 376.5,309.6 386.7,303.0 396.8,296.8 407.0,294.4 417.2,293.2 427.3,292.8 437.5,290.9 447.7,289.6 457.8,288.6 468.0,286.3 478.2,284.4 488.3,282.7 498.5,281.4 508.7,280.6 518.8,279.3 529.0,278.6 539.2,278.4 549.3,278.7 559.5,278.7 569.7,277.1 579.8,276.4 590.0,275.5"/>
+<text class="fg" x="646" y="256" font-weight="bold">QVAPOR (rmse)</text>
+<line class="gr" x1="646" y1="428.0" x2="890" y2="428.0"/>
+<text class="fg" x="642" y="432.0" text-anchor="end">1e-10</text>
+<line class="gr" x1="646" y1="400.3" x2="890" y2="400.3"/>
+<text class="fg" x="642" y="404.3" text-anchor="end">1e-9</text>
+<line class="gr" x1="646" y1="372.7" x2="890" y2="372.7"/>
+<text class="fg" x="642" y="376.7" text-anchor="end">1e-8</text>
+<line class="gr" x1="646" y1="345.0" x2="890" y2="345.0"/>
+<text class="fg" x="642" y="349.0" text-anchor="end">1e-7</text>
+<line class="gr" x1="646" y1="317.3" x2="890" y2="317.3"/>
+<text class="fg" x="642" y="321.3" text-anchor="end">1e-6</text>
+<line class="gr" x1="646" y1="289.7" x2="890" y2="289.7"/>
+<text class="fg" x="642" y="293.7" text-anchor="end">1e-5</text>
+<line class="gr" x1="646" y1="262.0" x2="890" y2="262.0"/>
+<text class="fg" x="642" y="266.0" text-anchor="end">1e-4</text>
+<text class="fg" x="646.0" y="442" text-anchor="middle">0</text>
+<text class="fg" x="707.0" y="442" text-anchor="middle">6</text>
+<text class="fg" x="768.0" y="442" text-anchor="middle">12</text>
+<text class="fg" x="829.0" y="442" text-anchor="middle">18</text>
+<text class="fg" x="890.0" y="442" text-anchor="middle">24</text>
+<text class="fg" x="890" y="452" text-anchor="end">hours</text>
+<rect class="ax" x="646" y="262" width="244" height="166"/>
+<polyline fill="none" stroke="#7f7f7f" stroke-width="1.6" stroke-dasharray="4 3" points="646.0,412.7 656.2,307.8 666.3,297.6 676.5,287.0 686.7,283.1 696.8,280.6 707.0,280.1 717.2,279.4 727.3,279.5 737.5,278.3 747.7,277.5 757.8,277.1 768.0,276.1 778.2,274.8 788.3,273.9 798.5,273.4 808.7,272.5 818.8,271.6 829.0,271.5 839.2,271.3 849.3,271.0 859.5,271.1 869.7,270.9 879.8,270.3 890.0,270.1"/>
+<polyline fill="none" stroke="#d62728" stroke-width="1.6" points="646.0,424.5 656.2,317.3 666.3,307.7 676.5,296.0 686.7,289.8 696.8,284.0 707.0,282.5 717.2,281.5 727.3,280.6 737.5,278.6 747.7,277.6 757.8,277.0 768.0,276.0 778.2,275.1 788.3,274.3 798.5,273.7 808.7,273.2 818.8,272.6 829.0,271.7 839.2,271.6 849.3,271.3 859.5,270.9 869.7,270.6 879.8,269.8 890.0,269.3"/>
+<polyline fill="none" stroke="#1f77b4" stroke-width="1.6" points="646.0,412.7 656.2,308.7 666.3,297.9 676.5,287.4 686.7,283.7 696.8,281.6 707.0,280.1 717.2,279.2 727.3,278.8 737.5,277.5 747.7,276.9 757.8,276.2 768.0,274.9 778.2,274.1 788.3,273.5 798.5,273.0 808.7,271.9 818.8,271.1 829.0,270.4 839.2,270.2 849.3,270.0 859.5,269.8 869.7,269.4 879.8,268.9 890.0,268.8"/>
+<polyline fill="none" stroke="#2ca02c" stroke-width="1.6" stroke-dasharray="4 3" points="656.2,327.0 666.3,311.3 676.5,300.7 686.7,295.1 696.8,287.7 707.0,285.7 717.2,283.8 727.3,282.4 737.5,280.9 747.7,279.1 757.8,278.0 768.0,276.6 778.2,276.1 788.3,275.5 798.5,274.6 808.7,273.9 818.8,272.6 829.0,272.0 839.2,271.6 849.3,271.3 859.5,271.5 869.7,270.8 879.8,270.1 890.0,270.0"/>
+</svg>

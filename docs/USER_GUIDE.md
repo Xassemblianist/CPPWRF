@@ -49,8 +49,8 @@ updates, branches, constants and defaults. Every result is checked against WRF i
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
 - **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (79 GPU runs of the suite, on NVIDIA L4, RTX PRO
   6000 Blackwell and A100).
-- **GPU, FP32**: the fast mode; its distance from WRF real*8 is that of stock WRF real*4 (measured at 1 h: 0.35 to
-  1.08 times WRF real*4's relative L2 difference from real*8; docs/FP32_ACCURACY.md). Use it for forecasts and
+- **GPU, FP32**: the fast mode; its distance from WRF real*8 is that of stock WRF real*4 for most physics suites,
+  and up to about twice it with ACM2 / Pleim-Xiu, Morrison or the skin SST (docs/FP32_ACCURACY.md). Use it for forecasts and
   ensembles on GPUs with slow FP64; use FP64 when the answer must be WRF real*8's (verification, comparisons with
   WRF runs, continuing a WRF run).
 
