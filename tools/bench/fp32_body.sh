@@ -59,6 +59,9 @@ build_wrf() {  # NAME CONFIGURE_OPTION [-r8]
   printf '%s\n1\n' "$2" | ./configure $3 > configure.log 2>&1
   [ -f configure.wrf ] || return 1
   ./compile -j 16 em_real > compile.log 2>&1
+  # WRF's parallel make can lose a module dependency (e.g. ccpp_kind_types.mod): continue with fewer jobs
+  [ -x main/wrf.exe ] && [ -x main/real.exe ] || ./compile -j 4 em_real > compile2.log 2>&1
+  [ -x main/wrf.exe ] && [ -x main/real.exe ] || ./compile -j 1 em_real > compile3.log 2>&1
   [ -x main/wrf.exe ] && [ -x main/real.exe ]
 }
 wps() {  # met_em files of the large domain in $W/wps (as bench_body.sh)
