@@ -211,10 +211,10 @@ WRF's clock: XTIME, julian and the year come from the exact clock (n times the r
 parent's / parent_time_step_ratio), as WRF's ESMF clock gives them. P4D16 (P4 with dt 16 s and radt 10 min on the 72 h
 inputs, 30 h, every hourly frame) covers XTIME past one day (days*1440 + seconds/60; the radiation call of 27.7 h is
 the first whose coszen depends on it) and N3D50 (N3 with d01 dt 50 s, a nest step of 50/3 s, 1 h) a step that is a
-fraction of a second; both pass at tolerance 0 on the CPU and in CUDA FP64.
+fraction of a second; both pass at tolerance 0 on the CPU (Colab L4, Intel) and in CUDA FP64 (L4).
 
 CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (88 runs with the GPU
-restart cases: R1, T1, P1 to P9, P4D16, N3D50, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
+restart cases: R1, T1, P1 to P9, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
 D0V, sst_update, hybrid, nest and ideal cases) passes with tolerance 0 (tests/verify/exact.py, every frame and variable of the history) on Colab's
 L4 (sm_89), RTX PRO 6000 Blackwell "G4" (sm_120) and A100 (sm_80); H100 was not available. The FP64 device code
 computes as WRF's gfortran real*8 build on x86-64:
