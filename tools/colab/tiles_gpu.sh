@@ -32,6 +32,8 @@ for i in $(seq 20); do  # the chroot job may hold apt's locks
     apt-get -o DPkg::Lock::Timeout=600 -qq install -y libnetcdf-dev >> $G/apt.log 2>&1 && break
   sleep 30
 done
+# the suite's comparison (tests/verify/exact.py) reads the files with netCDF4, which a runtime image may lack
+python3 -c 'import netCDF4' 2> /dev/null || pip install -q netCDF4 > $G/pip.log 2>&1
 rm -rf $G/src $G/base && mkdir -p $G/src $G/base
 tar xzf /content/cpu/src.tar.gz -C $G/src
 tar xzf /content/cpu/in/base_src.tar.gz -C $G/base

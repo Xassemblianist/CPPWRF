@@ -4,7 +4,7 @@ Version 1.0.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
-(242 cases, 8 of them the slow 24 h and 72 h runs of `--slow`, and 34 restart checks plus the Straka checks, all passing) and
+(246 cases, 9 of them the slow 24 h, 30 h and 72 h runs of `--slow`, and 34 restart checks plus the Straka checks, all passing) and
 `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
@@ -143,6 +143,8 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | N2S1 / N2S2 | N2 with smooth_option 1 / 2 (smoothing of the fed-back fields, ht included) | 1 h |
 | N3 | two-way nest with the P4 physics on both domains (physics feedback, nest ozone from the parent) | 1 h |
 | P4, P6, P9, N3 long runs | inputs from real.exe for 24 h / 72 h (wrfbdy every 6 h; 24-72 h from the GFS forecast through WPS), history every 3 h, CPPWRF restarted in the middle from its own wrfrst files | 24 h; 72 h (P4, P6, P9) |
+| P4D16 | P4 with dt = 16 s and radt = 10 min on the 72 h inputs, history every hour (WRF's clock past one day: XTIME, coszen) | 30 h |
+| N3D50 | N3 with d01 dt = 50 s, so a nest step of 50/3 s (WRF's clock with a fraction of a second: XTIME, julian) | 1 h |
 | W1 | active w_damping (dt 450 s) | 10 steps |
 
 V1-V3, T6, G2, F1, F2, D0, D0V, SU1 and SU2 are compared in every wrfout variable over the whole run; V1-V3 start from the
@@ -205,8 +207,14 @@ RQCBLTEN / RQIBLTEN in runs without qc / qi, and QZ0 / USTM at fractional sea-ic
 surface layer (restart fields). `cppwrf_real` output is identical to real.exe for 43 cases
 ([REAL.md](REAL.md)).
 
+WRF's clock: XTIME, julian and the year come from the exact clock (n times the rational time step; a nest's is the
+parent's / parent_time_step_ratio), as WRF's ESMF clock gives them. P4D16 (P4 with dt 16 s and radt 10 min on the 72 h
+inputs, 30 h, every hourly frame) covers XTIME past one day (days*1440 + seconds/60; the radiation call of 27.7 h is
+the first whose coszen depends on it) and N3D50 (N3 with d01 dt 50 s, a nest step of 50/3 s, 1 h) a step that is a
+fraction of a second; both pass at tolerance 0 on the CPU and in CUDA FP64.
+
 CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (88 runs with the GPU
-restart cases: R1, T1, P1 to P9, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
+restart cases: R1, T1, P1 to P9, P4D16, N3D50, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
 D0V, sst_update, hybrid, nest and ideal cases) passes with tolerance 0 (tests/verify/exact.py, every frame and variable of the history) on Colab's
 L4 (sm_89), RTX PRO 6000 Blackwell "G4" (sm_120) and A100 (sm_80); H100 was not available. The FP64 device code
 computes as WRF's gfortran real*8 build on x86-64:
