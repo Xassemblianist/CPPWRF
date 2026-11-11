@@ -29,8 +29,9 @@ rm -rf $C/done $C/data_done $C/results.tar.gz $C/fetch $C/res
 finish() {
   rm -f $C/gcs.tok $C/rclone.conf
   df -h / | awk 'NR == 2 {print "disk at the end", $2, "used", $3, "free", $4}' >> $C/versions.txt
-  # a streamed runtime is short of disk: the job's inputs go before its results are packed
-  [ "${STREAM:-0}" = 1 ] && rm -rf $J/data
+  # a streamed runtime whose disk is full: the job's inputs go before its results are packed (only then: a data-only
+  # job, such as the merge train's GPU proof, leaves the data for the host side)
+  [ "${STREAM:-0}" = 1 ] && [ "$(df -BG --output=avail / | tail -1 | tr -dc 0-9)" -lt 5 ] && rm -rf $J/data
   mkdir -p $C/res
   ( cd $J 2> /dev/null && cp -f ./*.log ./*.out ./*.txt $C/res/ 2> /dev/null )
   cat $C/res/setup.out >> $C/setup.out 2> /dev/null; rm -f $C/res/setup.out
