@@ -1,0 +1,18 @@
+# The full CPU FP64 WRF comparison suite of every push to main, on GitHub-hosted runners: the workflow suite.yml of
+# github.com/Xassemblianist/cppwrf-data (with the reference data of that repository's release; docs/USER_GUIDE.md,
+# "Remote Suite Runs"). Unpushed commits: tools/ci/ci_submit.sh.
+name: wrf_suite
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: wrf_suite-${{ github.sha }}
+jobs:
+  suite:
+    uses: Xassemblianist/cppwrf-data/.github/workflows/suite.yml@main
+    with:
+      ref: ${{ github.sha }}
+      tag: suite ${{ github.sha }}

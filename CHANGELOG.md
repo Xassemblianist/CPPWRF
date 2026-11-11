@@ -50,6 +50,14 @@ a verified configuration, of a configuration key or of an output file is a new m
   byte) and `--device-mib N` (the runs see N MiB of free device memory).
 
 ### Tools and documentation
+- The CPU FP64 suite on free GitHub-hosted runners (docs/USER_GUIDE.md, "The CPU Suite on GitHub"): the reference
+  data (the tars of tests/verify/vm_data.txt) are public release assets of github.com/Xassemblianist/cppwrf-data,
+  whose workflow suite.yml runs wrf_suite.py's CPU cases, the output files tests, the ideal files test, the
+  differential and ctest tests, the translator tests and the comparators' self-test in a Debian 13 container, a
+  gate failing unless every expected case PASSed. tools/ci/ci_submit.sh runs it for any local commit (a git bundle
+  of the commits origin/main lacks) and prints suite_status.sh's summary; .github/workflows/wrf_suite.yml runs it on
+  every push to main. Its workflow wrfref.yml builds WRF v4.8.0 as the references were built and makes WRF
+  references (replacing tools/colab/colab_wrfref.sh); the Colab and Google Cloud tools stay as alternatives.
 - `cppwrf-post` (docs/POST.md): forecaster fields from wrfout files with wrf-python's methods (ported to numpy,
   identical to wrf-python on single precision files), written as CF-1.8 NetCDF and / or GRIB2 (Lambert, polar
   stereographic, Mercator and latitude-longitude grids; WMO parameters; simple packing, JPEG 2000 / CCSDS through

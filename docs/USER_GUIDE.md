@@ -767,67 +767,58 @@ ctest --test-dir build-cpu --output-on-failure
 python3 -m unittest tests.tools.test_wrf2cppwrf
 ```
 
-### The CPU Suite on Google Cloud or Colab
-The model runs against WRF need the WRF reference runs (WRF's inputs, its wrfout / wrfrst files and its builds),
-which are kept in the project's data bucket and are not public; the tools below need access to it.
-The full CPU FP64 suite (wrf_suite.py, the output files tests, the differential and ctest tests, the translator
-tests and the comparators' self-test) runs on a remote machine. The references are Intel-made; on an AMD CPU the
-model gives the same results (`CPPWRF_PORTABLE_LIBMVEC`, see below) and so does WRF's side of the differential
-tests (`tests/phys/libmvec_intel.cpp`: their Fortran drivers get glibc libmvec's vector log / log10 as on Intel).
-The default is the AMD CPU of Colab's G4 runtime, the cheapest and fastest:
+### The CPU Suite on GitHub (and Colab or Google Cloud)
+The model runs against WRF need the WRF reference runs (WRF's inputs, its wrfout / wrfrst files and its builds). They
+are public: the tars of `tests/verify/vm_data.txt` are release assets of
+[cppwrf-data](https://github.com/Xassemblianist/cppwrf-data) (release `data-v1`: parts of 512 MiB, `SHA256SUMS`,
+`TARS.txt`, `INDEX.tsv.gz`), and the full CPU FP64 suite (wrf_suite.py's CPU cases, the output files tests, the
+ideal files test, the differential and ctest tests, the translator tests and the comparators' self-test) runs on free
+GitHub-hosted runners with the workflow `suite.yml` of that repository. The references are Intel-made; on an AMD CPU
+the model gives the same results (`CPPWRF_PORTABLE_LIBMVEC`, see below) and so does WRF's side of the differential
+tests (`tests/phys/libmvec_intel.cpp`), so every runner (AMD EPYC or Intel Xeon) is used.
 
 ```bash
-CPPWRF_GCP_BUCKET=cppwrf-data-244589 timeout 14400 tools/colab/colab_suite.sh --gpu G4 --any-cpu --jobs 12 --threads 4
+# the full suite of HEAD (or of any local commit: tools/ci/ci_submit.sh COMMIT)
+tools/ci/ci_submit.sh
+# some cases (exact names), with the translator tests and the self-test; --full adds the other jobs
+tools/ci/ci_submit.sh HEAD --cases real_r1_fp64_cpu,real_n3_r8_fp64_cpu
 ```
 
-(AMD EPYC 9B45, 48 vCPUs, 176 GB: the full suite in about 42 min; the Intel L4 runtime, the script's default
-`--gpu L4`, takes 2 h 45 min and stays possible).
+- `tools/ci/ci_submit.sh [COMMIT]` (default HEAD) starts the workflow and waits for it. A commit that is not on
+  origin/main travels as a git bundle (only the objects origin/main lacks) attached to the `jobs` release of
+  cppwrf-data and deleted after the run; nothing is pushed to this repository. The result files (logs, no data) go to
+  `~/cppwrf_scratch/ci/<run id>/` and the script prints `tools/gcp/suite_status.sh`'s summary (`SUITE PASS n FAIL n
+  SKIP n`, `files:`, `idealfiles:`, `diff:`, `ctest:`); exit 0 only for a run without FAIL or SKIP whose gate passed.
+  Options: `--cases`, `--full`, `--data TAR,...` (instead of the cases' own tars), `--slow`, `--suite-jobs N` (default
+  13), `--data-tag`, `--out`, `--hours`, `--no-wait`. It needs `gh` logged in with the right to start the workflow
+  and upload release assets of cppwrf-data; no token is stored.
+- Every push to main runs the full suite too (`.github/workflows/wrf_suite.yml` calls `suite.yml`).
+- The workflow: `prep` takes the source and plans the jobs (`ci/plan.py`: the suite cases packed into jobs by their
+  recorded times, `ci/times.txt`, and the download time of their tars; each job gets only the tars its cases read,
+  `wrf_suite.py`'s `DATA`, or, for the files and translator tests, the tars holding the run directories they read),
+  `build` compiles the CPU FP64 binary once as `tools/gcp/suite_body.sh` does (`-march=skylake`, Release, CUDA off),
+  the `work` matrix runs the jobs in a Debian 13 container (gcc 14, gfortran 14, glibc 2.41, NetCDF 4.9.3, Python
+  3.13: the packages of the machines that made the references) with OpenMP threads = the runner's vCPUs, and `gate`
+  merges the logs and fails unless every job passed and the PASS lines are exactly the expected case list (a lost
+  case is a FAIL, never a silent SKIP). At most 20 jobs run at once (the free plan's limit).
+- WRF references: the workflow `wrfref.yml` of cppwrf-data builds WRF v4.8.0 from the release source as the
+  references were built (`configure` option 32, serial gfortran / gcc, basic nesting, `-r8`; and with
+  `-fdefault-double-8`), keeps each build as an asset of its `wrf-build` release, runs `tools/gcp/wrf_ref_run.py`
+  lines (`NAME BASE_RUN r8|r8d8 section.key=value ...`) on given data tars and returns the run directories as assets of
+  its `wrfref` release; `rerun` runs WRF again in copies of existing reference directories and compares every output
+  file's MD5 with the reference's:
+  `gh workflow run wrfref.yml -R Xassemblianist/cppwrf-data -f tag=NAME -f data=suite_data.tar,v05_suite_refs.tar -f rerun="wrf_runs/run_R1_r8:r8"`.
+  A new reference is then staged into a new data tar (a later port task) and added to `vm_data.txt` and the release.
+- Not on GitHub: the slow cases' data (`long_data.tar`, `long72_data.tar`, `long72n3_data.tar`) are not in the
+  data release yet, and GPU runs need a GPU machine.
 
-- `tools/gcp/gcp_run.sh` runs it on a Google Compute Engine spot VM (Debian 13), with the data tars of
-  `tests/verify/vm_data.txt` from the bucket.
-- `tools/colab/colab_suite.sh` runs the same steps (`tools/gcp/suite_body.sh`) on a Colab runtime
-  (`--gpu G4 --any-cpu --jobs 12 --threads 4` as above; default `--gpu L4`: Intel Xeon Cascade Lake, 12 vCPUs, 52 GB;
-  the GPU is not used; G4 and the CPU-only runtime `--gpu CPU` are AMD and are refused unless `--any-cpu`) inside a
-  Debian 13 chroot, so that gcc, glibc, libmvec, NetCDF and Python are the GCP
-  VMs' packages. The data tars come from Google Drive (`cppwrf-drive:cppwrf-data`), where
-  `tools/colab/drive_sync.sh` copies them from the bucket on a Colab runtime; a tar not yet on Drive is read from
-  the bucket with a read-only token (`tools/colab/gcs_token.py`) and then put on Drive. Same options as
-  `gcp_run.sh` (`--cases`, `--data`, `--out`, `--slow`), plus `--jobs` / `--threads`, `--rev` (another commit),
-  `--keep` / `--session` (reuse a runtime with its chroot and tars). Without `--data` the tars come from the case
-  registry: with `--cases` only the tars those cases read (`DATA` in `tests/verify/cases/*.py`,
-  `tests/verify/wrf_suite.py --data-for`), else every tar of `vm_data.txt`. Exit status 0 only for a complete suite
-  without FAIL or SKIP (`tools/gcp/suite_status.sh`, as `gcp_run.sh`). The full suite takes about 42 min on the G4
-  (data from Drive ~12 min, 12 suite jobs x 4 threads) and about 2.5 h on an L4 (data ~25 min, 4 suite jobs x 3
-  threads; 6 jobs ran out of the 52 GB), with the same PASS / FAIL / SKIP lists as the GCP VM. `--diff-only` runs
-  only the differential and ctest tests (`tools/colab/diff_body.sh`; data diff_data.tar, port_c01_diff.tar),
-  `--tests REGEX` limits them, `--faults DIR` applies each `*.patch` of DIR alone after the clean run (a line
-  `# tests: REGEX` names the tests it must break; faults.log: DETECTED / MISSED).
-- `tools/colab/colab_wrfref.sh REFS.txt` makes WRF references on such a runtime as `tools/gcp/gcp_wrfref.sh`
-  (`--check-only`, `--files`, `--cases`; `--stage OBJ:CASE,...` puts the suite's tar of the new references on Drive).
-- `tools/colab/colab_mvec.sh [--gpu L4|G4|CPU] [--n N]` proves the portable vector log / log10 on a runtime of any
-  CPU (`tools/colab/mvec_body.sh`): `tests/unit/test_libmvec` (the results hash to Intel libmvec's on any CPU), the
-  table against the CPU's `rcpps` (`tools/libmvec_tables.py --check`), on Intel the table made again from glibc
-  2.41's source and `tools/libmvec_proof.cpp` (N random inputs, default 10^10, every rcpps input class at every
-  exponent and the edge values equal to libmvec bit for bit), and two deliberate faults that the unit test must
-  catch.
-- `tools/colab/colab_regression.sh [--mode update|check]` runs the legacy regression tool (`tools/regression`:
-  CPU FP32 and FP64 builds, ctest, the ideal cases of `configs/`, `tests/verify/verify.py check` and the goldens)
-  in the same chroot with the suite's build flags (`tools/colab/regression_body.sh`; default `--gpu G4`, no data
-  tars). `--mode update` makes new goldens (`update_golden.sh --quick --no-gpu`, in OUT/golden, to copy into
-  `tools/regression/golden`) and runs `run.sh --quick --no-gpu` against them a second time; `--mode check` runs
-  `run.sh` against the goldens of the commit. The goldens come from this environment, not from a workstation.
-
-```bash
-# once: the Drive remote (browser login; scope drive.file), then the tars of vm_data.txt to Drive
-rclone config create cppwrf-drive drive scope=drive.file
-CPPWRF_GCP_BUCKET=cppwrf-data-244589 tools/colab/drive_sync.sh
-# the full suite (every tar of vm_data.txt) on the G4's AMD CPU; on the Intel L4: without --gpu ... --threads 4
-CPPWRF_GCP_BUCKET=cppwrf-data-244589 timeout 14400 tools/colab/colab_suite.sh --gpu G4 --any-cpu --jobs 12 --threads 4
-# the differential tests alone, with deliberate faults (DIR/*.patch)
-CPPWRF_GCP_BUCKET=cppwrf-data-244589 timeout 10800 tools/colab/colab_suite.sh --gpu G4 --any-cpu --diff-only --faults DIR
-# some cases, with only the tars they read
-CPPWRF_GCP_BUCKET=cppwrf-data-244589 timeout 10800 tools/colab/colab_suite.sh --cases real_r1_fp64_cpu,real_n3_r8_fp64_cpu
-```
+The earlier remote tools remain as alternatives (they need the project's private bucket or a Colab subscription):
+`tools/gcp/gcp_run.sh` (a Google Compute Engine spot VM, Debian 13) and `tools/colab/colab_suite.sh` (a Colab
+runtime, the same steps `tools/gcp/suite_body.sh` in a Debian 13 chroot; `--gpu G4 --any-cpu --jobs 12 --threads 4`
+ran the full suite in about 42 min), with `--cases`, `--data`, `--slow`, `--diff-only [--faults DIR]`;
+`tools/colab/colab_wrfref.sh` / `tools/gcp/gcp_wrfref.sh` make WRF references there,
+`tools/colab/colab_mvec.sh` proves the portable vector log / log10 on a runtime of any CPU and
+`tools/colab/colab_regression.sh` runs the legacy regression tool (`tools/regression`).
 
 The suite's cases are defined in `tests/verify/cases/` (one file per group, `NN_<group>.py`, loaded in the order of
 their names; `wrf_suite.py --list` prints them all). A group file defines `CASES`, `DATA` (the data tars each case
