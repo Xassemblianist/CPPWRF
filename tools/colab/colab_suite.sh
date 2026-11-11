@@ -73,6 +73,9 @@ git -C "$REPO" rev-parse --short "$REV" > "$OUT/commit.txt"
 echo "[colab_suite] commit $(cat "$OUT/commit.txt"), $GPU, data $DATA${CASES:+, cases $CASES}"
 TAG=colab_suite
 . "$REPO/tools/colab/colab_lib.sh"
+# the full suite (cases, output files, differential tests) fills about 140 GB: a runtime with a smaller disk (some G4
+# runtimes have 113 GB) is stopped at once (SMALL_DISK) and the caller tries again later
+[ -z "$CASES" ] && [ "$DIFF" = 0 ] && MIN_DISK_GB=${MIN_DISK_GB:-200}
 cj_start "$GPU"
 if [ "$DIFF" = 1 ]; then
   for f in ${FAULTS:+"$FAULTS"/*.patch}; do cj_send "$f" "in/fault_$(basename "$f")"; done

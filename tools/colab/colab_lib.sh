@@ -36,6 +36,12 @@ cj_start() {
   echo "[$TAG] CPU: $cpu"
   case $cpu in *Intel*) ;; *) [ "${ANY_CPU:-0}" = 1 ] || { echo "[$TAG] not an Intel runtime: the references cannot be reproduced here"; return 1; } ;; esac
   NPROC=${cpu##*| }
+  if [ -n "${MIN_DISK_GB:-}" ]; then  # a job that needs a large disk (the full suite: about 140 GB of 236)
+    local disk
+    disk=$(echo 'import shutil; print("DISK", shutil.disk_usage("/").total // 2**30)' | rx 60 | sed -n 's/^DISK //p')
+    echo "[$TAG] disk ${disk:-?} GB"
+    [ "${disk:-0}" -ge "$MIN_DISK_GB" ] || { echo "[$TAG] SMALL_DISK: ${disk:-?} GB < $MIN_DISK_GB GB"; return 1; }
+  fi
   echo 'import os; os.makedirs("/content/cpu/in", exist_ok=True); print("OK")' | rx 60 | grep OK > /dev/null || { echo "[$TAG] session not answering"; return 1; }
 }
 
