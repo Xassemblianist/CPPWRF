@@ -28,6 +28,9 @@ rm -rf $C/done $C/data_done $C/results.tar.gz $C/fetch $C/res
 : > $C/setup.out; : > $C/data.txt
 finish() {
   rm -f $C/gcs.tok $C/rclone.conf
+  df -h / | awk 'NR == 2 {print "disk at the end", $2, "used", $3, "free", $4}' >> $C/versions.txt
+  # a streamed runtime is short of disk: the job's inputs go before its results are packed
+  [ "${STREAM:-0}" = 1 ] && rm -rf $J/data
   mkdir -p $C/res
   ( cd $J 2> /dev/null && cp -f ./*.log ./*.out ./*.txt $C/res/ 2> /dev/null )
   cat $C/res/setup.out >> $C/setup.out 2> /dev/null; rm -f $C/res/setup.out
@@ -96,6 +99,7 @@ DT0=$SECONDS
 # cached by an earlier --keep run is unpacked from its file; one that is not on Drive is fetched, unpacked and deleted)
 DISK_GB=$(df -BG --output=size / | tail -1 | tr -dc 0-9)
 if [ "${CPPWRF_COLAB_STREAM:-auto}" = 1 ] || { [ "${CPPWRF_COLAB_STREAM:-auto}" = auto ] && [ "$DISK_GB" -lt 200 ]; }; then
+  STREAM=1
   echo "STREAM disk ${DISK_GB} GB: tars streamed from Drive, not kept" >> $C/data.txt
   for t in ${DATA//,/ }; do
     t0=$SECONDS
