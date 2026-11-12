@@ -84,7 +84,7 @@ CPPWRF_HOST_DEVICE inline real tgamma_fn(real x) {
 }
 
 template <typename real>
-CPPWRF_HOST_DEVICE inline void zu_profile(real* zu, const real* p, int kstart,
+CPPWRF_HOST_DEVICE inline void zu_profile(ColPtr<real> zu, ColCPtr<real> p, int kstart,
                                           int kt_minus_1, real p_kstart,
                                           real dp, real zubeg, real fzu,
                                           real e1, real e2) {
@@ -139,13 +139,16 @@ CPPWRF_HOST_DEVICE inline real satvap(real temp2) {
 // cup_env (lines 3180-3324 of module_cu_gfl_deep.F90)
 // 1-indexed arrays [1..kte]
 // ---------------------------------------------------------------------------
+#define CPPWRF_GFL_CUP_ENV(X) \
+  X(real, tv, KM)
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_env(int ktf, int kte, int ierr, int itest,
-                                       real psur, real z1, const real* p,
-                                       const real* t, real* z, real* he,
-                                       real* hes, real* qes, const real* q) {
+                                       real psur, real z1, ColCPtr<real> p,
+                                       ColCPtr<real> t, ColPtr<real> z, ColPtr<real> he,
+                                       ColPtr<real> hes, ColPtr<real> qes, ColCPtr<real> q,
+    CPPWRF_COLUMN_CURSOR) {
   if (ierr != 0) return;
-  real tv[KM];
+  CPPWRF_GFL_CUP_ENV(CPPWRF_COLUMN_ARRAY)
   for (int k = 1; k <= ktf; ++k) {
     real e = satvap(t[k]);
     qes[k] = R(0.622) * e / max(R(1.e-8), (p[k] - e));
@@ -183,10 +186,10 @@ CPPWRF_HOST_DEVICE inline void cup_env(int ktf, int kte, int ierr, int itest,
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_env_clev(
-    int ktf, int kte, int ierr, real psur, real z1, const real* t,
-    const real* qes, const real* q, const real* he, const real* hes,
-    const real* z, const real* p, real* qes_cup, real* q_cup, real* he_cup,
-    real* hes_cup, real* z_cup, real* p_cup, real* gamma_cup, real* t_cup) {
+    int ktf, int kte, int ierr, real psur, real z1, ColCPtr<real> t,
+    ColCPtr<real> qes, ColCPtr<real> q, ColCPtr<real> he, ColCPtr<real> hes,
+    ColCPtr<real> z, ColCPtr<real> p, ColPtr<real> qes_cup, ColPtr<real> q_cup, ColPtr<real> he_cup,
+    ColPtr<real> hes_cup, ColPtr<real> z_cup, ColPtr<real> p_cup, ColPtr<real> gamma_cup, ColPtr<real> t_cup) {
   using C = GflConstants<real>;
   for (int k = 1; k <= ktf; ++k) {
     qes_cup[k] = R(0.0);
@@ -228,7 +231,7 @@ CPPWRF_HOST_DEVICE inline void cup_env_clev(
 // get_cloud_bc (lines 4989-5012 of module_cu_gfl_deep.F90)
 // ---------------------------------------------------------------------------
 template <typename real>
-CPPWRF_HOST_DEVICE inline void get_cloud_bc(int kte, const real* array,
+CPPWRF_HOST_DEVICE inline void get_cloud_bc(int kte, ColCPtr<real> array,
                                             real& x_aver, int k22, real add) {
   constexpr int order_aver = 3;
   int local_order_aver = min(k22, order_aver);
@@ -245,7 +248,7 @@ CPPWRF_HOST_DEVICE inline void get_cloud_bc(int kte, const real* array,
 // cup_maximi (lines 4002-4062 of module_cu_gfl_deep.F90)
 // ---------------------------------------------------------------------------
 template <typename real>
-CPPWRF_HOST_DEVICE inline void cup_maximi(const real* array, int ks, int ke,
+CPPWRF_HOST_DEVICE inline void cup_maximi(ColCPtr<real> array, int ks, int ke,
                                           int ierr, int& maxx) {
   maxx = ks;
   if (ierr != 0) return;
@@ -263,7 +266,7 @@ CPPWRF_HOST_DEVICE inline void cup_maximi(const real* array, int ks, int ke,
 // cup_minimi (lines 4065-4120 of module_cu_gfl_deep.F90)
 // ---------------------------------------------------------------------------
 template <typename real>
-CPPWRF_HOST_DEVICE inline void cup_minimi(const real* array, int ks, int kend,
+CPPWRF_HOST_DEVICE inline void cup_minimi(ColCPtr<real> array, int ks, int kend,
                                           int ierr, int& kt) {
   kt = ks;
   if (ierr != 0) return;
@@ -280,14 +283,17 @@ CPPWRF_HOST_DEVICE inline void cup_minimi(const real* array, int ks, int kend,
 // ---------------------------------------------------------------------------
 // cup_kbcon (lines 3842-3998 of module_cu_gfl_deep.F90)
 // ---------------------------------------------------------------------------
+#define CPPWRF_GFL_CUP_KBCON_Z(X) \
+  X(real, hcot, KM)
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_kbcon(
-    real cap_inc, int iloop_in, int& k22, int& kbcon, const real* he_cup,
-    const real* hes_cup, real& hkb, int& ierr, int kbmax, const real* p_cup,
-    real cap_max, real ztexec, real zqexec, int kte, const real* z_cup,
-    real entr_rate, const real* heo, int imid) {
+    real cap_inc, int iloop_in, int& k22, int& kbcon, ColCPtr<real> he_cup,
+    ColCPtr<real> hes_cup, real& hkb, int& ierr, int kbmax, ColCPtr<real> p_cup,
+    real cap_max, real ztexec, real zqexec, int kte, ColCPtr<real> z_cup,
+    real entr_rate, ColCPtr<real> heo, int imid,
+    CPPWRF_COLUMN_CURSOR) {
   using C = GflConstants<real>;
-  real hcot[KM] = {};
+  CPPWRF_GFL_CUP_KBCON_Z(CPPWRF_COLUMN_ARRAY0)
   int iloop = iloop_in;
   kbcon = 1;
   if (cap_max > R(200.0) && imid == 1) iloop = 5;
@@ -349,10 +355,10 @@ CPPWRF_HOST_DEVICE inline void cup_kbcon(
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_up_aa0(int ktf, int kte, real& aa0,
-                                          const real* z, const real* zu,
-                                          const real* dby,
-                                          const real* gamma_cup,
-                                          const real* t_cup, int kbcon,
+                                          ColCPtr<real> z, ColCPtr<real> zu,
+                                          ColCPtr<real> dby,
+                                          ColCPtr<real> gamma_cup,
+                                          ColCPtr<real> t_cup, int kbcon,
                                           int ktop, int ierr) {
   aa0 = R(0.0);
   if (ierr != 0) return;
@@ -369,7 +375,7 @@ CPPWRF_HOST_DEVICE inline void cup_up_aa0(int ktf, int kte, real& aa0,
 }
 
 template <typename T>
-CPPWRF_HOST_DEVICE inline int maxloc_abs(const T* a, int lo, int hi) {
+CPPWRF_HOST_DEVICE inline int maxloc_abs(ColCPtr<T> a, int lo, int hi) {
   int m = lo;
   for (int k = lo + 1; k <= hi; ++k) {
     if (a[k] > a[m]) m = k;
@@ -378,7 +384,7 @@ CPPWRF_HOST_DEVICE inline int maxloc_abs(const T* a, int lo, int hi) {
 }
 
 template <typename real>
-CPPWRF_HOST_DEVICE inline real maxval_range(const real* a, int lo, int hi) {
+CPPWRF_HOST_DEVICE inline real maxval_range(ColCPtr<real> a, int lo, int hi) {
   real m = a[lo];
   for (int k = lo + 1; k <= hi; ++k) {
     if (a[k] > m) m = a[k];
@@ -391,17 +397,19 @@ CPPWRF_HOST_DEVICE inline real maxval_range(const real* a, int lo, int hi) {
 // In GFL v4.8.0: sec_deriv(:) = 0. at entry, ilev = max(4, kstart + 1),
 // and sec_deriv(:) = 1.e9 is inside the column loop.
 // ---------------------------------------------------------------------------
+#define CPPWRF_GFL_GET_INVERSION_LAYERS_Z(X) \
+  X(int, kinv, KM) X(real, first_deriv, KM) X(real, sec_deriv, KM) X(real, dtempdz, KM)
 template <typename real>
 CPPWRF_HOST_DEVICE inline void get_inversion_layers(
-    int ierr, const real* p_cup, const real* t_cup, const real* z_cup,
-    int kstart, int kend, int kte, int& kinv1, int& kinv2) {
-  int kinv[KM] = {};
+    int ierr, ColCPtr<real> p_cup, ColCPtr<real> t_cup, ColCPtr<real> z_cup,
+    int kstart, int kend, int kte, int& kinv1, int& kinv2,
+    CPPWRF_COLUMN_CURSOR) {
+  CPPWRF_GFL_GET_INVERSION_LAYERS_Z(CPPWRF_COLUMN_ARRAY0)
   for (int k = 1; k <= kte; ++k) kinv[k] = 1;
   kinv1 = 1;
   kinv2 = 1;
   if (ierr != 0) return;
 
-  real first_deriv[KM] = {}, sec_deriv[KM] = {}, dtempdz[KM] = {};
   int kend_p3 = kend + 3;
   for (int k = 2; k <= kend_p3 + 4; ++k) {
     first_deriv[k] =
@@ -477,12 +485,12 @@ CPPWRF_HOST_DEVICE inline void get_inversion_layers(
 // draft: 1 = deep, 2 = shallow, 3 = mid, 4 = downdraft
 // ---------------------------------------------------------------------------
 template <typename real>
-CPPWRF_HOST_DEVICE inline void get_zu_zd_pdf_fim(int kklev, const real* p,
+CPPWRF_HOST_DEVICE inline void get_zu_zd_pdf_fim(int kklev, ColCPtr<real> p,
                                                  real rand_vmas, real zubeg,
                                                  int ipr, int xland,
-                                                 const real* zuh2, int draft,
+                                                 ColCPtr<real> zuh2, int draft,
                                                  int& ierr, int kb, int kt,
-                                                 real* zu, int kts, int kte,
+                                                 ColPtr<real> zu, int kts, int kte,
                                                  int ktf, real max_mass,
                                                  int kpbli, int csum,
                                                  int pmin_lev) {
@@ -661,12 +669,15 @@ CPPWRF_HOST_DEVICE inline void get_zu_zd_pdf_fim(int kklev, const real* p,
 // rates_up_pdf (lines 5016-5151 of module_cu_gfl_deep.F90)
 // mode: 1 = deep, 2 = shallow, 3 = mid
 // ---------------------------------------------------------------------------
+#define CPPWRF_GFL_RATES_UP_PDF_Z(X) \
+  X(real, dby, KM) X(real, dbm, KM) X(real, hcot, KM) X(real, zu_local, KM) X(real, zuh2, 40)
 template <typename real>
 CPPWRF_HOST_DEVICE inline void rates_up_pdf(
-    int mode, int ktf, int kte, int& ierr, const real* p_cup, int& ktop,
-    int& k22, const real* z_cup, const real* entr_rate_2d, const real* heo,
-    const real* heso_cup, real hkbo, int xland, int& kbcon, real* zuo,
-    int& ktopdby, int csum, int pmin_lev) {
+    int mode, int ktf, int kte, int& ierr, ColCPtr<real> p_cup, int& ktop,
+    int& k22, ColCPtr<real> z_cup, ColCPtr<real> entr_rate_2d, ColCPtr<real> heo,
+    ColCPtr<real> heso_cup, real hkbo, int xland, int& kbcon, ColPtr<real> zuo,
+    int& ktopdby, int csum, int pmin_lev,
+    CPPWRF_COLUMN_CURSOR) {
   if (ierr > 0) return;
   for (int k = 1; k <= kte; ++k) zuo[k] = R(0.0);
 
@@ -674,11 +685,7 @@ CPPWRF_HOST_DEVICE inline void rates_up_pdf(
   const real dbythresh = (mode == 2 || mode == 3) ? R(1.0) : R(0.8);
   const real beta_u = max(R(0.1), R(0.2) - real(csum) * R(0.01));
 
-  real dby[KM] = {};
-  real dbm[KM] = {};
-  real hcot[KM] = {};
-  real zu_local[KM] = {};
-  real zuh2[40] = {};
+  CPPWRF_GFL_RATES_UP_PDF_Z(CPPWRF_COLUMN_ARRAY0)
 
   kbcon = max(kbcon, 2);
   int start_level = max(1, k22);
@@ -773,10 +780,10 @@ CPPWRF_HOST_DEVICE inline void rates_up_pdf(
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void get_lateral_massflux(
-    int ktf, int kte, int ierr, int ktop, const real* zo_cup, const real* zuo,
-    real* cd, real* entr_rate_2d, real* up_massentro, real* up_massdetro,
-    real* up_massentr, real* up_massdetr, int draft, int kbcon, int k22,
-    real* up_massentru, real* up_massdetru, real& lambau) {
+    int ktf, int kte, int ierr, int ktop, ColCPtr<real> zo_cup, ColCPtr<real> zuo,
+    ColPtr<real> cd, ColPtr<real> entr_rate_2d, ColPtr<real> up_massentro, ColPtr<real> up_massdetro,
+    ColPtr<real> up_massentr, ColPtr<real> up_massdetr, int draft, int kbcon, int k22,
+    ColPtr<real> up_massentru, ColPtr<real> up_massdetru, real& lambau) {
   for (int k = 1; k <= kte; ++k) {
     up_massentro[k] = R(0.0);
     up_massdetro[k] = R(0.0);
@@ -854,13 +861,13 @@ CPPWRF_HOST_DEVICE inline void get_lateral_massflux(
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_up_moisture(
-    bool is_mid, int& ierr, const real* z_cup, real* qc, real* qrc, real* pw,
-    real& pwav, const real* p_cup, int kbcon, int ktop, const real* dby,
-    real* clw_all, int xland1, const real* q, const real* gamma_cup,
-    const real* zu, const real* qes_cup, int k22, const real* qe_cup, real c0,
-    real* c0t3d, real zqexec, real ccn, real ccnclean, const real* rho,
-    real* c1d, const real* t, int autoconv, const real* up_massentr,
-    const real* up_massdetr, real& psum, real& psumh, int itest, int ktf,
+    bool is_mid, int& ierr, ColCPtr<real> z_cup, ColPtr<real> qc, ColPtr<real> qrc, ColPtr<real> pw,
+    real& pwav, ColCPtr<real> p_cup, int kbcon, int ktop, ColCPtr<real> dby,
+    ColPtr<real> clw_all, int xland1, ColCPtr<real> q, ColCPtr<real> gamma_cup,
+    ColCPtr<real> zu, ColCPtr<real> qes_cup, int k22, ColCPtr<real> qe_cup, real c0,
+    ColPtr<real> c0t3d, real zqexec, real ccn, real ccnclean, ColCPtr<real> rho,
+    ColPtr<real> c1d, ColCPtr<real> t, int autoconv, ColCPtr<real> up_massentr,
+    ColCPtr<real> up_massdetr, real& psum, real& psumh, int itest, int ktf,
     int kte) {
   using C = GflConstants<real>;
 

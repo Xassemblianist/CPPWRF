@@ -580,7 +580,11 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     lowlyr.upload(std::vector<int>(lowlyr.layout().total, 1));
     tke_pbl.fill_host([](int, int, int) { return 0.2; });       // myjpblinit: TKE_MYJ = EPSQ2 = 0.2
   }
+  // the cumulus scheme's column arrays in the GPU's work buffer
+  column_work_reserve(g.columns(), suite_detail::cumulus_work_bytes(o.cu_physics, g.nz));
+  if (o.gwd_opt == 1) column_work_reserve(g.columns(), suite_detail::gwdo_work_bytes());
   if (o.cu_physics == 1) {
+    cu_kf::kf_reserve<real>(g.columns(), g.nz);  // CUDA FP64: its column arrays in the work buffer
     using namespace wrfc;
     cu_kf::KFTables<real> h_kf{};
     cu_kf::init_kf_tables(h_kf, svp1, svp2, svp3, svpt0);

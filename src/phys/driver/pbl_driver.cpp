@@ -3,6 +3,7 @@
 #include "phys/driver/suite.hpp"
 
 #include "phys/bl_acm/acm.hpp"
+#include "core/column_work.hpp"
 #include "phys/bl_gwdo/gwdo.hpp"
 #include "phys/bl_myj/myjpbl.hpp"
 #include "phys/bl_mynn/mynnedmf.hpp"
@@ -54,8 +55,13 @@ struct KGwdo {
   C2 var, oc1, oa1, oa2, oa3, oa4, ol1, ol2, ol3, ol4, omax, dx;
   BView2<const real> sina, cosa;
   V2 dusfcg, dvsfcg;
+  ColumnWork work{};  // the GPU's column arrays (column_for_work)
+  static constexpr std::size_t kWorkBytes = bl_gwdo::kWorkBytes<real>;
   CPPWRF_HD void operator()(int i, int j) const {
-    bl_gwdo::GwdoColumn<real> c;
+    using T = real;  // the lists' element type
+    using bl_gwdo::KM;
+    CPPWRF_COLUMN_SLOTS(work, i, j)
+    CPPWRF_COLUMN_STRUCT(bl_gwdo::GwdoColumn<real>, c, CPPWRF_GWDO_COLUMN)
     for (int k = 0; k <= nz; ++k) c.prsi[k + 1] = p8w(i, j, k);
     for (int k = 0; k < nz; ++k) {
       c.rublten[k + 1] = rublten(i, j, k);
@@ -72,7 +78,7 @@ struct KGwdo {
     c.oa2d1 = oa1(i, j); c.oa2d2 = oa2(i, j); c.oa2d3 = oa3(i, j); c.oa2d4 = oa4(i, j);
     c.ol2d1 = ol1(i, j); c.ol2d2 = ol2(i, j); c.ol2d3 = ol3(i, j); c.ol2d4 = ol4(i, j);
     c.omax = omax(i, j);
-    bl_gwdo::bl_gwdo_run<real>(c, nz, dx_factor, if_nonhyd, g, cp, rd, ep1, pi, dt);
+    bl_gwdo::bl_gwdo_run<real>(c, nz, dx_factor, if_nonhyd, g, cp, rd, ep1, pi, dt, cppwrf_cw_);
     for (int k = 0; k < nz; ++k) {
       rublten(i, j, k) = c.rublten[k + 1];
       rvblten(i, j, k) = c.rvblten[k + 1];
@@ -325,6 +331,10 @@ struct KBlFogdes {
 }  // namespace
 
 // module_pbl_driver.F pbl_driver for YSUSCHEME / MYJPBLSCHEME / MYNNPBLSCHEME / ACMPBLSCHEME
+namespace suite_detail {
+std::size_t gwdo_work_bytes() { return KGwdo::kWorkBytes; }
+}  // namespace suite_detail
+
 void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
   if (o_.bl_pbl_physics == 0) return;  // module_pbl_driver: no PBL scheme (surface fluxes reach diff_opt 2)
   const Range2D cols = g_.columns();
@@ -458,7 +468,7 @@ void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
     k.oa4 = oa4.cview(); k.ol1 = ol1.cview(); k.ol2 = ol2.cview(); k.ol3 = ol3.cview(); k.ol4 = ol4.cview();
     k.omax = elvmax.cview(); k.dx = dx2d.cview(); k.sina = b.sina.view(); k.cosa = b.cosa.view();
     k.dusfcg = dusfcg.view(); k.dvsfcg = dvsfcg.view();
-    column_for(cols, k);
+    column_for_work(cols, k);
   }
   if (o_.grav_settling >= 1) {
     if (!flag_qc) throw std::runtime_error("grav_settling: the microphysics must carry qc (qc_curr)");

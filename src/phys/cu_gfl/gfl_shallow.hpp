@@ -14,7 +14,7 @@
 template <typename real>
 struct GflShallowIn {
   int nz;
-  const real *us, *vs, *zo, *t, *q, *tn, *qo, *po, *dhdt, *rho;
+  ColCPtr<real> us, vs, zo, t, q, tn, qo, po, dhdt, rho;
   real z1, psur, hfx, qfx, xland, dx, tcrit, dtime;
   int kpbl, ichoice;
 };
@@ -23,22 +23,37 @@ struct GflShallowOut {
   int ierr, kbcon, ktop, k22;
 };
 
+#define CPPWRF_GFL_CU_GFL_SH_RUN_Z(X) \
+  X(real, zo, KM) X(real, z, KM) X(real, xz, KM) X(real, zu, KM) X(real, xzu, KM) X(real, qes, KM) \
+  X(real, he, KM) X(real, hes, KM) X(real, qeso, KM) X(real, heo, KM) X(real, heso, KM) X(real, qes_cup, KM) \
+  X(real, q_cup, KM) X(real, he_cup, KM) X(real, hes_cup, KM) X(real, z_cup, KM) X(real, p_cup, KM) \
+  X(real, gamma_cup, KM) X(real, t_cup, KM) X(real, qeso_cup, KM) X(real, qo_cup, KM) X(real, heo_cup, KM) \
+  X(real, heso_cup, KM) X(real, zo_cup, KM) X(real, po_cup, KM) X(real, gammao_cup, KM) X(real, tn_cup, KM) \
+  X(real, u_cup, KM) X(real, v_cup, KM) X(real, uc, KM) X(real, vc, KM) X(real, hc, KM) X(real, dby, KM) \
+  X(real, hco, KM) X(real, dbyo, KM) X(real, dbyt, KM) X(real, qco, KM) X(real, qrco, KM) X(real, pwo, KM) \
+  X(real, c1d, KM) X(real, cd, KM) X(real, entr_rate_2d, KM) X(real, up_massentr, KM) X(real, up_massdetr, KM) \
+  X(real, up_massentro, KM) X(real, up_massdetro, KM) X(real, up_massentru, KM) X(real, up_massdetru, KM) \
+  X(real, dellah, KM) X(real, dellaq, KM) X(real, dellat, KM) X(real, dellaqc, KM) X(real, dellu, KM) \
+  X(real, dellv, KM) X(real, xhe, KM) X(real, xq, KM) X(real, xt, KM) X(real, xqes, KM) X(real, xhes, KM) \
+  X(real, xqes_cup, KM) X(real, xq_cup, KM) X(real, xhe_cup, KM) X(real, xhes_cup, KM) X(real, xz_cup, KM) \
+  X(real, xt_cup, KM) X(real, xhc, KM) X(real, xdby, KM) X(real, xff_shal, 4)
 template <typename real>
 CPPWRF_HOST_DEVICE inline GflShallowOut cu_gfl_sh_run(
-    const GflShallowIn<real>& in, real& frhs, real* zuo, real& xmb_out,
-    real* outt, real* outq, real* outqc, real* outu, real* outv, real* cnvwt,
-    real& pre, real* cupclw) {
+    const GflShallowIn<real>& in, real& frhs, ColPtr<real> zuo, real& xmb_out,
+    ColPtr<real> outt, ColPtr<real> outq, ColPtr<real> outqc, ColPtr<real> outu, ColPtr<real> outv, ColPtr<real> cnvwt,
+    real& pre, ColPtr<real> cupclw,
+    CPPWRF_COLUMN_CURSOR) {
   using C = GflConstants<real>;
   const int kte = in.nz, ktf = in.nz;
-  const real* us = in.us;
-  const real* vs = in.vs;
-  const real* t = in.t;
-  const real* q = in.q;
-  const real* tn = in.tn;
-  const real* qo = in.qo;
-  const real* po = in.po;
-  const real* dhdt = in.dhdt;
-  const real* rho = in.rho;
+  ColCPtr<real> us = in.us;
+  ColCPtr<real> vs = in.vs;
+  ColCPtr<real> t = in.t;
+  ColCPtr<real> q = in.q;
+  ColCPtr<real> tn = in.tn;
+  ColCPtr<real> qo = in.qo;
+  ColCPtr<real> po = in.po;
+  ColCPtr<real> dhdt = in.dhdt;
+  ColCPtr<real> rho = in.rho;
   const real z1 = in.z1, psur = in.psur, dtime = in.dtime, tcrit = in.tcrit;
   (void)tcrit;
   const int kpbl = in.kpbl;
@@ -47,26 +62,7 @@ CPPWRF_HOST_DEVICE inline GflShallowOut cu_gfl_sh_run(
   int ierr = 0, kbcon = 0, ktop = 0, k22 = 0, kbmax = 1, kstabi = 0, ktopx = 0;
   int pmin_lev = 0;
 
-  real zo[KM] = {}, z[KM] = {}, xz[KM] = {}, zu[KM] = {}, xzu[KM] = {};
-  real qes[KM] = {}, he[KM] = {}, hes[KM] = {};
-  real qeso[KM] = {}, heo[KM] = {}, heso[KM] = {};
-  real qes_cup[KM] = {}, q_cup[KM] = {}, he_cup[KM] = {}, hes_cup[KM] = {};
-  real z_cup[KM] = {}, p_cup[KM] = {}, gamma_cup[KM] = {}, t_cup[KM] = {};
-  real qeso_cup[KM] = {}, qo_cup[KM] = {}, heo_cup[KM] = {}, heso_cup[KM] = {};
-  real zo_cup[KM] = {}, po_cup[KM] = {}, gammao_cup[KM] = {}, tn_cup[KM] = {};
-  real u_cup[KM] = {}, v_cup[KM] = {}, uc[KM] = {}, vc[KM] = {};
-  real hc[KM] = {}, dby[KM] = {}, hco[KM] = {}, dbyo[KM] = {}, dbyt[KM] = {};
-  real qco[KM] = {}, qrco[KM] = {}, pwo[KM] = {}, c1d[KM] = {};
-  real cd[KM] = {}, entr_rate_2d[KM] = {};
-  real up_massentr[KM] = {}, up_massdetr[KM] = {};
-  real up_massentro[KM] = {}, up_massdetro[KM] = {};
-  real up_massentru[KM] = {}, up_massdetru[KM] = {};
-  real dellah[KM] = {}, dellaq[KM] = {}, dellat[KM] = {}, dellaqc[KM] = {};
-  real dellu[KM] = {}, dellv[KM] = {};
-  real xhe[KM] = {}, xq[KM] = {}, xt[KM] = {}, xqes[KM] = {}, xhes[KM] = {};
-  real xqes_cup[KM] = {}, xq_cup[KM] = {}, xhe_cup[KM] = {}, xhes_cup[KM] = {};
-  real xz_cup[KM] = {}, xt_cup[KM] = {};
-  real xhc[KM] = {}, xdby[KM] = {};
+  CPPWRF_GFL_CU_GFL_SH_RUN_Z(CPPWRF_COLUMN_ARRAY0)
 
   for (int k = 1; k <= kte; ++k) zo[k] = in.zo[k];
 
@@ -120,8 +116,9 @@ CPPWRF_HOST_DEVICE inline GflShallowOut cu_gfl_sh_run(
   }
 
   const real zkbmax = R(3000.0);
-  cup_env(ktf, kte, ierr, -1, psur, z1, po, t, z, he, hes, qes, q);
-  cup_env(ktf, kte, ierr, -1, psur, z1, po, tn, zo, heo, heso, qeso, qo);
+  cup_env(ktf, kte, ierr, -1, psur, z1, po, t, z, he, hes, qes, q, cppwrf_cw_);
+  cup_env(ktf, kte, ierr, -1, psur, z1, po, tn, zo, heo, heso, qeso, qo,
+cppwrf_cw_);
   cup_env_clev(ktf, kte, ierr, psur, z1, t, qes, q, he, hes, z, po, qes_cup,
                q_cup, he_cup, hes_cup, z_cup, p_cup, gamma_cup, t_cup);
   cup_env_clev(ktf, kte, ierr, psur, z1, tn, qeso, qo, heo, heso, zo, po,
@@ -169,12 +166,12 @@ CPPWRF_HOST_DEVICE inline GflShallowOut cu_gfl_sh_run(
 
   cup_kbcon(cap_max_increment, 5, k22, kbcon, heo_cup, heso_cup, hkbo, ierr,
             kbmax, po_cup, cap_max, ztexec, zqexec, kte, z_cup, entr_rate, heo,
-            0);
+            0, cppwrf_cw_);
   cup_minimi(heso_cup, kbcon, kbmax, ierr, kstabi);
 
   int kinv1 = 0, kinv2 = 0;
   get_inversion_layers(ierr, p_cup, t_cup, z_cup, kbcon, kstabi, kte, kinv1,
-                       kinv2);
+                       kinv2, cppwrf_cw_);
 
   for (int k = 1; k <= kte; ++k) entr_rate_2d[k] = entr_rate;
   if (ierr == 0) {
@@ -202,7 +199,8 @@ CPPWRF_HOST_DEVICE inline GflShallowOut cu_gfl_sh_run(
   }
 
   rates_up_pdf(2, ktf, kte, ierr, po_cup, ktop, k22, zo_cup, entr_rate_2d, heo,
-               heso_cup, hkbo, xland1, kbcon, zuo, ktopx, kbcon, pmin_lev);
+               heso_cup, hkbo, xland1, kbcon, zuo, ktopx, kbcon, pmin_lev,
+               cppwrf_cw_);
 
   if (ierr == 0) {
     if (k22 > 1) {
@@ -414,7 +412,8 @@ CPPWRF_HOST_DEVICE inline GflShallowOut cu_gfl_sh_run(
     xt[ktf] = tn[ktf];
   }
 
-  cup_env(ktf, kte, ierr, -1, psur, z1, po, xt, xz, xhe, xhes, xqes, xq);
+  cup_env(ktf, kte, ierr, -1, psur, z1, po, xt, xz, xhe, xhes, xqes, xq,
+cppwrf_cw_);
   cup_env_clev(ktf, kte, ierr, psur, z1, xt, xqes, xq, xhe, xhes, xz, po,
                xqes_cup, xq_cup, xhe_cup, xhes_cup, xz_cup, po_cup, gamma_cup,
                xt_cup);
@@ -451,7 +450,6 @@ CPPWRF_HOST_DEVICE inline GflShallowOut cu_gfl_sh_run(
              ierr);
 
   real xmb = R(0.0);
-  real xff_shal[4] = {};
   if (ierr == 0) {
     const real xmbmax = R(1.0);
     real xkshal = (xaa0 - aa1) / mbdt;

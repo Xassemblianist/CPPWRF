@@ -7,6 +7,7 @@
 #include <cmath>
 
 #include "core/backend.hpp"
+#include "core/column_work.hpp"
 
 namespace cppwrf::phys::cu_ntiedtke {
 
@@ -77,7 +78,7 @@ CPPWRF_HD inline T foeldcpm(const NtConst<T>& c, T tt) {
 
 // cuadjtqn: saturation adjustment of pt(kk), pq(kk) at pressure psp
 template <typename T>
-CPPWRF_HD inline void cuadjtqn(const NtConst<T>& c, int kk, T psp, T* pt, T* pq, bool ldflag, int kcall) {
+CPPWRF_HD inline void cuadjtqn(const NtConst<T>& c, int kk, T psp, ColPtr<T> pt, ColPtr<T> pq, bool ldflag, int kcall) {
   using C = NtConst<T>;
   const T c3les = T(C::c3les), c3ies = T(C::c3ies), c4les = T(C::c4les), c4ies = T(C::c4ies), tmelt = T(C::tmelt);
   if (kcall == 1) {
@@ -150,11 +151,11 @@ CPPWRF_HD inline void cuadjtqn(const NtConst<T>& c, int kk, T psp, T* pt, T* pq,
 
 // cuinin: half-level environment, initial updraft/downdraft profiles
 template <typename T>
-CPPWRF_HD inline void cuinin(const NtConst<T>& c, int klev, const T* pten, const T* pqen, const T* pqsen, const T* puen,
-                             const T* pven, const T* pverv, const T* pgeo, const T* paph, const T* pgeoh, T* ptenh,
-                             T* pqenh, T* pqsenh, int& klwmin, T* ptu, T* pqu, T* ptd, T* pqd, T* puu, T* pvu, T* pud,
-                             T* pvd, T* pmfu, T* pmfd, T* pmfus, T* pmfds, T* pmfuq, T* pmfdq, T* pdmfup, T* pdmfdp,
-                             T* pdpmel, T* plu, T* plude, int* klab) {
+CPPWRF_HD inline void cuinin(const NtConst<T>& c, int klev, ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> pqsen, ColCPtr<T> puen,
+                             ColCPtr<T> pven, ColCPtr<T> pverv, ColCPtr<T> pgeo, ColCPtr<T> paph, ColCPtr<T> pgeoh, ColPtr<T> ptenh,
+                             ColPtr<T> pqenh, ColPtr<T> pqsenh, int& klwmin, ColPtr<T> ptu, ColPtr<T> pqu, ColPtr<T> ptd, ColPtr<T> pqd, ColPtr<T> puu, ColPtr<T> pvu, ColPtr<T> pud,
+                             ColPtr<T> pvd, ColPtr<T> pmfu, ColPtr<T> pmfd, ColPtr<T> pmfus, ColPtr<T> pmfds, ColPtr<T> pmfuq, ColPtr<T> pmfdq, ColPtr<T> pdmfup, ColPtr<T> pdmfdp,
+                             ColPtr<T> pdpmel, ColPtr<T> plu, ColPtr<T> plude, ColPtr<int> klab) {
   (void)pmfu; (void)pmfd; (void)pmfus; (void)pmfds; (void)pmfuq; (void)pmfdq; (void)pdmfup; (void)pdmfdp;
   (void)pdpmel; (void)plude;
   for (int jk = 2; jk <= klev; ++jk) {
@@ -201,10 +202,10 @@ CPPWRF_HD inline void cuinin(const NtConst<T>& c, int klev, const T* pten, const
 
 // cubasmcn: mid-level convection base
 template <typename T>
-CPPWRF_HD inline void cubasmcn(const NtConst<T>& c, int kk, const T* pten, const T* pqen, const T* pqsen,
-                               const T* pverv, const T* pgeo, const T* pgeoh, bool ldcum, int& ktype, int* klab,
-                               T* plrain, T* pmfu, T& pmfub, int& kcbot, T* ptu, T* pqu, T* plu, T* pmfus, T* pmfuq,
-                               T* pmful, T* pdmfup) {
+CPPWRF_HD inline void cubasmcn(const NtConst<T>& c, int kk, ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> pqsen,
+                               ColCPtr<T> pverv, ColCPtr<T> pgeo, ColCPtr<T> pgeoh, bool ldcum, int& ktype, ColPtr<int> klab,
+                               ColPtr<T> plrain, ColPtr<T> pmfu, T& pmfub, int& kcbot, ColPtr<T> ptu, ColPtr<T> pqu, ColPtr<T> plu, ColPtr<T> pmfus, ColPtr<T> pmfuq,
+                               ColPtr<T> pmful, ColPtr<T> pdmfup) {
   using C = NtConst<T>;
   if (!ldcum && klab[kk + 1] == 0) {
     if (C::lmfmid && pqen[kk] > T(0.80) * pqsen[kk] && pgeo[kk] * c.zrg > T(5.0e2) && pgeo[kk] * c.zrg < T(1.0e4)) {
@@ -229,8 +230,8 @@ CPPWRF_HD inline void cubasmcn(const NtConst<T>& c, int kk, const T* pten, const
 
 // cuentrn (zentr = 0: no entrainment from this routine, detrainment 0.75e-4 per m)
 template <typename T>
-CPPWRF_HD inline void cuentrn(const NtConst<T>& c, int kk, int kcbot, bool ldcum, bool ldwork, const T* pgeoh,
-                              const T* pmfu, T& pdmfen, T& pdmfde) {
+CPPWRF_HD inline void cuentrn(const NtConst<T>& c, int kk, int kcbot, bool ldcum, bool ldwork, ColCPtr<T> pgeoh,
+                              ColCPtr<T> pmfu, T& pdmfen, T& pdmfde) {
   if (ldwork) {
     pdmfen = T(0.);
     pdmfde = T(0.);
@@ -249,11 +250,15 @@ CPPWRF_HD inline void cuentrn(const NtConst<T>& c, int kk, int kcbot, bool ldcum
 
 // cutypen: convection type and cloud base/top from test parcels (shallow from the surface layer, then
 // deep parcels launched from each level of the lower half)
+#define CPPWRF_NT_CUTYPEN(X) \
+  X(T, plu, KM) X(T, ptu, KM) X(T, pqu, KM) X(T, dh, KM) X(T, dhen, KM) X(T, kup, KM) X(T, vptu, KM) \
+  X(T, vten, KM) X(T, zbuo, KM) X(T, abuoy, KM) X(int, klab, KM)
 template <typename T>
-CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, const T* pqen, const T* ptenh, const T* pqenh,
-                              const T* pqsenh, const T* pgeoh, const T* paph, T hfx, T qfx, const T* pgeo,
-                              const T* pqsen, const T* pap, const T* pten, int lndj, T* cutu, T* cuqu, int* culab,
-                              bool& ldcum, int& cubot, int& cutop, int& ktype, T& wbase, T* culu, int& kdpl) {
+CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, ColCPtr<T> pqen, ColCPtr<T> ptenh, ColCPtr<T> pqenh,
+                              ColCPtr<T> pqsenh, ColCPtr<T> pgeoh, ColCPtr<T> paph, T hfx, T qfx, ColCPtr<T> pgeo,
+                              ColCPtr<T> pqsen, ColCPtr<T> pap, ColCPtr<T> pten, int lndj, ColPtr<T> cutu, ColPtr<T> cuqu, ColPtr<int> culab,
+                              bool& ldcum, int& cubot, int& cutop, int& ktype, T& wbase, ColPtr<T> culu, int& kdpl,
+                              CPPWRF_COLUMN_CURSOR) {
   using C = NtConst<T>;
   (void)pqsenh; (void)lndj;
   const int klevm1 = klev - 1;
@@ -263,8 +268,7 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, const T* pqen, cons
   ktype = 0;
   wbase = T(0.);
   ldcum = false;
-  T plu[KM], ptu[KM], pqu[KM], dh[KM], dhen[KM], kup[KM], vptu[KM], vten[KM], zbuo[KM], abuoy[KM];
-  int klab[KM];
+  CPPWRF_NT_CUTYPEN(CPPWRF_COLUMN_ARRAY)
   for (int jk = 1; jk <= klev; ++jk) {
     plu[jk] = culu[jk];
     ptu[jk] = cutu[jk];
@@ -530,14 +534,16 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, const T* pqen, cons
 }
 
 // cuascn: updraft (entrainment/detrainment, condensation, precipitation, mid-level convection)
+#define CPPWRF_NT_CUASCN(X) \
+  X(T, zlrain, KM) X(T, zbuo, KM) X(T, kup, KM) X(T, pdmfen, KM)
 template <typename T>
-CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, T* ptenh, T* pqenh, const T* puen, const T* pven,
-                             const T* pten, const T* pqen, const T* pqsen, const T* pgeo, const T* pgeoh, const T* pap,
-                             const T* paph, const T* pqte, const T* pverv, int klwmin, bool& ldcum, T& phcbase,
-                             int& ktype, int* klab, T* ptu, T* pqu, T* plu, T* puu, T* pvu, T* pmfu, T& pmfub,
-                             T* pmfus, T* pmfuq, T* pmful, T* plude, T* pdmfup, int& kcbot, int& kctop, int& kctop0,
-                             int& kcum, T ztmst, T* pqsenh, T* plglac, int lndj, T& wup, T wbase, int kdpl,
-                             T* pmfude_rate) {
+CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, ColPtr<T> pqenh, ColCPtr<T> puen, ColCPtr<T> pven,
+                             ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> pqsen, ColCPtr<T> pgeo, ColCPtr<T> pgeoh, ColCPtr<T> pap,
+                             ColCPtr<T> paph, ColCPtr<T> pqte, ColCPtr<T> pverv, int klwmin, bool& ldcum, T& phcbase,
+                             int& ktype, ColPtr<int> klab, ColPtr<T> ptu, ColPtr<T> pqu, ColPtr<T> plu, ColPtr<T> puu, ColPtr<T> pvu, ColPtr<T> pmfu, T& pmfub,
+                             ColPtr<T> pmfus, ColPtr<T> pmfuq, ColPtr<T> pmful, ColPtr<T> plude, ColPtr<T> pdmfup, int& kcbot, int& kctop, int& kctop0,
+                             int& kcum, T ztmst, ColPtr<T> pqsenh, ColPtr<T> plglac, int lndj, T& wup, T wbase, int kdpl,
+                             ColPtr<T> pmfude_rate, CPPWRF_COLUMN_CURSOR) {
   using C = NtConst<T>;
   (void)puen; (void)pven; (void)pqte; (void)klwmin; (void)phcbase; (void)puu; (void)pvu; (void)kcum; (void)pqsenh;
   const int klevm1 = klev - 1;
@@ -560,7 +566,7 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, T* ptenh, T* pqenh, 
     pmfub = T(0.);
     pqu[klev] = T(0.);
   }
-  T zlrain[KM], zbuo[KM], kup[KM], pdmfen[KM];
+  CPPWRF_NT_CUASCN(CPPWRF_COLUMN_ARRAY)
   for (int jk = 1; jk <= klev; ++jk) {
     if (jk != kcbot) plu[jk] = T(0.);
     pmfu[jk] = T(0.);
@@ -809,12 +815,15 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, T* ptenh, T* pqenh, 
 }
 
 // cudlfsn: level of free sinking (downdraft top)
+#define CPPWRF_NT_CUDLFSN(X) \
+  X(T, ztenwb, KM) X(T, zqenwb, KM)
 template <typename T>
 CPPWRF_HD inline void cudlfsn(const NtConst<T>& c, int klev, int kcbot, int kctop, int lndj, bool ldcum,
-                              const T* ptenh, const T* pqenh, const T* puen, const T* pven, const T* pten,
-                              const T* pqsen, const T* pgeo, const T* pgeoh, const T* paph, const T* ptu, const T* pqu,
-                              const T* plu, const T* puu, const T* pvu, T pmfub, T& prfl, T* ptd, T* pqd, T* pud,
-                              T* pvd, T* pmfd, T* pmfds, T* pmfdq, T* pdmfdp, int& kdtop, bool& lddraf) {
+                              ColCPtr<T> ptenh, ColCPtr<T> pqenh, ColCPtr<T> puen, ColCPtr<T> pven, ColCPtr<T> pten,
+                              ColCPtr<T> pqsen, ColCPtr<T> pgeo, ColCPtr<T> pgeoh, ColCPtr<T> paph, ColCPtr<T> ptu, ColCPtr<T> pqu,
+                              ColCPtr<T> plu, ColCPtr<T> puu, ColCPtr<T> pvu, T pmfub, T& prfl, ColPtr<T> ptd, ColPtr<T> pqd, ColPtr<T> pud,
+                              ColPtr<T> pvd, ColPtr<T> pmfd, ColPtr<T> pmfds, ColPtr<T> pmfdq, ColPtr<T> pdmfdp, int& kdtop, bool& lddraf,
+                              CPPWRF_COLUMN_CURSOR) {
   using C = NtConst<T>;
   (void)lndj; (void)puen; (void)pven; (void)plu; (void)puu; (void)pvu; (void)pud; (void)pvd;
   lddraf = false;
@@ -829,7 +838,7 @@ CPPWRF_HD inline void cudlfsn(const NtConst<T>& c, int klev, int kcbot, int kcto
     }
   }
   const int ike = klev - 3;
-  T ztenwb[KM], zqenwb[KM];
+  CPPWRF_NT_CUDLFSN(CPPWRF_COLUMN_ARRAY)
   for (int jk = 3; jk <= ike; ++jk) {
     ztenwb[jk] = ptenh[jk];
     zqenwb[jk] = pqenh[jk];
@@ -858,10 +867,10 @@ CPPWRF_HD inline void cudlfsn(const NtConst<T>& c, int klev, int kcbot, int kcto
 
 // cuddrafn: downdraft
 template <typename T>
-CPPWRF_HD inline void cuddrafn(const NtConst<T>& c, int klev, bool lddraf, const T* ptenh, const T* pqenh,
-                               const T* puen, const T* pven, const T* pgeo, const T* pgeoh, const T* paph, T& prfl,
-                               T* ptd, T* pqd, T* pud, T* pvd, const T* pmfu, T* pmfd, T* pmfds, T* pmfdq, T* pdmfdp,
-                               T* pmfdde_rate) {
+CPPWRF_HD inline void cuddrafn(const NtConst<T>& c, int klev, bool lddraf, ColCPtr<T> ptenh, ColCPtr<T> pqenh,
+                               ColCPtr<T> puen, ColCPtr<T> pven, ColCPtr<T> pgeo, ColCPtr<T> pgeoh, ColCPtr<T> paph, T& prfl,
+                               ColPtr<T> ptd, ColPtr<T> pqd, ColPtr<T> pud, ColPtr<T> pvd, ColCPtr<T> pmfu, ColPtr<T> pmfd, ColPtr<T> pmfds, ColPtr<T> pmfdq, ColPtr<T> pdmfdp,
+                               ColPtr<T> pmfdde_rate) {
   using C = NtConst<T>;
   (void)puen; (void)pven; (void)pud; (void)pvd;
   T zoentr = T(0.), zbuoy = T(0.), zdmfen = T(0.), zdmfde = T(0.);
@@ -930,11 +939,11 @@ CPPWRF_HD inline void cuddrafn(const NtConst<T>& c, int klev, bool lddraf, const
 
 // cuflxn: final convective fluxes, precipitation fluxes, melting and evaporation below cloud base
 template <typename T>
-CPPWRF_HD inline void cuflxn(const NtConst<T>& c, int klev, T ztmst, const T* pten, const T* pqen, T* pqsen,
-                             const T* ptenh, const T* pqenh, const T* paph, const T* pap, const T* pgeoh, int lndj,
+CPPWRF_HD inline void cuflxn(const NtConst<T>& c, int klev, T ztmst, ColCPtr<T> pten, ColCPtr<T> pqen, ColPtr<T> pqsen,
+                             ColCPtr<T> ptenh, ColCPtr<T> pqenh, ColCPtr<T> paph, ColCPtr<T> pap, ColCPtr<T> pgeoh, int lndj,
                              bool ldcum, int kcbot, int kctop, int kdtop, int& ktopm2, int& ktype, bool& lddraf,
-                             T* pmfu, T* pmfd, T* pmfus, T* pmfds, T* pmfuq, T* pmfdq, T* pmful, T* plude, T* pdmfup,
-                             T* pdmfdp, T* pdpmel, T* plglac, T& prain, T* pmfdde_rate, T* pmflxr, T* pmflxs) {
+                             ColPtr<T> pmfu, ColPtr<T> pmfd, ColPtr<T> pmfus, ColPtr<T> pmfds, ColPtr<T> pmfuq, ColPtr<T> pmfdq, ColPtr<T> pmful, ColPtr<T> plude, ColPtr<T> pdmfup,
+                             ColPtr<T> pdmfdp, ColPtr<T> pdpmel, ColPtr<T> plglac, T& prain, ColPtr<T> pmfdde_rate, ColPtr<T> pmflxr, ColPtr<T> pmflxs) {
   using C = NtConst<T>;
   const T tmelt = T(C::tmelt);
   const T ztaumel = T(18000.);
@@ -1094,14 +1103,17 @@ CPPWRF_HD inline void cuflxn(const NtConst<T>& c, int klev, T ztmst, const T* pt
 }
 
 // cudtdqn: temperature and moisture tendencies, detrained condensate
+#define CPPWRF_NT_CUDTDQN(X) \
+  X(T, zdp, KM) X(T, zdtdt, KM) X(T, zdqdt, KM)
 template <typename T>
-CPPWRF_HD inline void cudtdqn(const NtConst<T>& c, int klev, int ktopm2, bool ldcum, const T* paph, const T* pten,
-                              const T* plglac, const T* plude, const T* pmfu, const T* pmfd, const T* pmfus,
-                              const T* pmfds, const T* pmfuq, const T* pmfdq, const T* pmful, const T* pdmfup,
-                              const T* pdmfdp, const T* pdpmel, T* ptent, T* ptenq, T* pcte) {
+CPPWRF_HD inline void cudtdqn(const NtConst<T>& c, int klev, int ktopm2, bool ldcum, ColCPtr<T> paph, ColCPtr<T> pten,
+                              ColCPtr<T> plglac, ColCPtr<T> plude, ColCPtr<T> pmfu, ColCPtr<T> pmfd, ColCPtr<T> pmfus,
+                              ColCPtr<T> pmfds, ColCPtr<T> pmfuq, ColCPtr<T> pmfdq, ColCPtr<T> pmful, ColCPtr<T> pdmfup,
+                              ColCPtr<T> pdmfdp, ColCPtr<T> pdpmel, ColPtr<T> ptent, ColPtr<T> ptenq, ColPtr<T> pcte,
+                              CPPWRF_COLUMN_CURSOR) {
   (void)pmfu; (void)pmfd;
   if (!ldcum) return;
-  T zdp[KM], zdtdt[KM], zdqdt[KM];
+  CPPWRF_NT_CUDTDQN(CPPWRF_COLUMN_ARRAY)
   for (int jk = 1; jk <= klev; ++jk) zdp[jk] = c.g / (paph[jk + 1] - paph[jk]);
   for (int jk = ktopm2; jk <= klev; ++jk) {
     const T zalv = foelhm(c, pten[jk]);
@@ -1125,12 +1137,16 @@ CPPWRF_HD inline void cudtdqn(const NtConst<T>& c, int klev, int ktopm2, bool ld
 }
 
 // cududvn: momentum tendencies
+#define CPPWRF_NT_CUDUDVN(X) \
+  X(T, zdp, KM) X(T, zuen, KM) X(T, zven, KM) X(T, zmfuu, KM) X(T, zmfuv, KM) X(T, zmfdu, KM) X(T, zmfdv, KM) \
+  X(T, zdudt, KM) X(T, zdvdt, KM)
 template <typename T>
 CPPWRF_HD inline void cududvn(const NtConst<T>& c, int klev, int ktopm2, int ktype, int kcbot, bool ldcum,
-                              const T* paph, const T* puen, const T* pven, const T* pmfu, const T* pmfd, const T* puu,
-                              const T* pud, const T* pvu, const T* pvd, T* ptenu, T* ptenv) {
+                              ColCPtr<T> paph, ColCPtr<T> puen, ColCPtr<T> pven, ColCPtr<T> pmfu, ColCPtr<T> pmfd, ColCPtr<T> puu,
+                              ColCPtr<T> pud, ColCPtr<T> pvu, ColCPtr<T> pvd, ColPtr<T> ptenu, ColPtr<T> ptenv,
+                              CPPWRF_COLUMN_CURSOR) {
   if (!ldcum) return;
-  T zdp[KM], zuen[KM], zven[KM], zmfuu[KM], zmfuv[KM], zmfdu[KM], zmfdv[KM], zdudt[KM], zdvdt[KM];
+  CPPWRF_NT_CUDUDVN(CPPWRF_COLUMN_ARRAY)
   for (int jk = 1; jk <= klev; ++jk) {
     zuen[jk] = puen[jk];
     zven[jk] = pven[jk];
@@ -1171,24 +1187,26 @@ CPPWRF_HD inline void cududvn(const NtConst<T>& c, int klev, int ktopm2, int kty
 }
 
 // cumastrn: master routine (one column)
+#define CPPWRF_NT_CUMASTRN(X) \
+  X(int, ilab, KM) X(T, ztenh, KM) X(T, zqenh, KM) X(T, zqsenh, KM) X(T, ztd, KM) X(T, zqd, KM) X(T, zmfus, KM) \
+  X(T, zmfds, KM) X(T, zmfuq, KM) X(T, zmfdq, KM) X(T, zdmfup, KM) X(T, zdmfdp, KM) X(T, zmful, KM) \
+  X(T, zuu, KM) X(T, zvu, KM) X(T, zud, KM) X(T, zvd, KM) X(T, zlglac, KM) X(T, zdpmel, KM) \
+  X(T, pmfude_rate, KM) X(T, pmfdde_rate, KM) X(T, zmfuus, KM) X(T, zmfdus, KM) X(T, zuv2, KM) X(T, ztenu, KM) \
+  X(T, ztenv, KM) X(T, pmflxr, KM) X(T, pmflxs, KM)
 template <typename T>
-CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, const T* pten, const T* pqen, const T* puen,
-                               const T* pven, const T* pverv, T* pqsen, T pqhfl, T ztmst, const T* pap, const T* paph,
-                               const T* pgeo, T* ptte, T* pqte, T* pvom, T* pvol, T& prsfc, T& pssfc, bool& ldcum,
-                               int& ktype, int& kcbot, int& kctop, T* ptu, T* pqu, T* plu, T* plude, T* pmfu,
-                               T* pmfd, T& prain, T* pcte, T phhfl, int lndj, const T* zgeoh, T dx, T scale_fac,
-                               T scale_fac2) {
+CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> puen,
+                               ColCPtr<T> pven, ColCPtr<T> pverv, ColPtr<T> pqsen, T pqhfl, T ztmst, ColCPtr<T> pap, ColCPtr<T> paph,
+                               ColCPtr<T> pgeo, ColPtr<T> ptte, ColPtr<T> pqte, ColPtr<T> pvom, ColPtr<T> pvol, T& prsfc, T& pssfc, bool& ldcum,
+                               int& ktype, int& kcbot, int& kctop, ColPtr<T> ptu, ColPtr<T> pqu, ColPtr<T> plu, ColPtr<T> plude, ColPtr<T> pmfu,
+                               ColPtr<T> pmfd, T& prain, ColPtr<T> pcte, T phhfl, int lndj, ColCPtr<T> zgeoh, T dx, T scale_fac,
+                               T scale_fac2, CPPWRF_COLUMN_CURSOR) {
   using C = NtConst<T>;
   (void)dx;
   const T cmfcmin = T(C::cmfcmin);
   const T zcons = T(1.) / (c.g * ztmst);
   const T zcons2 = T(3.) / (c.g * ztmst);
   int ilwmin = 0, ictop0 = 0, kdpl = 0, idtop = 0, icum = 0, itopm2 = 0;
-  int ilab[KM];
-  T ztenh[KM], zqenh[KM], zqsenh[KM], ztd[KM], zqd[KM], zmfus[KM], zmfds[KM], zmfuq[KM], zmfdq[KM], zdmfup[KM],
-      zdmfdp[KM], zmful[KM], zuu[KM], zvu[KM], zud[KM], zvd[KM], zlglac[KM], zdpmel[KM];
-  T pmfude_rate[KM], pmfdde_rate[KM], zmfuus[KM], zmfdus[KM], zuv2[KM], ztenu[KM], ztenv[KM];
-  T pmflxr[KM], pmflxs[KM];
+  CPPWRF_NT_CUMASTRN(CPPWRF_COLUMN_ARRAY)
   T wbase = T(0), wup = T(0), zhcbase = T(0), zmfub = T(0), zmfub1 = T(0), zdhpbl = T(0), upbl = T(0), zrfl = T(0);
   T zmfs = T(0), zmfuub = T(0), zheat = T(0), zcape = T(0), zcape1 = T(0), zcape2 = T(0), ztauc = T(0),
     ztaubl = T(0), zsum12 = T(0), zsum22 = T(0);
@@ -1200,7 +1218,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, const T* pten, con
   cuinin(c, klev, pten, pqen, pqsen, puen, pven, pverv, pgeo, paph, zgeoh, ztenh, zqenh, zqsenh, ilwmin, ptu, pqu, ztd,
          zqd, zuu, zvu, zud, zvd, pmfu, pmfd, zmfus, zmfds, zmfuq, zmfdq, zdmfup, zdmfdp, zdpmel, plu, plude, ilab);
   cutypen(c, klev, pqen, ztenh, zqenh, zqsenh, zgeoh, paph, phhfl, pqhfl, pgeo, pqsen, pap, pten, lndj, ptu, pqu, ilab,
-          ldcum, kcbot, ictop0, ktype, wbase, plu, kdpl);
+          ldcum, kcbot, ictop0, ktype, wbase, plu, kdpl, cppwrf_cw_);
 
   zdhpbl = T(0.0);
   upbl = T(0.0);
@@ -1238,7 +1256,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, const T* pten, con
 
   cuascn(c, klev, ztenh, zqenh, puen, pven, pten, pqen, pqsen, pgeo, zgeoh, pap, paph, pqte, pverv, ilwmin, ldcum,
          zhcbase, ktype, ilab, ptu, pqu, plu, zuu, zvu, pmfu, zmfub, zmfus, zmfuq, zmful, plude, zdmfup, kcbot, kctop,
-         ictop0, icum, ztmst, zqsenh, zlglac, lndj, wup, wbase, kdpl, pmfude_rate);
+         ictop0, icum, ztmst, zqsenh, zlglac, lndj, wup, wbase, kdpl, pmfude_rate, cppwrf_cw_);
 
   if (ldcum) {
     const int ikb = kcbot;
@@ -1259,7 +1277,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, const T* pten, con
   }
   if (C::lmfdd) {
     cudlfsn(c, klev, kcbot, kctop, lndj, ldcum, ztenh, zqenh, puen, pven, pten, pqsen, pgeo, zgeoh, paph, ptu, pqu,
-            plu, zuu, zvu, zmfub, zrfl, ztd, zqd, zud, zvd, pmfd, zmfds, zmfdq, zdmfdp, idtop, loddraf);
+            plu, zuu, zvu, zmfub, zrfl, ztd, zqd, zud, zvd, pmfd, zmfds, zmfdq, zdmfdp, idtop, loddraf, cppwrf_cw_);
     cuddrafn(c, klev, loddraf, ztenh, zqenh, puen, pven, pgeo, zgeoh, paph, zrfl, ztd, zqd, zud, zvd, pmfu, pmfd,
              zmfds, zmfdq, zdmfdp, pmfdde_rate);
   }
@@ -1443,7 +1461,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, const T* pten, con
   pssfc = pmflxs[klev + 1];
 
   cudtdqn(c, klev, itopm2, ldcum, paph, pten, zlglac, plude, pmfu, pmfd, zmfus, zmfds, zmfuq, zmfdq, zmful, zdmfup,
-          zdmfdp, zdpmel, ptte, pqte, pcte);
+          zdmfdp, zdpmel, ptte, pqte, pcte, cppwrf_cw_);
 
   if (C::lmfdudv) {
     for (int jk = klev - 1; jk >= 2; --jk) {
@@ -1516,7 +1534,8 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, const T* pten, con
       ztenu[jk] = pvom[jk];
       ztenv[jk] = pvol[jk];
     }
-    cududvn(c, klev, itopm2, ktype, kcbot, ldcum, paph, puen, pven, zmfuus, zmfdus, zuu, zud, zvu, zvd, pvom, pvol);
+    cududvn(c, klev, itopm2, ktype, kcbot, ldcum, paph, puen, pven, zmfuus, zmfdus, zuu, zud, zvu, zvd, pvom, pvol,
+cppwrf_cw_);
     zsum12 = T(0.);
     zsum22 = T(0.);
     for (int jk = 1; jk <= klev; ++jk) {
@@ -1556,10 +1575,15 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, const T* pten, con
 
 // cu_ntiedtke_run for one column (lq = 1). Arrays 1..km (top to bottom), half levels 1..km+1.
 // On exit pu, pv, pt, pqv, pqc, pqi are the updated state and zprecc the convective precipitation (mm).
+#define CPPWRF_NT_CU_NTIEDTKE_RUN(X) \
+  X(T, pgeoh, KM) X(T, pcte, KM) X(T, pvom, KM) X(T, pvol, KM) X(T, ztp1, KM) X(T, zqp1, KM) X(T, pum1, KM) \
+  X(T, pvm1, KM) X(T, pverv, KM) X(T, pgeo, KM) X(T, zqsat, KM) X(T, pqte, KM) X(T, zqq, KM) X(T, ptte, KM) \
+  X(T, ztt, KM) X(T, ztu, KM) X(T, zqu, KM) X(T, zlu, KM) X(T, zlude, KM) X(T, zmfu, KM) X(T, zmfd, KM)
 template <typename T>
-CPPWRF_HD inline void cu_ntiedtke_run(const NtConst<T>& c, int km, T* pu, T* pv, T* pt, T* pqv, T* pqc, T* pqi,
-                                      const T* pqvf, const T* ptf, const T* poz, const T* pzz, const T* pomg,
-                                      const T* pap, const T* paph, T evap, T hfx, T& zprecc, int lndj, T dt, T dx) {
+CPPWRF_HD inline void cu_ntiedtke_run(const NtConst<T>& c, int km, ColPtr<T> pu, ColPtr<T> pv, ColPtr<T> pt, ColPtr<T> pqv, ColPtr<T> pqc, ColPtr<T> pqi,
+                                      ColCPtr<T> pqvf, ColCPtr<T> ptf, ColCPtr<T> poz, ColCPtr<T> pzz, ColCPtr<T> pomg,
+                                      ColCPtr<T> pap, ColCPtr<T> paph, T evap, T hfx, T& zprecc, int lndj, T dt, T dx,
+                                      CPPWRF_COLUMN_CURSOR) {
   const T ztmst = dt;
   const T dxref = T(15000.);
   T scale_fac, scale_fac2;
@@ -1575,8 +1599,7 @@ CPPWRF_HD inline void cu_ntiedtke_run(const NtConst<T>& c, int km, T* pu, T* pv,
   bool locum = false;
   T prsfc = T(0.0), pssfc = T(0.0);
   const T pqhfl = evap, phhfl = hfx;
-  T pgeoh[KM], pcte[KM], pvom[KM], pvol[KM], ztp1[KM], zqp1[KM], pum1[KM], pvm1[KM], pverv[KM], pgeo[KM], zqsat[KM];
-  T pqte[KM], zqq[KM], ptte[KM], ztt[KM], ztu[KM], zqu[KM], zlu[KM], zlude[KM], zmfu[KM], zmfd[KM];
+  CPPWRF_NT_CU_NTIEDTKE_RUN(CPPWRF_COLUMN_ARRAY)
   pgeoh[km + 1] = c.g * pzz[km + 1];
   for (int k = 1; k <= km; ++k) {
     pcte[k] = T(0.0);
@@ -1603,7 +1626,7 @@ CPPWRF_HD inline void cu_ntiedtke_run(const NtConst<T>& c, int km, T* pu, T* pv,
   int ktype = 0, icbot = 0, ictop = 0;
   cumastrn(c, km, ztp1, zqp1, pum1, pvm1, pverv, zqsat, pqhfl, ztmst, pap, paph, pgeo, ptte, pqte, pvom, pvol, prsfc,
            pssfc, locum, ktype, icbot, ictop, ztu, zqu, zlu, zlude, zmfu, zmfd, zrain, pcte, phhfl, lndj, pgeoh, dx,
-           scale_fac, scale_fac2);
+           scale_fac, scale_fac2, cppwrf_cw_);
   for (int k = 1; k <= km; ++k) {
     if (pcte[k] > T(0.)) {
       const T fliq = foealfa(ztp1[k]);
@@ -1625,5 +1648,17 @@ CPPWRF_HD inline void cu_ntiedtke_run(const NtConst<T>& c, int km, T* pu, T* pv,
     }
   }
 }
+
+// The column arrays of one column of the scheme's routines in bytes (the GPU's work buffer, core/column_work.hpp),
+// each routine's counted once
+template <typename T>
+inline constexpr std::size_t kWorkBytes =
+    0 CPPWRF_NT_CUTYPEN(CPPWRF_COLUMN_BYTES)
+        CPPWRF_NT_CUASCN(CPPWRF_COLUMN_BYTES)
+        CPPWRF_NT_CUDLFSN(CPPWRF_COLUMN_BYTES)
+        CPPWRF_NT_CUDTDQN(CPPWRF_COLUMN_BYTES)
+        CPPWRF_NT_CUDUDVN(CPPWRF_COLUMN_BYTES)
+        CPPWRF_NT_CUMASTRN(CPPWRF_COLUMN_BYTES)
+        CPPWRF_NT_CU_NTIEDTKE_RUN(CPPWRF_COLUMN_BYTES);
 
 }  // namespace cppwrf::phys::cu_ntiedtke

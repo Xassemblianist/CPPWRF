@@ -13,6 +13,12 @@ binaries for the VM's GPU, runs the suite cases against the WRF references, the 
 CPPWRF_JOB_GLIBC_PROOF (default 10^7, 0: none): random inputs per function of tools/glibc_math_proof_cuda.cu, the
 device's glibc math functions (the CUDA FP64 build's libm) against the host's ("glibc device math" in summary.txt).
 
+CPPWRF_JOB_BASE=1 (colab_run.sh --base REV): /content/base.tar.gz is a second source tree, built as build-base-cuda
+and build-base-cuda_dp. Every bench case then runs with both builds in turn ("ab" lines of summary.txt): the
+stepping time twice each (base, new, base, new), the peak device memory and the CPPWRF_MEMINFO lines of both, the
+kernel times of both when CPPWRF_KTIME is among the --env variables (bench-env-base-NAME.log), and once each with
+the case's own outputs, compared byte for byte (IDENTICAL / DIFFERENT with the files).
+
 Profiling (colab_run.sh --env / --nsys / --ncu):
 - CPPWRF_JOB_ENV_KEYS: the variables of the environment that colab_run.sh --env set (e.g. CPPWRF_KTIME). The suite
   runs with them; each bench case runs once without them (the stepping time) and once more with them.
@@ -86,6 +92,31 @@ class GpuMemory:
         if not self.vals:
             return "? (no nvidia-smi samples)"
         return f"{max(self.vals) - self.idle} MiB (peak {max(self.vals)} MiB, idle {self.idle} MiB)"
+
+
+def meminfo(log):
+    """The last CPPWRF_MEMINFO line of a log: (MiB used, stack limit in bytes, its reserve in MiB) or None."""
+    m = re.findall(r"cppwrf: device memory at the end: (\d+) MiB used of \d+ MiB; stack limit (\d+) bytes x \d+ "
+                   r"resident threads \((\d+) MiB\)", open(log).read())
+    return tuple(int(x) for x in m[-1]) if m else None
+
+
+def same_outputs(a, b):
+    """The output files of two runs of a case (snapshots, NetCDF streams, restart files; no logs, diag.csv or
+    json): (files compared, the names that differ or exist on one side only)."""
+    def files(root):
+        r = {}
+        for d, _, fs in os.walk(root):
+            for f in fs:
+                if f.endswith(".bin") or f.endswith(".nc") or re.match(r"(wrfout|wrfrst|auxhist\d+)_d\d\d", f):
+                    r[os.path.relpath(os.path.join(d, f), root)] = os.path.join(d, f)
+        return r
+    fa, fb = files(a), files(b)
+    bad = sorted(set(fa) ^ set(fb))
+    for f in sorted(set(fa) & set(fb)):
+        if open(fa[f], "rb").read() != open(fb[f], "rb").read():
+            bad.append(f)
+    return len(set(fa) | set(fb)), bad
 
 
 def base(name):
@@ -347,6 +378,17 @@ def job(note):
         note(f"build {name}: exit {rc}, {time.time() - t:.0f} s")
         if rc == 0:
             bins[name] = f"{b}/cppwrf"
+    base_bins, BASE_SRC = {}, "/content/cppwrf-base"
+    if os.environ.get("CPPWRF_JOB_BASE") == "1":
+        sh(f"rm -rf {BASE_SRC} && mkdir -p {BASE_SRC} && tar xzf /content/base.tar.gz -C {BASE_SRC}", "setup.log")
+        for name, dp in (("cuda", "OFF"), ("cuda_dp", "ON")):
+            b = f"/content/build-base-{name}"
+            t = time.time()
+            rc = sh(f"cmake -S {BASE_SRC} -B {b} -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON "
+                    f"-DCPPWRF_DOUBLE={dp} && cmake --build {b} -j{nproc} --target cppwrf", f"build-base-{name}.log")
+            note(f"build base {name}: exit {rc}, {time.time() - t:.0f} s")
+            if rc == 0:
+                base_bins[name] = f"{b}/cppwrf"
 
     # glibc's math functions on this GPU (src/core/glibc_math.hpp, the CUDA FP64 build's libm) against the same code
     # on the host: CPPWRF_JOB_GLIBC_PROOF random inputs per function (default 10^7; 0: none)
@@ -397,12 +439,39 @@ def job(note):
                 continue
             tag = name + (f"@{over}" if over else "")
 
-            def cmd(o, run_time):
-                c = [bins[key], cfg, "--set", f"output.dir={o}"]
-                for s in sets + [f"run.run_time={int(run_time)}", "output.out_interval=1000000",
-                                 "output.diag_interval=1000000"]:
+            def cmd(o, run_time, binary=None, quiet=True):
+                c = [binary or bins[key], cfg, "--set", f"output.dir={o}"]
+                for s in sets + [f"run.run_time={int(run_time)}"] + (
+                        ["output.out_interval=1000000", "output.diag_interval=1000000"] if quiet else []):
                     c += ["--set", s]
                 return c
+
+            if key in base_bins:  # the base build and this one in turn (the base runs in its own source tree)
+                st, pk, mi = {"base": [], "new": []}, {}, {}
+                menv = dict(plain, CPPWRF_MEMINFO="1")
+                for rnd in (1, 2):
+                    for v, b, cwd in (("base", base_bins[key], BASE_SRC), ("new", bins[key], SRC)):
+                        log, o = f"ab-{v}{rnd}-{tag}.log", f"/content/bench/ab_{v}"
+                        with GpuMemory() as mem:
+                            sh(f"rm -rf {o} && {shlex.join(cmd(o, t, b))}", log, cwd=cwd, env=menv)
+                        d = timings(os.path.join(JOB, log))
+                        st[v].append(d[0][1] if d else "?")
+                        pk[v] = max(mem.vals) - mem.idle if mem.vals else -1
+                        mi[v] = meminfo(os.path.join(JOB, log))
+                note(f"ab {tag}: stepping s base {', '.join(st['base'])} new {', '.join(st['new'])}; peak MiB "
+                     f"{pk['base']} -> {pk['new']}; stack limit B (reserve MiB) "
+                     + " -> ".join(f"{mi[v][1]} ({mi[v][2]})" if mi[v] else "?" for v in ("base", "new")))
+                if "CPPWRF_KTIME" in keys:
+                    sh(f"rm -rf /content/bench/ab_base && {shlex.join(cmd('/content/bench/ab_base', t, base_bins[key]))}",
+                       f"bench-env-base-{tag}.log", cwd=BASE_SRC, env=env)
+                for v, b, cwd in (("base", base_bins[key], BASE_SRC), ("new", bins[key], SRC)):
+                    o = f"/content/bench/out_{v}"
+                    sh(f"rm -rf {o} && {shlex.join(cmd(o, t, b, quiet=False))}", f"ab-out-{v}-{tag}.log", cwd=cwd,
+                       env=plain)
+                n, bad = same_outputs("/content/bench/out_base", "/content/bench/out_new")
+                note(f"ab {tag}: outputs of base and new: {n} files, " +
+                     ("IDENTICAL" if n and not bad else "DIFFERENT: " + " ".join(bad[:8]) if bad else "none written"))
+                sh("rm -rf /content/bench/out_base /content/bench/out_new", "setup.log")
 
             o = f"/content/bench/{tag}"
             with GpuMemory() as mem:

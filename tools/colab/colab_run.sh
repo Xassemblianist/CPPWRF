@@ -5,7 +5,8 @@
 #
 #   tools/colab/colab_run.sh [--gpu T4|L4|G4|A100|H100] (default G4: RTX PRO 6000, the fastest per credit)
 #                            [--cases NAME,...] [--files NAME,...] [--bench NAME[@cuda|@cuda_dp],...]
-#                            [--env K=V]... [--nsys] [--ncu REGEX|top] [--wrf-tables] [--keep] [--out DIR]
+#                            [--env K=V]... [--nsys] [--ncu REGEX|top] [--base REV] [--wrf-tables] [--keep]
+#                            [--out DIR]
 #
 #   --cases  wrf_suite.py cases to run on the VM against the WRF references (default: the GPU core set below;
 #            '' for none: the data then have no reference files)
@@ -19,6 +20,10 @@
 #   --ncu    ncu on the bench cases' kernels whose mangled names match REGEX (e.g. 'KTendU|YSURunner'; "top": the
 #            nsys top 15) in their first 2 steps (at most 500 launches): achieved occupancy, local-memory traffic,
 #            DRAM bytes, registers and stack
+#   --base   also build revision REV (git archive) and run every bench case with both builds in the same session:
+#            the stepping time twice each, alternating, the device memory and the stack reserve of both, the kernel
+#            times of both with --env CPPWRF_KTIME=1, and the case's own outputs (history every interval of its
+#            configuration) of both builds compared byte for byte
 #   --wrf-tables  upload WRF's Thompson tables (370 MB) instead of computing them on the VM: the Thompson cases
 #            (mp_physics 8 / 28) are then bit-identical to WRF in FP64
 #   --keep   leave the VM running (stop it later with `colab stop -s <session>`)
@@ -34,7 +39,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${CPPWRF_WRF_RUNS:?set CPPWRF_WRF_RUNS}"
 SCRATCH=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}
-GPU=G4 KEEP=0 OUT= FILES= NSYS= NCU= ENVS=() KEYS= MAX_UPLOAD_MIN=${MAX_UPLOAD_MIN:-20} TABLES=--no-thompson-tables WT=
+GPU=G4 KEEP=0 OUT= FILES= NSYS= NCU= BASE= ENVS=() KEYS= MAX_UPLOAD_MIN=${MAX_UPLOAD_MIN:-20} TABLES=--no-thompson-tables WT=
 CASES=real_r1_fp64_cuda,real_p1_r8_fp64_cuda_1h,real_p1_fp32_1h,real_p4_r8_fp64_cuda_1h,real_p8_r8_fp64_cuda_1h,real_t6_r8_fp64_cuda_1h,real_d0_r8_fp64_cuda_1h,real_nmp1_r8_fp64_cuda_1h
 BENCH=real_p1_r8_fp64_cuda_1h,real_p1_fp32_1h,real_d0_r8_fp64_cuda_1h
 while [ $# -gt 0 ]; do
@@ -47,6 +52,7 @@ while [ $# -gt 0 ]; do
            ENVS+=(--env "$2"); KEYS=${KEYS:+$KEYS,}${2%%=*}; shift 2 ;;
     --nsys) NSYS=1; shift ;;
     --ncu) NCU=$2; shift 2 ;;
+    --base) BASE=$2; shift 2 ;;
     --wrf-tables) TABLES= WT=wrf-tables; shift ;;
     --keep) KEEP=1; shift ;;
     --out) OUT=$2; shift 2 ;;
@@ -64,6 +70,10 @@ mkdir -p "$OUT" "$SCRATCH/colab/cache"
 [ -z "$(git -C "$REPO" status --porcelain --untracked-files=no)" ] || echo "note: uncommitted changes are not sent (HEAD only)"
 git -C "$REPO" archive --format=tar.gz -o "$OUT/src.tar.gz" HEAD
 git -C "$REPO" rev-parse --short HEAD > "$OUT/commit.txt"
+if [ -n "$BASE" ]; then
+  git -C "$REPO" archive --format=tar.gz -o "$OUT/base.tar.gz" "$BASE"
+  echo "base $(git -C "$REPO" rev-parse --short "$BASE")" >> "$OUT/commit.txt"
+fi
 STAGE=$(echo "$CASES,$BENCH" | sed 's/@cuda[a-z_]*//g')
 # no --cases and no --files: the bench cases need no reference files
 NOREFS=; [ -n "$CASES$FILES" ] || NOREFS=--no-refs
@@ -121,6 +131,7 @@ upload() {
   esac
 }
 upload "$OUT/src.tar.gz" /content/src.tar.gz || exit 1
+[ -z "$BASE" ] || upload "$OUT/base.tar.gz" /content/base.tar.gz || exit 1
 upload "$DATA" /content/data.tar || exit 1
 upload "$OUT/commit.txt" /content/commit.txt || exit 1
 upload "$REPO/tools/colab/remote_job.py" /content/remote_job.py || exit 1
@@ -128,6 +139,7 @@ fenv=("${ENVS[@]}"); [ -z "$FILES" ] || fenv+=(--env CPPWRF_JOB_FILES="$FILES")
 [ -z "$KEYS" ] || fenv+=(--env CPPWRF_JOB_ENV_KEYS="$KEYS")
 [ -z "$NSYS" ] || fenv+=(--env CPPWRF_JOB_NSYS=1)
 [ -z "$NCU" ] || fenv+=(--env CPPWRF_JOB_NCU="$NCU")
+[ -z "$BASE" ] || fenv+=(--env CPPWRF_JOB_BASE=1)
 timeout 300 colab exec -s "$S" --timeout 120 --env CPPWRF_JOB_CASES="$CASES" --env CPPWRF_JOB_BENCH="$BENCH" "${fenv[@]}" <<'EOF'
 import os, subprocess
 env = dict(os.environ)
@@ -157,10 +169,10 @@ done
 case $st in *JOB-DIED*) echo "[colab_run] the job ended without its done file (killed?)"; exit 1 ;; esac
 timeout 1800 colab download -s "$S" /content/results.tar.gz "$OUT/results.tar.gz" || { echo "[colab_run] download failed"; exit 1; }
 tar xzf "$OUT/results.tar.gz" -C "$OUT"
-rm -f "$OUT/src.tar.gz"
+rm -f "$OUT/src.tar.gz" "$OUT/base.tar.gz"
 echo "[colab_run] results in $OUT/job"
 cat "$OUT/job/summary.txt"
-if grep -qE "^suite (FAIL|SKIP|ERROR)|^files (FAIL|SKIP)|^job error|^glibc device math: exit [1-9]" "$OUT/job/summary.txt" ||
+if grep -qE "^suite (FAIL|SKIP|ERROR)|^files (FAIL|SKIP)|^job error|^glibc device math: exit [1-9]|^ab .*DIFFERENT" "$OUT/job/summary.txt" ||
    { [ -n "$FILES" ] && ! grep -q "^files compared " "$OUT/job/summary.txt"; } ||
    { [ -n "$CASES" ] && ! grep -q "^suite SUITE " "$OUT/job/summary.txt"; }; then
   echo "[colab_run] the suite did not pass"; exit 1

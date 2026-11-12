@@ -7,24 +7,36 @@
 #include <cmath>
 
 #include "core/backend.hpp"
+#include "core/column_work.hpp"
 
 namespace cppwrf::phys::bl_gwdo {
 
 inline constexpr int kMaxLevels = 100;
 inline constexpr int KM = kMaxLevels + 2;
 
+// the column's level arrays (on the GPU views into the column work buffer, core/column_work.hpp); rublten,
+// rvblten in: the PBL tendencies; out: + the drag
+#define CPPWRF_GWDO_COLUMN(X) \
+  X(T, uproj, KM) X(T, vproj, KM) X(T, t1, KM) X(T, q1, KM) X(T, prslk, KM) X(T, zl, KM) X(T, prsl, KM) \
+  X(T, prsi, KM) X(T, rublten, KM) X(T, rvblten, KM) X(T, dtaux3d, KM) X(T, dtauy3d, KM)
+// bl_gwdo_run's level arrays
+#define CPPWRF_GWDO_RUN(X) \
+  X(T, usqj, KM) X(T, bnv2, KM) X(T, vtj, KM) X(T, vtk, KM) X(T, taup, KM) X(T, taud, KM) X(T, dtfac, KM) \
+  X(T, rho, KM) X(T, del, KM) X(T, u1, KM) X(T, v1, KM) X(T, velco, KM) X(T, taufb, KM) X(T, dudt, KM) \
+  X(T, dvdt, KM) X(T, dtaux2d, KM) X(T, dtauy2d, KM)
+template <typename T>
+inline constexpr std::size_t kWorkBytes = 0 CPPWRF_GWDO_COLUMN(CPPWRF_COLUMN_BYTES) CPPWRF_GWDO_RUN(CPPWRF_COLUMN_BYTES);
+
 template <typename T>
 struct GwdoColumn {
-  T uproj[KM], vproj[KM], t1[KM], q1[KM], prslk[KM], zl[KM], prsl[KM], prsi[KM];
-  T rublten[KM], rvblten[KM];  // in: the PBL tendencies; out: + the drag
-  T dtaux3d[KM], dtauy3d[KM];
+  CPPWRF_GWDO_COLUMN(CPPWRF_COLUMN_MEMBER)
   T var, oc1, omax, oa2d1, oa2d2, oa2d3, oa2d4, ol2d1, ol2d2, ol2d3, ol2d4, sina, cosa, dxmeter;
   T dusfcg, dvsfcg;
 };
 
 template <typename T>
 CPPWRF_HD inline void bl_gwdo_run(GwdoColumn<T>& c, int kte, T dx_factor, bool if_nonhyd, T g_, T cp_, T rd_, T fv_,
-                                  T pi_, T deltim) {
+                                  T pi_, T deltim, CPPWRF_COLUMN_CURSOR) {
   constexpr int kts = 1, kgwdmin = 2, mdir = 8;
   const T qmin = T(1.0e-30), ric = T(0.25), velmin = T(1.), rimin = T(-100.), bnv2min = T(1.0e-5), efacmin = T(0.);
   const T efacmax = T(10.), frc = T(1.0), frmax = T(10.), ce = T(0.8), cg = T(1.), hmt_min = T(50.);
@@ -54,8 +66,7 @@ CPPWRF_HD inline void bl_gwdo_run(GwdoColumn<T>& c, int kte, T dx_factor, bool i
   T dtaux = T(0.), dtauy = T(0.), xn = T(0.), yn = T(0.), ubar = T(0.), vbar = T(0.), rhobar = T(0.), ulow = T(0.);
   T oa = T(0.), ol = T(0.), oc = T(0.), taub = T(0.), xlinv = T(1.0), denfac = T(1.0), nhd_effect = T(1.0);
   T coefm = T(0.), bnv = T(0.), fr = T(0.), brvf = T(0.), rulow = T(0.), olp = T(0.), od = T(0.), dxy = T(0.), dxyp = T(0.);
-  T usqj[KM], bnv2[KM], vtj[KM], vtk[KM], taup[KM], taud[KM], dtfac[KM], rho[KM], del[KM], u1[KM], v1[KM];
-  T velco[KM], taufb[KM], dudt[KM], dvdt[KM], dtaux2d[KM], dtauy2d[KM];
+  CPPWRF_GWDO_RUN(CPPWRF_COLUMN_ARRAY)
   for (int k = 0; k < KM; ++k) {
     taufb[k] = T(0.); usqj[k] = T(0.); bnv2[k] = T(0.); vtj[k] = T(0.); vtk[k] = T(0.); taup[k] = T(0.);
     taud[k] = T(0.); dtaux2d[k] = T(0.); dtauy2d[k] = T(0.); dtfac[k] = T(1.0);

@@ -17,6 +17,7 @@
 #include <cmath>
 
 #include "core/backend.hpp"
+#include "core/column_work.hpp"
 
 namespace cppwrf::phys::cu_tiedtke {
 
@@ -93,7 +94,7 @@ CPPWRF_HD inline T tlucuc(const TdConst<T>& c, T tt) {
 
 // cuadjtq: t and q adjustment at level kk (kcall 0: environment, 1: condensation, 2: evaporation)
 template <typename T>
-CPPWRF_HD inline void cuadjtq(const TdConst<T>& c, int kk, T pp, T* pt, T* pq, bool ldflag, int kcall) {
+CPPWRF_HD inline void cuadjtq(const TdConst<T>& c, int kk, T pp, ColPtr<T> pt, ColPtr<T> pq, bool ldflag, int kcall) {
   if (kcall == 1 || kcall == 2) {
     if (!ldflag) return;
     const T zqp = T(1.) / pp;
@@ -143,11 +144,11 @@ CPPWRF_HD inline void cuadjtq(const TdConst<T>& c, int kk, T pp, T* pt, T* pq, b
 
 // cuini: half-level environment values, updraft/downdraft initial values
 template <typename T>
-CPPWRF_HD inline void cuini(const TdConst<T>& c, int klev, const T* pten, const T* pqen, const T* pqsen,
-                            const T* puen, const T* pven, const T* pverv, const T* pgeo, const T* paph, T* pgeoh,
-                            T* ptenh, T* pqenh, T* pqsenh, int& klwmin, T* ptu, T* pqu, T* ptd, T* pqd, T* puu,
-                            T* pvu, T* pud, T* pvd, T* pmfu, T* pmfd, T* pmfus, T* pmfds, T* pmfuq, T* pmfdq,
-                            T* pdmfup, T* pdmfdp, T* pdpmel, T* plu, T* plude, int* klab) {
+CPPWRF_HD inline void cuini(const TdConst<T>& c, int klev, ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> pqsen,
+                            ColCPtr<T> puen, ColCPtr<T> pven, ColCPtr<T> pverv, ColCPtr<T> pgeo, ColCPtr<T> paph, ColPtr<T> pgeoh,
+                            ColPtr<T> ptenh, ColPtr<T> pqenh, ColPtr<T> pqsenh, int& klwmin, ColPtr<T> ptu, ColPtr<T> pqu, ColPtr<T> ptd, ColPtr<T> pqd, ColPtr<T> puu,
+                            ColPtr<T> pvu, ColPtr<T> pud, ColPtr<T> pvd, ColPtr<T> pmfu, ColPtr<T> pmfd, ColPtr<T> pmfus, ColPtr<T> pmfds, ColPtr<T> pmfuq, ColPtr<T> pmfdq,
+                            ColPtr<T> pdmfup, ColPtr<T> pdmfdp, ColPtr<T> pdpmel, ColPtr<T> plu, ColPtr<T> plude, ColPtr<int> klab) {
   const int klevm1 = klev - 1;
   const T zdp = T(0.5);
   for (int jk = 2; jk <= klev; ++jk) {
@@ -203,13 +204,15 @@ CPPWRF_HD inline void cuini(const TdConst<T>& c, int klev, const T* pten, const 
 
 // cubase: cloud base (subcloud ascent). The row's "if (is == 0) cycle" only skips levels where this
 // column does not ascend either: a column that finds a cloud base ascends at every level below it.
+#define CPPWRF_TD_CUBASE(X) \
+  X(T, zqold, KM)
 template <typename T>
-CPPWRF_HD inline void cubase(const TdConst<T>& c, int klev, const T* ptenh, const T* pqenh, const T* pgeoh,
-                             const T* paph, T* ptu, T* pqu, T* plu, const T* puen, const T* pven, T* puu, T* pvu,
-                             bool& ldcum, int& kcbot, int* klab) {
+CPPWRF_HD inline void cubase(const TdConst<T>& c, int klev, ColCPtr<T> ptenh, ColCPtr<T> pqenh, ColCPtr<T> pgeoh,
+                             ColCPtr<T> paph, ColPtr<T> ptu, ColPtr<T> pqu, ColPtr<T> plu, ColCPtr<T> puen, ColCPtr<T> pven, ColPtr<T> puu, ColPtr<T> pvu,
+                             bool& ldcum, int& kcbot, ColPtr<int> klab, CPPWRF_COLUMN_CURSOR) {
   using C = TdConst<T>;
   const int klevm1 = klev - 1, klevp1 = klev + 1;
-  T zqold[KM];
+  CPPWRF_TD_CUBASE(CPPWRF_COLUMN_ARRAY)
   klab[klev] = 1;
   kcbot = klevm1;
   ldcum = false;
@@ -261,10 +264,10 @@ CPPWRF_HD inline void cubase(const TdConst<T>& c, int klev, const T* ptenh, cons
 
 // cubasmc: cloud base values for midlevel convection at level kk
 template <typename T>
-CPPWRF_HD inline void cubasmc(const TdConst<T>& c, int kk, const T* pten, const T* pqen, const T* pqsen,
-                              const T* puen, const T* pven, const T* pverv, const T* pgeo, const T* pgeoh,
-                              bool ldcum, int& ktype, int* klab, T* pmfu, T& pmfub, T& pentr, int& kcbot, T* ptu,
-                              T* pqu, T* plu, T* puu, T* pvu, T* pmfus, T* pmfuq, T* pmful, T* pdmfup, T& pmfuu,
+CPPWRF_HD inline void cubasmc(const TdConst<T>& c, int kk, ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> pqsen,
+                              ColCPtr<T> puen, ColCPtr<T> pven, ColCPtr<T> pverv, ColCPtr<T> pgeo, ColCPtr<T> pgeoh,
+                              bool ldcum, int& ktype, ColPtr<int> klab, ColPtr<T> pmfu, T& pmfub, T& pentr, int& kcbot, ColPtr<T> ptu,
+                              ColPtr<T> pqu, ColPtr<T> plu, ColPtr<T> puu, ColPtr<T> pvu, ColPtr<T> pmfus, ColPtr<T> pmfuq, ColPtr<T> pmful, ColPtr<T> pdmfup, T& pmfuu,
                               T& pmfuv) {
   using C = TdConst<T>;
   if (!ldcum && klab[kk + 1] == 0 && pqen[kk] > T(0.80) * pqsen[kk]) {
@@ -294,9 +297,9 @@ CPPWRF_HD inline void cubasmc(const TdConst<T>& c, int kk, const T* pten, const 
 
 // cuentr_new: entrainment / detrainment rates at level kk
 template <typename T>
-CPPWRF_HD inline void cuentr_new(const TdConst<T>& c, int kk, const T* ptenh, const T* paph, const T* pap,
-                                 const T* pgeoh, int klwmin, bool ldcum, int ktype, int kcbot, int kctop0,
-                                 T& zpbase, const T* pmfu, T pentr, T& zdmfen, T& zdmfde, T* zodetr, int khmin) {
+CPPWRF_HD inline void cuentr_new(const TdConst<T>& c, int kk, ColCPtr<T> ptenh, ColCPtr<T> paph, ColCPtr<T> pap,
+                                 ColCPtr<T> pgeoh, int klwmin, bool ldcum, int ktype, int kcbot, int kctop0,
+                                 T& zpbase, ColCPtr<T> pmfu, T pentr, T& zdmfen, T& zdmfde, ColPtr<T> zodetr, int khmin) {
   using C = TdConst<T>;
   zpbase = paph[kcbot];
   const T zrrho = (c.rd * ptenh[kk + 1]) / paph[kk + 1];
@@ -331,18 +334,20 @@ CPPWRF_HD inline void cuentr_new(const TdConst<T>& c, int kk, const T* ptenh, co
 // cuasc_new: cloud ascent (entraining / detraining plume). The row's "if (is == 0) cycle" skips levels
 // where this column does not ascend; what it skips for such a column (cuentr_new rates, the momentum
 // mixing of zdmfen / zdmfde) is recomputed before it is read again.
+#define CPPWRF_TD_CUASC_NEW(X) \
+  X(T, zodetr, KM) X(T, zoentr, KM)
 template <typename T>
-CPPWRF_HD inline void cuasc_new(const TdConst<T>& c, int klev, const T* ptenh, const T* pqenh, const T* puen,
-                                const T* pven, const T* pten, const T* pqen, const T* pqsen, const T* pgeo,
-                                const T* pgeoh, const T* pap, const T* paph, const T* pverv, int klwmin, bool& ldcum,
-                                T phcbase, int& ktype, int* klab, T* ptu, T* pqu, T* plu, T* puu, T* pvu, T* pmfu,
-                                T& pmfub, T& pentr, T* pmfus, T* pmfuq, T* pmful, T* plude, T* pdmfup, int& kcbot,
-                                int& kctop, int& kctop0, int& kcum, T ztmst, int khmin, const T* phhatt,
-                                const T* pqsenh) {
+CPPWRF_HD inline void cuasc_new(const TdConst<T>& c, int klev, ColCPtr<T> ptenh, ColCPtr<T> pqenh, ColCPtr<T> puen,
+                                ColCPtr<T> pven, ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> pqsen, ColCPtr<T> pgeo,
+                                ColCPtr<T> pgeoh, ColCPtr<T> pap, ColCPtr<T> paph, ColCPtr<T> pverv, int klwmin, bool& ldcum,
+                                T phcbase, int& ktype, ColPtr<int> klab, ColPtr<T> ptu, ColPtr<T> pqu, ColPtr<T> plu, ColPtr<T> puu, ColPtr<T> pvu, ColPtr<T> pmfu,
+                                T& pmfub, T& pentr, ColPtr<T> pmfus, ColPtr<T> pmfuq, ColPtr<T> pmful, ColPtr<T> plude, ColPtr<T> pdmfup, int& kcbot,
+                                int& kctop, int& kctop0, int& kcum, T ztmst, int khmin, ColCPtr<T> phhatt,
+                                ColCPtr<T> pqsenh, CPPWRF_COLUMN_CURSOR) {
   using C = TdConst<T>;
   const int klevm1 = klev - 1;
   const T zcons2 = T(1.) / (c.g * ztmst);
-  T zodetr[KM], zoentr[KM];
+  CPPWRF_TD_CUASC_NEW(CPPWRF_COLUMN_ARRAY)
   T zmfuu = T(0.), zmfuv = T(0.), zbuoy = T(0.), zpbase = T(0.), zqold = T(0.), zdmfen = T(0.), zdmfde = T(0.);
   if (!ldcum) ktype = 0;
   for (int jk = 1; jk <= klev; ++jk) {
@@ -545,13 +550,16 @@ CPPWRF_HD inline void cuasc_new(const TdConst<T>& c, int klev, const T* ptenh, c
 }
 
 // cudlfs: level of free sinking for downdrafts
+#define CPPWRF_TD_CUDLFS(X) \
+  X(T, ztenwb, KM) X(T, zqenwb, KM)
 template <typename T>
-CPPWRF_HD inline void cudlfs(const TdConst<T>& c, int klev, const T* ptenh, const T* pqenh, const T* puen,
-                             const T* pven, const T* pgeoh, const T* paph, const T* ptu, const T* pqu, const T* puu,
-                             const T* pvu, bool ldcum, int kcbot, int kctop, T pmfub, T& prfl, T* ptd, T* pqd,
-                             T* pud, T* pvd, T* pmfd, T* pmfds, T* pmfdq, T* pdmfdp, int& kdtop, bool& lddraf) {
+CPPWRF_HD inline void cudlfs(const TdConst<T>& c, int klev, ColCPtr<T> ptenh, ColCPtr<T> pqenh, ColCPtr<T> puen,
+                             ColCPtr<T> pven, ColCPtr<T> pgeoh, ColCPtr<T> paph, ColCPtr<T> ptu, ColCPtr<T> pqu, ColCPtr<T> puu,
+                             ColCPtr<T> pvu, bool ldcum, int kcbot, int kctop, T pmfub, T& prfl, ColPtr<T> ptd, ColPtr<T> pqd,
+                             ColPtr<T> pud, ColPtr<T> pvd, ColPtr<T> pmfd, ColPtr<T> pmfds, ColPtr<T> pmfdq, ColPtr<T> pdmfdp, int& kdtop, bool& lddraf,
+                             CPPWRF_COLUMN_CURSOR) {
   using C = TdConst<T>;
-  T ztenwb[KM], zqenwb[KM];
+  CPPWRF_TD_CUDLFS(CPPWRF_COLUMN_ARRAY)
   lddraf = false;
   kdtop = klev + 1;
   if (!C::lmfdd) return;
@@ -590,9 +598,9 @@ CPPWRF_HD inline void cudlfs(const TdConst<T>& c, int klev, const T* ptenh, cons
 
 // cuddraf: downdraft descent
 template <typename T>
-CPPWRF_HD inline void cuddraf(const TdConst<T>& c, int klev, const T* ptenh, const T* pqenh, const T* puen,
-                              const T* pven, const T* pgeoh, const T* paph, T& prfl, bool lddraf, T* ptd, T* pqd,
-                              T* pud, T* pvd, T* pmfd, T* pmfds, T* pmfdq, T* pdmfdp) {
+CPPWRF_HD inline void cuddraf(const TdConst<T>& c, int klev, ColCPtr<T> ptenh, ColCPtr<T> pqenh, ColCPtr<T> puen,
+                              ColCPtr<T> pven, ColCPtr<T> pgeoh, ColCPtr<T> paph, T& prfl, bool lddraf, ColPtr<T> ptd, ColPtr<T> pqd,
+                              ColPtr<T> pud, ColPtr<T> pvd, ColPtr<T> pmfd, ColPtr<T> pmfds, ColPtr<T> pmfdq, ColPtr<T> pdmfdp) {
   using C = TdConst<T>;
   const int klevp1 = klev + 1;
   for (int jk = 3; jk <= klev; ++jk) {
@@ -642,11 +650,11 @@ CPPWRF_HD inline void cuddraf(const TdConst<T>& c, int klev, const T* ptenh, con
 // cuflx: final convective fluxes, precipitation, melting and evaporation. WRF's ktopm2 is the row's
 // minimum cloud top - 2; the levels above this column's own top only add zeros, so its own top is used.
 template <typename T>
-CPPWRF_HD inline void cuflx(const TdConst<T>& c, int klev, const T* pqen, const T* pqsen, const T* ptenh,
-                            const T* pqenh, const T* paph, const T* pgeoh, int kcbot, int kctop, int kdtop,
-                            int& ktype, bool& lddraf, bool& ldcum, T* pmfu, T* pmfd, T* pmfus, T* pmfds, T* pmfuq,
-                            T* pmfdq, T* pmful, T* plude, T* pdmfup, T* pdmfdp, T& prfl, T& prain, const T* pten,
-                            T& psfl, T* pdpmel, int& ktopm2, T ztmst, const T* sig1) {
+CPPWRF_HD inline void cuflx(const TdConst<T>& c, int klev, ColCPtr<T> pqen, ColCPtr<T> pqsen, ColCPtr<T> ptenh,
+                            ColCPtr<T> pqenh, ColCPtr<T> paph, ColCPtr<T> pgeoh, int kcbot, int kctop, int kdtop,
+                            int& ktype, bool& lddraf, bool& ldcum, ColPtr<T> pmfu, ColPtr<T> pmfd, ColPtr<T> pmfus, ColPtr<T> pmfds, ColPtr<T> pmfuq,
+                            ColPtr<T> pmfdq, ColPtr<T> pmful, ColPtr<T> plude, ColPtr<T> pdmfup, ColPtr<T> pdmfdp, T& prfl, T& prain, ColCPtr<T> pten,
+                            T& psfl, ColPtr<T> pdpmel, int& ktopm2, T ztmst, ColCPtr<T> sig1) {
   using C = TdConst<T>;
   const int klevp1 = klev + 1;
   const T zcons1 = c.cpd / (c.alf * c.g * ztmst);
@@ -742,10 +750,10 @@ CPPWRF_HD inline void cuflx(const TdConst<T>& c, int klev, const T* pqen, const 
 
 // cudtdq: t and q tendencies, surface precipitation rates (the global budgets are diagnostics only)
 template <typename T>
-CPPWRF_HD inline void cudtdq(const TdConst<T>& c, int klev, int ktopm2, const T* paph, bool ldcum, const T* pten,
-                             T* ptte, T* pqte, const T* pmfus, const T* pmfds, const T* pmfuq, const T* pmfdq,
-                             const T* pmful, const T* pdmfup, const T* pdmfdp, const T* pdpmel, T prfl, T psfl,
-                             T& prsfc, T& pssfc, const T* pqen, const T* pqsen, const T* plude, T* pcte) {
+CPPWRF_HD inline void cudtdq(const TdConst<T>& c, int klev, int ktopm2, ColCPtr<T> paph, bool ldcum, ColCPtr<T> pten,
+                             ColPtr<T> ptte, ColPtr<T> pqte, ColCPtr<T> pmfus, ColCPtr<T> pmfds, ColCPtr<T> pmfuq, ColCPtr<T> pmfdq,
+                             ColCPtr<T> pmful, ColCPtr<T> pdmfup, ColCPtr<T> pdmfdp, ColCPtr<T> pdpmel, T prfl, T psfl,
+                             T& prsfc, T& pssfc, ColCPtr<T> pqen, ColCPtr<T> pqsen, ColCPtr<T> plude, ColPtr<T> pcte) {
   using C = TdConst<T>;
   const T rhc = T(C::rhc), rhm = T(C::rhm), fdbk = T(C::fdbk);
   for (int jk = ktopm2; jk <= klev; ++jk) {
@@ -779,13 +787,16 @@ CPPWRF_HD inline void cudtdq(const TdConst<T>& c, int klev, int ktopm2, const T*
 }
 
 // cududv: u and v tendencies (cumulus friction)
+#define CPPWRF_TD_CUDUDV(X) \
+  X(T, zmfuu, KM) X(T, zmfdu, KM) X(T, zmfuv, KM) X(T, zmfdv, KM)
 template <typename T>
-CPPWRF_HD inline void cududv(const TdConst<T>& c, int klev, int ktopm2, int ktype, int kcbot, const T* paph,
-                             bool ldcum, const T* puen, const T* pven, T* pvom, T* pvol, const T* puu, const T* pud,
-                             const T* pvu, const T* pvd, const T* pmfu, const T* pmfd) {
+CPPWRF_HD inline void cududv(const TdConst<T>& c, int klev, int ktopm2, int ktype, int kcbot, ColCPtr<T> paph,
+                             bool ldcum, ColCPtr<T> puen, ColCPtr<T> pven, ColPtr<T> pvom, ColPtr<T> pvol, ColCPtr<T> puu, ColCPtr<T> pud,
+                             ColCPtr<T> pvu, ColCPtr<T> pvd, ColCPtr<T> pmfu, ColCPtr<T> pmfd,
+                             CPPWRF_COLUMN_CURSOR) {
   if (!ldcum) return;
   const int klevp1 = klev + 1;
-  T zmfuu[KM], zmfdu[KM], zmfuv[KM], zmfdv[KM];
+  CPPWRF_TD_CUDUDV(CPPWRF_COLUMN_ARRAY)
   for (int jk = ktopm2; jk <= klev; ++jk) {
     const int ik = jk - 1;
     zmfuu[jk] = pmfu[jk] * (puu[jk] - puen[ik]);
@@ -820,28 +831,31 @@ CPPWRF_HD inline void cududv(const TdConst<T>& c, int klev, int ktopm2, int ktyp
 }
 
 // cumastr_new state of one column (the level arrays of the master routine)
+#define CPPWRF_TD_COLUMN(X) \
+  X(T, ztenh, KM) X(T, zqenh, KM) X(T, zgeoh, KM) X(T, zqsenh, KM) X(T, ztd, KM) X(T, zqd, KM) X(T, zmfus, KM) \
+  X(T, zmfds, KM) X(T, zmfuq, KM) X(T, zmfdq, KM) X(T, zdmfup, KM) X(T, zdmfdp, KM) X(T, zmful, KM) X(T, zuu, KM) \
+  X(T, zvu, KM) X(T, zud, KM) X(T, zvd, KM) X(T, zdpmel, KM) X(T, zhhatt, KM) X(T, ptu, KM) X(T, pqu, KM) \
+  X(T, plu, KM) X(T, plude, KM) X(T, pmfu, KM) X(T, pmfd, KM) X(int, ilab, KM)
 template <typename T>
 struct TdColumn {
-  T ztenh[KM], zqenh[KM], zgeoh[KM], zqsenh[KM], ztd[KM], zqd[KM], zmfus[KM], zmfds[KM], zmfuq[KM], zmfdq[KM];
-  T zdmfup[KM], zdmfdp[KM], zmful[KM], zuu[KM], zvu[KM], zud[KM], zvd[KM], zdpmel[KM], zhhatt[KM];
-  T ptu[KM], pqu[KM], plu[KM], plude[KM], pmfu[KM], pmfd[KM];
-  int ilab[KM];
+  CPPWRF_TD_COLUMN(CPPWRF_COLUMN_MEMBER)
 };
 
 // cumastr_new up to and including the first cloud ascent; returns icum (1 if the column convects)
 template <typename T>
-CPPWRF_HD inline int cumastr_first(const TdConst<T>& c, int klev, const T* pten, const T* pqen, const T* puen,
-                                   const T* pven, const T* pverv, const T* pqsen, T pqhfl, T ztmst, const T* pap,
-                                   const T* paph, const T* pgeo, const T* pqte, bool& ldcum, int& ktype, int& kcbot,
+CPPWRF_HD inline int cumastr_first(const TdConst<T>& c, int klev, ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> puen,
+                                   ColCPtr<T> pven, ColCPtr<T> pverv, ColCPtr<T> pqsen, T pqhfl, T ztmst, ColCPtr<T> pap,
+                                   ColCPtr<T> paph, ColCPtr<T> pgeo, ColCPtr<T> pqte, bool& ldcum, int& ktype, int& kcbot,
                                    int& kctop, int lndj, TdColumn<T>& s, int& ilwmin, int& ictop0, int& ihmin,
-                                   T& zhcbase, T& zmfub, T& zentr, T& zdqpbl) {
+                                   T& zhcbase, T& zmfub, T& zentr, T& zdqpbl, CPPWRF_COLUMN_CURSOR) {
   using C = TdConst<T>;
   const int klevm1 = klev - 1;
   const T zcons2 = T(1.) / (c.g * ztmst);
   cuini(c, klev, pten, pqen, pqsen, puen, pven, pverv, pgeo, paph, s.zgeoh, s.ztenh, s.zqenh, s.zqsenh, ilwmin, s.ptu,
         s.pqu, s.ztd, s.zqd, s.zuu, s.zvu, s.zud, s.zvd, s.pmfu, s.pmfd, s.zmfus, s.zmfds, s.zmfuq, s.zmfdq, s.zdmfup,
         s.zdmfdp, s.zdpmel, s.plu, s.plude, s.ilab);
-  cubase(c, klev, s.ztenh, s.zqenh, s.zgeoh, paph, s.ptu, s.pqu, s.plu, puen, pven, s.zuu, s.zvu, ldcum, kcbot, s.ilab);
+  cubase(c, klev, s.ztenh, s.zqenh, s.zgeoh, paph, s.ptu, s.pqu, s.plu, puen, pven, s.zuu, s.zvu, ldcum, kcbot, s.ilab,
+         cppwrf_cw_);
   // (b) total moisture convergence, type of convection
   int jk = 1;
   T zdqcv = pqte[jk] * (paph[jk + 1] - paph[jk]);
@@ -916,24 +930,25 @@ CPPWRF_HD inline int cumastr_first(const TdConst<T>& c, int klev, const T* pten,
   int icum = 0;
   cuasc_new(c, klev, s.ztenh, s.zqenh, puen, pven, pten, pqen, pqsen, pgeo, s.zgeoh, pap, paph, pverv, ilwmin, ldcum,
             zhcbase, ktype, s.ilab, s.ptu, s.pqu, s.plu, s.zuu, s.zvu, s.pmfu, zmfub, zentr, s.zmfus, s.zmfuq, s.zmful,
-            s.plude, s.zdmfup, kcbot, kctop, ictop0, icum, ztmst, ihmin, s.zhhatt, s.zqsenh);
+            s.plude, s.zdmfup, kcbot, kctop, ictop0, icum, ztmst, ihmin, s.zhhatt, s.zqsenh, cppwrf_cw_);
   return icum;
 }
 
 // cumastr_new (row_icum: the row's icum after the first ascent)
 template <typename T>
-CPPWRF_HD inline void cumastr_new(const TdConst<T>& c, int klev, const T* pten, const T* pqen, const T* puen,
-                                  const T* pven, const T* pverv, const T* pqsen, T pqhfl, T ztmst, const T* pap,
-                                  const T* paph, const T* pgeo, T* ptte, T* pqte, T* pvom, T* pvol, T& prsfc,
-                                  T& pssfc, int& ktype, T* pcte, const T* sig1, int lndj, int row_icum) {
+CPPWRF_HD inline void cumastr_new(const TdConst<T>& c, int klev, ColCPtr<T> pten, ColCPtr<T> pqen, ColCPtr<T> puen,
+                                  ColCPtr<T> pven, ColCPtr<T> pverv, ColCPtr<T> pqsen, T pqhfl, T ztmst, ColCPtr<T> pap,
+                                  ColCPtr<T> paph, ColCPtr<T> pgeo, ColPtr<T> ptte, ColPtr<T> pqte, ColPtr<T> pvom, ColPtr<T> pvol, T& prsfc,
+                                  T& pssfc, int& ktype, ColPtr<T> pcte, ColCPtr<T> sig1, int lndj, int row_icum,
+                                  CPPWRF_COLUMN_CURSOR) {
   using C = TdConst<T>;
   const T zcons2 = T(1.) / (c.g * ztmst);
-  TdColumn<T> s;
+  CPPWRF_COLUMN_STRUCT(TdColumn<T>, s, CPPWRF_TD_COLUMN)
   bool ldcum = false;
   int kcbot = 0, kctop = 0, ilwmin = 0, ictop0 = 0, ihmin = 0, idtop = 0, itopm2 = 0, icum = 0;
   T zhcbase = T(0), zmfub = T(0), zentr = T(0), zdqpbl = T(0);
   cumastr_first(c, klev, pten, pqen, puen, pven, pverv, pqsen, pqhfl, ztmst, pap, paph, pgeo, pqte, ldcum, ktype, kcbot,
-                kctop, lndj, s, ilwmin, ictop0, ihmin, zhcbase, zmfub, zentr, zdqpbl);
+                kctop, lndj, s, ilwmin, ictop0, ihmin, zhcbase, zmfub, zentr, zdqpbl, cppwrf_cw_);
   idtop = 0;
   if (row_icum == 0) return;
   // (c) cloud depth, entrainment rate, precipitation rate for the downdrafts
@@ -950,7 +965,7 @@ CPPWRF_HD inline void cumastr_new(const TdConst<T>& c, int klev, const T* pten, 
   bool loddraf = false;
   if (C::lmfdd) {
     cudlfs(c, klev, s.ztenh, s.zqenh, puen, pven, s.zgeoh, paph, s.ptu, s.pqu, s.zuu, s.zvu, ldcum, kcbot, kctop, zmfub,
-           zrfl, s.ztd, s.zqd, s.zud, s.zvd, s.pmfd, s.zmfds, s.zmfdq, s.zdmfdp, idtop, loddraf);
+           zrfl, s.ztd, s.zqd, s.zud, s.zvd, s.pmfd, s.zmfds, s.zmfdq, s.zdmfdp, idtop, loddraf, cppwrf_cw_);
     cuddraf(c, klev, s.ztenh, s.zqenh, puen, pven, s.zgeoh, paph, zrfl, loddraf, s.ztd, s.zqd, s.zud, s.zvd, s.pmfd,
             s.zmfds, s.zmfdq, s.zdmfdp);
   }
@@ -1017,7 +1032,7 @@ CPPWRF_HD inline void cumastr_new(const TdConst<T>& c, int klev, const T* pten, 
   // 6.0 final cloud ascent
   cuasc_new(c, klev, s.ztenh, s.zqenh, puen, pven, pten, pqen, pqsen, pgeo, s.zgeoh, pap, paph, pverv, ilwmin, ldcum,
             zhcbase, ktype, s.ilab, s.ptu, s.pqu, s.plu, s.zuu, s.zvu, s.pmfu, zmfub, zentr, s.zmfus, s.zmfuq, s.zmful,
-            s.plude, s.zdmfup, kcbot, kctop, ictop0, icum, ztmst, ihmin, s.zhhatt, s.zqsenh);
+            s.plude, s.zdmfup, kcbot, kctop, ictop0, icum, ztmst, ihmin, s.zhhatt, s.zqsenh, cppwrf_cw_);
   // 7.0 final convective fluxes
   T prain = T(0), zsfl = T(0);
   cuflx(c, klev, pqen, pqsen, s.ztenh, s.zqenh, paph, s.zgeoh, kcbot, kctop, idtop, ktype, loddraf, ldcum, s.pmfu, s.pmfd,
@@ -1029,20 +1044,22 @@ CPPWRF_HD inline void cumastr_new(const TdConst<T>& c, int klev, const T* pten, 
   // 9.0 u and v tendencies
   if (C::lmfdudv)
     cududv(c, klev, itopm2, ktype, kcbot, paph, ldcum, puen, pven, pvom, pvol, s.zuu, s.zud, s.zvu, s.zvd, s.pmfu,
-           s.pmfd);
+           s.pmfd, cppwrf_cw_);
 }
 
 // tiecnv inputs of one column: pt, pqv (mixing ratio) ... at levels 1 (top) .. km, paph at 1 .. km + 1
+#define CPPWRF_TD_INPUT(X) \
+  X(T, pu, KM) X(T, pv, KM) X(T, pt, KM) X(T, pqv, KM) X(T, pqc, KM) X(T, pqi, KM) X(T, pqvf, KM) X(T, pqvbl, KM) \
+  X(T, poz, KM) X(T, pomg, KM) X(T, pap, KM) X(T, paph, KM) X(T, sig1, KM)
 template <typename T>
 struct TdInput {
-  T pu[KM], pv[KM], pt[KM], pqv[KM], pqc[KM], pqi[KM], pqvf[KM], pqvbl[KM], poz[KM], pomg[KM], pap[KM], paph[KM];
-  T sig1[KM];
+  CPPWRF_TD_INPUT(CPPWRF_COLUMN_MEMBER)
 };
 
 // tiecnv's conversion of the model variables (shared by both passes)
 template <typename T>
-CPPWRF_HD inline void tiecnv_prep(const TdConst<T>& c, int km, const TdInput<T>& in, int lane, int nlane, T* ztp1,
-                                  T* zqp1, T* zqsat, T* pgeo, T* pqte, T* zqq) {
+CPPWRF_HD inline void tiecnv_prep(const TdConst<T>& c, int km, const TdInput<T>& in, int lane, int nlane, ColPtr<T> ztp1,
+                                  ColPtr<T> zqp1, ColPtr<T> zqsat, ColPtr<T> pgeo, ColPtr<T> pqte, ColPtr<T> zqq) {
   for (int k = 1; k <= km; ++k) {
     ztp1[k] = in.pt[k];
     zqp1[k] = in.pqv[k] / (T(1.0) + in.pqv[k]);
@@ -1057,26 +1074,32 @@ CPPWRF_HD inline void tiecnv_prep(const TdConst<T>& c, int km, const TdInput<T>&
 }
 
 // first pass: the column's icum after cumastr_new's first cloud ascent
+#define CPPWRF_TD_TIEDTKE_FIRST_ASCENT(X) \
+  X(T, ztp1, KM) X(T, zqp1, KM) X(T, zqsat, KM) X(T, pgeo, KM) X(T, pqte, KM) X(T, zqq, KM)
 template <typename T>
 CPPWRF_HD inline int tiedtke_first_ascent(const TdConst<T>& c, int km, const TdInput<T>& in, T evap, int lndj, T dt,
-                                          int lane, int nlane) {
-  T ztp1[KM], zqp1[KM], zqsat[KM], pgeo[KM], pqte[KM], zqq[KM];
+                                          int lane, int nlane, CPPWRF_COLUMN_CURSOR) {
+  CPPWRF_TD_TIEDTKE_FIRST_ASCENT(CPPWRF_COLUMN_ARRAY)
   tiecnv_prep(c, km, in, lane, nlane, ztp1, zqp1, zqsat, pgeo, pqte, zqq);
-  TdColumn<T> s;
+  CPPWRF_COLUMN_STRUCT(TdColumn<T>, s, CPPWRF_TD_COLUMN)
   bool ldcum = false;
   int ktype = 0, kcbot = 0, kctop = 0, ilwmin = 0, ictop0 = 0, ihmin = 0;
   T zhcbase = T(0), zmfub = T(0), zentr = T(0), zdqpbl = T(0);
   return cumastr_first(c, km, ztp1, zqp1, in.pu, in.pv, in.pomg, zqsat, evap, dt, in.pap, in.paph, pgeo, pqte, ldcum,
-                       ktype, kcbot, kctop, lndj, s, ilwmin, ictop0, ihmin, zhcbase, zmfub, zentr, zdqpbl);
+                       ktype, kcbot, kctop, lndj, s, ilwmin, ictop0, ihmin, zhcbase, zmfub, zentr, zdqpbl, cppwrf_cw_);
 }
 
 // tiecnv: updates pu, pv, pt, pqv, pqc, pqi of the column (levels 1 .. km) and returns zprecc
+#define CPPWRF_TD_TIECNV(X) \
+  X(T, ztp1, KM) X(T, zqp1, KM) X(T, zqsat, KM) X(T, pgeo, KM) X(T, pqte, KM) X(T, zqq, KM) X(T, ptte, KM) \
+  X(T, pcte, KM) X(T, pvom, KM) X(T, pvol, KM)
 template <typename T>
-CPPWRF_HD inline T tiecnv(const TdConst<T>& c, int km, const TdInput<T>& in, T* pu, T* pv, T* pt, T* pqv, T* pqc,
-                          T* pqi, T evap, int lndj, T dt, int lane, int nlane, int row_icum) {
+CPPWRF_HD inline T tiecnv(const TdConst<T>& c, int km, const TdInput<T>& in, ColPtr<T> pu, ColPtr<T> pv, ColPtr<T> pt, ColPtr<T> pqv, ColPtr<T> pqc,
+                          ColPtr<T> pqi, T evap, int lndj, T dt, int lane, int nlane, int row_icum,
+                          CPPWRF_COLUMN_CURSOR) {
   using C = TdConst<T>;
   const T ztmst = dt;
-  T ztp1[KM], zqp1[KM], zqsat[KM], pgeo[KM], pqte[KM], zqq[KM], ptte[KM], pcte[KM], pvom[KM], pvol[KM];
+  CPPWRF_TD_TIECNV(CPPWRF_COLUMN_ARRAY)
   T prsfc = T(0.0), pssfc = T(0.0);
   const T pqhfl = evap;
   for (int k = 1; k <= km; ++k) {
@@ -1088,7 +1111,7 @@ CPPWRF_HD inline T tiecnv(const TdConst<T>& c, int km, const TdInput<T>& in, T* 
   tiecnv_prep(c, km, in, lane, nlane, ztp1, zqp1, zqsat, pgeo, pqte, zqq);
   int ktype = 0;
   cumastr_new(c, km, ztp1, zqp1, in.pu, in.pv, in.pomg, zqsat, pqhfl, ztmst, in.pap, in.paph, pgeo, ptte, pqte, pvom,
-              pvol, prsfc, pssfc, ktype, pcte, in.sig1, lndj, row_icum);
+              pvol, prsfc, pssfc, ktype, pcte, in.sig1, lndj, row_icum, cppwrf_cw_);
   // cloud water and cloud ice detrained from convection
   if (C::fdbk >= 1.0e-9) {
     for (int k = 1; k <= km; ++k) {
@@ -1127,5 +1150,14 @@ CPPWRF_HD inline T tiecnv(const TdConst<T>& c, int km, const TdInput<T>& in, T* 
   }
   return zprecc;
 }
+
+// The column arrays of one column of the scheme in bytes (the GPU's work buffer, core/column_work.hpp): the
+// kernel's own (TdInput and the arrays of both passes) and every routine's, each counted once (cumastr_new's
+// TdColumn serves either pass).
+template <typename T>
+inline constexpr std::size_t kWorkBytes =
+    0 CPPWRF_TD_INPUT(CPPWRF_COLUMN_BYTES) CPPWRF_TD_COLUMN(CPPWRF_COLUMN_BYTES) CPPWRF_TD_TIECNV(CPPWRF_COLUMN_BYTES)
+        CPPWRF_TD_CUBASE(CPPWRF_COLUMN_BYTES) CPPWRF_TD_CUASC_NEW(CPPWRF_COLUMN_BYTES)
+        CPPWRF_TD_CUDLFS(CPPWRF_COLUMN_BYTES) CPPWRF_TD_CUDUDV(CPPWRF_COLUMN_BYTES);
 
 }  // namespace cppwrf::phys::cu_tiedtke

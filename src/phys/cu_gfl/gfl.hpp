@@ -12,6 +12,7 @@
 #include <type_traits>
 
 #include "core/backend.hpp"
+#include "core/column_work.hpp"
 
 #ifndef CPPWRF_HOST_DEVICE
 #define CPPWRF_HOST_DEVICE CPPWRF_HD
@@ -46,8 +47,9 @@ struct Tier<48, real> {
   static constexpr int KM = km48::KM;
   using Column = km48::GflDrvColumn<real>;
   using Out = km48::GflDrvOut<real>;
-  CPPWRF_HD static void run(const Column& c, int ishallow, int ichoice, Out& o) {
-    km48::gfl_column(c, ishallow, ichoice, o);
+  static constexpr std::size_t kWorkBytes = km48::kWorkBytes<real>;
+  CPPWRF_HD static void run(const Column& c, int ishallow, int ichoice, Out& o, CPPWRF_COLUMN_CURSOR) {
+    km48::gfl_column(c, ishallow, ichoice, o, cppwrf_cw_);
   }
 };
 template <typename real>
@@ -55,8 +57,9 @@ struct Tier<kMaxLevels, real> {
   static constexpr int KM = km100::KM;
   using Column = km100::GflDrvColumn<real>;
   using Out = km100::GflDrvOut<real>;
-  CPPWRF_HD static void run(const Column& c, int ishallow, int ichoice, Out& o) {
-    km100::gfl_column(c, ishallow, ichoice, o);
+  static constexpr std::size_t kWorkBytes = km100::kWorkBytes<real>;
+  CPPWRF_HD static void run(const Column& c, int ishallow, int ichoice, Out& o, CPPWRF_COLUMN_CURSOR) {
+    km100::gfl_column(c, ishallow, ichoice, o, cppwrf_cw_);
   }
 };
 }  // namespace cppwrf::phys::cu_gfl

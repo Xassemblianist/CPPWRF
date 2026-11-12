@@ -2,6 +2,7 @@
 // PhysicsSuite::cumulus_driver, convtrans_prep and advance_ppt (WRF phys/module_cumulus_driver.F,
 // dyn_em/module_convtrans_prep.F, phys/module_physics_addtendc.F)
 #include "phys/driver/suite.hpp"
+#include "core/column_work.hpp"
 #include "core/tiles.hpp"
 
 #include <cmath>
@@ -35,6 +36,7 @@ struct KGrellFreitas {
   V2 raincv, pratec, htop, hbot;
   V3 rthcuten, rqvcuten, rqccuten, rqicuten, rucuten, rvcuten, gd_cloud, gd_cloud2;
   bool flag_qc, flag_qi;
+  ColumnWork work{};  // the GPU's column arrays (column_for_work)
   // T: the level tier (cu_gfl::Tier, gfl.hpp)
   template <class T>
   CPPWRF_HD void column(int i, int j, typename T::Column& c) const {
@@ -60,10 +62,12 @@ struct KGrellFreitas {
   template <int L>
   CPPWRF_HD void run(int i, int j) const {
     using T = cu_gfl::Tier<L, real>;
-    typename T::Column c;
+    [[maybe_unused]] constexpr int KM = T::KM;  // the lists' array size
+    CPPWRF_COLUMN_SLOTS(work, i, j)
+    CPPWRF_COLUMN_STRUCT(typename T::Column, c, CPPWRF_GFL_DRV_COLUMN)
     column<T>(i, j, c);
-    typename T::Out o;
-    T::run(c, ishallow, ichoice, o);
+    CPPWRF_COLUMN_STRUCT(typename T::Out, o, CPPWRF_GFL_DRV_OUT)
+    T::run(c, ishallow, ichoice, o, cppwrf_cw_);
     raincv(i, j) = o.raincv;
     pratec(i, j) = o.pratec;
     htop(i, j) = o.htop;
@@ -86,6 +90,8 @@ struct KGrellFreitas {
 template <int L>
 struct KGrellFreitasRunner {
   KGrellFreitas k;
+  static constexpr std::size_t kWorkBytes = cu_gfl::Tier<L, real>::kWorkBytes;
+  void set_work(const ColumnWork& w) { k.work = w; }
   CPPWRF_HD void operator()(int i, int j) const { k.template run<L>(i, j); }
 };
 
@@ -175,6 +181,14 @@ struct KConvtransPrep {
 // module_cumulus_driver.F (G3/NTIEDTKE forcing: RTHFTEN = (RTHFTEN + RTHRATEN + RTHBLTEN)*pi,
 // RQVFTEN += RQVBLTEN) and module_cu_ntiedtke.F cu_ntiedtke_driver (pre_run, cu_ntiedtke_run,
 // post_run) for one column. C++ k = WRF k - 1; the scheme's arrays run top (1) to bottom (nz).
+// KNTiedtke's column arrays (core/column_work.hpp): cu_ntiedtke_pre_run's heights and the column of cu_ntiedtke_run
+#define CPPWRF_NTIEDTKE_KERNEL(X) \
+  X(real, zi, cu_ntiedtke::KM) X(real, zl, cu_ntiedtke::KM) X(real, dot, cu_ntiedtke::KM) \
+  X(real, ghti, cu_ntiedtke::KM) X(real, prsi, cu_ntiedtke::KM) X(real, ghtl, cu_ntiedtke::KM) \
+  X(real, omg, cu_ntiedtke::KM) X(real, prsl, cu_ntiedtke::KM) X(real, tf, cu_ntiedtke::KM) \
+  X(real, qvf, cu_ntiedtke::KM) X(real, qcf, cu_ntiedtke::KM) X(real, qif, cu_ntiedtke::KM) \
+  X(real, uf, cu_ntiedtke::KM) X(real, vf, cu_ntiedtke::KM) X(real, qvftenz, cu_ntiedtke::KM) \
+  X(real, thftenz, cu_ntiedtke::KM)
 struct KNTiedtke {
   cu_ntiedtke::NtConst<real> c;
   int nz; long itimestep; int stepcu; real dt;
@@ -186,8 +200,12 @@ struct KNTiedtke {
   V3 rthcuten, rqvcuten, rqccuten, rqicuten, rucuten, rvcuten;
   bool flag_qc, flag_qi;
   void* dump;  // debug (CPU, one thread): FILE* receiving inputs and outputs of cu_ntiedtke_run
+  ColumnWork work{};  // the GPU's column arrays (column_for_work)
+  static constexpr std::size_t kWorkBytes = cu_ntiedtke::kWorkBytes<real> CPPWRF_NTIEDTKE_KERNEL(CPPWRF_COLUMN_BYTES);
   CPPWRF_HD void operator()(int i, int j) const {
     using cu_ntiedtke::KM;
+    CPPWRF_COLUMN_SLOTS(work, i, j)
+    CPPWRF_NTIEDTKE_KERNEL(CPPWRF_COLUMN_ARRAY)
     using namespace wrfc;
     for (int k = 0; k < nz; ++k) {
       rthften(i, j, k) = (rthften(i, j, k) + rthraten(i, j, k) + rthblten(i, j, k)) * pi(i, j, k);
@@ -196,15 +214,12 @@ struct KNTiedtke {
     // cu_ntiedtke_pre_run
     const real delt = dt * real(stepcu);
     const int slimsk = int(std::fabs(xland(i, j) - real(2.)));
-    real zi[KM], zl[KM], dot[KM];
     zi[0] = real(0.);
     for (int k = 0; k < nz; ++k) zi[k + 1] = zi[k] + dz8w(i, j, k);
     for (int k = 0; k < nz; ++k) {
       zl[k] = real(0.5) * (zi[k] + zi[k + 1]);
       dot[k] = -real(0.5) * g * rho(i, j, k) * (w(i, j, k) + w(i, j, k + 1));
     }
-    real ghti[KM], prsi[KM], ghtl[KM], omg[KM], prsl[KM];
-    real tf[KM], qvf[KM], qcf[KM], qif[KM], uf[KM], vf[KM], qvftenz[KM], thftenz[KM];
     for (int k = 0; k <= nz; ++k) {
       ghti[nz + 1 - k] = zi[k];
       prsi[nz + 1 - k] = p8w(i, j, k);
@@ -229,7 +244,7 @@ struct KNTiedtke {
     }
 #endif
     cu_ntiedtke::cu_ntiedtke_run<real>(c, nz, uf, vf, tf, qvf, qcf, qif, qvftenz, thftenz, ghtl, ghti, omg, prsl,
-                                       prsi, qfx(i, j), hfx(i, j), rn, slimsk, delt, dx2d(i, j));
+                                       prsi, qfx(i, j), hfx(i, j), rn, slimsk, delt, dx2d(i, j), cppwrf_cw_);
 #if !defined(__CUDA_ARCH__)
     if (dump) {
       for (const real* a : {uf, vf, tf, qvf, qcf, qif}) wr(a, nz);
@@ -256,6 +271,11 @@ struct KNTiedtke {
 // module_cu_tiedtke.F cu_tiedtke (TIEDTKESCHEME, cu_physics = 6): the column inputs of tiecnv. Pass 1
 // (first = true) stores the column's icum after the first cloud ascent in icum1; pass 2 runs tiecnv with
 // the row's icum (row_icum) and writes the tendencies.
+// KTiedtke's column arrays (core/column_work.hpp): the heights, and the column tiecnv updates
+#define CPPWRF_TIEDTKE_KERNEL(X) X(real, zi, cu_tiedtke::KM) X(real, zl, cu_tiedtke::KM)
+#define CPPWRF_TIEDTKE_OUT(X) \
+  X(real, u1, cu_tiedtke::KM) X(real, v1, cu_tiedtke::KM) X(real, t1, cu_tiedtke::KM) X(real, q1, cu_tiedtke::KM) \
+  X(real, q2, cu_tiedtke::KM) X(real, q3, cu_tiedtke::KM)
 struct KTiedtke {
   cu_tiedtke::TdConst<real> c;
   int nz, nx; long itimestep; int stepcu; real dt;
@@ -268,18 +288,23 @@ struct KTiedtke {
   V2 raincv, pratec;
   V3 rthcuten, rqvcuten, rqccuten, rqicuten, rucuten, rvcuten;
   bool flag_qc, flag_qi;
+  ColumnWork work{};  // the GPU's column arrays (column_for_work)
+  static constexpr std::size_t kWorkBytes =
+      cu_tiedtke::kWorkBytes<real> CPPWRF_TIEDTKE_KERNEL(CPPWRF_COLUMN_BYTES) CPPWRF_TIEDTKE_OUT(CPPWRF_COLUMN_BYTES);
   CPPWRF_HD void operator()(int i, int j) const {
     using cu_tiedtke::KM;
+    using T = real;  // the lists' element type
+    CPPWRF_COLUMN_SLOTS(work, i, j)
     using namespace wrfc;
     const real delt = dt * real(stepcu);
     const real rdelt = real(1.) / delt;
-    real zi[KM], zl[KM];
+    CPPWRF_TIEDTKE_KERNEL(CPPWRF_COLUMN_ARRAY)
     zi[0] = real(0.0);  // zi(kts) = 0, zi(k) = zi(k-1) + dz8w(k-1), k = kts+1 .. kte
     for (int k = 1; k < nz; ++k) zi[k] = zi[k - 1] + dz8w(i, j, k - 1);
     for (int k = 1; k < nz; ++k) zl[k - 1] = (zi[k] + zi[k - 1]) * real(0.5);
     zl[nz - 1] = real(2.) * zi[nz - 1] - zl[nz - 2];
     const int slimsk = int(std::fabs(xland(i, j) - real(2.)));
-    cu_tiedtke::TdInput<real> in;
+    CPPWRF_COLUMN_STRUCT(cu_tiedtke::TdInput<real>, in, CPPWRF_TD_INPUT)
     for (int k = 0; k < nz; ++k) {
       const int zz = nz - k;
       in.pu[zz] = u(i, j, k);
@@ -298,14 +323,15 @@ struct KTiedtke {
     for (int k = 0; k <= nz; ++k) in.paph[nz + 1 - k] = p8w(i, j, k);
     const real evap = qfx(i, j);
     if (first) {
-      icum1(i, j) = cu_tiedtke::tiedtke_first_ascent<real>(c, nz, in, evap, slimsk, delt, i, nx);
+      icum1(i, j) = cu_tiedtke::tiedtke_first_ascent<real>(c, nz, in, evap, slimsk, delt, i, nx, cppwrf_cw_);
       return;
     }
-    real u1[KM], v1[KM], t1[KM], q1[KM], q2[KM], q3[KM];
+    CPPWRF_TIEDTKE_OUT(CPPWRF_COLUMN_ARRAY)
     for (int k = 1; k <= nz; ++k) {
       u1[k] = in.pu[k]; v1[k] = in.pv[k]; t1[k] = in.pt[k]; q1[k] = in.pqv[k]; q2[k] = in.pqc[k]; q3[k] = in.pqi[k];
     }
-    const real rn = cu_tiedtke::tiecnv<real>(c, nz, in, u1, v1, t1, q1, q2, q3, evap, slimsk, delt, i, nx, row_icum(0, j));
+    const real rn = cu_tiedtke::tiecnv<real>(c, nz, in, u1, v1, t1, q1, q2, q3, evap, slimsk, delt, i, nx,
+                                             row_icum(0, j), cppwrf_cw_);
     raincv(i, j) = rn / real(stepcu);
     pratec(i, j) = rn / (real(stepcu) * dt);
     for (int k = 0; k < nz; ++k) {
@@ -374,6 +400,16 @@ struct KAdvancePpt {
 }  // namespace
 
 // module_cumulus_driver.F cumulus_driver for KFETASCHEME (cu_physics = 1)
+namespace suite_detail {
+std::size_t cumulus_work_bytes(int cu_physics, int nz) {
+  if (cu_physics == 3)
+    return nz <= 48 ? KGrellFreitasRunner<48>::kWorkBytes : KGrellFreitasRunner<cu_gfl::kMaxLevels>::kWorkBytes;
+  if (cu_physics == 6) return KTiedtke::kWorkBytes;
+  if (cu_physics == 16) return KNTiedtke::kWorkBytes;
+  return 0;
+}
+}  // namespace suite_detail
+
 void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) {
   if (o_.cu_physics == 0) return;
   // module_cumulus_driver.F:803-860: with the adaptive time step the first call sets cudtacttime, and the scheme
@@ -406,8 +442,8 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
     k.rqicuten = pt.rqicuten.view(); k.rucuten = pt.rucuten.view(); k.rvcuten = pt.rvcuten.view();
     k.gd_cloud = gd_cloud.view(); k.gd_cloud2 = gd_cloud2.view();
     k.flag_qc = s.P_QC >= 0; k.flag_qi = s.P_QI >= 0;
-    if (g_.nz <= 48) column_for(g_.columns(), KGrellFreitasRunner<48>{k});
-    else column_for(g_.columns(), KGrellFreitasRunner<cu_gfl::kMaxLevels>{k});
+    if (g_.nz <= 48) column_for_work(g_.columns(), KGrellFreitasRunner<48>{k});
+    else column_for_work(g_.columns(), KGrellFreitasRunner<cu_gfl::kMaxLevels>{k});
     // debug: CPPWRF_GFL_DUMP=file CPPWRF_GFL_DUMP_STEP=n (or CPPWRF_GF_DUMP / CPPWRF_GF_DUMP_STEP)
     // writes cu_grell_freitas_li's inputs and outputs of step n
     // (tests/phys/cu_gfl/harness.f90 runs WRF's cu_grell_freitas_li on them)
@@ -491,11 +527,11 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
     k.rqicuten = pt.rqicuten.view(); k.rucuten = pt.rucuten.view(); k.rvcuten = pt.rvcuten.view();
     k.flag_qc = s.P_QC >= 0; k.flag_qi = s.P_QI >= 0;
     k.first = true;
-    column_for(g_.columns(), k);
+    column_for_work(g_.columns(), k);
     tile::gather(td_icum);  // tiles: the row's OR needs the row's every column
     column_for_whole(Range2D{0, 1, 0, g_.ny}, KRowAny{td_icum.cview(), td_row_icum.view(), g_.nx});
     k.first = false;
-    column_for(g_.columns(), k);
+    column_for_work(g_.columns(), k);
     return;
   }
   if (o_.cu_physics == 16) {
@@ -523,7 +559,7 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
     const char* ds = std::getenv("CPPWRF_NTIEDTKE_DUMP_STEP");
     if (d && ds && itimestep == std::atol(ds)) k.dump = std::fopen(d, "wb");
 #endif
-    column_for(g_.columns(), k);
+    column_for_work(g_.columns(), k);
 #if !defined(CPPWRF_USE_CUDA)
     if (k.dump) std::fclose(static_cast<std::FILE*>(k.dump));
 #endif

@@ -11,21 +11,28 @@
 #define R(x) static_cast<real>(x)
 
 // Column inputs of cu_grell_freitas_li in C++ level order (k = 0..nz-1, w and p8w at 0..nz interfaces)
+// (the level arrays first: on the GPU they are views into the column work buffer, core/column_work.hpp)
+#define CPPWRF_GFL_DRV_COLUMN(X) \
+  X(real, u, KM) X(real, v, KM) X(real, t, KM) X(real, q, KM) X(real, p, KM) X(real, pi, KM) X(real, rho, KM) \
+  X(real, dz8w, KM) X(real, w, KM) X(real, p8w, KM) X(real, rthften, KM) X(real, rthraten, KM) \
+  X(real, rthblten, KM) X(real, rqvften, KM) X(real, rqvblten, KM)
 template <typename real>
 struct GflDrvColumn {
+  CPPWRF_GFL_DRV_COLUMN(CPPWRF_COLUMN_MEMBER)
   int nz;
   real dt, dx, ht, hfx, qfx, xland;
   real xlv, cp, g, r_v;
   int kpbl;
-  real u[KM], v[KM], t[KM], q[KM], p[KM], pi[KM], rho[KM], dz8w[KM], w[KM], p8w[KM];
-  real rthften[KM], rthraten[KM], rthblten[KM], rqvften[KM], rqvblten[KM];
 };
 
 // Prepared 1-based column arrays in cu_grell_freitas_li
+#define CPPWRF_GFL_PREP(X) \
+  X(real, zo, KM) X(real, po, KM) X(real, rhoi, KM) X(real, us, KM) X(real, vs, KM) X(real, t2d, KM) \
+  X(real, q2d, KM) X(real, qcheck, KM) X(real, qc, KM) X(real, qi, KM) X(real, tn, KM) X(real, qo, KM) \
+  X(real, tshall, KM) X(real, qshall, KM) X(real, dhdt, KM) X(real, omeg, KM)
 template <typename real>
 struct GflPrep {
-  real zo[KM], po[KM], rhoi[KM], us[KM], vs[KM], t2d[KM], q2d[KM], qcheck[KM];
-  real qc[KM], qi[KM], tn[KM], qo[KM], tshall[KM], qshall[KM], dhdt[KM], omeg[KM];
+  CPPWRF_GFL_PREP(CPPWRF_COLUMN_MEMBER)
   real ter11, psur, mconv;
 };
 
@@ -90,17 +97,25 @@ CPPWRF_HOST_DEVICE inline void gfl_prep(const GflDrvColumn<real>& c,
 }
 
 // Outputs of cu_grell_freitas_li for one column (C++ levels 0..nz-1)
+#define CPPWRF_GFL_DRV_OUT(X) \
+  X(real, rthcuten, KM) X(real, rqvcuten, KM) X(real, rqccuten, KM) X(real, rqicuten, KM) X(real, rucuten, KM) \
+  X(real, rvcuten, KM) X(real, gdc, KM) X(real, gdc2, KM)
 template <typename real>
 struct GflDrvOut {
-  real rthcuten[KM], rqvcuten[KM], rqccuten[KM], rqicuten[KM], rucuten[KM], rvcuten[KM];
-  real gdc[KM], gdc2[KM];
+  CPPWRF_GFL_DRV_OUT(CPPWRF_COLUMN_MEMBER)
   real raincv, pratec, htop, hbot;
 };
 
+#define CPPWRF_GFL_GFL_COLUMN_Z(X) \
+  X(real, outt, KM) X(real, outq, KM) X(real, outqc, KM) X(real, outu, KM) X(real, outv, KM) \
+  X(real, cupclw, KM) X(real, cnvwt, KM) X(real, subten_h, KM) X(real, subten_q, KM) X(real, subten_t, KM) \
+  X(real, subten_u, KM) X(real, subten_v, KM) X(real, outts, KM) X(real, outqs, KM) X(real, outqcs, KM) \
+  X(real, outus, KM) X(real, outvs, KM) X(real, cupclws, KM) X(real, cnvwts, KM) X(real, zus, KM)
 template <typename real>
 CPPWRF_HOST_DEVICE inline void gfl_column(const GflDrvColumn<real>& c,
                                           int ishallow, int ichoice_deep,
-                                          GflDrvOut<real>& o) {
+                                          GflDrvOut<real>& o,
+    CPPWRF_COLUMN_CURSOR) {
   using C = GflConstants<real>;
   const int kte = c.nz, ktf = c.nz;
   for (int k = 0; k < KM; ++k) {
@@ -118,15 +133,10 @@ CPPWRF_HOST_DEVICE inline void gfl_column(const GflDrvColumn<real>& c,
   o.raincv = R(0.0);
   o.pratec = R(0.0);
 
-  GflPrep<real> p;
+  CPPWRF_COLUMN_STRUCT(GflPrep<real>, p, CPPWRF_GFL_PREP)
   gfl_prep(c, p);
 
-  real outt[KM] = {}, outq[KM] = {}, outqc[KM] = {}, outu[KM] = {}, outv[KM] = {};
-  real cupclw[KM] = {}, cnvwt[KM] = {};
-  real subten_h[KM] = {}, subten_q[KM] = {}, subten_t[KM] = {};
-  real subten_u[KM] = {}, subten_v[KM] = {};
-  real outts[KM] = {}, outqs[KM] = {}, outqcs[KM] = {}, outus[KM] = {}, outvs[KM] = {};
-  real cupclws[KM] = {}, cnvwts[KM] = {}, zus[KM] = {};
+  CPPWRF_GFL_GFL_COLUMN_Z(CPPWRF_COLUMN_ARRAY0)
 
   real pret = R(0.0), prets = R(0.0);
   real xmb = R(0.0), xmbs = R(0.0);
@@ -158,7 +168,8 @@ CPPWRF_HOST_DEVICE inline void gfl_column(const GflDrvColumn<real>& c,
 
   const GflDeepOut<real> r =
       cu_gfl_deep_run(d, outu, outv, outt, outq, outqc, subten_h, subten_q,
-                      subten_t, subten_u, subten_v, cupclw, cnvwt, pret, xmb);
+                      subten_t, subten_u, subten_v, cupclw, cnvwt, pret, xmb,
+                      cppwrf_cw_);
 
   neg_check(false, c.dt, p.qcheck, outq, subten_q, outt, subten_t, outu,
             subten_u, outv, subten_v, outqc, pret, r.ktop);
@@ -191,7 +202,7 @@ CPPWRF_HOST_DEVICE inline void gfl_column(const GflDrvColumn<real>& c,
       s.kpbl = c.kpbl;
       s.ichoice = 3;
       sh = cu_gfl_sh_run(s, frhs, zus, xmbs, outts, outqs, outqcs, outus, outvs,
-                         cnvwts, prets, cupclws);
+                         cnvwts, prets, cupclws, cppwrf_cw_);
     }
   }
 
@@ -229,3 +240,23 @@ CPPWRF_HOST_DEVICE inline void gfl_column(const GflDrvColumn<real>& c,
 }
 
 #undef R
+
+// The column arrays of one column in bytes (the GPU's work buffer, core/column_work.hpp): the kernel's column and
+// outputs, cu_grell_freitas_li's, and the larger of the deep and the shallow scheme's (they run one after the
+// other on the same part of the buffer), each with its routines' arrays
+namespace work_bytes {
+template <typename real>
+inline constexpr std::size_t kHelpers = 0 CPPWRF_GFL_CUP_ENV(CPPWRF_COLUMN_BYTES) CPPWRF_GFL_CUP_KBCON_Z(
+    CPPWRF_COLUMN_BYTES) CPPWRF_GFL_GET_INVERSION_LAYERS_Z(CPPWRF_COLUMN_BYTES) CPPWRF_GFL_RATES_UP_PDF_Z(
+    CPPWRF_COLUMN_BYTES) CPPWRF_GFL_CUP_FORCING_ENS_3D_Z(CPPWRF_COLUMN_BYTES);
+template <typename real>
+inline constexpr std::size_t kDeep =
+    kHelpers<real> CPPWRF_GFL_CU_GFL_DEEP_RUN_Z(CPPWRF_COLUMN_BYTES) CPPWRF_GFL_DEEP_DOWNDRAFT_Z(CPPWRF_COLUMN_BYTES);
+template <typename real>
+inline constexpr std::size_t kShallow = kHelpers<real> CPPWRF_GFL_CU_GFL_SH_RUN_Z(CPPWRF_COLUMN_BYTES);
+}  // namespace work_bytes
+template <typename real>
+inline constexpr std::size_t kWorkBytes =
+    (work_bytes::kDeep<real> > work_bytes::kShallow<real> ? work_bytes::kDeep<real> : work_bytes::kShallow<real>)
+        CPPWRF_GFL_DRV_COLUMN(CPPWRF_COLUMN_BYTES) CPPWRF_GFL_PREP(CPPWRF_COLUMN_BYTES)
+        CPPWRF_GFL_DRV_OUT(CPPWRF_COLUMN_BYTES) CPPWRF_GFL_GFL_COLUMN_Z(CPPWRF_COLUMN_BYTES);

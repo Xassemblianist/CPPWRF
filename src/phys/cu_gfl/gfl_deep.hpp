@@ -13,8 +13,8 @@
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void get_partition_liq_ice(
-    int ierr, const real* tn, const real* po_cup, real* p_liq_ice,
-    real* melting_layer, int ktf, int kte, bool is_deep) {
+    int ierr, ColCPtr<real> tn, ColCPtr<real> po_cup, ColPtr<real> p_liq_ice,
+    ColPtr<real> melting_layer, int ktf, int kte, bool is_deep) {
   using C = GflConstants<real>;
   constexpr real t1 = R(276.16);
 
@@ -72,9 +72,9 @@ CPPWRF_HOST_DEVICE inline void get_partition_liq_ice(
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void get_melting_profile(
-    int ierr, const real* tn_cup, const real* po_cup, const real* p_liq_ice,
-    const real* melting_layer, const real* qrco, const real* pwo, real edto,
-    const real* pwdo, real* melting, int ktf, int kte, bool is_deep) {
+    int ierr, ColCPtr<real> tn_cup, ColCPtr<real> po_cup, ColCPtr<real> p_liq_ice,
+    ColCPtr<real> melting_layer, ColCPtr<real> qrco, ColCPtr<real> pwo, real edto,
+    ColCPtr<real> pwdo, ColPtr<real> melting, int ktf, int kte, bool is_deep) {
   using C = GflConstants<real>;
 
   if (C::melt_glac && is_deep) {
@@ -108,11 +108,11 @@ CPPWRF_HOST_DEVICE inline void get_melting_profile(
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_dd_moisture(
-    const real* zd, const real* hcd, const real* hes_cup, real* qcd,
-    const real* qes_cup, real* pwd, const real* q_cup, const real* z_cup,
-    const real* dd_massentr, const real* dd_massdetr, int jmin, int& ierr,
-    const real* gamma_cup, real& pwev, real& bu, real* qrcd, const real* p_cup,
-    const real* q, const real* he, int iloop, int ktf) {
+    ColCPtr<real> zd, ColCPtr<real> hcd, ColCPtr<real> hes_cup, ColPtr<real> qcd,
+    ColCPtr<real> qes_cup, ColPtr<real> pwd, ColCPtr<real> q_cup, ColCPtr<real> z_cup,
+    ColCPtr<real> dd_massentr, ColCPtr<real> dd_massdetr, int jmin, int& ierr,
+    ColCPtr<real> gamma_cup, real& pwev, real& bu, ColPtr<real> qrcd, ColCPtr<real> p_cup,
+    ColCPtr<real> q, ColCPtr<real> he, int iloop, int ktf) {
   using C = GflConstants<real>;
 
   bu = R(0.0);
@@ -175,10 +175,10 @@ CPPWRF_HOST_DEVICE inline void cup_dd_moisture(
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_dd_edt(
-    int ierr, const real* us, const real* vs, const real* z, int ktop,
-    int kbcon, real& edt, const real* p, real pwav, const real* pw, real ccn,
+    int ierr, ColCPtr<real> us, ColCPtr<real> vs, ColCPtr<real> z, int ktop,
+    int kbcon, real& edt, ColCPtr<real> p, real pwav, ColCPtr<real> pw, real ccn,
     real ccnclean, real pwev, real edtmax, real edtmin, real& edtc, real psum2,
-    real psumh, const real* rho, int aeroevap, real& pefc, int xland1,
+    real psumh, ColCPtr<real> rho, int aeroevap, real& pefc, int xland1,
     int ktf) {
   pefc = R(0.0);
   edt = R(0.0);
@@ -249,19 +249,22 @@ CPPWRF_HOST_DEVICE inline void cup_dd_edt(
 // ---------------------------------------------------------------------------
 // cup_forcing_ens_3d (lines 3433-3839 of module_cu_gfl_deep.F90)
 // ---------------------------------------------------------------------------
+#define CPPWRF_GFL_CUP_FORCING_ENS_3D_Z(X) \
+  X(real, xff_ens3, GflConstants<real>::maxens3 + 1)
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_forcing_ens_3d(
     real& closure_n, int xland, real aa0, real aa1, real xaa0, real mbdt,
-    real dtime, int ierr, int ierr2, int ierr3, real* xf_ens, real axx,
-    real mconv, const real* p_cup, int ktop, const real* omeg, const real* zd,
-    const real* zu, const real* pr_ens, real edt, int kbcon, int ichoice,
-    int dicycle, real tau_ecmwf, real aa1_bl, real& xf_dicycle) {
+    real dtime, int ierr, int ierr2, int ierr3, ColPtr<real> xf_ens, real axx,
+    real mconv, ColCPtr<real> p_cup, int ktop, ColCPtr<real> omeg, ColCPtr<real> zd,
+    ColCPtr<real> zu, ColCPtr<real> pr_ens, real edt, int kbcon, int ichoice,
+    int dicycle, real tau_ecmwf, real aa1_bl, real& xf_dicycle,
+    CPPWRF_COLUMN_CURSOR) {
   using C = GflConstants<real>;
   constexpr int maxens3 = C::maxens3;
 
   real ens_adj = R(1.0);
   real xff_dicycle = R(0.0);
-  real xff_ens3[maxens3 + 1] = {};
+  CPPWRF_GFL_CUP_FORCING_ENS_3D_Z(CPPWRF_COLUMN_ARRAY0)
 
   if (ierr == 0) {
     real a_ave = axx;
@@ -399,10 +402,10 @@ CPPWRF_HOST_DEVICE inline void cup_forcing_ens_3d(
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void cup_output_ens_3d(
-    const real* xff_mid, real* xf_ens, int& ierr, const real* dellat,
-    const real* dellaq, const real* dellaqc, real* outtem, real* outq,
-    real* outqc, real* subten_h, real* subten_q, real* subten_t, real& pre,
-    const real* pw, real& xmb, int ktop, const real* pr_ens, real sig,
+    ColCPtr<real> xff_mid, ColPtr<real> xf_ens, int& ierr, ColCPtr<real> dellat,
+    ColCPtr<real> dellaq, ColCPtr<real> dellaqc, ColPtr<real> outtem, ColPtr<real> outq,
+    ColPtr<real> outqc, ColPtr<real> subten_h, ColPtr<real> subten_q, ColPtr<real> subten_t, real& pre,
+    ColCPtr<real> pw, real& xmb, int ktop, ColCPtr<real> pr_ens, real sig,
     real closure_n, real xmbs_in, int ichoice, int imid, int ktf, int kte,
     int dicycle, real xf_dicycle) {
   using C = GflConstants<real>;
@@ -499,10 +502,10 @@ CPPWRF_HOST_DEVICE inline void cup_output_ens_3d(
 // ---------------------------------------------------------------------------
 template <typename real>
 CPPWRF_HOST_DEVICE inline void neg_check(bool is_shallow_or_mid, real dt,
-                                         const real* q, real* outq, real* sq,
-                                         real* outt, real* st, real* outu,
-                                         real* su, real* outv, real* sv,
-                                         real* outqc, real& pret, int ktop) {
+                                         ColCPtr<real> q, ColPtr<real> outq, ColPtr<real> sq,
+                                         ColPtr<real> outt, ColPtr<real> st, ColPtr<real> outu,
+                                         ColPtr<real> su, ColPtr<real> outv, ColPtr<real> sv,
+                                         ColPtr<real> outqc, real& pret, int ktop) {
   if (ktop <= 2) return;
 
   real thresh = R(800.01);
@@ -568,7 +571,7 @@ CPPWRF_HOST_DEVICE inline void neg_check(bool is_shallow_or_mid, real dt,
 template <typename real>
 struct GflColumnIn {
   int nz;
-  const real *t, *q, *tn, *qo, *po, *us, *vs, *rho, *omeg, *zo, *dhdt;
+  ColCPtr<real> t, q, tn, qo, po, us, vs, rho, omeg, zo, dhdt;
   real z1, psur, hfx, qfx, xland, dx, dtime;
   int kpbl, ichoice;
   real xmbs_in;
@@ -585,22 +588,45 @@ struct GflDeepOut {
 // Called from cu_grell_freitas_li with imid = 0, sub3d = 0, dicycle = 0,
 // nranflag = 0, do_capsuppress = 0, do_smoke_transport = .false.
 // ---------------------------------------------------------------------------
+// its downdraft profile block
+#define CPPWRF_GFL_DEEP_DOWNDRAFT_Z(X) X(real, zd_local, KM) X(real, zuh2, 40)
+#define CPPWRF_GFL_CU_GFL_DEEP_RUN_Z(X) \
+  X(real, zo, KM) X(real, z, KM) X(real, xz, KM) X(real, zuo, KM) X(real, zdo, KM) X(real, zu, KM) \
+  X(real, xzu, KM) X(real, qes, KM) X(real, he, KM) X(real, hes, KM) X(real, qeso, KM) X(real, heo, KM) \
+  X(real, heso, KM) X(real, qes_cup, KM) X(real, q_cup, KM) X(real, he_cup, KM) X(real, hes_cup, KM) \
+  X(real, z_cup, KM) X(real, p_cup, KM) X(real, gamma_cup, KM) X(real, t_cup, KM) X(real, qeso_cup, KM) \
+  X(real, qo_cup, KM) X(real, heo_cup, KM) X(real, heso_cup, KM) X(real, zo_cup, KM) X(real, po_cup, KM) \
+  X(real, gammao_cup, KM) X(real, tn_cup, KM) X(real, u_cup, KM) X(real, v_cup, KM) X(real, uc, KM) \
+  X(real, vc, KM) X(real, ucd, KM) X(real, vcd, KM) X(real, hc, KM) X(real, dby, KM) X(real, hco, KM) \
+  X(real, dbyo, KM) X(real, dbyt, KM) X(real, cd, KM) X(real, cdd, KM) X(real, c1d, KM) X(real, c0t3d, KM) \
+  X(real, entr_rate_2d, KM) X(real, mentrd_rate_2d, KM) X(real, up_massentr, KM) X(real, up_massdetr, KM) \
+  X(real, up_massentro, KM) X(real, up_massdetro, KM) X(real, up_massentru, KM) X(real, up_massdetru, KM) \
+  X(real, dd_massentro, KM) X(real, dd_massdetro, KM) X(real, dd_massentru, KM) X(real, dd_massdetru, KM) \
+  X(real, hcdo, KM) X(real, qcdo, KM) X(real, qrcdo, KM) X(real, pwdo, KM) X(real, dbydo, KM) X(real, qco, KM) \
+  X(real, qrco, KM) X(real, pwo, KM) X(real, clw_all, KM) X(real, dellu, KM) X(real, dellv, KM) \
+  X(real, dellah, KM) X(real, dellaq, KM) X(real, dellat, KM) X(real, dellaqc, KM) X(real, dellat_ens, KM) \
+  X(real, dellaq_ens, KM) X(real, dellaqc_ens, KM) X(real, pwo_ens, KM) X(real, xhe, KM) X(real, xq, KM) \
+  X(real, xt, KM) X(real, xqes, KM) X(real, xhes, KM) X(real, xqes_cup, KM) X(real, xq_cup, KM) \
+  X(real, xhe_cup, KM) X(real, xhes_cup, KM) X(real, xz_cup, KM) X(real, xt_cup, KM) X(real, xhc, KM) \
+  X(real, xdby, KM) X(real, p_liq_ice, KM) X(real, melting_layer, KM) X(real, melting, KM) \
+  X(real, xf_ens, GflConstants<real>::maxens3 + 1) X(real, pr_ens, GflConstants<real>::maxens3 + 1) X(real, xff_mid, 3)
 template <typename real>
 CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
-    const GflColumnIn<real>& in, real* outu, real* outv, real* outt, real* outq,
-    real* outqc, real* subten_h, real* subten_q, real* subten_t, real* subten_u,
-    real* subten_v, real* cupclw, real* cnvwt, real& pre, real& xmb_out) {
+    const GflColumnIn<real>& in, ColPtr<real> outu, ColPtr<real> outv, ColPtr<real> outt, ColPtr<real> outq,
+    ColPtr<real> outqc, ColPtr<real> subten_h, ColPtr<real> subten_q, ColPtr<real> subten_t, ColPtr<real> subten_u,
+    ColPtr<real> subten_v, ColPtr<real> cupclw, ColPtr<real> cnvwt, real& pre, real& xmb_out,
+    CPPWRF_COLUMN_CURSOR) {
   using C = GflConstants<real>;
   const int kte = in.nz, ktf = in.nz;
-  const real* t = in.t;
-  const real* q = in.q;
-  const real* tn = in.tn;
-  const real* qo = in.qo;
-  const real* po = in.po;
-  const real* us = in.us;
-  const real* vs = in.vs;
-  const real* rho = in.rho;
-  const real* omeg = in.omeg;
+  ColCPtr<real> t = in.t;
+  ColCPtr<real> q = in.q;
+  ColCPtr<real> tn = in.tn;
+  ColCPtr<real> qo = in.qo;
+  ColCPtr<real> po = in.po;
+  ColCPtr<real> us = in.us;
+  ColCPtr<real> vs = in.vs;
+  ColCPtr<real> rho = in.rho;
+  ColCPtr<real> omeg = in.omeg;
   const real z1 = in.z1, psur = in.psur, dx = in.dx, dtime = in.dtime;
   const int kpbl = in.kpbl;
 
@@ -612,38 +638,7 @@ CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
   int kstabi = 0, kzdown = 0, ktopdby = 0, pmin_lev = 0;
   int ierr2 = 0, ierr3 = 0;
 
-  real zo[KM] = {}, z[KM] = {}, xz[KM] = {};
-  real zuo[KM] = {}, zdo[KM] = {}, zu[KM] = {}, xzu[KM] = {};
-  real qes[KM] = {}, he[KM] = {}, hes[KM] = {};
-  real qeso[KM] = {}, heo[KM] = {}, heso[KM] = {};
-  real qes_cup[KM] = {}, q_cup[KM] = {}, he_cup[KM] = {}, hes_cup[KM] = {};
-  real z_cup[KM] = {}, p_cup[KM] = {}, gamma_cup[KM] = {}, t_cup[KM] = {};
-  real qeso_cup[KM] = {}, qo_cup[KM] = {}, heo_cup[KM] = {}, heso_cup[KM] = {};
-  real zo_cup[KM] = {}, po_cup[KM] = {}, gammao_cup[KM] = {}, tn_cup[KM] = {};
-  real u_cup[KM] = {}, v_cup[KM] = {}, uc[KM] = {}, vc[KM] = {};
-  real ucd[KM] = {}, vcd[KM] = {};
-  real hc[KM] = {}, dby[KM] = {}, hco[KM] = {}, dbyo[KM] = {}, dbyt[KM] = {};
-  real cd[KM] = {}, cdd[KM] = {}, c1d[KM] = {}, c0t3d[KM] = {};
-  real entr_rate_2d[KM] = {}, mentrd_rate_2d[KM] = {};
-  real up_massentr[KM] = {}, up_massdetr[KM] = {};
-  real up_massentro[KM] = {}, up_massdetro[KM] = {};
-  real up_massentru[KM] = {}, up_massdetru[KM] = {};
-  real dd_massentro[KM] = {}, dd_massdetro[KM] = {};
-  real dd_massentru[KM] = {}, dd_massdetru[KM] = {};
-  real hcdo[KM] = {}, qcdo[KM] = {}, qrcdo[KM] = {}, pwdo[KM] = {},
-       dbydo[KM] = {};
-  real qco[KM] = {}, qrco[KM] = {}, pwo[KM] = {}, clw_all[KM] = {};
-  real dellu[KM] = {}, dellv[KM] = {}, dellah[KM] = {}, dellaq[KM] = {};
-  real dellat[KM] = {}, dellaqc[KM] = {};
-  real dellat_ens[KM] = {}, dellaq_ens[KM] = {}, dellaqc_ens[KM] = {},
-       pwo_ens[KM] = {};
-  real xhe[KM] = {}, xq[KM] = {}, xt[KM] = {}, xqes[KM] = {}, xhes[KM] = {};
-  real xqes_cup[KM] = {}, xq_cup[KM] = {}, xhe_cup[KM] = {}, xhes_cup[KM] = {};
-  real xz_cup[KM] = {}, xt_cup[KM] = {};
-  real xhc[KM] = {}, xdby[KM] = {};
-  real p_liq_ice[KM] = {}, melting_layer[KM] = {}, melting[KM] = {};
-  real xf_ens[C::maxens3 + 1] = {}, pr_ens[C::maxens3 + 1] = {};
-  real xff_mid[3] = {};
+  CPPWRF_GFL_CU_GFL_DEEP_RUN_Z(CPPWRF_COLUMN_ARRAY0)
 
   for (int k = 1; k <= kte; ++k) zo[k] = in.zo[k];
 
@@ -734,8 +729,9 @@ CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
   const int kstabm = ktf - 1;
   const real zkbmax = R(4000.0), zcutdown = R(4000.0), z_detr = R(500.0);
 
-  cup_env(ktf, kte, ierr, -1, psur, z1, po, t, z, he, hes, qes, q);
-  cup_env(ktf, kte, ierr, -1, psur, z1, po, tn, zo, heo, heso, qeso, qo);
+  cup_env(ktf, kte, ierr, -1, psur, z1, po, t, z, he, hes, qes, q, cppwrf_cw_);
+  cup_env(ktf, kte, ierr, -1, psur, z1, po, tn, zo, heo, heso, qeso, qo,
+cppwrf_cw_);
   cup_env_clev(ktf, kte, ierr, psur, z1, t, qes, q, he, hes, z, po, qes_cup,
                q_cup, he_cup, hes_cup, z_cup, p_cup, gamma_cup, t_cup);
   cup_env_clev(ktf, kte, ierr, psur, z1, tn, qeso, qo, heo, heso, zo, po,
@@ -786,7 +782,7 @@ CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
 
   cup_kbcon(cap_max_increment, 1, k22, kbcon, heo_cup, heso_cup, hkbo, ierr,
             kbmax, po_cup, cap_max, ztexec, zqexec, kte, z_cup, entr_rate, heo,
-            imid);
+            imid, cppwrf_cw_);
   cup_minimi(heso_cup, kbcon, kstabm, ierr, kstabi);
 
   if (ierr == 0) {
@@ -819,7 +815,8 @@ CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
   }
 
   rates_up_pdf(1, ktf, kte, ierr, po_cup, ktop, k22, zo_cup, entr_rate_2d, heo,
-               heso_cup, hkbo, xland1, kbcon, zuo, ktopdby, csum, pmin_lev);
+               heso_cup, hkbo, xland1, kbcon, zuo, ktopdby, csum, pmin_lev,
+               cppwrf_cw_);
 
   if (ierr == 0) {
     if (k22 > 1) {
@@ -1044,8 +1041,7 @@ CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
     real bud = R(0.0);
     for (int k = 1; k <= jmin; ++k) cdd[k] = R(0.1) * entr_rate;
     cdd[jmin] = R(0.0);
-    real zd_local[KM] = {};
-    real zuh2[40] = {};
+    CPPWRF_GFL_DEEP_DOWNDRAFT_Z(CPPWRF_COLUMN_ARRAY0)
     get_zu_zd_pdf_fim(0, po_cup, R(0.0), R(0.0), 0, xland1, zuh2, 4, ierr, kdet,
                       jmin + 1, zd_local, 1, kte, ktf, beta, kpbl, csum,
                       pmin_lev);
@@ -1284,7 +1280,8 @@ CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
     xt[ktf] = tn[ktf];
   }
 
-  cup_env(ktf, kte, ierr, -1, psur, z1, po, xt, xz, xhe, xhes, xqes, xq);
+  cup_env(ktf, kte, ierr, -1, psur, z1, po, xt, xz, xhe, xhes, xqes, xq,
+cppwrf_cw_);
   cup_env_clev(ktf, kte, ierr, psur, z1, xt, xqes, xq, xhe, xhes, xz, po,
                xqes_cup, xq_cup, xhe_cup, xhes_cup, xz_cup, po_cup, gamma_cup,
                xt_cup);
@@ -1340,10 +1337,10 @@ CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
     real hkbo2 = hkbo;
     cup_kbcon(cap_max_increment, 2, k22x, kbconx, heo_cup, heso_cup, hkbo2,
               ierr2, kbmax, po_cup, cap_max, ztexec, zqexec, kte, z_cup,
-              entr_rate, heo, imid);
+              entr_rate, heo, imid, cppwrf_cw_);
     cup_kbcon(cap_max_increment, 3, k22x, kbconx, heo_cup, heso_cup, hkbo2,
               ierr3, kbmax, po_cup, cap_max, ztexec, zqexec, kte, z_cup,
-              entr_rate, heo, imid);
+              entr_rate, heo, imid, cppwrf_cw_);
   }
 
   real mconv = R(0.0);
@@ -1358,7 +1355,7 @@ CPPWRF_HOST_DEVICE inline GflDeepOut<real> cu_gfl_deep_run(
   cup_forcing_ens_3d(closure_n, xland1, aa0, aa1, xaa0_ens, mbdt, dtime, ierr,
                      ierr2, ierr3, xf_ens, axx, mconv, po_cup, ktop, omeg, zdo,
                      zuo, pr_ens, edto, kbcon, in.ichoice, dicycle, tau_ecmwf,
-                     aa1_bl, xf_dicycle);
+                     aa1_bl, xf_dicycle, cppwrf_cw_);
 
   for (int k = 1; k <= ktf; ++k) {
     if (ierr == 0) {

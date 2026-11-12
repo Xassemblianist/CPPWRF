@@ -2,6 +2,7 @@
 #pragma once
 
 #include "core/backend.hpp"
+#include "core/column_work.hpp"
 #include "core/field.hpp"
 #include "phys/phys_constants.hpp"
 #include "phys/cu_kf/kf_tables.hpp"
@@ -11,6 +12,45 @@
 namespace cppwrf::phys::cu_kf {
 
 inline constexpr int kMaxLevels = 128;
+
+// kf_eta_cps's column arrays (KFKernel::compute). CUDA FP64 builds keep them in the column work buffer
+// (core/column_work.hpp) instead of the thread's stack, which the GPU reserves for every thread it can hold (29 KB
+// per thread at 48 levels). FP32 builds keep the local arrays: kf.cpp contracts multiply-adds there, and the
+// contraction follows the code around it (in the buffer the FP32 values of P2 / P4 differed).
+#if defined(CPPWRF_DOUBLE)
+#define CPPWRF_KF_ARRAY CPPWRF_COLUMN_ARRAY
+#define CPPWRF_KF_SLOTS(work, i, j) CPPWRF_COLUMN_SLOTS(work, i, j)
+#else
+#define CPPWRF_KF_ARRAY(T, name, n) T name[n];
+#define CPPWRF_KF_SLOTS(work, i, j)
+#endif
+// the input column
+#define CPPWRF_KF_COLUMN_IN(X) \
+    X(T, u0, MaxLevels) X(T, v0, MaxLevels) X(T, t0, MaxLevels) X(T, qv0, MaxLevels) \
+    X(T, p0, MaxLevels) X(T, dzq, MaxLevels)
+// KF_eta_PARA's column arrays
+#define CPPWRF_KF_COLUMN(X) \
+    X(T, q0, MaxLevels) X(T, z0, MaxLevels) X(T, tv0, MaxLevels) X(T, tu, MaxLevels) \
+    X(T, tvu, MaxLevels) X(T, qu, MaxLevels) X(T, tz, MaxLevels) X(T, tvd, MaxLevels) \
+    X(T, qd, MaxLevels) X(T, qes, MaxLevels) X(T, tg, MaxLevels) X(T, tvg, MaxLevels) \
+    X(T, qg, MaxLevels) X(T, wu, MaxLevels) X(T, wd, MaxLevels) X(T, ems, MaxLevels) \
+    X(T, emsd, MaxLevels) X(T, umf, MaxLevels) X(T, uer, MaxLevels) X(T, udr, MaxLevels) \
+    X(T, dmf, MaxLevels) X(T, der, MaxLevels) X(T, ddr, MaxLevels) X(T, umf2, MaxLevels) \
+    X(T, uer2, MaxLevels) X(T, udr2, MaxLevels) X(T, dmf2, MaxLevels) X(T, der2, MaxLevels) \
+    X(T, ddr2, MaxLevels) X(T, dza, MaxLevels) X(T, thta0, MaxLevels) X(T, thetee, MaxLevels) \
+    X(T, thtau, MaxLevels) X(T, theteu, MaxLevels) X(T, thtad, MaxLevels) X(T, theted, MaxLevels) \
+    X(T, qliq, MaxLevels) X(T, qice, MaxLevels) X(T, qlqout, MaxLevels) X(T, qicout, MaxLevels) \
+    X(T, pptliq, MaxLevels) X(T, pptice, MaxLevels) X(T, detlq, MaxLevels) X(T, detic, MaxLevels) \
+    X(T, detlq2, MaxLevels) X(T, detic2, MaxLevels) X(T, ratio2, MaxLevels) X(T, domgdp, MaxLevels) \
+    X(T, tvqu, MaxLevels) X(T, dp, MaxLevels) X(T, rh, MaxLevels) X(T, eqfrc, MaxLevels) \
+    X(T, wspd, MaxLevels) X(T, qdt, MaxLevels) X(T, fxm, MaxLevels) X(T, thtag, MaxLevels) \
+    X(T, thpa, MaxLevels) X(T, thfxout, MaxLevels) X(T, thfxin, MaxLevels) X(T, qpa, MaxLevels) \
+    X(T, qfxout, MaxLevels) X(T, qfxin, MaxLevels) X(T, ql0, MaxLevels) X(T, qlg, MaxLevels) \
+    X(T, qi0, MaxLevels) X(T, qig, MaxLevels) X(T, qr0, MaxLevels) X(T, qrg, MaxLevels) \
+    X(T, qs0, MaxLevels) X(T, qsg, MaxLevels) X(T, rainfb, MaxLevels) X(T, snowfb, MaxLevels) \
+    X(T, cldhgt, MaxLevels) X(T, qsd, MaxLevels) X(T, dilfrc, MaxLevels) X(T, ddilfrc, MaxLevels) \
+    X(T, tgu, MaxLevels) X(T, qgu, MaxLevels) X(T, thteeg, MaxLevels) X(T, omg, MaxLevels + 1) \
+    X(int, kcheck, MaxLevels)
 
 template <typename T>
 CPPWRF_HD inline void envirtht(const KFTables<T>& tables, T p1, T t1, T q1, T& tht1,
@@ -305,6 +345,15 @@ struct KFKernel {
     View3<T> qc_kf;
     View3<T> qi_kf;
 
+#if defined(CPPWRF_DOUBLE)
+    // the GPU's column arrays (column_for_work through KFRunner)
+    ColumnWork work{};
+#endif
+    template <int MaxLevels>
+    static constexpr std::size_t work_bytes() {
+        return 0 CPPWRF_KF_COLUMN_IN(CPPWRF_COLUMN_BYTES) CPPWRF_KF_COLUMN(CPPWRF_COLUMN_BYTES);
+    }
+
     CPPWRF_HD void operator()(int i, int j) const { compute<kMaxLevels>(i, j); }
 
     template <int MaxLevels = kMaxLevels>
@@ -364,8 +413,8 @@ struct KFKernel {
         cubot(i, j) = static_cast<T>(kx + 1);       // KTE + 1
 
         // Local column scratch arrays
-        T u0[MaxLevels], v0[MaxLevels], t0[MaxLevels], qv0[MaxLevels], p0[MaxLevels];
-        T dzq[MaxLevels];
+        CPPWRF_KF_SLOTS(work, i, j)
+        CPPWRF_KF_COLUMN_IN(CPPWRF_KF_ARRAY)
 
         for (int k = 0; k < kx; ++k) {
             u0[k] = u(i, j, k);
@@ -403,26 +452,7 @@ struct KFKernel {
         const T dpmin = static_cast<T>(5.0e3);
         const T p300 = p0[0] - static_cast<T>(30000.0);
 
-        T q0[MaxLevels], z0[MaxLevels], tv0[MaxLevels], tu[MaxLevels], tvu[MaxLevels];
-        T qu[MaxLevels], tz[MaxLevels], tvd[MaxLevels], qd[MaxLevels], qes[MaxLevels];
-        T tg[MaxLevels], tvg[MaxLevels], qg[MaxLevels], wu[MaxLevels], wd[MaxLevels];
-        T ems[MaxLevels], emsd[MaxLevels], umf[MaxLevels], uer[MaxLevels], udr[MaxLevels];
-        T dmf[MaxLevels], der[MaxLevels], ddr[MaxLevels], umf2[MaxLevels], uer2[MaxLevels];
-        T udr2[MaxLevels], dmf2[MaxLevels], der2[MaxLevels], ddr2[MaxLevels], dza[MaxLevels];
-        T thta0[MaxLevels], thetee[MaxLevels], thtau[MaxLevels], theteu[MaxLevels];
-        T thtad[MaxLevels], theted[MaxLevels], qliq[MaxLevels], qice[MaxLevels];
-        T qlqout[MaxLevels], qicout[MaxLevels], pptliq[MaxLevels], pptice[MaxLevels];
-        T detlq[MaxLevels], detic[MaxLevels], detlq2[MaxLevels], detic2[MaxLevels];
-        T ratio2[MaxLevels], domgdp[MaxLevels], tvqu[MaxLevels];
-        T dp[MaxLevels], rh[MaxLevels], eqfrc[MaxLevels], wspd[MaxLevels];
-        T qdt[MaxLevels], fxm[MaxLevels], thtag[MaxLevels], thpa[MaxLevels];
-        T thfxout[MaxLevels], thfxin[MaxLevels], qpa[MaxLevels], qfxout[MaxLevels];
-        T qfxin[MaxLevels], ql0[MaxLevels], qlg[MaxLevels], qi0[MaxLevels];
-        T qig[MaxLevels], qr0[MaxLevels], qrg[MaxLevels], qs0[MaxLevels], qsg[MaxLevels];
-        T rainfb[MaxLevels], snowfb[MaxLevels], cldhgt[MaxLevels], qsd[MaxLevels];
-        T dilfrc[MaxLevels], ddilfrc[MaxLevels], tgu[MaxLevels], qgu[MaxLevels], thteeg[MaxLevels];
-        T omg[MaxLevels + 1];
-        int kcheck[MaxLevels];
+        CPPWRF_KF_COLUMN(CPPWRF_KF_ARRAY)
 
         int l5 = 0;
         int llfc = 0;
@@ -1487,18 +1517,18 @@ struct KFKernel {
         }
 
         // Hydrometeor tendencies (alias dead closure scratch arrays)
-        T* qlpa = umf2;
-        T* qipa = dmf2;
-        T* qrpa = detlq2;
-        T* qspa = detic2;
-        T* qlfxin = thfxin;
-        T* qlfxout = thfxout;
-        T* qifxin = qfxin;
-        T* qifxout = qfxout;
-        T* qrfxin = udr2;
-        T* qrfxout = uer2;
-        T* qsfxin = der2;
-        T* qsfxout = ddr2;
+        auto qlpa = umf2;
+        auto qipa = dmf2;
+        auto qrpa = detlq2;
+        auto qspa = detic2;
+        auto qlfxin = thfxin;
+        auto qlfxout = thfxout;
+        auto qifxin = qfxin;
+        auto qifxout = qfxout;
+        auto qrfxin = udr2;
+        auto qrfxout = uer2;
+        auto qsfxin = der2;
+        auto qsfxout = ddr2;
 
         T frc2 = (cpr > static_cast<T>(0.0)) ? (pptflx / (cpr * ainc)) : static_cast<T>(0.0);
         for (int nk = 0; nk <= ltop; ++nk) {
@@ -1623,8 +1653,16 @@ struct KFKernel {
 template <typename T, int MaxLevels>
 struct KFRunner {
     KFKernel<T> k;
+    static constexpr std::size_t kWorkBytes = KFKernel<T>::template work_bytes<MaxLevels>();
     CPPWRF_HD void operator()(int i, int j) const { k.template compute<MaxLevels>(i, j); }
+#if defined(CPPWRF_DOUBLE)
+    void set_work(const ColumnWork& w) { k.work = w; }
+#endif
 };
+
+// The GPU work buffer of run_kf over range (outside the time loop; CPU build: no-op)
+template <typename T>
+void kf_reserve(const Range2D& range, int nz);
 
 template <typename T>
 void run_kf(KFKernel<T> kernel, const Range2D& range);

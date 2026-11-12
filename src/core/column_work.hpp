@@ -34,6 +34,20 @@ struct ColArray {
   CPPWRF_FORCEINLINE explicit operator bool() const { return p != nullptr; }  // an optional array (null: absent)
 };
 
+// A column array as a parameter of a helper or as a second name for an array: ColPtr<T> a, ColCPtr<T> b (read
+// only) are T* and const T* on the host (the caller's local array) and the work buffer's view on the GPU.
+#if defined(__CUDA_ARCH__)
+template <class T>
+using ColPtr = ColArray<T>;
+template <class T>
+using ColCPtr = ColArray<T>;
+#else
+template <class T>
+using ColPtr = T*;
+template <class T>
+using ColCPtr = const T*;
+#endif
+
 // a [n1][N2] work array: element (k, n) of a thread at p[32 (k N2 + n)]
 template <class T, int N2>
 struct ColArray2 {
@@ -94,6 +108,27 @@ class ColumnSlots {
 #else
 #define CPPWRF_COLUMN_ARRAY(T, name, n) T name[n];
 #define CPPWRF_COLUMN_ARRAY2(T, name, n1, n2) T name[n1][n2];
+#endif
+// a struct of column arrays: LIST(CPPWRF_COLUMN_MEMBER) as its members, CPPWRF_COLUMN_STRUCT(Type, var, LIST)
+// declares one (its arrays taken from the cursor in the list's order)
+#if defined(__CUDA_ARCH__)
+#define CPPWRF_COLUMN_MEMBER(T, name, n) ::cppwrf::ColArray<T> name;
+#define CPPWRF_COLUMN_TAKE_(T, name, n) cppwrf_cw_.take<T>(n),
+#define CPPWRF_COLUMN_STRUCT(Type, var, LIST) Type var{LIST(CPPWRF_COLUMN_TAKE_)};
+#else
+#define CPPWRF_COLUMN_MEMBER(T, name, n) T name[n];
+#define CPPWRF_COLUMN_STRUCT(Type, var, LIST) Type var;
+#endif
+// a helper with column arrays of its own: its last parameter (the caller passes its cppwrf_cw_; the helper's arrays
+// follow the caller's and are free again when it returns)
+#define CPPWRF_COLUMN_CURSOR [[maybe_unused]] ::cppwrf::ColumnSlots cppwrf_cw_
+// T name[n] = {}: the array zero-filled (CPPWRF_COLUMN_ARRAY0 after CPPWRF_COLUMN_SLOTS or with a cursor parameter)
+#if defined(__CUDA_ARCH__)
+#define CPPWRF_COLUMN_ARRAY0(T, name, n) \
+  const ::cppwrf::ColArray<T> name = cppwrf_cw_.take<T>(n); \
+  for (int cppwrf_cw_k_ = 0; cppwrf_cw_k_ < (n); ++cppwrf_cw_k_) name[cppwrf_cw_k_] = T();
+#else
+#define CPPWRF_COLUMN_ARRAY0(T, name, n) T name[n] = {};
 #endif
 #define CPPWRF_COLUMN_BYTES(T, name, n) +sizeof(T) * std::size_t(n)
 #define CPPWRF_COLUMN_BYTES2(T, name, n1, n2) +sizeof(T) * std::size_t(n1) * std::size_t(n2)
