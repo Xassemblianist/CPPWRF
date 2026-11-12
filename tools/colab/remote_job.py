@@ -20,7 +20,8 @@ kernel times of both when CPPWRF_KTIME is among the --env variables (bench-env-b
 the case's own outputs, compared byte for byte (IDENTICAL / DIFFERENT with the files).
 
 CPPWRF_JOB_DEVICE_MIB=N (colab_run.sh --device-mib N): after the builds a second process allocates device memory
-until N MiB are free and holds it to the end, so every run sees the memory of a smaller GPU ("device memory
+until N MiB are free and holds it to the end, and the runs get CPPWRF_DEVICE_MEMORY_MIB=N (the work buffers'
+budget of such a GPU), so every run sees the memory of a smaller GPU ("device memory
 limit" in summary.txt; a run that needs more stops with CPPWRF's "device memory too small" message, which the
 bench lines then show).
 
@@ -431,6 +432,7 @@ def job(note):
 
     if os.environ.get("CPPWRF_JOB_DEVICE_MIB"):
         hold_device_memory(int(os.environ["CPPWRF_JOB_DEVICE_MIB"]), note)
+        os.environ["CPPWRF_DEVICE_MEMORY_MIB"] = os.environ["CPPWRF_JOB_DEVICE_MIB"]  # the work buffers' budget too
 
     # glibc's math functions on this GPU (src/core/glibc_math.hpp, the CUDA FP64 build's libm) against the same code
     # on the host: CPPWRF_JOB_GLIBC_PROOF random inputs per function (default 10^7; 0: none)
