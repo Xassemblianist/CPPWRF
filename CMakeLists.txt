@@ -274,6 +274,12 @@ if(TARGET cppwrf)
   add_test(NAME robustness COMMAND bash ${CMAKE_SOURCE_DIR}/tests/robustness/run_test.sh $<TARGET_FILE:cppwrf>
            ${CMAKE_BINARY_DIR}/robustness WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(robustness PROPERTIES LABELS unit ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
+  # WRF's restart alarm with an interval that is not a multiple of the time step, also in a run resumed from a
+  # restart file (tests/verify/restart_alarm_test.py; a tiny em_quarter_ss, skipped without WRF's input_sounding)
+  add_test(NAME restart_alarm COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/restart_alarm_test.py
+           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/restart_alarm WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(restart_alarm PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                       ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 endif()
 
 # Differential tests against WRF v4.8.0's own compiled code (gfortran; slow): physics schemes, the

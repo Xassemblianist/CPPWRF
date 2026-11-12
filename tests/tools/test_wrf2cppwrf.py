@@ -904,6 +904,22 @@ class TestValidationAndWarnings(unittest.TestCase):
         self.assertEqual(sec["phys"]["auxinput4_interval"], 180)
         self.assertEqual(sec["real"]["wrflowinp"], "lowinp_d01")
 
+    def test_sst_update_interval_and_time_step(self):
+        """auxinput4_interval that is not a multiple of the time step: WRF's AUXINPUT4 alarm rings at the first step
+        past the interval (ESMF_ClockAdvance), input_wrf finds no record of that time in wrflowinp and WRF stops with
+        'Could not find matching time in input file' (share/input_wrf.F). An error, not a run that never reads the
+        later records (6 h = 21600 s is not a multiple of 70 s; it is one of 60 s and of 50 s)."""
+        text = ("&time_control auxinput4_inname = 'wrflowinp_d<domain>', auxinput4_interval = 360,\n"
+                " io_form_auxinput4 = 2 /\n&domains time_step = {dt} /\n&physics sst_update = 1, mp_physics = 6,\n"
+                " sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1 /\n")
+        for dt in (60, 50):
+            t = WrfTranslator(parse_namelist(real_case(text.format(dt=dt))))
+            t.translate()
+            self.assertEqual(t.errors, [], dt)
+        t = WrfTranslator(parse_namelist(real_case(text.format(dt=70))))
+        t.translate()
+        self.assertTrue(any("auxinput4_interval" in e and "time step" in e for e in t.errors), t.errors)
+
     def test_sst_skin_tmn_update(self):
         """sst_skin = 1 and tmn_update = 1 (with lagday) with Noah; the other LSMs, lagday = 1, values other than 0 / 1
         and the adaptive time step are errors; lagday without tmn_update stays an unported option."""
@@ -1328,6 +1344,11 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, sec = self.translate(text.replace("grid_fdda = 1, 1", "grid_fdda = 0, 1"))
         self.assertEqual(t.errors, [])
         self.assertEqual((sec["fdda"]["grid_fdda"], sec["d02"]["fdda_grid_fdda"]), (0, 1))
+        # gfdda_interval_m that is not a multiple of the time step (70 s): the AUXINPUT10 alarm rings at the first step
+        # past the interval, input_wrf finds no analysis of that time in wrffdda and WRF stops (share/input_wrf.F,
+        # 'Could not find matching time in input file'): an error, not nudging towards the first analyses for ever
+        t, sec = self.translate(text.replace("time_step = 60,", "time_step = 70,"))
+        self.assertTrue(any("gfdda_interval_m" in e and "time step" in e for e in t.errors), t.errors)
         # without grid_fdda the &fdda options have no effect (check_a_mundo zeroes the gfdda end and interval)
         t, sec = self.translate(text.replace("grid_fdda = 1, 1", "grid_fdda = 0, 0"))
         self.assertEqual(t.errors, [])
