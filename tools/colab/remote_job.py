@@ -17,7 +17,8 @@ CPPWRF_JOB_BASE=1 (colab_run.sh --base REV): /content/base.tar.gz is a second so
 and build-base-cuda_dp. Every bench case then runs with both builds in turn ("ab" lines of summary.txt): the
 stepping time twice each (base, new, base, new), the peak device memory and the CPPWRF_MEMINFO lines of both, the
 kernel times of both when CPPWRF_KTIME is among the --env variables (bench-env-base-NAME.log), and once each with
-the case's own outputs, compared byte for byte (IDENTICAL / DIFFERENT with the files).
+the case's own outputs, compared byte for byte (IDENTICAL / DIFFERENT with the files). With CPPWRF_JOB_AB=quick
+(colab_run.sh --env CPPWRF_JOB_AB=quick) each build runs the case once and nothing else is done with it.
 
 CPPWRF_JOB_DEVICE_MIB=N (colab_run.sh --device-mib N): after the builds a second process allocates device memory
 until N MiB are free and holds it to the end, and the runs get CPPWRF_DEVICE_MEMORY_MIB=N (the work buffers'
@@ -493,7 +494,8 @@ def job(note):
             if key in base_bins:  # the base build and this one in turn (the base runs in its own source tree)
                 st, pk, mi = {"base": [], "new": []}, {}, {}
                 menv = dict(plain, CPPWRF_MEMINFO="1")
-                for rnd in (1, 2):
+                quick = os.environ.get("CPPWRF_JOB_AB") == "quick"
+                for rnd in (1,) if quick else (1, 2):
                     for v, b, cwd in (("base", base_bins[key], BASE_SRC), ("new", bins[key], SRC)):
                         log, o = f"ab-{v}{rnd}-{tag}.log", f"/content/bench/ab_{v}"
                         with GpuMemory() as mem:
@@ -505,6 +507,8 @@ def job(note):
                 note(f"ab {tag}: stepping s base {', '.join(st['base'])} new {', '.join(st['new'])}; peak MiB "
                      f"{pk['base']} -> {pk['new']}; stack limit B (reserve MiB) "
                      + " -> ".join(f"{mi[v][1]} ({mi[v][2]})" if mi[v] else "?" for v in ("base", "new")))
+                if quick:  # one run of each build only (does the case fit, its time and memory)
+                    continue
                 if "CPPWRF_KTIME" in keys:
                     sh(f"rm -rf /content/bench/ab_base && {shlex.join(cmd('/content/bench/ab_base', t, base_bins[key]))}",
                        f"bench-env-base-{tag}.log", cwd=BASE_SRC, env=env)
