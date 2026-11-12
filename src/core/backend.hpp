@@ -327,6 +327,11 @@ int current_device();  // the calling thread's CUDA device (0 on the CPU)
 const char* backend_name();
 // CPPWRF_MEMINFO=1: prints the device memory in use and the stack (local memory) reserved per GPU thread
 void device_memory_report(const char* when);
+// The bytes one shared work buffer (the column physics' work arrays, the RRTMG batch scratch) may take: an eighth
+// of the device memory and at most a quarter of what is free. CPPWRF_DEVICE_MEMORY_MIB=N counts the device as
+// having N MiB when it has more (the buffers of a smaller GPU on a larger one, or a GPU shared with other
+// processes). CPU build: 0.
+std::size_t device_work_budget();
 
 // One model time step (dyn::RK3::step). CUDA: the step's launches and device copies are captured into CUDA graphs
 // and replayed (an instantiated graph per domain and segment, updated with the new launch parameters), so the

@@ -37,8 +37,7 @@ void column_work_reserve(const Range2D& r, std::size_t bytes_per_col) {
   if (r.i1 <= r.i0 || r.j1 <= r.j0 || bytes_per_col == 0) return;
   const int ni = r.i1 - r.i0, nj = r.j1 - r.j0;
   const std::size_t bpc = detail::column_work_bpc(bytes_per_col);
-  std::size_t budget = 0, free_b = 0, total_b = 0;
-  if (cudaMemGetInfo(&free_b, &total_b) == cudaSuccess) budget = std::min(total_b / 8, free_b / 4);
+  const std::size_t budget = device_work_budget();
   std::size_t want = detail::column_for_threads(ni, nj) * bpc;
   if (want > budget) {  // whole block rows (a block covers column_block().y rows), at least one
     const std::size_t pair = detail::column_for_threads(ni, column_block().y) * bpc;

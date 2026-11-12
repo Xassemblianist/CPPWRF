@@ -52,8 +52,7 @@ int rrtmg_chunk_columns(int ncol, std::size_t bytes_per_col) {
   bytes_per_col = std::max<std::size_t>(bytes_per_col, 1);
   std::size_t budget = 0;
 #if defined(CPPWRF_USE_CUDA)
-  std::size_t free_b = 0, total_b = 0;
-  if (cudaMemGetInfo(&free_b, &total_b) == cudaSuccess) budget = std::min(total_b / 8, free_b / 4);
+  budget = device_work_budget();
 #endif
   {
     std::lock_guard<std::mutex> lk(mtx);
