@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include "core/backend.hpp"
+#include "core/column_work.hpp"
 #include "core/field.hpp"
 #include "core/precision.hpp"
 #include "phys/driver/wrf_constants.hpp"
@@ -15,6 +16,31 @@ template <typename T>
 CPPWRF_HD inline T c_abs(T a) { return (a < T(0)) ? -a : a; }
 
 static constexpr int kMaxLevels = 128;
+
+// The kernel's column arrays (1-based as in the Fortran: 1 .. nz, zhk 1 .. nz + 1): the column, the tridiagonal
+// and level-2.5 work arrays shared by MIXLEN, VDIFQ, VDIFH and VDIFV. CUDA FP64 builds keep them in the column
+// work buffer (core/column_work.hpp) instead of the thread's stack, which the GPU reserves for every thread it can
+// hold (19.6 KB per thread). FP32 builds keep the local arrays: myjpbl.cpp contracts multiply-adds there, and the
+// contraction follows the code around it.
+#define CPPWRF_MYJ_COLUMN(X) \
+  X(real, tk, kMaxLevels + 1) X(real, thek, kMaxLevels + 1) X(real, qk, kMaxLevels + 1) \
+  X(real, cwmk, kMaxLevels + 1) X(real, qcwk, kMaxLevels + 1) X(real, qcik, kMaxLevels + 1) \
+  X(real, uk, kMaxLevels + 1) X(real, vk, kMaxLevels + 1) X(real, q2k, kMaxLevels + 1) \
+  X(real, zhk, kMaxLevels + 2) X(real, cm, kMaxLevels + 1) X(real, cr, kMaxLevels + 1) \
+  X(real, dtoz, kMaxLevels + 1) X(real, gm, kMaxLevels + 1) X(real, gh, kMaxLevels + 1) \
+  X(real, el, kMaxLevels + 1) X(real, rhok, kMaxLevels + 1) X(real, akhk, kMaxLevels + 1) \
+  X(real, akmk, kMaxLevels + 1)
+#if defined(CPPWRF_DOUBLE)
+#define CPPWRF_MYJ_ARRAY CPPWRF_COLUMN_ARRAY
+#define CPPWRF_MYJ_SLOTS(work, i, j) CPPWRF_COLUMN_SLOTS(work, i, j)
+using MyjPtr = ColPtr<real>;    // a column array as a parameter
+using MyjCPtr = ColCPtr<real>;
+#else
+#define CPPWRF_MYJ_ARRAY(T, name, n) T name[n];
+#define CPPWRF_MYJ_SLOTS(work, i, j)
+using MyjPtr = real*;
+using MyjCPtr = const real*;
+#endif
 
 // Physical constants from module_model_constants.F and module_bl_myjpbl.F:29-125
 static constexpr real G = wrfc::g;
@@ -159,26 +185,26 @@ static constexpr real A4 = real(35.86);
 // ----------------------------------------------------------------------
 CPPWRF_HD inline void mixlen(
     int lmh,
-    const real* u,
-    const real* v,
-    const real* t,
-    const real* the,
-    const real* q,
-    const real* cwm,
-    const real* q2,
-    const real* z,
-    real* gm,
-    real* gh,
-    real* el,
+    MyjCPtr u,
+    MyjCPtr v,
+    MyjCPtr t,
+    MyjCPtr the,
+    MyjCPtr q,
+    MyjCPtr cwm,
+    MyjCPtr q2,
+    MyjCPtr z,
+    MyjPtr gm,
+    MyjPtr gh,
+    MyjPtr el,
     real& pblh,
     int& lpbl,
     int& lmxl,
     real& ct,
     real& mixht,
-    real* q1,
-    real* dth,
-    real* elm,
-    real* rel) {
+    MyjPtr q1,
+    MyjPtr dth,
+    MyjPtr elm,
+    MyjPtr rel) {
   lpbl = 1;
   for (int k = lmh - 1; k >= 1; --k) {
     if (q2[k] <= EPSQ2 * FH) {
@@ -299,10 +325,10 @@ CPPWRF_HD inline void prodq2(
     int lmh,
     real dtturbl,
     real ustar,
-    const real* gm,
-    const real* gh,
-    real* el,
-    real* q2) {
+    MyjCPtr gm,
+    MyjCPtr gh,
+    MyjPtr el,
+    MyjPtr q2) {
   for (int k = 1; k <= lmh - 1; ++k) {
     real gml = gm[k];
     real ghl = gh[k];
@@ -377,13 +403,13 @@ CPPWRF_HD inline void prodq2(
 // ----------------------------------------------------------------------
 CPPWRF_HD inline void difcof(
     int lmh,
-    const real* gm,
-    const real* gh,
-    const real* el,
-    const real* q2,
-    const real* z,
-    real* akm,
-    real* akh) {
+    MyjCPtr gm,
+    MyjCPtr gh,
+    MyjCPtr el,
+    MyjCPtr q2,
+    MyjCPtr z,
+    MyjPtr akm,
+    MyjPtr akh) {
   for (int k = 1; k <= lmh - 1; ++k) {
     real ell = el[k];
     real eloq2 = ell * ell / q2[k];
@@ -419,14 +445,14 @@ CPPWRF_HD inline void difcof(
 CPPWRF_HD inline void vdifq(
     int lmh,
     real dtdif,
-    real* q2,
-    const real* el,
-    const real* z,
-    real* akq,
-    real* rsq2,
-    real* cm,
-    real* cr,
-    real* dtoz) {
+    MyjPtr q2,
+    MyjCPtr el,
+    MyjCPtr z,
+    MyjPtr akq,
+    MyjPtr rsq2,
+    MyjPtr cm,
+    MyjPtr cr,
+    MyjPtr dtoz) {
   const real esqhf = real(0.5) * ESQ;
 
   for (int k = 1; k <= lmh - 2; ++k) {
@@ -470,15 +496,15 @@ CPPWRF_HD inline void vdifh_1spec(
     real rkhs_dens,
     real clow_m,
     real cts_m,
-    real* sp,
-    const real* rkh,
-    const real* zhk,
-    const real* rho,
-    real* rkct,
-    real* rss,
-    real* cm,
-    real* cr,
-    real* dtoz) {
+    MyjPtr sp,
+    MyjCPtr rkh,
+    MyjCPtr zhk,
+    MyjCPtr rho,
+    MyjPtr rkct,
+    MyjPtr rss,
+    MyjPtr cm,
+    MyjPtr cr,
+    MyjPtr dtoz) {
   for (int k = 1; k <= lmh - 1; ++k) {
     dtoz[k] = dtdif / (zhk[k] - zhk[k + 1]);
     cr[k] = -dtoz[k] * rkh[k];
@@ -529,16 +555,16 @@ CPPWRF_HD inline void vdifv(
     real uz0,
     real vz0,
     real rkms_dens,
-    real* u,
-    real* v,
-    const real* rkm,
-    const real* z,
-    const real* rho,
-    real* rsu,
-    real* rsv,
-    real* cm,
-    real* cr,
-    real* dtoz) {
+    MyjPtr u,
+    MyjPtr v,
+    MyjCPtr rkm,
+    MyjCPtr z,
+    MyjCPtr rho,
+    MyjPtr rsu,
+    MyjPtr rsv,
+    MyjPtr cm,
+    MyjPtr cr,
+    MyjPtr dtoz) {
   for (int k = 1; k <= lmh - 1; ++k) {
     dtoz[k] = dtdif / (z[k] - z[k + 1]);
     cr[k] = -dtoz[k] * rkm[k];
@@ -635,6 +661,10 @@ struct MYJPBLKernel {
   bool has_qi;
   int i0;
   int nx;
+#if defined(CPPWRF_DOUBLE)
+  ColumnWork work{};  // the GPU's column arrays (column_for_work)
+  static constexpr std::size_t kWorkBytes = 0 CPPWRF_MYJ_COLUMN(CPPWRF_COLUMN_BYTES);
+#endif
 
   CPPWRF_HD void operator()(int i, int j) const {
     real dtturbl = dt * real(stepbl);
@@ -645,28 +675,8 @@ struct MYJPBLKernel {
     int lmh = nz - lowlyr_val + 1;
 
     // Local column arrays (1-indexed matching Fortran: 1 to nz, zhk 1 to nz+1)
-    real tk[kMaxLevels + 1];
-    real thek[kMaxLevels + 1];
-    real qk[kMaxLevels + 1];
-    real cwmk[kMaxLevels + 1];
-    real qcwk[kMaxLevels + 1];
-    real qcik[kMaxLevels + 1];
-    real uk[kMaxLevels + 1];
-    real vk[kMaxLevels + 1];
-    real q2k[kMaxLevels + 1];
-    real zhk[kMaxLevels + 2];
-
-    // Tridiagonal and level-2.5 workspace buffers (shared across MIXLEN, VDIFQ, VDIFH, VDIFV)
-    real cm[kMaxLevels + 1];
-    real cr[kMaxLevels + 1];
-    real dtoz[kMaxLevels + 1];
-
-    real gm[kMaxLevels + 1];
-    real gh[kMaxLevels + 1];
-    real el[kMaxLevels + 1];
-    real rhok[kMaxLevels + 1];
-    real akhk[kMaxLevels + 1];
-    real akmk[kMaxLevels + 1];
+    CPPWRF_MYJ_SLOTS(work, i, j)
+    CPPWRF_MYJ_COLUMN(CPPWRF_MYJ_ARRAY)
 
     // Interface heights (module_bl_myjpbl.F:312-328, 381-384)
     zhk[nz + 1] = ht(i, j);
@@ -831,6 +841,9 @@ struct MYJPBLKernel {
 };
 
 // Host launcher functions
+// The GPU work buffer of run_myjpbl over range (outside the time loop; CUDA FP64 builds, otherwise a no-op)
+void myjpbl_reserve(const Range2D& range);
+
 void run_myjpbl(
     View2<const real> ht,
     View3<const real> dz,

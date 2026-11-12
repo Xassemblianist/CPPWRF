@@ -577,6 +577,7 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     dfgdp = Field2(g, Stagger::M, "dfgdp");
   }
   if (o.bl_pbl_physics == 2) {
+    myjpbl::myjpbl_reserve(g.columns());  // CUDA FP64: its column arrays in the work buffer
     lowlyr.upload(std::vector<int>(lowlyr.layout().total, 1));
     tke_pbl.fill_host([](int, int, int) { return 0.2; });       // myjpblinit: TKE_MYJ = EPSQ2 = 0.2
   }

@@ -63,7 +63,17 @@ void run_myjpbl(
       dt, stepbl, nz, has_qi,
       range.i0, range.i1 - range.i0};
 
+#if defined(CPPWRF_DOUBLE)  // the column arrays in the work buffer (myjpbl.hpp)
+  column_for_work(range, kernel);
+#else
   column_for(range, kernel);
+#endif
+}
+
+void myjpbl_reserve([[maybe_unused]] const Range2D& range) {
+#if defined(CPPWRF_DOUBLE)
+  column_work_reserve(range, MYJPBLKernel::kWorkBytes);
+#endif
 }
 
 }  // namespace cppwrf::phys::myjpbl

@@ -5,8 +5,8 @@
 #
 #   tools/colab/colab_run.sh [--gpu T4|L4|G4|A100|H100] (default G4: RTX PRO 6000, the fastest per credit)
 #                            [--cases NAME,...] [--files NAME,...] [--bench NAME[@cuda|@cuda_dp],...]
-#                            [--env K=V]... [--nsys] [--ncu REGEX|top] [--base REV] [--wrf-tables] [--keep]
-#                            [--out DIR]
+#                            [--env K=V]... [--nsys] [--ncu REGEX|top] [--base REV] [--device-mib N]
+#                            [--wrf-tables] [--keep] [--out DIR]
 #
 #   --cases  wrf_suite.py cases to run on the VM against the WRF references (default: the GPU core set below;
 #            '' for none: the data then have no reference files)
@@ -24,6 +24,8 @@
 #            the stepping time twice each, alternating, the device memory and the stack reserve of both, the kernel
 #            times of both with --env CPPWRF_KTIME=1, and the case's own outputs (history every interval of its
 #            configuration) of both builds compared byte for byte
+#   --device-mib  a second process holds device memory so that N MiB are free for every run (a smaller GPU's memory
+#            on this one: 6000 for a 6 GB card; the resident threads, and with them the stack reserve, stay this GPU's)
 #   --wrf-tables  upload WRF's Thompson tables (370 MB) instead of computing them on the VM: the Thompson cases
 #            (mp_physics 8 / 28) are then bit-identical to WRF in FP64
 #   --keep   leave the VM running (stop it later with `colab stop -s <session>`)
@@ -39,7 +41,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 : "${CPPWRF_WRF_RUNS:?set CPPWRF_WRF_RUNS}"
 SCRATCH=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}
-GPU=G4 KEEP=0 OUT= FILES= NSYS= NCU= BASE= ENVS=() KEYS= MAX_UPLOAD_MIN=${MAX_UPLOAD_MIN:-20} TABLES=--no-thompson-tables WT=
+GPU=G4 KEEP=0 OUT= FILES= NSYS= NCU= BASE= DEVMIB= ENVS=() KEYS= MAX_UPLOAD_MIN=${MAX_UPLOAD_MIN:-20} TABLES=--no-thompson-tables WT=
 CASES=real_r1_fp64_cuda,real_p1_r8_fp64_cuda_1h,real_p1_fp32_1h,real_p4_r8_fp64_cuda_1h,real_p8_r8_fp64_cuda_1h,real_t6_r8_fp64_cuda_1h,real_d0_r8_fp64_cuda_1h,real_nmp1_r8_fp64_cuda_1h
 BENCH=real_p1_r8_fp64_cuda_1h,real_p1_fp32_1h,real_d0_r8_fp64_cuda_1h
 while [ $# -gt 0 ]; do
@@ -53,6 +55,7 @@ while [ $# -gt 0 ]; do
     --nsys) NSYS=1; shift ;;
     --ncu) NCU=$2; shift 2 ;;
     --base) BASE=$2; shift 2 ;;
+    --device-mib) DEVMIB=$2; shift 2 ;;
     --wrf-tables) TABLES= WT=wrf-tables; shift ;;
     --keep) KEEP=1; shift ;;
     --out) OUT=$2; shift 2 ;;
@@ -140,6 +143,7 @@ fenv=("${ENVS[@]}"); [ -z "$FILES" ] || fenv+=(--env CPPWRF_JOB_FILES="$FILES")
 [ -z "$NSYS" ] || fenv+=(--env CPPWRF_JOB_NSYS=1)
 [ -z "$NCU" ] || fenv+=(--env CPPWRF_JOB_NCU="$NCU")
 [ -z "$BASE" ] || fenv+=(--env CPPWRF_JOB_BASE=1)
+[ -z "$DEVMIB" ] || fenv+=(--env CPPWRF_JOB_DEVICE_MIB="$DEVMIB")
 timeout 300 colab exec -s "$S" --timeout 120 --env CPPWRF_JOB_CASES="$CASES" --env CPPWRF_JOB_BENCH="$BENCH" "${fenv[@]}" <<'EOF'
 import os, subprocess
 env = dict(os.environ)

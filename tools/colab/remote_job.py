@@ -19,6 +19,11 @@ stepping time twice each (base, new, base, new), the peak device memory and the 
 kernel times of both when CPPWRF_KTIME is among the --env variables (bench-env-base-NAME.log), and once each with
 the case's own outputs, compared byte for byte (IDENTICAL / DIFFERENT with the files).
 
+CPPWRF_JOB_DEVICE_MIB=N (colab_run.sh --device-mib N): after the builds a second process allocates device memory
+until N MiB are free and holds it to the end, so every run sees the memory of a smaller GPU ("device memory
+limit" in summary.txt; a run that needs more stops with CPPWRF's "device memory too small" message, which the
+bench lines then show).
+
 Profiling (colab_run.sh --env / --nsys / --ncu):
 - CPPWRF_JOB_ENV_KEYS: the variables of the environment that colab_run.sh --env set (e.g. CPPWRF_KTIME). The suite
   runs with them; each bench case runs once without them (the stepping time) and once more with them.
@@ -92,6 +97,40 @@ class GpuMemory:
         if not self.vals:
             return "? (no nvidia-smi samples)"
         return f"{max(self.vals) - self.idle} MiB (peak {max(self.vals)} MiB, idle {self.idle} MiB)"
+
+
+HOG = r"""
+#include <cuda_runtime.h>
+#include <cstdio>
+#include <cstdlib>
+#include <unistd.h>
+int main(int, char** v) {
+  std::size_t keep = std::size_t(std::atol(v[1])) << 20, f = 0, t = 0;
+  cudaMemGetInfo(&f, &t);
+  void* p = nullptr;
+  if (f > keep && cudaMalloc(&p, f - keep) != cudaSuccess) { std::printf("hog: allocation failed\n"); return 1; }
+  cudaMemGetInfo(&f, &t);
+  std::printf("hog: %zu MiB free of %zu MiB\n", f >> 20, t >> 20);
+  std::fflush(stdout);
+  pause();
+}
+"""
+
+
+def hold_device_memory(mib, note):
+    """A process that leaves mib MiB of device memory free (it lives as long as this job)."""
+    open("/content/hog.cu", "w").write(HOG)
+    if sh("nvcc -O2 /content/hog.cu -o /content/hog", "setup.log") != 0:
+        note("device memory limit: the holder did not build")
+        return
+    p = subprocess.Popen(["/content/hog", str(mib)], stdout=subprocess.PIPE, text=True)
+    note(f"device memory limit: {p.stdout.readline().strip()}")
+
+
+def oom(log):
+    """CPPWRF's "device memory too small" message of a log, shortened ('' when there is none)."""
+    m = re.search(r"device memory too small: [^\n]*", open(log).read())
+    return m.group(0)[:260] if m else ""
 
 
 def meminfo(log):
@@ -390,6 +429,9 @@ def job(note):
             if rc == 0:
                 base_bins[name] = f"{b}/cppwrf"
 
+    if os.environ.get("CPPWRF_JOB_DEVICE_MIB"):
+        hold_device_memory(int(os.environ["CPPWRF_JOB_DEVICE_MIB"]), note)
+
     # glibc's math functions on this GPU (src/core/glibc_math.hpp, the CUDA FP64 build's libm) against the same code
     # on the host: CPPWRF_JOB_GLIBC_PROOF random inputs per function (default 10^7; 0: none)
     n_proof = int(os.environ.get("CPPWRF_JOB_GLIBC_PROOF", "10000000"))
@@ -455,7 +497,7 @@ def job(note):
                         with GpuMemory() as mem:
                             sh(f"rm -rf {o} && {shlex.join(cmd(o, t, b))}", log, cwd=cwd, env=menv)
                         d = timings(os.path.join(JOB, log))
-                        st[v].append(d[0][1] if d else "?")
+                        st[v].append(d[0][1] if d else "? " + oom(os.path.join(JOB, log)))
                         pk[v] = max(mem.vals) - mem.idle if mem.vals else -1
                         mi[v] = meminfo(os.path.join(JOB, log))
                 note(f"ab {tag}: stepping s base {', '.join(st['base'])} new {', '.join(st['new'])}; peak MiB "
@@ -479,7 +521,8 @@ def job(note):
             # one line per domain (a nest's parent first: its stepping time contains the nests' steps)
             done = timings(os.path.join(JOB, f"bench-{tag}.log"))
             note(f"bench {tag}: " + ("; ".join(f"{s} s stepping, {n} ns/cell/step, {k} steps" for k, s, n in done)
-                                     if done else "no timing (see log)") + f"; device memory {mem.text()}")
+                                     if done else "no timing (see log) " + oom(os.path.join(JOB, f"bench-{tag}.log")))
+                 + f"; device memory {mem.text()}")
             if keys:
                 ev = " ".join(f"{k}={os.environ[k]}" for k in keys)
                 sh(f"rm -rf {o} && {shlex.join(cmd(o, t))}", f"bench-env-{tag}.log", cwd=SRC, env=env)
