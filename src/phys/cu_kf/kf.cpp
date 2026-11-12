@@ -26,7 +26,7 @@ void run_kf(KFKernel<T> kernel, const Range2D& range) {
 template <typename T>
 void kf_reserve([[maybe_unused]] const Range2D& range, [[maybe_unused]] int nz) {
 #if defined(CPPWRF_DOUBLE)
-    column_work_reserve(range, nz <= 48 ? KFRunner<T, 48>::kWorkBytes : KFRunner<T, kMaxLevels>::kWorkBytes);
+    column_work_reserve(range, nz <= 48 ? kColumnBytes<T, 48> : kColumnBytes<T, kMaxLevels>);
 #endif
 }
 

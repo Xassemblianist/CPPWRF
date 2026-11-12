@@ -52,6 +52,11 @@ inline constexpr int kMaxLevels = 128;
     X(T, tgu, MaxLevels) X(T, qgu, MaxLevels) X(T, thteeg, MaxLevels) X(T, omg, MaxLevels + 1) \
     X(int, kcheck, MaxLevels)
 
+// the bytes of one column's arrays
+template <typename T, int MaxLevels>
+inline constexpr std::size_t kColumnBytes =
+    0 CPPWRF_KF_COLUMN_IN(CPPWRF_COLUMN_BYTES) CPPWRF_KF_COLUMN(CPPWRF_COLUMN_BYTES);
+
 template <typename T>
 CPPWRF_HD inline void envirtht(const KFTables<T>& tables, T p1, T t1, T q1, T& tht1,
                                T aliq, T bliq, T cliq, T dliq) {
@@ -349,10 +354,6 @@ struct KFKernel {
     // the GPU's column arrays (column_for_work through KFRunner)
     ColumnWork work{};
 #endif
-    template <int MaxLevels>
-    static constexpr std::size_t work_bytes() {
-        return 0 CPPWRF_KF_COLUMN_IN(CPPWRF_COLUMN_BYTES) CPPWRF_KF_COLUMN(CPPWRF_COLUMN_BYTES);
-    }
 
     CPPWRF_HD void operator()(int i, int j) const { compute<kMaxLevels>(i, j); }
 
@@ -1653,7 +1654,7 @@ struct KFKernel {
 template <typename T, int MaxLevels>
 struct KFRunner {
     KFKernel<T> k;
-    static constexpr std::size_t kWorkBytes = KFKernel<T>::template work_bytes<MaxLevels>();
+    static constexpr std::size_t kWorkBytes = kColumnBytes<T, MaxLevels>;
     CPPWRF_HD void operator()(int i, int j) const { k.template compute<MaxLevels>(i, j); }
 #if defined(CPPWRF_DOUBLE)
     void set_work(const ColumnWork& w) { k.work = w; }
