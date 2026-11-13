@@ -273,6 +273,7 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   meta.date_str = wrf_io::add_seconds(start_date_, std::lround(time_sec));
   meta.commit = CPPWRF_COMMIT;
   meta.options = restart_options(cfg_);
+  meta.restart_secs_to_ring = rst_secs_to_ring(step);
 
   const io_netcdf::DType dt = sizeof(real) == 8 ? io_netcdf::DType::F64 : io_netcdf::DType::F32;
   std::vector<std::vector<real>> bufs;
@@ -471,6 +472,22 @@ void DomainRunner::load_restart_file(const std::string& path) {
   }
 
   start_step = meta.step;
+  // RESTART_ALARM (an input alarm for input_wrf, share/input_wrf.F:236-279): it keeps the namelist's interval and gets
+  // RingTime = the restart time + WRF_ALARM_SECS_TIL_NEXT_RING_51; its PrevRingTime is the restart time (the resumed
+  // run's start, ESMF_ClockAddAlarm). ESMF_ClockAdvance rings it at the first step with RingTime <= time <
+  // RingTime + dt and sets PrevRingTime to that step's time, so an interval that is not a multiple of dt goes on from
+  // there, not from the multiples of the interval. CPPWRF's own restart file carries the same attribute.
+  {
+    const long rsecs = wrf_alarm(path, 51).second;
+    if (rsecs >= 0 && rsecs < 1700000000) {
+      if (m_.adapt) {
+        rst_ring_set_ = true;
+        rst_ring_t_ = wrf_time::make(rsecs);
+      } else {
+        rst_ring_time_ = meta.time_sec + double(rsecs);
+      }
+    }
+  }
   if (m_.nsteps < start_step) {
     throw std::runtime_error("run.run_time (" + std::to_string(m_.run_time) + "s / step " + std::to_string(m_.nsteps) +
                              ") is less than restart file step " + std::to_string(start_step));
@@ -485,6 +502,10 @@ void DomainRunner::load_restart_file(const std::string& path) {
       hist_alarm_t_ = hsecs >= 0 && hsecs < 1700000000;
       if (hist_alarm_t_) hist_iv_t_ = wrf_time::make(hsecs);
       if (hsecs == 0) throw std::runtime_error(path + ": WRF_ALARM_SECS_TIL_NEXT_RING_01 = 0");
+      // and RingTime = the restart time + those seconds: the first ring is at the first step at or past it, the later
+      // ones count from that step (ESMF_ClockAdvance)
+      hist_ring_set_ = hist_alarm_t_;
+      hist_ring_t_ = hist_iv_t_;
     } else if (hsecs >= 1700000000) {
       hist_iv_ = 0;  // a forever interval: no history
     } else if (hsecs >= 0) {
@@ -727,6 +748,25 @@ bool DomainRunner::start() {
   }
 #endif
 
+  // auxinput4_interval / gfdda_interval_m must be multiples of dt: WRF's AUXINPUT4 / AUXINPUT10 alarm rings at the
+  // first step at or past each interval (ESMF_ClockAdvance), input_wrf finds no wrflowinp / wrffdda record of that
+  // time and stops ("Could not find matching time in input file", share/input_wrf.F:1105-1160, 1285)
+  if (!m_.adapt) {
+    auto check_iv = [&](double iv, const char* key, const char* file) {
+      const double st = iv / g.dt;
+      if (iv > 0 && std::abs(st - std::round(st)) > 1e-9 * st) {
+        char b[400];
+        std::snprintf(b, sizeof b, "%s (%g s) is not a multiple of time.dt (%g s): WRF's alarm rings at the first step "
+                      "past the interval, finds no %s record of that time and stops (\"Could not find matching time "
+                      "in input file\")", key, iv, double(g.dt), file);
+        throw std::runtime_error(b);
+      }
+    };
+    if (m_.suite && m_.suite->options().sst_update == 1)
+      check_iv(cfg_.get_double("phys.auxinput4_interval", 360.0) * 60.0, "phys.auxinput4_interval", "wrflowinp");
+    if (aux10_on())
+      check_iv(double(m_.suite->options().fdda.interval_m) * 60.0, "fdda.gfdda_interval_m", "wrffdda");
+  }
   prepare_output();  // reads the output.* keys
   check_config_keys(cfg_);  // a key no code reads (misspelled, wrong section, not ported) is an error
 
@@ -876,12 +916,23 @@ void DomainRunner::adapt_before_step(long n) {
   const std::size_t i = std::size_t(n - start_step);
   t_end_[i] = t;
   hist_ring_[i] = 0;
-  if (hist_alarm_t_ && hist_prev_t_ + hist_iv_t_ <= t) {
+  // ESMF_ClockAdvance: a one-shot RingTime (a resumed run) rings when RingTime <= t < RingTime + this step and sets
+  // PrevRingTime = t; else the interval, PrevRingTime + interval <= t, adds the interval to PrevRingTime
+  const wrf_time::Interval step = t - (i > 0 ? t_end_[i - 1] : wrf_time::Interval{});
+  if (hist_alarm_t_ && hist_ring_set_ && hist_ring_t_ <= t && t < hist_ring_t_ + step) {
+    hist_ring_[i] = 1;
+    hist_prev_t_ = t;
+    hist_ring_set_ = false;
+  } else if (hist_alarm_t_ && hist_prev_t_ + hist_iv_t_ <= t) {
     hist_ring_[i] = 1;
     hist_prev_t_ = hist_prev_t_ + hist_iv_t_;
   }
   rst_ring_[i] = 0;
-  if (rst_iv_s_ > 0 && rst_prev_t_ + rst_iv_t_ <= t) {
+  if (rst_ring_set_ && rst_ring_t_ <= t && t < rst_ring_t_ + step) {  // also with restart.interval = 0 (below)
+    rst_ring_[i] = 1;
+    rst_prev_t_ = t;
+    rst_ring_set_ = false;
+  } else if (rst_iv_s_ > 0 && rst_prev_t_ + rst_iv_t_ <= t) {
     rst_ring_[i] = 1;
     rst_prev_t_ = rst_prev_t_ + rst_iv_t_;
   }
@@ -956,7 +1007,7 @@ bool DomainRunner::reads_state(long n) const {
   if (m_.adapt || n == m_.nsteps || (nonfinite_every_step_ && !nonfinite_seen_)) return true;
   if (n % diag_iv_ == 0 || n % out_iv_ == 0 || hist_due(n) || aux3_due(n)) return true;
 #ifdef CPPWRF_HAVE_NETCDF
-  if (rst_iv_s_ > 0 && rst_due(n)) return true;
+  if (rst_due(n)) return true;
 #endif
   return false;
 }
@@ -989,13 +1040,20 @@ bool DomainRunner::after_step(long n) {
   }
 #ifdef CPPWRF_HAVE_NETCDF
   const bool ring = rst_due(n);
-  if (ring && !m_.adapt) rst_prev_ += rst_iv_s_;
+  if (ring && !m_.adapt) {  // ESMF_ClockAdvance: the one-shot RingTime sets PrevRingTime to this time, else += interval
+    if (rst_one_shot(n)) {
+      rst_prev_ = double(n) * m_.g.dt;
+      rst_ring_time_ = -1.0;
+    } else {
+      rst_prev_ += rst_iv_s_;
+    }
+  }
   // d01: med_before_solve_io of the next step reads auxinput4 before med_restart_out writes the restart files of
   // this time (a nest reads in its own med_before_solve_io, after the parent's med_restart_out)
   if (ring && !last && domain_tag_ == "d01" && m_.suite && m_.suite->options().sst_update == 1 && aux4_due(n))
     read_aux4(n);
   if (ring && !last && domain_tag_ == "d01" && aux10_on() && aux10_due(n)) read_aux10(n);
-  if (rst_iv_s_ > 0 && (ring || last) && (rst_end_ <= 0 || n <= rst_end_)) {
+  if ((ring || (rst_iv_s_ > 0 && last)) && (rst_end_ <= 0 || n <= rst_end_)) {
     do_restart(n, ring);
   }
 #endif
@@ -1093,7 +1151,26 @@ void DomainRunner::do_snap(long n) {
 // interval that is not a multiple of dt rings at the first step past each multiple of it
 bool DomainRunner::rst_due(long n) const {
   if (m_.adapt) return n > start_step && n - start_step < long(rst_ring_.size()) && rst_ring_[std::size_t(n - start_step)];
-  return rst_iv_s_ > 0 && rst_prev_ + rst_iv_s_ <= double(n) * m_.g.dt + 1e-6 * m_.g.dt;
+  // restart.interval = 0: WRF's alarm has the forever interval, and a resumed run still rings once at the RingTime of
+  // the restart file (input_wrf sets it whatever the interval) and writes its wrfrst files there
+  return rst_one_shot(n) || (rst_iv_s_ > 0 && rst_prev_ + rst_iv_s_ <= double(n) * m_.g.dt + 1e-6 * m_.g.dt);
+}
+
+// the restart alarm's seconds to its next ring after step n: output_wrf's interval - (time - PrevRingTime) in whole
+// seconds (share/output_wrf.F:413-435); a native restart file at the last step before a resumed run's first ring (no
+// wrfrst file there) takes the seconds to that RingTime, so a run resumed from it rings there too
+long DomainRunner::rst_secs_to_ring(long n) const {
+  const double t = double(n) * m_.g.dt;
+  if (rst_ring_time_ >= 0.0 && t < rst_ring_time_) return long(std::trunc(rst_ring_time_ - t));
+  if (rst_iv_s_ <= 0) return 1700000000L;  // the forever interval (set_timekeeping), written unchanged
+  return long(std::trunc(rst_iv_s_) - std::trunc(t - rst_prev_));
+}
+
+// a resumed run's first ring: RingTime <= time < RingTime + dt (ESMF_ClockAdvance's PRED2, Is_alarm_tstep's)
+bool DomainRunner::rst_one_shot(long n) const {
+  if (rst_ring_time_ < 0.0) return false;
+  const double d = double(n) * m_.g.dt - rst_ring_time_, eps = 1e-6 * m_.g.dt;
+  return d >= -eps && d < m_.g.dt - eps;
 }
 
 void DomainRunner::do_restart(long n, bool ring) {
@@ -1112,12 +1189,13 @@ void DomainRunner::do_restart(long n, bool ring) {
     const bool hring = n == m_.nsteps && hist_due(n);
     const long hsecs = hist_alarm_t_ ? long(hist_iv_t_.S - (t - hist_prev_t_).S) : 1700000000L;
     wrfout_->set_history_alarm(hring ? 1 : 0, hsecs);
-    wrfout_->write_restart(n, time_s(n), 0.0, 0.0, double(rst_iv_t_.S - (t - rst_prev_t_).S), aux4_first_s_);
+    wrfout_->write_restart(n, time_s(n), 0.0, 0.0,
+                           rst_iv_s_ > 0 ? double(rst_iv_t_.S - (t - rst_prev_t_).S) : 1700000000.0, aux4_first_s_);
   } else if (wrfout_ && ring) {
     wrfout_->set_exact_time(elapsed(n), false);
     wrfout_->set_auxhist3_alarm(double(aux3_iv_) * m_.g.dt, double(aux3_ref_) * m_.g.dt);
     wrfout_->write_restart(n, n * m_.g.dt, double(hist_iv_) * m_.g.dt, double(hist_ref_) * m_.g.dt,
-                           std::trunc(rst_iv_s_) - std::trunc(n * m_.g.dt - rst_prev_), aux4_first_s_);
+                           double(rst_secs_to_ring(n)), aux4_first_s_);
   }
   if (wrf_timing_ && wrfout_ && ring) wrf_timing_line(writing("restart", domain_tag_), t_rst);
 }

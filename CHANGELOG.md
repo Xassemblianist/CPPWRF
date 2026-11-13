@@ -15,6 +15,16 @@ a verified configuration, of a configuration key or of an output file is a new m
   option's entry in this changelog names its tier.
 
 ### Fixed
+- The restart alarm of a run resumed from a restart file (WRF's or CPPWRF's own) with a restart interval that is not
+  a multiple of the time step: the first ring is at the restart time + WRF_ALARM_SECS_TIL_NEXT_RING_51 and the later
+  ones are counted from that ring's step (share/input_wrf.F, ESMF_ClockAdvance), so the wrfrst files and their alarm
+  attributes are WRF's; with restart_interval = 0 the resumed run writes the one set WRF writes at that ring. CPPWRF's
+  restart_<step>.nc files are format version 2 (they carry WRF_ALARM_SECS_TIL_NEXT_RING_51). New suite cases RSA
+  (P4, dt 50 s, restart every 2 min, the wrfrst files compared too) and its resumed runs, CPU and CUDA FP64 at
+  tolerance 0 (data port_af2_data.tar); ctest restart_alarm.
+- auxinput4_interval (sst_update) and gfdda_interval_m (grid_fdda) that are not multiples of the domain's time step:
+  WRF stops at the first read ("Could not find matching time in input file"); tools/wrf2cppwrf.py and the model now
+  refuse them (before, the model ran on with the first record). ctest input_interval.
 - WRF's clock values on the fixed time step: the physics' xtime (radiation's coszen and hour angle, grid nudging),
   julian and the year (radiation, tmn_update, Noah-MP), solve_em's curr_secs2 / curr_mins2 (buckets, prec_acc_dt,
   grid nudging), clwrf's xtime and the history files' XTIME now come from the exact clock, n times the domain's

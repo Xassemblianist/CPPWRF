@@ -859,6 +859,46 @@ class WrfTranslator:
                     default = vals[0]
                 vals.extend([default] * (self._max_dom - len(vals)))
 
+    def check_input_intervals(self, sections: Dict[str, Dict[str, Any]], max_dom: int):
+        """auxinput4_interval (sst_update = 1) and gfdda_interval_m (grid_fdda = 1) must be multiples of the domain's
+        time step: WRF's AUXINPUT4 / AUXINPUT10 alarm rings at the first step at or past each interval
+        (ESMF_ClockAdvance), input_wrf then finds no wrflowinp / wrffdda record of that time and stops
+        ("Could not find matching time in input file", share/input_wrf.F). A nest's time step is its parent's divided
+        by parent_time_step_ratio."""
+        from fractions import Fraction
+        if sections["time"].get("adaptive"):
+            return  # sst_update and grid_fdda are rejected with the adaptive time step
+        n = max(1, max_dom)
+        dts: List[Fraction] = []
+        for d in range(n):
+            if d == 0:
+                num = self.get_opt("domains", "time_step_fract_num", 0) or 0
+                den = self.get_opt("domains", "time_step_fract_den", 1) or 1
+                dt = Fraction(int(self.get_opt("domains", "time_step", 60))) + (Fraction(int(num), int(den)) if num else 0)
+            else:
+                p = self.get_dom_opt("domains", "parent_id", d, d, fallback_d0=False)
+                r = self.get_dom_opt("domains", "parent_time_step_ratio", d, 1, fallback_d0=False)
+                p = p - 1 if isinstance(p, int) and 1 <= p <= d else 0
+                dt = dts[p] / (r if isinstance(r, int) and r >= 1 else 1)
+            dts.append(dt)
+
+        def check(key, minutes, d, what):
+            if isinstance(minutes, (int, float)) and minutes > 0 and dts[d] > 0 and \
+                    (Fraction(minutes).limit_denominator(10**6) * 60) % dts[d] != 0:
+                self.error(f"WRF {key} = {minutes:g} min (domain {d + 1}) is not a multiple of its time step "
+                           f"{float(dts[d]):g} s: WRF's alarm rings at the first step past the interval, input_wrf "
+                           f"finds no {what} record of that time and stops ('Could not find matching time in input "
+                           "file').")
+        if sections.get("phys", {}).get("sst_update") == 1:
+            for d in range(n):
+                iv = self.get_opt("time_control", "auxinput4_interval", 0) if d == 0 else \
+                    self.get_dom_opt("time_control", "auxinput4_interval", d, 0, fallback_d0=False)
+                check("auxinput4_interval", iv, d, "wrflowinp")
+        for d in range(n):
+            if self.get_dom_opt("fdda", "grid_fdda", d, 0, fallback_d0=False) == 1:
+                check("gfdda_interval_m", self.get_dom_opt("fdda", "gfdda_interval_m", d, 0, fallback_d0=False), d,
+                      "wrffdda")
+
     def translate_fdda(self, sections: Dict[str, Dict[str, Any]], max_dom: int, has_physics_suite: bool,
                        case_name: str):
         """grid_fdda = 1 (analysis nudging, phys/module_fddagd_driver.F + module_fdda_psufddagd.F) to [fdda], a
@@ -2735,6 +2775,7 @@ class WrfTranslator:
                         sections[tag]["time_step_sound"] = tss_d
 
         self.translate_fdda(sections, max_dom, has_physics_suite, case_name)
+        self.check_input_intervals(sections, max_dom)
 
         # 15. Check for unused / ignored options
         wrf_groups = {g for g, _ in WRF_NAMELIST_OPTIONS}  # a group WRF does not read is not checked (WRF skips it)

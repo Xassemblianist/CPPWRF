@@ -280,6 +280,12 @@ if(TARGET cppwrf)
            $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/restart_alarm WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(restart_alarm PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                        ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
+  # auxinput4_interval / gfdda_interval_m that are not multiples of the time step: refused as WRF stops
+  # (tests/verify/input_interval_test.py; one step of SU1, skipped without ${CPPWRF_WRF_RUNS}/run_SU1_r8/steps)
+  add_test(NAME input_interval COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/input_interval_test.py
+           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/input_interval WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(input_interval PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                       ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 endif()
 
 # Differential tests against WRF v4.8.0's own compiled code (gfortran; slow): physics schemes, the

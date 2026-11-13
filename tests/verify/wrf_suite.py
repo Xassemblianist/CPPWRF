@@ -205,6 +205,38 @@ def _exact_case(refs, out, t, sets):
     return bad, f"{frames} frames, {nvars} variables"
 
 
+def wrfrst_check(sets):
+    """A case that also compares its wrfrst files (suite.wrfrst in its --set list): wrfrst_case."""
+    return "suite.wrfrst" in sets
+
+
+def wrfrst_case(refs, out, skip=()):
+    """The wrfrst files of a run against WRF's: the reference run's directory (next to its wrfout) and `out` (or
+    out/<domain>) must hold the same set of wrfrst_<domain>_<date> files (the restart alarm's times), each identical at
+    tolerance 0 (every variable and attribute, WRF_ALARM_SECS_TIL_NEXT_RING_* among them; RQCBLTEN / RQIBLTEN not when
+    WRF's file has no QCLOUD / QICE). `skip`: file names that are inputs (a resumed run's linked restart file):
+    (differences, summary)."""
+    import netCDF4
+    import exact
+    bad, n = [], 0
+    for dom, w in refs.items():
+        d = dom or re.search(r"wrfout_(d\d\d)_", os.path.basename(w)).group(1)
+        ref = {os.path.basename(f): f for f in glob.glob(os.path.join(os.path.dirname(w), f"wrfrst_{d}_*"))
+               if os.path.basename(f) not in skip}
+        mine = {os.path.basename(f): f for f in glob.glob(os.path.join(out, f"wrfrst_{d}_*"))
+                + glob.glob(os.path.join(out, d, f"wrfrst_{d}_*")) if os.path.basename(f) not in skip}
+        if sorted(ref) != sorted(mine):
+            bad.append(f"{d}: wrfrst files {sorted(x[-8:] for x in mine)}, WRF's {sorted(x[-8:] for x in ref)}")
+        for name in sorted(set(ref) & set(mine)):
+            with _NC:
+                with netCDF4.Dataset(ref[name]) as ds:
+                    noise = [x for x, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")) if q not in ds.variables]
+                dif, _ = exact.compare_stream([mine[name]], [ref[name]])
+            bad += [f"{name}.{k}: {v}" for k, v in dif.items() if k not in noise]
+            n += 1
+    return bad, f"{n} wrfrst files identical" if not bad else f"{n} wrfrst files"
+
+
 def restarted_case(b, cfg, sets, refs, t, mid, out):
     """A run to `t` s restarted at `mid` s from its own wrfrst files: the first run (to one step past mid, wrfrst files
     at mid only: written within the run, as WRF's, not at its last step, where WRF's history alarm is still ringing)
@@ -372,10 +404,14 @@ def main():
             if rc != 0:
                 return False, f"FAIL  {name:22s} drop-in run failed: {log[-200:]}"
             bad, what = exact_case(refs, out, t, sets)
+            if wrfrst_check(sets):
+                b2, w2 = wrfrst_case(refs, out, [os.path.basename(f) for f in dropin_spec(cfg, sets)[2]])
+                bad, what = bad + b2, f"{what}, {w2}"
             done(out, not bad)
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact (cppwrf-wrf): {what}"
                              + (f"  [{'; '.join(x[:300] for x in bad[:6])}{' ...' if len(bad) > 6 else ''}]" if bad else ""))
         mid = restart_at(sets)
+        rst_check = wrfrst_check(sets)
         sets = [x for x in sets if not x.startswith("suite.")]
         exact = all(x == 0.0 for x in tol.values())
         if exact:  # WRF history output; with the reference's namelist.input CPPWRF writes WRF's global attributes
@@ -395,6 +431,9 @@ def main():
             return False, f"FAIL  {name:22s} run failed: {log[-200:]}"
         if exact:
             bad, what = exact_case(refs, out, t, sets)
+            if rst_check:
+                b2, w2 = wrfrst_case(refs, out)
+                bad, what = bad + b2, f"{what}, {w2}"
             done(out, not bad)
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
                              + (f"  [{'; '.join(x[:300] for x in bad[:6])}{' ...' if len(bad) > 6 else ''}]" if bad else ""))

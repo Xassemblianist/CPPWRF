@@ -4,7 +4,7 @@ Version 1.0.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
-(246 cases, 9 of them the slow 24 h, 30 h and 72 h runs of `--slow`, and 34 restart checks plus the Straka checks, all passing) and
+(252 cases, 9 of them the slow 24 h, 30 h and 72 h runs of `--slow`, and 34 restart checks plus the Straka checks, all passing) and
 `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
@@ -154,6 +154,7 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | P4, P6, P9, N3 long runs | inputs from real.exe for 24 h / 72 h (wrfbdy every 6 h; 24-72 h from the GFS forecast through WPS), history every 3 h, CPPWRF restarted in the middle from its own wrfrst files | 24 h; 72 h (P4, P6, P9) |
 | P4D16 | P4 with dt = 16 s and radt = 10 min on the 72 h inputs, history every hour (WRF's clock past one day: XTIME, coszen) | 30 h |
 | N3D50 | N3 with d01 dt = 50 s, so a nest step of 50/3 s (WRF's clock with a fraction of a second: XTIME, julian) | 1 h |
+| RSA | P4 with dt = 50 s and restart_interval = 2 min (not a multiple of dt), history every 150 s; the wrfrst files too; resumed from its wrfrst file of 150 s with restart_interval = 2 and = 0 (WRF's restart alarm of a resumed run: the first ring at the file's seconds to the next ring) | 700 s |
 | W1 | active w_damping (dt 450 s) | 10 steps |
 
 V1-V3, T6, G2, F1, F2, D0, D0V, SU1 and SU2 are compared in every wrfout variable over the whole run; V1-V3 start from the

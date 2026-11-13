@@ -271,8 +271,10 @@ Model Model::build(const io::Config& cfg) {
   dyn::DiffusionConfig dc;
   dc.diff_opt = int(cfg.get_int("dyn.diff_opt", (lp.khdif > 0 || lp.kvdif > 0) ? 1 : 0));
   dc.km_opt = int(cfg.get_int("dyn.km_opt", 1));
-  // restart files carry BN2, which WRF evaluates for every km_opt
-  dc.n2_diagnostic = cfg.get_double("restart.interval", cfg.get_double("output.restart_interval", 0.0)) > 0;
+  // restart files carry BN2, which WRF evaluates for every km_opt; a resumed run writes them also with restart.interval
+  // = 0 (WRF's restart alarm keeps the RingTime of the file it resumes from and rings once: DomainRunner::rst_due)
+  dc.n2_diagnostic = cfg.get_double("restart.interval", cfg.get_double("output.restart_interval", 0.0)) > 0 ||
+                     !cfg.get_string("run.restart_file", "").empty();
   m.diff_opt = dc.diff_opt;
   m.km_opt = dc.km_opt;
   // real: from the input file; input_wrf: "hybrid_opt values must be consistent" (fatal)

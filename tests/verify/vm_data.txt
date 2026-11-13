@@ -38,6 +38,7 @@ port_a11r_data.tar
 # WRF's clock on the fixed time step: the P4D16 (30 h, dt = 16 s, radt = 10) and N3D50 (nest dt 50/3 s) references and
 # their inputs (tests/verify/cases/67_clock.py; the P4D16 CPU case is slow)
 port_af1_data.tar
+port_af2_data.tar
 # run_P3_r8's inputs and 1 h reference (the 60 min frame, every variable) for real_p3_r8_fp64_cuda_1h (the CPU case
 # reads run_P3_r8/steps)
 port_g01_data.tar

@@ -10,7 +10,7 @@ namespace cppwrf::io_netcdf {
 
 // the format of CPPWRF's own restart file (the global attribute CPPWRF_RESTART_VERSION): raise it when the file's
 // contents change; a file of another version is refused (WRF's wrfrst files are the cross-version restart)
-inline constexpr int kRestartVersion = 1;
+inline constexpr int kRestartVersion = 2;  // 2: WRF_ALARM_SECS_TIL_NEXT_RING_51
 
 struct RestartMeta {
   int version = kRestartVersion;  // read: 0 when the file has none (written before the version was recorded)
@@ -22,6 +22,9 @@ struct RestartMeta {
   double dx = 0.0, dy = 0.0, dt = 0.0;
   std::string case_name;
   std::string date_str = "0001-01-01_00:00:00";
+  // the restart alarm's seconds to its next ring, as WRF's wrfrst attribute WRF_ALARM_SECS_TIL_NEXT_RING_51 (a run
+  // resumed from the file rings first at its time + these seconds); < 0: not written (no restart alarm)
+  long restart_secs_to_ring = -1;
 };
 
 // CPPWRF's own restart file (restart_NNNNNN.nc; WRF's wrfrst_d0N files are WrfHistory::write_restart):

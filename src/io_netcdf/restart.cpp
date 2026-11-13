@@ -72,6 +72,10 @@ void write_restart(const std::string& path, const RestartMeta& meta,
     NC_CHECK(nc_put_att_text(ncid, NC_GLOBAL, "CURRENT_DATE", meta.date_str.size(), meta.date_str.data()));
   }
   NC_CHECK(nc_put_att_int(ncid, NC_GLOBAL, "CPPWRF_RESTART_VERSION", NC_INT, 1, &meta.version));
+  if (meta.restart_secs_to_ring >= 0) {
+    const int secs = int(meta.restart_secs_to_ring);
+    NC_CHECK(nc_put_att_int(ncid, NC_GLOBAL, "WRF_ALARM_SECS_TIL_NEXT_RING_51", NC_INT, 1, &secs));
+  }
   if (!meta.commit.empty())
     NC_CHECK(nc_put_att_text(ncid, NC_GLOBAL, "CPPWRF_COMMIT", meta.commit.size(), meta.commit.data()));
   if (!meta.options.empty())
@@ -174,6 +178,8 @@ void read_meta(int ncid, const std::string& path, RestartMeta& meta) {
     meta.step = step_i;
   }
   NC_CHECK(nc_get_att_double(ncid, NC_GLOBAL, "TIME", &meta.time_sec));
+  int secs = -1;
+  meta.restart_secs_to_ring = nc_get_att_int(ncid, NC_GLOBAL, "WRF_ALARM_SECS_TIL_NEXT_RING_51", &secs) == NC_NOERR ? secs : -1;
   NC_CHECK(nc_get_att_int(ncid, NC_GLOBAL, "NX", &meta.nx));
   NC_CHECK(nc_get_att_int(ncid, NC_GLOBAL, "NY", &meta.ny));
   NC_CHECK(nc_get_att_int(ncid, NC_GLOBAL, "NZ", &meta.nz));

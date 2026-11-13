@@ -368,15 +368,15 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `run_days/hours/minutes/seconds`, `start_*`, `end_*` | any (real-data runs from the start of wrfinput) |
 | `interval_seconds` | taken from wrfbdy_d01 |
 | `history_interval` (`_d`, `_h`, `_m`, `_s`), `frames_per_outfile`, `history_outname` | per domain |
-| `restart_interval` (minutes, a multiple of `time_step`), `rst_outname` | NetCDF wrfrst files of every domain |
+| `restart_interval` (minutes; in a nested run a multiple of `time_step`), `rst_outname` | NetCDF wrfrst files of every domain |
 | `io_form_history`, `io_form_restart`, `io_form_input`, `io_form_boundary` | 2 (NetCDF) |
 | `use_netcdf_classic` | `.false.`, `.true.` |
 | `iofields_filename` | the output streams as in WRF; lines that change an input stream (wrfinput, wrflowinp) are errors |
 | `output_diagnostics`, `auxhist3_interval`, `io_form_auxhist3`, `frames_per_auxhist3`, `auxhist3_outname` | 0, 1 (with column physics, not with the adaptive time step) |
-| `auxinput4_interval`, `io_form_auxinput4`, `auxinput4_inname` | with `sst_update = 1` (wrflowinp) |
+| `auxinput4_interval`, `io_form_auxinput4`, `auxinput4_inname` | with `sst_update = 1` (wrflowinp); each domain's interval a multiple of its time step (else WRF stops at the first read: "Could not find matching time in input file"; the translation and the model refuse it) |
 | **&fdda** | |
 | `grid_fdda` | 0, 1 (analysis nudging toward `wrffdda_d0N`, per domain; real-data runs with column physics, not with the adaptive time step) |
-| `gfdda_inname`, `gfdda_interval_m`, `gfdda_end_h`, `io_form_gfdda` | the file name (`wrffdda_d<domain>` is real.exe's; WRF's default is `gfdda_d<domain>`), minutes between the analyses (> 0), the end of the nudging in hours; 2. WRF stops with `gfdda_begin_*`, `gfdda_end_y/d/m/s` or `gfdda_interval_y/d/h/s`, and so does the translation |
+| `gfdda_inname`, `gfdda_interval_m`, `gfdda_end_h`, `io_form_gfdda` | the file name (`wrffdda_d<domain>` is real.exe's; WRF's default is `gfdda_d<domain>`), minutes between the analyses (> 0, a multiple of the domain's time step: as `auxinput4_interval`), the end of the nudging in hours; 2. WRF stops with `gfdda_begin_*`, `gfdda_end_y/d/m/s` or `gfdda_interval_y/d/h/s`, and so does the translation |
 | `guv`, `gt`, `gq`, `fgdt`, `fgdtzero`, `if_no_pbl_nudging_uv/t/q`, `if_zfac_uv/t/q`, `k_zfac_uv/t/q`, `if_ramping`, `dtramp_min` | any (per domain but `if_ramping`, `dtramp_min`); `guv`, `gt`, `gq` >= 0 |
 | **&domains** | |
 | `time_step`, `time_step_fract_num/den` | any stable step |
@@ -715,6 +715,13 @@ CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_
 refuses a file of another format version, of another commit (unless `run.restart_any_commit = true`) or of a run with
 other options, and names the differing options. WRF's `wrfrst` files are the restart across versions and changed
 options.
+
+The restart alarm of a resumed run is WRF's: input_wrf sets its first ring to the restart time plus the file's
+`WRF_ALARM_SECS_TIL_NEXT_RING_51`, it rings at the first step at or past that time and counts the interval from that
+step (ESMF_ClockAdvance). With a `restart.interval` that is not a multiple of `time.dt` a resumed run therefore writes
+its restart files at other times than the uninterrupted run (dt 50 s, interval 120 s, resumed at 150 s: 250, 400, 500,
+650 s instead of 250, 400, 500, 600 s), and with `restart.interval = 0` it still writes one set at that first ring, as
+WRF does. CPPWRF's own `restart_<step>.nc` (format version 2) carries the same attribute and resumes the same way.
 
 When resuming, pre-restart rows in `diag.csv` are preserved automatically.
 

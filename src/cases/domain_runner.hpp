@@ -100,13 +100,22 @@ class DomainRunner {
   bool aux3_due(long n) const { return aux3_iv_ > 0 && n > aux3_ref_ && (n - aux3_ref_) % aux3_iv_ == 0; }
   double rst_iv_s_ = 0.0;  // restart interval (s), WRF's RESTART_ALARM
   double rst_prev_ = 0.0;  // the alarm's PrevRingTime (s)
+  // a run resumed from a restart file: the alarm's one-shot RingTime (s), the restart time +
+  // WRF_ALARM_SECS_TIL_NEXT_RING_51 (share/input_wrf.F, restart_only); < 0: none (or it rang)
+  double rst_ring_time_ = -1.0;
   bool rst_due(long n) const;
+  bool rst_one_shot(long n) const;  // the alarm rings at the end of step n by its RingTime (ESMF_ClockAdvance's PRED2)
+  long rst_secs_to_ring(long n) const;  // WRF_ALARM_SECS_TIL_NEXT_RING_51 of a restart file at the end of step n
   // adaptive time step: the exact time (since this run's start) at the end of step start_step + i, and the history and
   // restart alarms of ESMF_ClockAdvance by time (PrevRingTime + interval <= current time; PrevRingTime += interval)
   std::vector<wrf_time::Interval> t_end_{wrf_time::Interval{}};
   std::vector<char> hist_ring_{0}, rst_ring_{0};
   wrf_time::Interval hist_iv_t_, hist_prev_t_, rst_iv_t_, rst_prev_t_;
   bool hist_alarm_t_ = false;
+  // a run resumed from a WRF restart file: the one-shot RingTime of the history and restart alarms (the restart time +
+  // the file's WRF_ALARM_SECS_TIL_NEXT_RING_01 / _51, as the time since the restart), while set
+  wrf_time::Interval hist_ring_t_, rst_ring_t_;
+  bool hist_ring_set_ = false, rst_ring_set_ = false;
   void adapt_before_step(long n);
   // the model time at the end of step n, seconds since the simulation start
   double time_s(long n) const {
