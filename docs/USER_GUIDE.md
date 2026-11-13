@@ -322,6 +322,7 @@ does not know is an error at start-up (`unknown configuration key ...`), so a ty
 | `CPPWRF_NC_THREADS` | threads that compress the NetCDF-4 chunks (default: the hardware threads, at most 64; 1: no pool; 0: HDF5's own filter); the bytes are the same |
 | `CPPWRF_IO_TIMING=1` | the time of each output record |
 | `CPPWRF_MEMINFO=1` | GPU builds: the device memory in use at start-up and at the end |
+| `CPPWRF_DEVICE_MEMORY_MIB=N` | GPU builds: size the work buffers (column physics, RRTMG) as on a device of N MiB |
 | `CPPWRF_KTIME=1` | GPU builds: time every kernel (slower; a table at the end) |
 | `CPPWRF_GRAPHS=0` | GPU builds: no CUDA graphs |
 | `CPPWRF_TILES=PxQ` | run the domain as P x Q tiles (overrides `run.tiles`; section 7, "Tiles") |
@@ -482,9 +483,12 @@ CPU build.
   batch kernels, Thompson and the physics drivers). Its difference from WRF real*8 is of the size of stock WRF
   real*4's (docs/FP32_ACCURACY.md: the measurement, its method and tools/verify/fp32_accuracy.py, which compares any
   two sets of wrfout files).
-- **Memory:** the column physics keeps per-column arrays in thread-local memory, which CUDA reserves for every thread
-  the GPU can hold, so the footprint grows with the GPU. `CPPWRF_MEMINFO=1` prints it. On an NVIDIA L4 (24 GB) a
-  359 x 269 x 44 domain in FP64 needs about 9.3 GB with Thompson + MYNN-EDMF + RRTMG.
+- **Memory:** a kernel's local arrays are reserved by CUDA for every thread the GPU can hold at once, so that part
+  of the footprint grows with the GPU (the largest frame is 10.8-12.4 KB per thread in FP64 and 4.2-11 KB in FP32:
+  0.4 GB on an RTX 2060, 3 GB on an RTX PRO 6000). The large per-column arrays of the column physics live in a
+  work buffer of at most 1/8 of the device memory instead. `CPPWRF_MEMINFO=1` prints the footprint. A 6 GB GPU
+  runs every verified physics suite on a 120 x 90 x 45 domain in FP32 and FP64 ("GPU memory" below has the
+  measured minimum per suite).
 - **Determinism:** the GPU build has no atomics in floating-point sums and gives the same bits in every run.
 
 ### Tiles (domain decomposition)
@@ -841,10 +845,32 @@ the hardware threads, at most 64; 1: no pool; 0: HDF5's own filter) and `CPPWRF_
 record (values, device copies, HDF5 calls). On the 359 x 269 x 44 domain a FP64 history frame takes about 1.2 s
 instead of 11 s on the G4.
 
-GPU memory: the column physics keeps its per-column arrays in thread-local memory, which CUDA reserves for every
-thread the GPU can hold at once, so the footprint grows with the GPU's size. On an NVIDIA L4 (24 GB) the same domain
-in FP64 peaks at about 9.3 GB with Thompson + MYNN-EDMF + RRTMG and 11.3 GB for the two-way nest N3 with Thompson
-(the domains share one set of Thompson tables).
+GPU memory: the fields, the physics tables, the work buffers (the column physics' per-column arrays and RRTMG's
+batch scratch: together at most 1/4 of the device memory, less when little is free) and the kernels' local memory,
+which CUDA reserves for every thread the GPU can hold at once (the largest frame times 30720 threads on an RTX 2060,
+40960 on a T4, 89088 on an L4, 288768 on an RTX PRO 6000). The peak of a 1 h run on a 120 x 90 x 45 domain, measured
+on a 16 GB T4 with 5800 MiB left free (what a 6 GB card offers) and `CPPWRF_DEVICE_MEMORY_MIB=5800`:
+
+| Physics (mp / cu / pbl / lsm / radiation) | FP64 MiB | FP32 MiB |
+|---|---|---|
+| none / none / YSU / Noah / none (P1) | 1378 | 768 |
+| none / none / MYJ / Noah / none (P9) | 1590 | 984 |
+| none / none / YSU / Noah-MP / none (NMP1) | 1414 | 800 |
+| none / Kain-Fritsch / YSU / Noah / none (G2) | 1738 | 1156 |
+| none / Tiedtke / YSU / Noah / none (T6) | 1954 | 1058 |
+| none / New Tiedtke / YSU / Noah / none (P7) | 2096 | 1182 |
+| none / Grell-Freitas / YSU / Noah / none (P8) | 2102 | 1190 |
+| WSM6 / Kain-Fritsch / YSU / Noah / RRTMG (P4) | 3098 | 2182 |
+| aerosol-aware Thompson / none / YSU / Noah / none (C01) | 3150 | 1786 |
+| WRF's CONUS suite: Thompson / Tiedtke / MYJ / Noah / RRTMG (D0) | 4052 | 2882 |
+| Thompson / none / MYNN-EDMF / Noah / RRTMG (MYNN) | 4094 | 2688 |
+| P4's physics on a two-way nest of two domains (N3) | 4646 | 3226 |
+
+A larger domain adds its fields; a larger GPU adds local memory and work buffers (the same D0 FP64 run peaks at
+8.7 GB on an RTX PRO 6000, which has 97 GB). On an RTX 2060 (6 GB) five steps of P4 and C01 in FP32 peak at 2.3 and
+2.0 GB. When the memory is short the run stops at the set-up or the first step and names the kernel or the
+allocation. `CPPWRF_DEVICE_MEMORY_MIB=N` sizes the work buffers for a device of N MiB (to reproduce a small GPU's
+footprint on a large one, or to leave memory to another process).
 
 `tools/heavy.sh` is a small helper that serialises heavy jobs (builds, runs, test suites) on a shared
 workstation: `tools/heavy.sh <command>` runs in one of four job slots, `--light` runs at once with two

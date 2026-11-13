@@ -26,6 +26,19 @@ a verified configuration, of a configuration key or of an output file is a new m
   nest dt 50/3 s), CPU and CUDA FP64 at tolerance 0 (data port_af1_data.tar). Results of the suite's earlier cases
   are unchanged.
 
+### Performance
+- GPU memory: the column arrays of Tiedtke, New Tiedtke, Grell-Freitas-Li and GWDO (FP32 and FP64) and of
+  Kain-Fritsch and MYJ (FP64) live in the column work buffer instead of the kernels' stack frames, which CUDA
+  reserves for every thread the GPU can hold. The frames of 20-80 KB per thread are gone; the largest left is
+  YSU's / Noah's (11-12 KB in FP64). A 1 h run on 120 x 90 x 45 peaks 4.7-15 GB lower on an RTX PRO 6000 with these
+  schemes (WRF's CONUS suite in FP64: 20.7 -> 8.7 GB) and 1.1-3.1 GB lower on an L4; every verified suite fits a
+  6 GB GPU in FP32 and FP64 (docs/USER_GUIDE.md "GPU memory" has the minimum per suite, docs/PERF.md the tables).
+  The moved kernels are up to 11 % (FP64) and 30 % (FP32) slower on the RTX PRO 6000; the steps of Grell-Freitas
+  and Tiedtke runs 3-7 %. Results are unchanged: CUDA FP64 at tolerance 0, FP32 byte-identical.
+- `CPPWRF_DEVICE_MEMORY_MIB=N`: the work buffers (column physics, RRTMG) are sized as on a device of N MiB.
+- tools/colab/colab_run.sh `--base REV` (both builds in one session: times, memory, kernel times, outputs byte for
+  byte) and `--device-mib N` (the runs see N MiB of free device memory).
+
 ### Tools and documentation
 - `cppwrf-post` (docs/POST.md): forecaster fields from wrfout files with wrf-python's methods (ported to numpy,
   identical to wrf-python on single precision files), written as CF-1.8 NetCDF and / or GRIB2 (Lambert, polar

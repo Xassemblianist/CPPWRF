@@ -488,7 +488,8 @@ held 16-18 GB of device memory for stacks on the G4 before the first field.
   by side. Thompson's column arrays (64 KB per column in FP64 at 48 levels) and MYNN's mass-flux plume arrays live
   there; the CPU keeps the local arrays.
 - Grell-Freitas is compiled for a 48- and a 100-level tier, WSM6 for 48 / 64 / 128 levels (the tier of nz).
-- Kain-Fritsch keeps its local arrays (29 KB FP64, 11 KB FP32 at 48 levels): in the work buffer its FP32 build
+- Kain-Fritsch keeps its local arrays (29 KB FP64, 11 KB FP32 at 48 levels; since PERF2 only in FP32, see the
+  last section): in the work buffer its FP32 build
   (kf.cpp contracts multiply-adds) gave different P2 / P4 values. Also measured and dropped as slower: a k-major buffer
   (column stride) with Thompson's sedimentation arrays kept local (Thompson FP64 +2-4 %, P6 FP32 steps +7 %) and
   the warp layout with that split (Thompson FP32 +29 %).
@@ -929,3 +930,148 @@ with 16 threads in all, R1D6's slowest tile takes 1.24 s with 2x1 and 2.1-2.2 s 
 each tile has 8 or 4 threads and the same barriers. Phase 1 is the proof that the decomposition gives the same bits;
 the time on several GPUs, the exchanges inside a graph (device-side flags instead of host barriers) and tiles that
 allocate only their own patch are the next steps.
+
+## Column work buffers for the cumulus schemes, GWDO and MYJ; consumer GPUs (PERF2; measured, Colab G4 / L4 / T4, RTX 2060)
+
+After F06, P01b and P01c the largest stack frames belonged to the cumulus schemes, not to the microphysics. Frames
+per thread before this change (cuobjdump, 48-level tier, FP64): Grell-Freitas 80464 B, New Tiedtke 59168, Tiedtke
+49376, Kain-Fritsch 29392, GWDO 21584, MYJ 19632, ACM2 13856, Noah-MP 13216, Noah 12400, YSU 8464 (Thompson, WSM6
+and MYNN were already below YSU). The CUDA driver reserves the largest frame launched for every resident thread
+(288768 on the G4, 89088 on the L4, 40960 on a T4, 30720 on an RTX 2060), so one cumulus scheme decided the
+footprint of a run.
+
+- The column arrays of Tiedtke, New Tiedtke, Grell-Freitas-Li and GWDO (FP32 and FP64), and of Kain-Fritsch and MYJ
+  in FP64, live in the column work buffer (`core/column_work`, the warp layout of F06). Their frames are now 0-368 B.
+  The CPU and the host pass keep the local arrays; the arithmetic is the same text.
+- Kain-Fritsch and MYJ keep their local arrays in FP32 (10960 B and 9816 B): kf.cpp and myjpbl.cpp contract
+  multiply-adds in FP32 (`--fmad=true`), and the contraction follows the storage (F06 measured different P2 / P4
+  values for KF). The FP32 text of both is unchanged, so the FP32 bytes are.
+- `core/column_work`: `ColPtr<T>` / `ColCPtr<T>` (a buffer view on the device, a pointer on the host) for the
+  helpers' parameters, `CPPWRF_COLUMN_MEMBER` / `CPPWRF_COLUMN_STRUCT` for structs of column arrays,
+  `CPPWRF_COLUMN_ARRAY0` for zero-filled arrays, and `CPPWRF_COLUMN_CURSOR`: a helper takes the cursor by value, so
+  its arrays are released at its return as a stack frame is.
+- One budget for the work buffers (`device_work_budget`: 1/8 of the device memory, 1/4 of what is free), used by
+  the column work buffer and by RRTMG's batch scratch. `CPPWRF_DEVICE_MEMORY_MIB=N` counts the device as N MiB.
+- What is left is the frame of YSU / Noah (10768-12400 B in FP64, by compiler and architecture) and, in FP32, of
+  KF or MYJ. Noah's frame is scalars and soil-layer arrays, not level arrays: there is nothing to move.
+
+Base origin/main a449d78 / new 1daca22 (the later commits change no kernel), 120 x 90 x 45, 1 h, no history
+output, base and new alternating twice in one session; peak from nvidia-smi, the stack limit and its reserve from
+`CPPWRF_MEMINFO`. The outputs of base and new are byte-identical in every line (FP32 and FP64).
+
+G4 (RTX PRO 6000 Blackwell, 97 GB):
+
+| Case | base s/h | new s/h | peak MiB base -> new | stack limit B (reserve MiB) base -> new |
+|---|---|---|---|---|
+| P1 FP64 | 0.660, 0.660 | 0.659, 0.660 | 4081 -> 4081 | 10768 (2965) -> 10768 (2965) |
+| P1 FP32 | 0.187, 0.187 | 0.187, 0.187 | 1979 -> 1979 | 4240 (1168) -> 4240 (1168) |
+| P4 FP64 | 2.489, 2.471 | 2.487, 2.466 | 13713 -> 9051 | 29008 (7989) -> 10768 (2965) |
+| P4 FP32 | 1.551, 1.547 | 1.550, 1.552 | 8233 -> 8233 | 10960 (3018) -> 10960 (3018) |
+| C01 FP64 | 1.463, 1.466 | 1.465, 1.468 | 5873 -> 5873 | 10768 (2965) -> 10768 (2965) |
+| C01 FP32 | 0.394, 0.394 | 0.393, 0.394 | 2999 -> 2999 | 4240 (1168) -> 4240 (1168) |
+| D0 FP64 | 1.857, 1.858 | 1.865, 1.865 | 20651 -> 8743 | 49376 (13598) -> 6144 (1692) |
+| D0 FP32 | 0.625, 0.626 | 0.635, 0.635 | 12365 -> 8663 | 23264 (6407) -> 9824 (2705) |
+| N3 FP64 | 8.034, 8.032 | 8.013, 8.029 | 15327 -> 10669 | 29008 (7989) -> 10768 (2965) |
+| N3 FP32 | 4.527, 4.529 | 4.522, 4.510 | 9333 -> 9333 | 10960 (3018) -> 10960 (3018) |
+| P7 FP64 | 0.885, 0.885 | 0.889, 0.889 | 17405 -> 4901 | 59168 (16294) -> 10768 (2965) |
+| P7 FP32 | 0.256, 0.256 | 0.258, 0.256 | 9015 -> 2395 | 29792 (8204) -> 4240 (1168) |
+| P8 FP64 | 1.022, 1.025 | 1.067, 1.052 | 19971 -> 4929 | 68464 (18854) -> 10768 (2965) |
+| P8 FP32 | 0.302, 0.302 | 0.322, 0.322 | 10237 -> 2403 | 34240 (9429) -> 4240 (1168) |
+| T6 FP64 | 0.824, 0.823 | 0.829, 0.832 | 14709 -> 4657 | 49376 (13598) -> 10768 (2965) |
+| T6 FP32 | 0.236, 0.237 | 0.248, 0.250 | 7219 -> 2271 | 23264 (6407) -> 4240 (1168) |
+| G2 FP64 | 0.902, 0.902 | 0.889, 0.888 | 9103 -> 4441 | 29008 (7989) -> 10768 (2965) |
+| G2 FP32 | 0.252, 0.252 | 0.258, 0.255 | 4123 -> 3959 | 12032 (3314) -> 10960 (3018) |
+| P9 FP64 | 0.636, 0.635 | 0.637, 0.639 | 6521 -> 1941 | 19632 (5406) -> 2224 (612) |
+| P9 FP32 | 0.184, 0.184 | 0.185, 0.184 | 3519 -> 3519 | 9824 (2705) -> 9824 (2705) |
+
+L4 (24 GB):
+
+| Case | base s/h | new s/h | peak MiB base -> new | stack limit B (reserve MiB) base -> new |
+|---|---|---|---|---|
+| P1 FP64 | 1.933, 1.939 | 1.937, 1.942 | 1994 -> 1994 | 12400 (1054) -> 12400 (1054) |
+| P1 FP32 | 0.548, 0.548 | 0.548, 0.548 | 1008 -> 1008 | 4240 (360) -> 4240 (360) |
+| P4 FP64 | 8.416, 8.550 | 8.483, 8.619 | 6084 -> 5002 | 29392 (2497) -> 12400 (1054) |
+| P4 FP32 | 6.003, 5.994 | 6.007, 5.990 | 4018 -> 4018 | 10960 (931) -> 10960 (931) |
+| C01 FP64 | 5.486, 5.318 | 5.453, 5.249 | 3784 -> 3784 | 12400 (1054) -> 12400 (1054) |
+| C01 FP32 | 1.253, 1.244 | 1.246, 1.242 | 2026 -> 2026 | 4240 (360) -> 4240 (360) |
+| D0 FP64 | 5.783, 5.799 | 5.776, 5.803 | 9116 -> 5974 | 49376 (4195) -> 12400 (1054) |
+| D0 FP32 | 1.780, 1.760 | 1.763, 1.756 | 5948 -> 4666 | 24928 (2118) -> 9824 (835) |
+| N3 FP64 | 26.040, 26.356 | 26.223, 26.506 | 7666 -> 6588 | 29392 (2497) -> 12400 (1054) |
+| N3 FP32 | 15.509, 15.504 | 15.515, 15.517 | 5088 -> 5088 | 10960 (931) -> 10960 (931) |
+
+T4 with 5800 MiB left free by another process and `CPPWRF_DEVICE_MEMORY_MIB=5800` (what a 6 GB GPU offers; one run
+per build, the T4 is 3-6 times slower than the G4):
+
+| Case | base s/h | new s/h | peak MiB base -> new | stack limit B (reserve MiB) base -> new |
+|---|---|---|---|---|
+| P1 FP64 | 3.657 | 3.532 | 1378 -> 1378 | 12400 (484) -> 12400 (484) |
+| P1 FP32 | 1.123 | 1.121 | 768 -> 768 | 4240 (166) -> 4240 (166) |
+| P4 FP64 | 15.221 | 15.709 | 3848 -> 3098 | 29392 (1148) -> 12400 (484) |
+| P4 FP32 | 10.863 | 11.338 | 2630 -> 2182 | 10960 (428) -> 10960 (428) |
+| C01 FP64 | 9.779 | 9.953 | 3168 -> 3150 | 12400 (484) -> 12400 (484) |
+| C01 FP32 | 2.515 | 2.522 | 1786 -> 1786 | 4240 (166) -> 4240 (166) |
+| D0 FP64 | 10.646 | 10.603 | 5684 -> 4052 | 49376 (1929) -> 12400 (484) |
+| D0 FP32 | 3.547 | 3.566 | 3640 -> 2882 | 24928 (974) -> 9824 (384) |
+| N3 FP64 | 50.229 | 55.885 | 5392 -> 4646 | 29392 (1148) -> 12400 (484) |
+| N3 FP32 | 28.657 | 28.869 | 3662 -> 3226 | 10960 (428) -> 10960 (428) |
+| P7 FP64 | 4.822 | 4.852 | 3196 -> 2096 | 59168 (2311) -> 12400 (484) |
+| P7 FP32 | 1.639 | 1.672 | 1554 -> 1182 | 24480 (956) -> 4240 (166) |
+| P8 FP64 | 4.894 | 5.052 | 4052 -> 2102 | 80944 (3162) -> 12400 (484) |
+| P8 FP32 | 1.669 | 1.724 | 1992 -> 1190 | 35680 (1394) -> 4240 (166) |
+| T6 FP64 | 4.405 | 4.496 | 2814 -> 1954 | 49376 (1929) -> 12400 (484) |
+| T6 FP32 | 1.465 | 1.463 | 1572 -> 1058 | 24928 (974) -> 4240 (166) |
+| G2 FP64 | 4.539 | 4.459 | 2038 -> 1738 | 29392 (1148) -> 12400 (484) |
+| G2 FP32 | 1.482 | 1.450 | 1026 -> 1156 | 10960 (428) -> 10960 (428) |
+| P9 FP64 | 3.919 | 4.014 | 1656 -> 1590 | 19632 (767) -> 12400 (484) |
+| P9 FP32 | 1.209 | 1.217 | 984 -> 984 | 9824 (384) -> 9824 (384) |
+| MYNN FP64 | 10.853 | 11.033 | 4316 -> 4094 | 12400 (484) -> 12400 (484) |
+| MYNN FP32 | 3.548 | 3.621 | 2856 -> 2688 | 3920 (153) -> 3920 (153) |
+| NMP1 FP64 | 4.317 | 4.378 | 1414 -> 1414 | 13232 (517) -> 13232 (517) |
+| NMP1 FP32 | 1.326 | 1.334 | 800 -> 800 | 5072 (198) -> 5072 (198) |
+
+Every suite configuration fits a 6 GB device in FP32 and FP64, the base too: the T4's reserve is small because it
+holds few threads, and F06 / P01b / P01c had removed the 64 KB frames this task was written for (the 19.8-21.5 GB
+on the G4 of an earlier profile). The gain here is on the larger GPUs: 4.7-15 GB less on the G4 with a cumulus
+scheme or MYJ in FP64 (3.7-7.8 GB in FP32 with Tiedtke, New Tiedtke or GF), 1.1-3.1 GB less on the L4. N3 FP64 on
+the T4 is slower with the new build (50.2 -> 55.9 s, one run each), probably because the memory variable shrinks the
+new build's RRTMG chunks and the base does not read it.
+
+Kernel time per hour (`CPPWRF_KTIME=1`, 60 steps; ms per step is 1/60 of it), base -> new:
+
+| Kernel | G4 FP64 | G4 FP32 | L4 FP64 | L4 FP32 |
+|---|---|---|---|---|
+| Grell-Freitas (P8) | 349.1 -> 386.5 | 106.0 -> 129.1 | | |
+| Tiedtke (T6) | 164.0 -> 178.7 | 50.0 -> 63.4 | | |
+| Tiedtke (D0) | 172.9 -> 190.4 | 54.2 -> 70.3 | 335.7 -> 339.2 | 140.8 -> 142.7 |
+| New Tiedtke (P7) | 204.8 -> 214.6 | 62.7 -> 65.5 | | |
+| Kain-Fritsch (P4) | 190.9 -> 191.9 | 42.7 -> 42.5 | 296.9 -> 305.4 | 92.2 -> 92.2 |
+| Kain-Fritsch (N3) | 553.0 -> 562.0 | 138.2 -> 137.3 | 737.0 -> 724.9 | 252.6 -> 252.3 |
+| GWDO (D0) | 33.3 -> 39.5 | 18.5 -> 21.7 | 95.7 -> 96.7 | 46.2 -> 47.9 |
+| MYJ (P9; L4: D0) | 75.9 -> 80.2 | 32.0 -> 32.4 | 142.8 -> 144.4 | 53.8 -> 52.3 |
+| Thompson (D0) | 305.9 -> 305.2 | 98.3 -> 98.3 | 1375.9 -> 1380.5 | 263.2 -> 259.0 |
+| Thompson (C01) | | 91.2 -> 91.3 | 1356.4 -> 1357.3 | 255.9 -> 256.0 |
+| WSM6 stages (P4) | 178.3 -> 178.1 | | 441.4 -> 461.8 | |
+| YSU (P1) | 73.2 -> 73.2 | 28.5 -> 28.5 | 127.8 -> 128.4 | 49.3 -> 49.4 |
+| RRTMG LW (P4) | 1112.3 -> 1112.9 | 1108.1 -> 1110.4 | 4522.2 -> 4617.7 | 4724.2 -> 4727.6 |
+
+The moved kernels are not faster: on the G4 they are 5-11 % slower in FP64 (KF +0.5 %) and up to 30 % slower in
+FP32 (Tiedtke), as F06 saw for Thompson in FP32; the local arrays were cached better than the global buffer. On
+the L4 the difference is within 1-4 %. In steps: P8 +3-4 % (FP64) and +7 % (FP32) on the G4, T6 FP32 +5 %, D0 FP32
++1.5 %, everything else within 1 %; G2 FP64 1.5 % faster. The change buys memory, not time. (The L4 P4 FP64 KTIME
+run was 2-4 % slower in every kernel, the unmoved ones too; its steps differ by 0.8 %.)
+
+RTX 2060 (6 GB, 30720 threads, 5920 MiB in all, 259 MiB in use by the desktop), five steps, FP32:
+
+| Case | peak MiB base | peak MiB new | stack limit B (reserve MiB) | 5 steps s base / new |
+|---|---|---|---|---|
+| P4 FP32 | 2327 | 2327 | 10960 (321) | 0.956 / 0.909 |
+| C01 FP32 | 1995 | 1995 | 4240 (124) | 0.230 / 0.206 |
+
+Proof (G4, new 1a61422 against base a449d78): the cuda_dp suite at tolerance 0, 93 PASS, 0 FAIL, 0 SKIP; the FP32
+suite cases with both builds, 15 PASS each (5 skipped in both: references or inputs not in the proof's data), their
+114 snapshot files byte-identical; the glibc device-math proof identical. CPU P4 1 h on that runtime: base 11.233,
+11.609, 11.641 s, new 11.301, 11.273, 11.322 s.
+
+Not done, with the reason: nsys / ncu tables per kernel (with CUDA graphs nsys reports no kernel launches; the
+ncu session was lost), so the kernel times are KTIME's. Splitting kernels in stages and per-launch stack limits
+were not needed once the frames were gone. Level tiers below 48 would shrink the buffer, not the reserve.
