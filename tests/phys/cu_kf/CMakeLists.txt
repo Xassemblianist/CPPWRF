@@ -20,6 +20,7 @@ add_executable(driver_kf_cpu
   ${CPPWRF_ROOT}/src/phys/cu_kf/kf.cpp
   ${CPPWRF_ROOT}/src/phys/cu_kf/kf_tables.cpp
   ${CPPWRF_ROOT}/src/core/backend.cpp
+  ${CPPWRF_ROOT}/src/core/column_work.cpp
 )
 target_include_directories(driver_kf_cpu PRIVATE
   ${CPPWRF_ROOT}/src
@@ -38,12 +39,14 @@ if(CMAKE_CUDA_COMPILER AND (NOT DEFINED CPPWRF_ENABLE_CUDA OR CPPWRF_ENABLE_CUDA
     ${CPPWRF_ROOT}/src/phys/cu_kf/kf.cpp
     ${CPPWRF_ROOT}/src/phys/cu_kf/kf_tables.cpp
     ${CPPWRF_ROOT}/src/core/backend.cpp
+  ${CPPWRF_ROOT}/src/core/column_work.cpp
   )
   set_source_files_properties(
     driver_kf.cpp
     ${CPPWRF_ROOT}/src/phys/cu_kf/kf.cpp
     ${CPPWRF_ROOT}/src/phys/cu_kf/kf_tables.cpp
     ${CPPWRF_ROOT}/src/core/backend.cpp
+  ${CPPWRF_ROOT}/src/core/column_work.cpp
     PROPERTIES LANGUAGE CUDA
   )
   target_include_directories(driver_kf_cuda_dp PRIVATE
@@ -58,12 +61,14 @@ if(CMAKE_CUDA_COMPILER AND (NOT DEFINED CPPWRF_ENABLE_CUDA OR CPPWRF_ENABLE_CUDA
     ${CPPWRF_ROOT}/src/phys/cu_kf/kf.cpp
     ${CPPWRF_ROOT}/src/phys/cu_kf/kf_tables.cpp
     ${CPPWRF_ROOT}/src/core/backend.cpp
+  ${CPPWRF_ROOT}/src/core/column_work.cpp
   )
   set_source_files_properties(
     driver_kf.cpp
     ${CPPWRF_ROOT}/src/phys/cu_kf/kf.cpp
     ${CPPWRF_ROOT}/src/phys/cu_kf/kf_tables.cpp
     ${CPPWRF_ROOT}/src/core/backend.cpp
+  ${CPPWRF_ROOT}/src/core/column_work.cpp
     PROPERTIES LANGUAGE CUDA
   )
   target_include_directories(driver_kf_cuda_sp PRIVATE

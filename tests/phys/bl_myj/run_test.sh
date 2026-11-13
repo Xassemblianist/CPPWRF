@@ -39,14 +39,14 @@ wrf_fortran "${OUT_DIR}/driver_bl_myj_fortran" "${SCRIPT_DIR}/driver_bl_myj.f90"
   -I"${REPO_ROOT}/src" \
   "${SCRIPT_DIR}/driver_bl_myj.cpp" \
   "${REPO_ROOT}/src/phys/bl_myj/myjpbl.cpp" \
-  "${REPO_ROOT}/src/core/backend.cpp" \
+  "${REPO_ROOT}/src/core/backend.cpp" "${REPO_ROOT}/src/core/column_work.cpp" \
   -lmvec -lm -o driver_bl_myj_cpu_fp64
 
 "${HEAVY}" --light g++ -std=c++20 -O3 -march=native -ffp-contract=off -fopenmp \
   -I"${REPO_ROOT}/src" \
   "${SCRIPT_DIR}/driver_bl_myj.cpp" \
   "${REPO_ROOT}/src/phys/bl_myj/myjpbl.cpp" \
-  "${REPO_ROOT}/src/core/backend.cpp" \
+  "${REPO_ROOT}/src/core/backend.cpp" "${REPO_ROOT}/src/core/column_work.cpp" \
   -lmvec -lm -o driver_bl_myj_cpu_fp32
 
 echo "=== 1. Eta Surface Layer (MYJSFC) Differential Test (itimestep=2, 2500 cols) ==="
