@@ -767,11 +767,14 @@ ctest --test-dir build-cpu --output-on-failure
 python3 -m unittest tests.tools.test_wrf2cppwrf
 ```
 
-### The CPU Suite on GitHub (and Colab or Google Cloud)
+### The CPU Suite on GitHub or Colab
 The model runs against WRF need the WRF reference runs (WRF's inputs, its wrfout / wrfrst files and its builds). They
 are public: the tars of `tests/verify/vm_data.txt` are release assets of
 [cppwrf-data](https://github.com/Xassemblianist/cppwrf-data) (release `data-v1`: parts of 512 MiB, `SHA256SUMS`,
-`TARS.txt`, `INDEX.tsv.gz`), and the full CPU FP64 suite (wrf_suite.py's CPU cases, the output files tests, the
+`TARS.txt`, `INDEX.tsv.gz`; `diff_data.tar` is replaced by `diff_runs.tar`, its WRF run files without the reference
+machine's WRF build trees, whose files name that machine's paths; `v05_files_data.tar.links` and `v05_suite_refs.tar.links`
+restore four links between ideal reference directories that pointed into that machine's home, unpacked after a job's
+tars), and the full CPU FP64 suite (wrf_suite.py's CPU cases, the output files tests, the
 ideal files test, the differential and ctest tests, the translator tests and the comparators' self-test) runs on free
 GitHub-hosted runners with the workflow `suite.yml` of that repository. The references are Intel-made; on an AMD CPU
 the model gives the same results (`CPPWRF_PORTABLE_LIBMVEC`, see below) and so does WRF's side of the differential
@@ -800,25 +803,32 @@ tools/ci/ci_submit.sh HEAD --cases real_r1_fp64_cpu,real_n3_r8_fp64_cpu
   the `work` matrix runs the jobs in a Debian 13 container (gcc 14, gfortran 14, glibc 2.41, NetCDF 4.9.3, Python
   3.13: the packages of the machines that made the references) with OpenMP threads = the runner's vCPUs, and `gate`
   merges the logs and fails unless every job passed and the PASS lines are exactly the expected case list (a lost
-  case is a FAIL, never a silent SKIP). At most 20 jobs run at once (the free plan's limit).
+  case is a FAIL, never a silent SKIP). At most 20 jobs run at once (the free plan's limit). The diff job takes
+  WRF's build trees from the `wrf-build` release (built by `ci/wrf_build.sh` as below) instead of the reference
+  machine's. The full suite (13 suite jobs, 2 files jobs, idealfiles, diff, checks) takes about 45 min from start to
+  gate; the longest job about 40 min, of which up to 20 min is the data download.
 - WRF references: the workflow `wrfref.yml` of cppwrf-data builds WRF v4.8.0 from the release source as the
   references were built (`configure` option 32, serial gfortran / gcc, basic nesting, `-r8`; and with
   `-fdefault-double-8`), keeps each build as an asset of its `wrf-build` release, runs `tools/gcp/wrf_ref_run.py`
   lines (`NAME BASE_RUN r8|r8d8 section.key=value ...`) on given data tars and returns the run directories as assets of
   its `wrfref` release; `rerun` runs WRF again in copies of existing reference directories and compares every output
-  file's MD5 with the reference's:
+  file's MD5 with the reference's (a different file is compared variable by variable, `ci/nc_same.py`). wrf.exe runs
+  with CPPWRF's `tests/phys/libmvec_intel.cpp` preloaded (glibc's vector log / log10 with Intel's bits: on an AMD
+  runner WRF's own libmvec calls change the results). The whole references are in `v05_suite_refs.tar`
+  (`suite_data.tar` keeps only the compared variables). R1 1 h came back with the reference's MD5 on an AMD EPYC
+  runner; P1 1 h equal in every variable but RQCBLTEN and RQIBLTEN (which the suite does not compare):
   `gh workflow run wrfref.yml -R Xassemblianist/cppwrf-data -f tag=NAME -f data=suite_data.tar,v05_suite_refs.tar -f rerun="wrf_runs/run_R1_r8:r8"`.
   A new reference is then staged into a new data tar (a later port task) and added to `vm_data.txt` and the release.
 - Not on GitHub: the slow cases' data (`long_data.tar`, `long72_data.tar`, `long72n3_data.tar`) are not in the
   data release yet, and GPU runs need a GPU machine.
 
-The earlier remote tools remain as alternatives (they need the project's private bucket or a Colab subscription):
-`tools/gcp/gcp_run.sh` (a Google Compute Engine spot VM, Debian 13) and `tools/colab/colab_suite.sh` (a Colab
-runtime, the same steps `tools/gcp/suite_body.sh` in a Debian 13 chroot; `--gpu G4 --any-cpu --jobs 12 --threads 4`
-ran the full suite in about 42 min), with `--cases`, `--data`, `--slow`, `--diff-only [--faults DIR]`;
-`tools/colab/colab_wrfref.sh` / `tools/gcp/gcp_wrfref.sh` make WRF references there,
+Colab is the other way (it needs a Colab subscription; the data come from the project's Drive):
+`tools/colab/colab_suite.sh` (a Colab runtime, the same steps `tools/gcp/suite_body.sh` in a Debian 13 chroot; `--gpu G4 --any-cpu --jobs 12 --threads 4`
+ran the full suite in about 42 min; GPU runs need it), with `--cases`, `--data`, `--slow`, `--diff-only [--faults DIR]`;
+`tools/colab/colab_wrfref.sh` makes WRF references there,
 `tools/colab/colab_mvec.sh` proves the portable vector log / log10 on a runtime of any CPU and
-`tools/colab/colab_regression.sh` runs the legacy regression tool (`tools/regression`).
+`tools/colab/colab_regression.sh` runs the legacy regression tool (`tools/regression`). The Google Cloud tools
+(`tools/gcp/gcp_run.sh`, `gcp_wrfref.sh`) are kept but not used.
 
 The suite's cases are defined in `tests/verify/cases/` (one file per group, `NN_<group>.py`, loaded in the order of
 their names; `wrf_suite.py --list` prints them all). A group file defines `CASES`, `DATA` (the data tars each case
