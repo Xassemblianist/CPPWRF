@@ -201,6 +201,11 @@ class WrfRun:
         run_time = float(tr.sections["run"].get("run_time", 0))
         self.start = nlm.start_date(nml)
         if restart:
+            # WRF: override_restart_timers takes the namelist's restart / history intervals instead of the file's,
+            # write_hist_at_0h_rst writes a history frame at the restart time; neither is ported
+            for k in ("override_restart_timers", "write_hist_at_0h_rst"):
+                if any(bool(v) for v in nml.get("time_control", {}).get(k, [])):
+                    raise Fatal(f"{k} = .true. with restart = .true. is not supported")
             pat = nlm.get(nml, "time_control", "rst_inname", "wrfrst_d<domain>_<date>")
             rst = os.path.join(self.run_dir, nlm.stream_filename(pat, 1, self.start))
             if not os.path.exists(rst):

@@ -141,6 +141,16 @@ class DropIn(unittest.TestCase):
         self.assertIn("d01 0001-01-01_00:02:00 wrf: SUCCESS COMPLETE WRF", r.stdout)
         self.assertIn("wrfout_d01_0001-01-01_00:01:12", os.listdir(d2))  # WRF: no frame at the restart time
 
+    def test_restart_timers_refused(self):
+        # WRF's override_restart_timers / write_hist_at_0h_rst change a resumed run's alarms: not ported, refused
+        for k in ("override_restart_timers", "write_hist_at_0h_rst"):
+            d = make_dir(f"rst_{k}", restart=".true.", extra_tc=f"{k} = .true.,")
+            r = run(WRF, d, "--exe", BIN)
+            self.assertEqual(r.returncode, 1, k)
+            err = text(os.path.join(d, "rsl.error.0000"))
+            self.assertIn("FATAL CALLED", err)
+            self.assertIn(f"{k} = .true. with restart = .true. is not supported", err)
+
     def test_outnames(self):
         d = make_dir("outnames", extra_tc="history_outname = 'hist_d<domain>_<date>.nc', "
                                           "rst_outname = 'rst_d<domain>_<date>',")
