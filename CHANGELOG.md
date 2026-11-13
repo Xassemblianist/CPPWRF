@@ -5,6 +5,15 @@ a verified configuration, of a configuration key or of an output file is a new m
 
 ## Unreleased
 
+### Added
+- Verification tiers of options: `data/option_tiers.txt` lists option values merged before their whole-model WRF
+  comparison as column_verified (bit-identical to WRF's Fortran in a column driver) or unverified (ported only).
+  The model and cppwrf_real stop on such a value, naming option, value and tier, unless `[cppwrf] allow_unverified =
+  true` (namelist.input: `&cppwrf allow_unverified = .true. /`, passed on by tools/wrf2cppwrf.py, which warns on
+  them); with the switch each one is logged and the wrfout / wrfrst files get the global attribute
+  `CPPWRF_UNVERIFIED_OPTIONS`. The table has no row: every option is verified, and no output byte changes. A new
+  option's entry in this changelog names its tier.
+
 ### Fixed
 - WRF's clock values on the fixed time step: the physics' xtime (radiation's coszen and hour angle, grid nudging),
   julian and the year (radiation, tmn_update, Noah-MP), solve_em's curr_secs2 / curr_mins2 (buckets, prec_acc_dt,

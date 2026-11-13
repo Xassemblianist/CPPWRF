@@ -301,6 +301,10 @@ Options that change nothing in a CPPWRF run (WPS and real.exe options such as `n
 quilting) are listed as `[INFO]` in the configuration's header. `restart = .true.` is not translated: a restart is
 `--set run.restart_file=<wrfrst file>` (section 9).
 
+An option merged below the verified tier (`data/option_tiers.txt`, docs/STATUS.md) gives a `[WARNING]` naming its
+tier; the model runs it only with `&cppwrf allow_unverified = .true. /` in the namelist, which the translator passes
+on as `[cppwrf] allow_unverified = true` (wrf.exe skips the `&cppwrf` group; `cppwrf_real` reads it too).
+
 ### Command Line and Environment
 
 ```bash
@@ -525,6 +529,7 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[run]` | `start_date` | string | `"2000-01-01_00:00:00"` | UTC start timestamp string | `start_year/month/day/hour/etc` |
 | `[run]` | `stop_on_nonfinite` | bool | `true` | Stop when a diagnostic step finds a NaN / Inf (false: go on, as WRF does) | none |
 | `[run]` | `check_nonfinite_every_step` | bool | `false` | Look for NaN / Inf after every step (default: on the `output.diag_interval` steps); the message names the first non-finite field and point | none |
+| `[cppwrf]` | `allow_unverified` | bool | `false` | Run options below the verified tier (`data/option_tiers.txt`: column_verified, unverified); without it such an option stops the run, naming the option, value and tier. With it: a warning per option and the global attribute `CPPWRF_UNVERIFIED_OPTIONS` (`mp_physics=4:column_verified;...`) in every wrfout / wrfrst file (docs/STATUS.md) | `&cppwrf allow_unverified = .true.` (read by the translator and cppwrf_real; wrf.exe skips the group) |
 | `[run]` | `restart_any_commit` | bool | `false` | Resume from a CPPWRF `restart_*.nc` file written by another commit | none |
 | `[real]` | `dir` | string | *required (real)* | Directory containing `wrfinput_d01` and `wrfbdy_d01` | WRF run directory |
 | `[real]` | `wrfinput` | string | `"wrfinput_d01"` | Name of initial condition NetCDF file | `wrfinput_d01` |

@@ -11,7 +11,8 @@ go by e-mail instead (SECURITY.md). Everyone taking part follows the [Code of Co
 - **Bug reports with a small case.** A namelist and a few steps that show the problem; `cppwrf-check` and
   `cppwrf-compare` output (docs/TOOLS.md).
 - **Ports of WRF options.** Schemes and options outside the ported list (docs/MIGRATING_FROM_WRF.md, docs/STATUS.md).
-  Open an issue first: a port is only accepted with a WRF reference run that the suite can compare with.
+  Open an issue first. A port is verified with a WRF reference run that the suite compares with; until then it can
+  be merged at a lower verification tier (below).
 - **Tools, documentation, packaging and translations** (docs/tr/ has the Turkish pages).
 
 ## Building and testing
@@ -43,6 +44,18 @@ say in the pull request which cases you ran.
 - **Every kernel launch that can raise a WRF fatal stop is followed by `fatal_check()`** (`ctest -R lint_fatal_check`).
 - **Configuration keys** are registered from their string literals in src/ (src/cases/config_keys.cpp); document new
   ones in docs/USER_GUIDE.md.
+- **Register a new option's tier** in `data/option_tiers.txt` when it is merged before its whole-model WRF
+  comparison (the one table: the model, cppwrf_real and tools/wrf2cppwrf.py read it; do not add another mechanism).
+  One row per option value, e.g.
+
+  ```
+  phys.mp_physics   physics.mp_physics   4   column_verified   WSM5 (tests/phys/mp_wsm5)
+  ```
+
+  `column_verified` needs a column driver that matches WRF's Fortran bit for bit (tests/phys/<scheme>), the minimum
+  for a new scheme; `unverified` (ported only) is for options where no column driver is possible, with the reason in
+  the note. Options without a row are verified. Such an option runs only with `[cppwrf] allow_unverified = true`;
+  list its tier in CHANGELOG.md and docs/STATUS.md, and delete the row when the suite proves it against WRF.
 
 ## Style
 
