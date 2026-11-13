@@ -12,6 +12,7 @@
 #include "core/precision.hpp"
 #include "core/tiles.hpp"
 #include "io/config.hpp"
+#include "io/option_tiers.hpp"
 
 using namespace cppwrf;
 
@@ -66,6 +67,8 @@ static int run(int argc, char** argv) {
   io::Config cfg = io::Config::load(argv[1], ov);
   const std::string cname = cfg.get_string("run.case");
   const std::string out_dir = cfg.get_string("output.dir", "out/" + cname);
+  // options below the verified tier stop here without cppwrf.allow_unverified (a nested run: per domain, run_nested)
+  if (!cases::has_nests(cfg)) io::check_option_tiers(cfg);
 
   const tile::Options tiles = tile::options(cfg.get_string("run.tiles", "1"));
   if (tiles.on()) {

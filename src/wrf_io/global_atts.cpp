@@ -174,6 +174,7 @@ void write_global_atts(NcOut& nc, const WrfConfig& c, const DomainAtts& d, Strea
   i("NUM_LAND_CAT", d.num_land_cat); i("ISWATER", d.iswater); i("ISLAKE", d.islake);
   i("ISICE", d.isice); i("ISURBAN", d.isurban); i("ISOILWATER", d.isoilwater);
   ci("HYBRID_OPT", "hybrid_opt"); r("ETAC", c.integer("hybrid_opt") == 0 ? 0.0 : c.num("etac"));
+  if ((history || restart) && !d.unverified_options.empty()) nc.att("CPPWRF_UNVERIFIED_OPTIONS", d.unverified_options);
 }
 
 }  // namespace cppwrf::wrf_io

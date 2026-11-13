@@ -50,6 +50,103 @@ REGISTRY_DEFAULTS = _registry_defaults()
 
 
 # -----------------------------------------------------------------------------
+# Verification tiers (data/option_tiers.txt; the model reads the same table, src/io/option_tiers.cpp)
+# -----------------------------------------------------------------------------
+
+TIERS = ("column_verified", "unverified")  # below "verified"; an option value without a row is verified
+
+
+def parse_option_tiers(text: str, source: str) -> List[Dict[str, Any]]:
+    """The rows of a tier table: config_key, wrf_group, wrf_key (None for '-'), values, tier, note (the format is in
+    data/option_tiers.txt; src/io/option_tiers.cpp parses it the same way)."""
+    rows = []
+    for n, line in enumerate(text.splitlines(), 1):
+        line = line.split("#", 1)[0]
+        parts = line.split(None, 4)
+        if not parts:
+            continue
+        where = f"{source}:{n}"
+        if len(parts) < 4:
+            raise ValueError(f"{where}: a row is <config key> <wrf group.key> <values> <tier> [note]")
+        ckey, wrf, vals, tier = parts[:4]
+        group = key = None
+        if wrf != "-":
+            group, dot, key = wrf.lower().partition(".")
+            if not dot or not group or not key:
+                raise ValueError(f"{where}: the WRF option '{wrf}' is not <group>.<key> (or -)")
+        if tier not in TIERS:
+            raise ValueError(f"{where}: tier '{tier}' is not column_verified or unverified")
+        items = [v.strip().lower() for v in vals.split(",")]
+        for it in items:
+            if not it:
+                raise ValueError(f"{where}: empty value")
+            if ":" in it:
+                lo, hi = (_tier_number(x) for x in it.split(":", 1))
+                if lo is None or hi is None or lo > hi:
+                    raise ValueError(f"{where}: value range '{it}' is not lo:hi")
+        rows.append({"config_key": None if ckey == "-" else ckey, "wrf_group": group, "wrf_key": key,
+                     "values": items, "tier": tier, "note": parts[4].strip() if len(parts) > 4 else ""})
+    return rows
+
+
+def _tier_number(s: str) -> Optional[float]:
+    try:
+        return float(s.strip().lower().replace("d", "e"))
+    except ValueError:
+        return None
+
+
+_TRUE = ("true", ".true.", "t", ".t.", "yes", "1")
+_FALSE = ("false", ".false.", "f", ".f.", "no", "0")
+
+
+def tier_value_matches(items: List[str], value: Any) -> bool:
+    """A namelist value against a row's values (integers, numbers, lo:hi, true / false, words, *)."""
+    if isinstance(value, bool):
+        v = "true" if value else "false"
+    else:
+        v = str(value).strip()
+        if len(v) >= 2 and v[0] in "'\"" and v[-1] == v[0]:
+            v = v[1:-1].strip()
+        v = v.lower()
+    vn = None if isinstance(value, bool) else _tier_number(v)
+    vb = True if v in _TRUE else False if v in _FALSE else None
+    for it in items:
+        if it == "*":
+            return True
+        if ":" in it:
+            lo, hi = (_tier_number(x) for x in it.split(":", 1))
+            if vn is not None and lo <= vn <= hi:
+                return True
+        elif _tier_number(it) is not None:
+            if vn is not None and vn == _tier_number(it):
+                return True
+        elif it in _TRUE or it in _FALSE:
+            if vb is not None and vb == (it in _TRUE):
+                return True
+        elif v == it:
+            return True
+    return False
+
+
+def _load_option_tiers() -> List[Dict[str, Any]]:
+    """data/option_tiers.txt, plus the file of $CPPWRF_OPTION_TIERS_EXTRA (as the model)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "option_tiers.txt")
+    rows = []
+    if os.path.exists(path):
+        with open(path) as f:
+            rows = parse_option_tiers(f.read(), "data/option_tiers.txt")
+    extra = os.environ.get("CPPWRF_OPTION_TIERS_EXTRA")
+    if extra:
+        with open(extra) as f:
+            rows += parse_option_tiers(f.read(), extra)
+    return rows
+
+
+OPTION_TIERS = _load_option_tiers()
+
+
+# -----------------------------------------------------------------------------
 # Fortran Namelist Tokenizer and Parser (f90nml-free)
 # -----------------------------------------------------------------------------
 
@@ -1012,6 +1109,37 @@ class WrfTranslator:
                     self.error(f"Domain d{d + 1:02d}: iofields_filename {name}: input stream changes ({line.strip()}) are "
                                "not supported (CPPWRF reads wrfinput and wrflowinp whole).")
 
+    def check_option_tiers(self, sections: Dict[str, Dict[str, Any]]):
+        """Options below the verified tier (data/option_tiers.txt): a warning each; &cppwrf allow_unverified goes to
+        [cppwrf] allow_unverified, without which the model stops on them."""
+        allow = self.get_opt("cppwrf", "allow_unverified", None)
+        if allow is not None and not isinstance(allow, bool):
+            self.error(f"&cppwrf.allow_unverified = {allow} is not .true. or .false.")
+            allow = None
+        for key in self.nml.get("cppwrf", {}):
+            if key != "allow_unverified":
+                self.used_keys.add(("cppwrf", key))
+                self.error(f"&cppwrf.{key} is not a CPPWRF option (&cppwrf has allow_unverified only).")
+        if allow is not None:
+            sections["cppwrf"] = {"allow_unverified": allow}
+        self.tier_hits: List[Tuple[str, str, Any, str]] = []
+        for row in OPTION_TIERS:
+            if not row["wrf_key"]:
+                continue
+            vals = self.nml.get(row["wrf_group"], {}).get(row["wrf_key"], [])
+            reg = REGISTRY_DEFAULTS.get(row["wrf_key"])
+            n = max(1, self._max_dom) if reg and reg[2] == "max_domains" else 1
+            for v in dict.fromkeys(str(x) if not isinstance(x, bool) else x for x in vals[:n] if x is not None):
+                if not tier_value_matches(row["values"], v):
+                    continue
+                shown = (".true." if v else ".false.") if isinstance(v, bool) else v
+                self.tier_hits.append((row["wrf_group"], row["wrf_key"], shown, row["tier"]))
+                note = f" ({row['note']})" if row["note"] else ""
+                then = ("runs because &cppwrf allow_unverified = .true." if allow else
+                        "CPPWRF stops on it unless &cppwrf allow_unverified = .true.")
+                self.warn(f"Option &{row['wrf_group']}.{row['wrf_key']} = {shown}: verification tier {row['tier']}"
+                          f"{note}, not compared with a whole WRF run; {then}")
+
     def apply_physics_suite(self):
         """WRF setup_physics_suite: the -1 physics options take the values of physics_suite (CONUS, tropical)."""
         suite = str(self.get_opt("physics", "physics_suite", "none")).strip().lower()
@@ -1054,6 +1182,7 @@ class WrfTranslator:
         self.check_entry_counts()
         self.pad_max_domains()
         self.apply_physics_suite()
+        self.check_option_tiers(sections)
 
         # 2. Determine Case
         ideal_case = self.get_opt("ideal", "ideal_case", None)

@@ -23,6 +23,7 @@
 #include "wrf_io/stream_file.hpp"
 #include "wrf_io/wrf_schema.hpp"
 #include "core/data_dir.hpp"
+#include "io/option_tiers.hpp"
 
 
 namespace cppwrf::cases {
@@ -114,6 +115,8 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
                        std::string start_date, std::vector<const Field2*> fields2, std::vector<const Field3*> fields3)
     : m_(m), out_dir_(std::move(out_dir)), domain_tag_(std::move(domain_tag)), start_date_(std::move(start_date)),
       f2_(std::move(fields2)), f3_(std::move(fields3)) {
+  // options below the verified tier (run with cppwrf.allow_unverified): CPPWRF_UNVERIFIED_OPTIONS of every file
+  unverified_ = io::tier_attribute(io::config_tier_hits(cfg));
   const std::string real_dir = cfg.get_string("real.dir", "");
   std::string nl_path = cfg.get_string("output.wrf_namelist", real_dir.empty() ? "" : real_dir + "/namelist.input");
   nl_ = std::make_unique<wrf_io::Namelist>(!nl_path.empty() && std::filesystem::exists(nl_path)
@@ -1061,6 +1064,7 @@ wrf_io::DomainAtts WrfHistory::domain_atts() {
   const Grid& g = m_.g;
   wrf_io::DomainAtts d;
   d.title = " OUTPUT FROM CPPWRF V4.8.0 MODEL";
+  d.unverified_options = unverified_;
   d.start_date = restart_sec_ > 0 ? wrf_io::add_seconds(start_date_, std::lround(restart_sec_)) : start_date_;
   d.gmt_date = start_date_;
   d.simulation_start_date = start_date_;

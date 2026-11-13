@@ -14,6 +14,7 @@
 #include "core/backend.hpp"
 #include "core/constants.hpp"
 #include "core/halo.hpp"
+#include "io/option_tiers.hpp"
 #include "nest/nest_bdy.hpp"
 #include "nest/nest_couple.hpp"
 #include "nest/nest_feedback.hpp"
@@ -641,6 +642,9 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     throw std::runtime_error("time.adaptive (WRF use_adaptive_time_step) with nests is not supported");
   std::vector<NestDomainSpec> specs = parse_nest_specs(root_cfg);
   const int max_dom = static_cast<int>(specs.size());
+  // verification tiers (io/option_tiers.hpp) of every domain's options, before any domain is built
+  if (root_cfg.has("cppwrf.allow_unverified")) root_cfg.mark_accessed("cppwrf.allow_unverified");
+  for (const NestDomainSpec& sp : specs) io::check_option_tiers(sp.cfg, sp.tag + ": ");
 
   struct DomInstance {
     NestDomainSpec spec;

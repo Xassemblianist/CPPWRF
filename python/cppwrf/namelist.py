@@ -197,6 +197,8 @@ def check(path: str, real_dir: Optional[str] = None, table_dir: Optional[str] = 
             elif errs:
                 blamed.update(errs)
                 st = OptionStatus(grp, key, vals, NOT_PORTED, " ".join(errs), _suggestion(t, grp, key, errs[0]))
+            elif warn and ": verification tier " in warn:  # ported, below the verified tier (data/option_tiers.txt)
+                st = OptionStatus(grp, key, vals, PORTED, warn.split(": ", 1)[-1])
             elif warn:
                 st = OptionStatus(grp, key, vals, IGNORED, warn.split(": ", 1)[-1])
             elif note:

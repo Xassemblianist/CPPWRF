@@ -41,6 +41,9 @@ struct DomainAtts {
   int real_bytes = 4;                 // WRF's REAL kind (4, or 8 for -r8)
   // restart files: FLAG_RESTART, MAX_WRF_ALARMS and the alarm state (name, value) in WRF's order
   std::vector<std::pair<std::string, int>> restart_alarms;
+  // history and restart files of a run with options below the verified tier (io/option_tiers.hpp): the global
+  // attribute CPPWRF_UNVERIFIED_OPTIONS, after WRF's (empty: not written, the file is WRF's byte for byte)
+  std::string unverified_options;
 };
 
 void write_global_atts(NcOut& nc, const WrfConfig& c, const DomainAtts& d, Stream s);

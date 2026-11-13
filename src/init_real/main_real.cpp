@@ -11,6 +11,8 @@
 #include <string>
 
 #include "core/data_dir.hpp"
+#include "core/strings.hpp"
+#include "io/option_tiers.hpp"
 #include "init_real/met_em.hpp"
 #include "init_real/wrf_io_names.hpp"
 #include "init_real/real_domain.hpp"
@@ -171,6 +173,19 @@ int main(int argc, char** argv) {
       }
     const RealOptions o1 = RealOptions::from_namelist(nl, sc, 1);
     if (o1.interval_seconds <= 0) throw std::runtime_error("real: namelist value for interval_seconds must be > 0");
+    {  // verification tiers (io/option_tiers.hpp): options below verified need &cppwrf allow_unverified = .true.
+      const std::string a = cppwrf::to_lower(cppwrf::trim(nl.raw("cppwrf", "allow_unverified").value_or("")));
+      const bool allow = a == ".true." || a == "t" || a == ".t." || a == "true";
+      for (int id = 1; id <= o1.max_dom; ++id) {
+        char tag[16];
+        std::snprintf(tag, sizeof tag, "real: d%02d: ", id);
+        cppwrf::io::enforce_option_tiers(
+            cppwrf::io::namelist_tier_hits([&](const std::string& g, const std::string& k) {
+              return nl.raw(g, k, id).value_or("");
+            }),
+            allow, tag, "&cppwrf allow_unverified = .true.");
+      }
+    }
     for (int id = 1; id <= o1.max_dom; ++id) {
       const RealOptions o = RealOptions::from_namelist(nl, sc, id);
       if (id > 1 && !o.input_from_file) continue;  // real_em.F: only domains with input_from_file

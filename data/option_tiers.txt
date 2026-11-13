@@ -1,0 +1,23 @@
+# Verification tiers of CPPWRF options (docs/STATUS.md "Verification tiers"; docs/PORTING in CONTRIBUTING.md).
+#
+# Every option and value WITHOUT a row here is "verified": the whole model's output is identical to WRF v4.8.0's at
+# tolerance 0 (CPU FP64 and CUDA FP64, tests/verify/wrf_suite.py). Every option on main when this table was added
+# (v1.0.0 and later ports up to 2026-11-13) is verified, so the table starts empty. A port that is merged before its
+# whole-model proof adds one row per option value it brings:
+#   column_verified  the scheme's routines match WRF's Fortran bit for bit in a column / unit driver (tests/phys)
+#   unverified       ported and compiling only (only where a column driver is impossible; the note says why)
+# The model stops on such a value unless the configuration has [cppwrf] allow_unverified = true (namelist.input:
+# &cppwrf allow_unverified = .true. /, which tools/wrf2cppwrf.py passes on); then it logs a warning per option and
+# writes CPPWRF_UNVERIFIED_OPTIONS = "mp_physics=4:column_verified;..." into every wrfout / wrfrst file. When the
+# suite proves the option against WRF, the row is deleted (the option is then verified).
+#
+# Columns (blank-separated; # starts a comment; the note is the rest of the line):
+#   <config key>   the CPPWRF configuration key (section.key), - for none
+#   <WRF option>   the namelist.input option as group.key (physics.mp_physics), - for a CPPWRF-only key
+#   <values>       comma-separated: an integer or number (4), a range lo:hi (20:23), a word (true, false, text) or
+#                  * (any value set)
+#   <tier>         column_verified or unverified
+#   <note>         the scheme and where its column driver is
+#
+# Example (WSM5 ported with a column driver, not yet compared with a whole WRF run):
+#   phys.mp_physics   physics.mp_physics   4   column_verified   WSM5 (tests/phys/mp_wsm5)

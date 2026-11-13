@@ -99,6 +99,7 @@ class WrfHistory {
   std::unique_ptr<FeedbackCache> fb_cache_;
 
   const Model& m_;
+  std::string unverified_;  // io::tier_attribute of the configuration (empty: every option verified)
   std::string out_dir_, domain_tag_, start_date_, wrfinput_, hist_outname_, rst_outname_, last_path_, hist_path_, aux3_path_;
   std::vector<const Field2*> f2_;
   std::vector<const Field3*> f3_;

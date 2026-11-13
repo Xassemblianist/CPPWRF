@@ -1,8 +1,16 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 add_library(cppwrf_io STATIC
   config.cpp
+  option_tiers.cpp
   output.cpp
 )
+# the verification tier table (data/option_tiers.txt) compiled into the binaries (src/io/option_tiers.cpp)
+add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/generated/option_tiers.inc
+  COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_SOURCE_DIR}/data/option_tiers.txt
+          -DOUT=${CMAKE_BINARY_DIR}/generated/option_tiers.inc -P ${CMAKE_CURRENT_SOURCE_DIR}/option_tiers.cmake
+  DEPENDS ${CMAKE_SOURCE_DIR}/data/option_tiers.txt ${CMAKE_CURRENT_SOURCE_DIR}/option_tiers.cmake VERBATIM)
+target_sources(cppwrf_io PRIVATE ${CMAKE_BINARY_DIR}/generated/option_tiers.inc)
+target_include_directories(cppwrf_io PRIVATE ${CMAKE_BINARY_DIR}/generated)
 
 target_include_directories(cppwrf_io PUBLIC
   ${CMAKE_SOURCE_DIR}/src
@@ -29,6 +37,13 @@ add_executable(test_io_config "${CPPWRF_IO_TEST_DIR}/test_config.cpp")
 target_link_libraries(test_io_config PRIVATE cppwrf_io)
 target_compile_features(test_io_config PRIVATE cxx_std_20)
 add_test(NAME test_io_config COMMAND test_io_config)
+
+# the verification tiers (data/option_tiers.txt): the parser, the gate and the attribute text on dummy rows
+add_executable(test_option_tiers "${CPPWRF_IO_TEST_DIR}/test_option_tiers.cpp")
+target_link_libraries(test_option_tiers PRIVATE cppwrf_io)
+target_compile_features(test_option_tiers PRIVATE cxx_std_20)
+add_test(NAME test_option_tiers COMMAND test_option_tiers)
+set_tests_properties(test_option_tiers PROPERTIES LABELS unit)
 
 add_executable(test_io_output "${CPPWRF_IO_TEST_DIR}/test_output.cpp")
 target_link_libraries(test_io_output PRIVATE cppwrf_io)
