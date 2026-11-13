@@ -56,6 +56,7 @@ int main() {
   // values
   CHECK(tier_value_matches({"4"}, "4") && tier_value_matches({"4"}, " 4.0 ") && !tier_value_matches({"4"}, "40"));
   CHECK(tier_value_matches({"20:23"}, "21") && !tier_value_matches({"20:23"}, "24"));
+  CHECK(tier_value_matches({"20:23"}, "20") && tier_value_matches({"20:23"}, "23") && !tier_value_matches({"20:23"}, "19"));
   CHECK(tier_value_matches({"true"}, ".TRUE.") && tier_value_matches({"true"}, "1") && !tier_value_matches({"true"}, "false"));
   CHECK(tier_value_matches({"*"}, "anything") && tier_value_matches({"abc"}, "'ABC'") && !tier_value_matches({"abc"}, "abd"));
 

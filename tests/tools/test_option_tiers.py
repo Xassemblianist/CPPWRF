@@ -69,6 +69,9 @@ class Table(unittest.TestCase):
         self.assertEqual(rows[0]["note"], "WSM5 (x)")
         self.assertIsNone(rows[1]["config_key"])
         self.assertTrue(w2c.tier_value_matches(rows[0]["values"], 21))
+        self.assertTrue(w2c.tier_value_matches(rows[0]["values"], 23))
+        self.assertTrue(w2c.tier_value_matches(rows[0]["values"], 20))
+        self.assertFalse(w2c.tier_value_matches(rows[0]["values"], 19))
         self.assertTrue(w2c.tier_value_matches(rows[0]["values"], 4.0))
         self.assertFalse(w2c.tier_value_matches(rows[0]["values"], 5))
         self.assertTrue(w2c.tier_value_matches(rows[1]["values"], True))
@@ -125,6 +128,8 @@ class Translator(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("NOT PORTED", r.stdout)
         self.assertIn("verification tier column_verified", r.stdout)
+        self.assertRegex(r.stdout, r"PORTED +&physics\.mp_physics +=")
+        self.assertIn(" 0 ignored, 0 not ported", r.stdout)
 
 
 @unittest.skipUnless(td.BIN and os.path.exists(td.BIN), "CPPWRF_BIN (a cppwrf binary) not set")
