@@ -196,6 +196,10 @@ struct KLsmPre {
   int lcz[11];
   bool myj, frpcpn, rdlai2d;
   real dt, xice_threshold;
+  // sf_urban_physics = 1: FRC_URB2D, TS_URB2D; the NATURAL category of VEGPARM.TBL and its SHDTBL
+  C2 frc_urb, ts_urb;
+  int natural;
+  real shdtbl_natural;
   CPPWRF_HD void operator()(int i, int j) const {
     using C = LsmConst;
     ice(i, j) = 0;
@@ -307,10 +311,24 @@ struct KLsmPre {
       swc(i, j, ns) = sh2o(i, j, ns);
     }
     if ((sneq != real(0.) && snwh == real(0.)) || (snwh <= sneq)) snwh = real(5.) * sneq;
-    // sf_urban_physics = 0: urban (and LCZ) points use the urban vegetation category
+    // sf_urban_physics = 0: urban (and LCZ) points use the urban vegetation category; 1 (UCM): the natural surface
+    // of the urban point is VEGPARM.TBL's NATURAL category, SFLX sees the rural skin temperature
     bool urb = vtyp == isurban;
     for (int n = 0; n < 11; ++n) urb = urb || vtyp == lcz[n];
     if (sf_urban_physics == 0 && urb) vtyp = isurban;
+    if (sf_urban_physics == 1 && urb) {
+      vtyp = natural;
+      shdf = shdtbl_natural;
+      albbrd(i, j) = real(0.2);
+      emissi(i, j) = real(0.98);
+      lwdn(i, j) = glw(i, j) * emissi(i, j);
+      solnet(i, j) = sold * (real(1.0) - real(0.2));  // SOLDN * (1.0 - ALBEDOK), ALBEDOK = 0.2
+      if (frc_urb(i, j) < real(0.99)) {
+        t1(i, j) = (tsk(i, j) - frc_urb(i, j) * ts_urb(i, j)) / (real(1) - frc_urb(i, j));
+      } else {
+        t1(i, j) = tsk(i, j);
+      }
+    }
     if (rdlai2d) {
       if (shdf > real(0.0) && lai(i, j) <= real(0.0)) lai(i, j) = real(0.01);
       xlai(i, j) = lai(i, j);
@@ -441,6 +459,107 @@ struct KLsmPost {
       acsnom(i, j) = acsnom(i, j) + snomlt(i, j) * real(1000.);
       snopcx(i, j) = snopcx(i, j) - snomlt(i, j) / fdtliw;
     }
+  }
+};
+
+// lsm's UCM call block (module_sf_noahdrv.F:1337-1625, sf_urban_physics = 1) after the land point's SFLX and
+// post-processing: SUBROUTINE urban at the urban category points, the grid-cell fluxes and skin values as the
+// FRC_URB2D-weighted mean of the urban and the natural surface, the UCM state and the urban surface layer values
+// (U10_URB2D ... AKMS_URB2D) for the surface driver
+struct KLsmUrban {
+  CI2 ivgtyp, ice;
+  C2 xland, sfctmp, q2k, soldn, glw, rainbl, sfcprs, xlat, cosz, omg, albedok, sheat, eta_kin, eta, ssoil, t1, q1,
+      frc;
+  CI2 utype;
+  C3 u_phy, v_phy, dz8w;
+  V2 chs, chs2, cqs2, albedo, hfx, qfx, lh, grdflx, tsk, qsfc, ust;
+  V2 tr, tb, tg, tc, qc, uc, xxxr, xxxb, xxxg, xxxc, sh_u, lh_u, g_u, rn_u, ts_u, fhr, fhb, fhg, cmr, chr, cmc, chc;
+  V3 trl, tbl, tgl;
+  V2 u10_u, v10_u, psim_u, psih_u, gz1oz0_u, akms_u;
+  I2 is_urb;
+  urban::UrbanTables tables;
+  int nl, isurban;
+  int lcz[11];
+  real dt, declin;
+  CPPWRF_HD void operator()(int i, int j) const {
+    is_urb(i, j) = 0;
+    bool urb = ivgtyp(i, j) == isurban;
+    for (int n = 0; n < 11; ++n) urb = urb || ivgtyp(i, j) == lcz[n];
+    if (!urb) return;
+    if ((xland(i, j) - real(1.5)) >= real(0.) || ice(i, j) == 1) {  // lsm skips the point (see kFatalUrbanSurface)
+      raise_fatal(kFatalUrbanSurface);
+      return;
+    }
+    const real u1 = u_phy(i, j, 0), v1 = v_phy(i, j, 0);
+    real ua = std::sqrt(u1 * u1 + v1 * v1);  // SQRT(U_PHY(I,1,J)**2.+V_PHY(I,1,J)**2.)
+    if (ua < real(1.)) ua = real(1.);
+    const real rain = rainbl(i, j) / dt * real(3600.0);  // [mm/hr]
+    const real rhoo = sfcprs(i, j) / (real(287.04) * sfctmp(i, j) * (real(1.0) + real(0.61) * q2k(i, j)));
+    const real za = real(0.5) * dz8w(i, j, 0);  // ZLVL
+    urban::UrbanState st;
+    st.tr = tr(i, j); st.tb = tb(i, j); st.tg = tg(i, j); st.tc = tc(i, j); st.qc = qc(i, j); st.uc = uc(i, j);
+    st.xxxr = xxxr(i, j); st.xxxb = xxxb(i, j); st.xxxg = xxxg(i, j); st.xxxc = xxxc(i, j);
+    for (int k = 0; k < nl; ++k) {
+      st.trl[k] = trl(i, j, k);
+      st.tbl[k] = tbl(i, j, k);
+      st.tgl[k] = tgl(i, j, k);
+    }
+    st.flxhumr = fhr(i, j); st.flxhumb = fhb(i, j); st.flxhumg = fhg(i, j);
+    st.cmr = cmr(i, j); st.chr = chr(i, j); st.cmc = cmc(i, j); st.chc = chc(i, j);
+    if (chs(i, j) < real(1.0E-02)) chs(i, j) = real(1.0E-02);
+    if (chs2(i, j) < real(1.0E-02)) chs2(i, j) = real(1.0E-02);
+    if (cqs2(i, j) < real(1.0E-02)) cqs2(i, j) = real(1.0E-02);
+    st.chs = chs(i, j);
+    st.chs2 = chs2(i, j);
+    urban::UrbanOut o;
+    if (!urban::urban_point(tables, nl, utype(i, j), sfctmp(i, j), q2k(i, j), ua, u1, v1, soldn(i, j), glw(i, j), rain,
+                            rhoo, za, declin, cosz(i, j), omg(i, j), xlat(i, j), dt, st, o)) {
+      raise_fatal(kFatalUrbanZa);
+      return;
+    }
+    const real f = frc(i, j);
+    ts_u(i, j) = o.ts;
+    albedo(i, j) = f * o.alb + (real(1) - f) * albedok(i, j);
+    hfx(i, j) = f * o.sh + (real(1) - f) * sheat(i, j);
+    qfx(i, j) = f * o.lh_kinematic + (real(1) - f) * eta_kin(i, j);
+    lh(i, j) = f * o.lh + (real(1) - f) * eta(i, j);
+    grdflx(i, j) = f * o.g + (real(1) - f) * ssoil(i, j);
+    tsk(i, j) = f * o.ts + (real(1) - f) * t1(i, j);
+    const real qb = f * o.qs + (real(1) - f) * q1(i, j);
+    qsfc(i, j) = qb / (real(1.0) - qb);
+    ust(i, j) = f * o.ust + (real(1) - f) * ust(i, j);
+    tr(i, j) = st.tr; tb(i, j) = st.tb; tg(i, j) = st.tg; tc(i, j) = st.tc; qc(i, j) = st.qc; uc(i, j) = st.uc;
+    fhr(i, j) = st.flxhumr; fhb(i, j) = st.flxhumb; fhg(i, j) = st.flxhumg;
+    for (int k = 0; k < nl; ++k) {
+      trl(i, j, k) = st.trl[k];
+      tbl(i, j, k) = st.tbl[k];
+      tgl(i, j, k) = st.tgl[k];
+    }
+    xxxr(i, j) = st.xxxr; xxxb(i, j) = st.xxxb; xxxg(i, j) = st.xxxg; xxxc(i, j) = st.xxxc;
+    sh_u(i, j) = o.sh; lh_u(i, j) = o.lh; g_u(i, j) = o.g; rn_u(i, j) = o.rn;
+    psim_u(i, j) = o.psim; psih_u(i, j) = o.psih; gz1oz0_u(i, j) = o.gz1oz0;
+    u10_u(i, j) = o.u10; v10_u(i, j) = o.v10;
+    akms_u(i, j) = wrfc::karman * o.ust / (o.gz1oz0 - o.psim);
+    cmr(i, j) = st.cmr; chr(i, j) = st.chr; cmc(i, j) = st.cmc; chc(i, j) = st.chc;
+    is_urb(i, j) = 1;
+  }
+};
+
+// surface_driver after SFCDIAGS (module_surface_driver.F:3091-3107): the urban points take the UCM's 10 m wind,
+// stability functions and exchange coefficients
+struct KUrbanDiag {
+  CI2 is_urb;
+  C2 u10_u, v10_u, psim_u, psih_u, gz1oz0_u, akms_u, chs;
+  V2 u10, v10, psim, psih, gz1oz0, akhs, akms;
+  CPPWRF_HD void operator()(int i, int j) const {
+    if (is_urb(i, j) == 0) return;
+    u10(i, j) = u10_u(i, j);
+    v10(i, j) = v10_u(i, j);
+    psim(i, j) = psim_u(i, j);
+    psih(i, j) = psih_u(i, j);
+    gz1oz0(i, j) = gz1oz0_u(i, j);
+    akhs(i, j) = chs(i, j);
+    akms(i, j) = akms_u(i, j);
   }
 };
 
@@ -1382,8 +1501,13 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       pre.vegtyp = n_vegtyp.view(); pre.soiltyp = n_soiltyp.view(); pre.slopetyp = n_slopetyp.view();
       pre.ice = n_ice.view(); pre.active = n_active.view();
       pre.nsoil = nsoil; pre.itimestep = int(itimestep); pre.isurban = o_.isurban; pre.isice = o_.isice;
-      pre.sf_urban_physics = 0;
+      pre.sf_urban_physics = o_.sf_urban_physics;
       for (int n = 0; n < 11; ++n) pre.lcz[n] = noah_tables_.lcz[n];
+      if (urb_) {
+        pre.frc_urb = urb_->frc_urb2d.cview(); pre.ts_urb = urb_->ts_urb2d.cview();
+        pre.natural = noah_tables_.natural;
+        pre.shdtbl_natural = noah_tables_.shdtbl[noah_tables_.natural - 1];
+      }
       pre.myj = (o_.sf_sfclay_physics == 2 || o_.sf_sfclay_physics == 4); pre.frpcpn = true;  // SR is passed by first_rk_step_part1
       pre.rdlai2d = o_.rdlai2d; pre.dt = dtbl; pre.xice_threshold = xice_threshold;
       column_for(cols, pre);
@@ -1575,6 +1699,38 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       post.smois = smois.view(); post.tslb = tslb.view(); post.sh2o = sh2o.view(); post.smcrel = smcrel.view();
       post.dt = dtbl; post.nsoil = nsoil;
       column_for(cols, post);
+      if (urb_) {  // lsm's UCM call block (sf_urban_physics = 1)
+        UrbanFields& u = *urb_;
+        KLsmUrban ku{};
+        ku.ivgtyp = ivgtyp.cview(); ku.ice = n_ice.cview(); ku.xland = xland.cview(); ku.sfctmp = n_sfctmp.cview();
+        ku.q2k = n_q2.cview(); ku.soldn = n_soldn.cview(); ku.glw = glw.cview(); ku.rainbl = rainbl.cview();
+        ku.sfcprs = n_sfcprs.cview(); ku.xlat = u.xlat_urb.cview(); ku.cosz = coszen.cview(); ku.omg = hrang.cview();
+        ku.albedok = n_albedok.cview(); ku.sheat = n_sheat.cview(); ku.eta_kin = n_eta_kin.cview();
+        ku.eta = n_eta.cview(); ku.ssoil = n_ssoil.cview(); ku.t1 = n_t1.cview(); ku.q1 = n_q1.cview();
+        ku.frc = u.frc_urb2d.cview(); ku.utype = u.utype_urb2d.cview();
+        ku.u_phy = prep.u_phy.cview(); ku.v_phy = prep.v_phy.cview(); ku.dz8w = prep.dz8w.cview();
+        ku.chs = chs.view(); ku.chs2 = chs2.view(); ku.cqs2 = cqs2.view(); ku.albedo = albedo.view();
+        ku.hfx = hfx.view(); ku.qfx = qfx.view(); ku.lh = lh.view(); ku.grdflx = grdflx.view(); ku.tsk = tsk.view();
+        ku.qsfc = qsfc.view(); ku.ust = ust.view();
+        ku.tr = u.tr_urb2d.view(); ku.tb = u.tb_urb2d.view(); ku.tg = u.tg_urb2d.view(); ku.tc = u.tc_urb2d.view();
+        ku.qc = u.qc_urb2d.view(); ku.uc = u.uc_urb2d.view(); ku.xxxr = u.xxxr_urb2d.view();
+        ku.xxxb = u.xxxb_urb2d.view(); ku.xxxg = u.xxxg_urb2d.view(); ku.xxxc = u.xxxc_urb2d.view();
+        ku.sh_u = u.sh_urb2d.view(); ku.lh_u = u.lh_urb2d.view(); ku.g_u = u.g_urb2d.view(); ku.rn_u = u.rn_urb2d.view();
+        ku.ts_u = u.ts_urb2d.view(); ku.fhr = u.flxhumr_urb2d.view(); ku.fhb = u.flxhumb_urb2d.view();
+        ku.fhg = u.flxhumg_urb2d.view(); ku.cmr = u.cmr_sfcdif.view(); ku.chr = u.chr_sfcdif.view();
+        ku.cmc = u.cmc_sfcdif.view(); ku.chc = u.chc_sfcdif.view();
+        ku.trl = u.trl_urb3d.view(); ku.tbl = u.tbl_urb3d.view(); ku.tgl = u.tgl_urb3d.view();
+        ku.u10_u = u.u10_urb.view(); ku.v10_u = u.v10_urb.view(); ku.psim_u = u.psim_urb.view();
+        ku.psih_u = u.psih_urb.view(); ku.gz1oz0_u = u.gz1oz0_urb.view(); ku.akms_u = u.akms_urb.view();
+        ku.is_urb = u.is_urb.view();
+        ku.tables = urban_tables_;
+        ku.nl = nsoil; ku.isurban = o_.isurban;
+        for (int n = 0; n < 11; ++n) ku.lcz[n] = noah_tables_.lcz[n];
+        ku.dt = dtbl;
+        ku.declin = real(rad_ ? rad_->declin() : 0.0);  // grid%declin (DECLINX of the last radiation call)
+        column_for(cols, ku);
+        fatal_check();
+      }
 
       run_seaice();
       seaice_lsm_post();
@@ -1583,6 +1739,13 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
                                 qsfc.cview(), chs2.cview(), cqs2.cview(), psfc.cview(), prep.t_phy.cview(),
                                 s.q_2[s.P_QV].cview(), sfcevp.view(), sfcexc.view(), achfx.view(), aclhf.view(),
                                 acgrdflx.view(), q2.view(), t2.view(), th2.view(), dtbl, dt});
+      if (urb_) {
+        const UrbanFields& u = *urb_;
+        column_for(cols, KUrbanDiag{u.is_urb.cview(), u.u10_urb.cview(), u.v10_urb.cview(), u.psim_urb.cview(),
+                                    u.psih_urb.cview(), u.gz1oz0_urb.cview(), u.akms_urb.cview(), chs.cview(),
+                                    u10.view(), v10.view(), psim.view(), psih.view(), gz1oz0.view(), akhs.view(),
+                                    akms.view()});
+      }
     } else if (o_.sf_surface_physics == 4) {
       // ---- Noah-MP (NoahmpWRFmain -> NoahmpDriverMain, module_surface_driver.F:3134-3481) ----
       const real julian_in = real(wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start()));

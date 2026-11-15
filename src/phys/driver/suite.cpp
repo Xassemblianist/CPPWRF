@@ -26,6 +26,7 @@
 #include "phys/driver/wrf_constants.hpp"
 #include "phys/lsm_noah/noah.hpp"
 #include "phys/lsm_slab/slab.hpp"
+#include "phys/sf_urban/urban_tables.hpp"
 
 namespace cppwrf::phys::driver {
 
@@ -402,6 +403,19 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: nz exceeds the New Tiedtke column limit");
   if (o.opt_thcnd != 1 && o.opt_thcnd != 2)
     throw std::runtime_error("PhysicsSuite: opt_thcnd must be 1 or 2");
+  // urban canopy: the single-layer UCM with Noah (module_sf_noahdrv.F); BEP (2) and BEP+BEM (3), the UCM under
+  // Noah-MP (noahmp_urban) and the other land-surface models are not ported
+  if (o.sf_urban_physics != 0 && o.sf_urban_physics != 1)
+    throw std::runtime_error("PhysicsSuite: sf_urban_physics = " + std::to_string(o.sf_urban_physics) +
+                             " is not supported (0 or 1: the single-layer urban canopy model)");
+  if (o.sf_urban_physics == 1 && o.sf_surface_physics != 2)
+    throw std::runtime_error("PhysicsSuite: sf_urban_physics = 1 is supported with the Noah LSM "
+                             "(sf_surface_physics = 2) only");
+  if (o.sf_urban_physics == 1 && o.num_soil_layers != 4)
+    throw std::runtime_error("PhysicsSuite: sf_urban_physics = 1 needs num_soil_layers = 4 (the 4 roof, wall and "
+                             "road layers of URBPARM.TBL)");
+  if (o.use_wudapt_lcz != 0 && o.use_wudapt_lcz != 1)
+    throw std::runtime_error("PhysicsSuite: use_wudapt_lcz must be 0 or 1");
   if (o.cu_physics == 1 && o.kfeta_trigger != 1 && o.kfeta_trigger != 3)
     throw std::runtime_error("PhysicsSuite: kfeta_trigger=2 is not supported");
   if (o.fractional_seaice != 0 && o.fractional_seaice != 1)
@@ -542,6 +556,13 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     n_rclast = IntField2(g, "n_rclast");
     if (!noah::read_noah_tables(o.table_dir, o.mminlu, o.mminsl, noah_tables_))
       throw std::runtime_error("PhysicsSuite: cannot read the Noah tables from " + o.table_dir);
+    if (o.sf_urban_physics == 1) {  // phy_init: urban_param_init (slucm_distributed_drag = .false.)
+      const std::string path = o.table_dir + (o.use_wudapt_lcz == 1 ? "/URBPARM_LCZ.TBL" : "/URBPARM.TBL");
+      urban::UrbanTableOptions uo;
+      urban::read_urban_table(path, o.num_soil_layers, 1, urban_tables_, uo);
+      urban::check_urban_table_options(uo, path);
+      urb_ = std::make_unique<UrbanFields>(g, gs_);
+    }
   } else if (o.sf_surface_physics == 4) {
     auto mk2 = [&](Field2& f, const char* n) { f = Field2(g, Stagger::M, n); };
     mk2(xlat_sfc, "xlat_sfc"); mk2(xlong_sfc, "xlong_sfc");
@@ -758,6 +779,102 @@ void PhysicsSuite::init_tmn_update() {
   column_for(g_.columns(), KTmnUpdateInit{tmn.cview(), tyr.view(), tyra.view(), tdly.view(), tlag.view(), o_.lagday});
 }
 
+namespace {
+// urban_var_init (module_sf_urban.F:3525-4044) for sf_urban_physics = 1, not a restart, without NUDAPT morphology
+struct KUrbanInit {
+  CI2 ivgtyp;
+  C2 tsk, hgt;
+  C3 tslb;
+  V2 frc, tr, tb, tg, tc, qc, uc, xxxr, xxxb, xxxg, xxxc, sh, lh, g, rn, ts, fhr, fhb, fhg, tgr, tvg, tt;
+  V3 trl, tbl, tgl, tgrl, tvgl, smr, smg;
+  I2 utype;
+  int isurban, use_wudapt_lcz, icate, nsoil;
+  int lcz[11];
+  real frc_tbl[urban::kMaxUrbCat];
+  CPPWRF_HD void operator()(int i, int j) const {
+    sh(i, j) = real(0.);
+    lh(i, j) = real(0.);
+    g(i, j) = real(0.);
+    rn(i, j) = real(0.);
+    int ut = 0;
+    if (ivgtyp(i, j) == isurban) {
+      ut = use_wudapt_lcz == 0 ? 2 : 5;  // high-intensity / open mid-rise
+    } else {
+      for (int n = 0; n < 11; ++n)
+        if (ivgtyp(i, j) == lcz[n]) { ut = n + 1; break; }
+    }
+    utype(i, j) = ut;
+    if (ut > 0) {
+      // HGT_URB2D > 0: NUDAPT morphology (not ported); LP, LB, HGT, MH, STDH, LF are 0 otherwise (WrfHistory)
+      if (hgt(i, j) > real(0.) || ut > icate) {
+        raise_fatal(kFatalUrbanInput);
+        return;
+      }
+      if (!(frc(i, j) > real(0) && frc(i, j) <= real(1.))) frc(i, j) = frc_tbl[ut - 1];
+    } else {
+      frc(i, j) = real(0.);
+    }
+    qc(i, j) = real(0.01);
+    xxxr(i, j) = real(0.);
+    xxxb(i, j) = real(0.);
+    xxxg(i, j) = real(0.);
+    xxxc(i, j) = real(0.);
+    fhr(i, j) = real(0.);
+    fhb(i, j) = real(0.);
+    fhg(i, j) = real(0.);
+    const real t0 = tsk(i, j) + real(0.);
+    tgr(i, j) = t0;
+    tvg(i, j) = t0;
+    tt(i, j) = t0;
+    tc(i, j) = t0;
+    tr(i, j) = t0;
+    tb(i, j) = t0;
+    tg(i, j) = t0;
+    ts(i, j) = t0;
+    const real l1 = tslb(i, j, 0), l2 = tslb(i, j, 1), l3 = tslb(i, j, 2);
+    const real lay[4] = {l1 + real(0.), real(0.5) * (l1 + l2), l2 + real(0.), l2 + (l3 - l2) * real(0.29)};
+    for (int k = 0; k < 4; ++k) {
+      trl(i, j, k) = lay[k];
+      tgrl(i, j, k) = lay[k];
+      tvgl(i, j, k) = lay[k];
+      tbl(i, j, k) = lay[k];
+      smr(i, j, k) = k < 3 ? real(0.2) : real(0.);
+      smg(i, j, k) = k < 3 ? real(0.2) : real(0.0);
+    }
+    for (int k = 0; k < nsoil; ++k) tgl(i, j, k) = tslb(i, j, k) + real(0.);
+  }
+};
+}  // namespace
+
+void PhysicsSuite::init_urban(const std::vector<double>& frc_in, const std::vector<double>& hgt_urb) {
+  if (!urb_) return;
+  UrbanFields& u = *urb_;
+  const int nx = g_.nx;
+  auto from = [nx](const std::vector<double>& v) {
+    return [&v, nx](int i, int j, int) { return v.empty() ? 0.0 : v[std::size_t(i) + std::size_t(nx) * std::size_t(j)]; };
+  };
+  u.frc_urb2d.fill_host(from(frc_in));
+  u.u10_urb.fill_host(from(hgt_urb));  // scratch: HGT_URB2D for the check
+  KUrbanInit k{};
+  k.ivgtyp = ivgtyp.cview(); k.tsk = tsk.cview(); k.hgt = u.u10_urb.cview(); k.tslb = tslb.cview();
+  k.frc = u.frc_urb2d.view(); k.tr = u.tr_urb2d.view(); k.tb = u.tb_urb2d.view(); k.tg = u.tg_urb2d.view();
+  k.tc = u.tc_urb2d.view(); k.qc = u.qc_urb2d.view(); k.uc = u.uc_urb2d.view(); k.xxxr = u.xxxr_urb2d.view();
+  k.xxxb = u.xxxb_urb2d.view(); k.xxxg = u.xxxg_urb2d.view(); k.xxxc = u.xxxc_urb2d.view(); k.sh = u.sh_urb2d.view();
+  k.lh = u.lh_urb2d.view(); k.g = u.g_urb2d.view(); k.rn = u.rn_urb2d.view(); k.ts = u.ts_urb2d.view();
+  k.fhr = u.flxhumr_urb2d.view(); k.fhb = u.flxhumb_urb2d.view(); k.fhg = u.flxhumg_urb2d.view();
+  k.tgr = u.tgr_urb2d.view(); k.tvg = u.tvg_urb2d.view(); k.tt = u.tt_urb2d.view();
+  k.trl = u.trl_urb3d.view(); k.tbl = u.tbl_urb3d.view(); k.tgl = u.tgl_urb3d.view(); k.tgrl = u.tgrl_urb3d.view();
+  k.tvgl = u.tvgl_urb3d.view(); k.smr = u.smr_urb3d.view(); k.smg = u.smg_urb3d.view();
+  k.utype = u.utype_urb2d.view();
+  k.isurban = o_.isurban; k.use_wudapt_lcz = o_.use_wudapt_lcz; k.icate = urban_tables_.icate;
+  k.nsoil = o_.num_soil_layers;
+  for (int n = 0; n < 11; ++n) k.lcz[n] = noah_tables_.lcz[n];
+  for (int c = 0; c < urban::kMaxUrbCat; ++c) k.frc_tbl[c] = urban_tables_.frc_urb[c];
+  column_for(g_.columns(), k);
+  fatal_check();
+  u.u10_urb.fill_host([](int, int, int) { return 0.0; });
+}
+
 void PhysicsSuite::init_noahmp(bool fndsnowh) {
   if (o_.sf_surface_physics != 4) return;
   noahmp::NoahmpInitKernel k{};
@@ -840,6 +957,26 @@ PhysicsSuite::SeaIceFields::SeaIceFields(const Grid& g) {
                     &ct_sea, &tshltr_sea, &th10_sea, &qshltr_sea, &q10_sea, &pshltr_sea, &u10e_sea, &v10e_sea,
                     &regime_hold})
     *f = Field2(g, Stagger::M, "seaice_scratch");
+}
+
+PhysicsSuite::UrbanFields::UrbanFields(const Grid& g, const Grid& gs) {
+  for (auto [f, n] : std::initializer_list<std::pair<Field2*, const char*>>{
+           {&tr_urb2d, "tr_urb2d"}, {&tb_urb2d, "tb_urb2d"}, {&tg_urb2d, "tg_urb2d"}, {&tc_urb2d, "tc_urb2d"},
+           {&qc_urb2d, "qc_urb2d"}, {&uc_urb2d, "uc_urb2d"}, {&xxxr_urb2d, "xxxr_urb2d"}, {&xxxb_urb2d, "xxxb_urb2d"},
+           {&xxxg_urb2d, "xxxg_urb2d"}, {&xxxc_urb2d, "xxxc_urb2d"}, {&sh_urb2d, "sh_urb2d"}, {&lh_urb2d, "lh_urb2d"},
+           {&g_urb2d, "g_urb2d"}, {&rn_urb2d, "rn_urb2d"}, {&ts_urb2d, "ts_urb2d"}, {&frc_urb2d, "frc_urb2d"},
+           {&flxhumr_urb2d, "flxhumr_urb2d"}, {&flxhumb_urb2d, "flxhumb_urb2d"}, {&flxhumg_urb2d, "flxhumg_urb2d"},
+           {&cmr_sfcdif, "cmr_sfcdif"}, {&chr_sfcdif, "chr_sfcdif"}, {&cmc_sfcdif, "cmc_sfcdif"},
+           {&chc_sfcdif, "chc_sfcdif"}, {&tgr_urb2d, "tgr_urb2d"}, {&tvg_urb2d, "tvg_urb2d"}, {&tt_urb2d, "tt_urb2d"},
+           {&u10_urb, "u10_urb"}, {&v10_urb, "v10_urb"}, {&psim_urb, "psim_urb"}, {&psih_urb, "psih_urb"},
+           {&gz1oz0_urb, "gz1oz0_urb"}, {&akms_urb, "akms_urb"}, {&xlat_urb, "xlat_urb"}})
+    *f = Field2(g, Stagger::M, n);
+  for (auto [f, n] : std::initializer_list<std::pair<Field3*, const char*>>{
+           {&trl_urb3d, "trl_urb3d"}, {&tbl_urb3d, "tbl_urb3d"}, {&tgl_urb3d, "tgl_urb3d"}, {&tgrl_urb3d, "tgrl_urb3d"},
+           {&tvgl_urb3d, "tvgl_urb3d"}, {&smr_urb3d, "smr_urb3d"}, {&smg_urb3d, "smg_urb3d"}})
+    *f = Field3(gs, Stagger::M, n);
+  utype_urb2d = IntField2(g, "utype_urb2d");
+  is_urb = IntField2(g, "is_urb");
 }
 
 std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
@@ -1187,6 +1324,13 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
   if (o_.cu_physics == 5)
     v.insert(v.end(), {&apr_gr, &apr_w, &apr_mc, &apr_st, &apr_as, &apr_capma, &apr_capme, &apr_capmi, &mass_flux,
                        &xmb_shallow});
+  if (urb_) {
+    const UrbanFields& u = *urb_;
+    v.insert(v.end(), {&u.tr_urb2d, &u.tb_urb2d, &u.tg_urb2d, &u.tc_urb2d, &u.qc_urb2d, &u.uc_urb2d, &u.xxxr_urb2d,
+                       &u.xxxb_urb2d, &u.xxxg_urb2d, &u.xxxc_urb2d, &u.sh_urb2d, &u.lh_urb2d, &u.g_urb2d, &u.rn_urb2d,
+                       &u.ts_urb2d, &u.frc_urb2d, &u.flxhumr_urb2d, &u.flxhumb_urb2d, &u.flxhumg_urb2d, &u.cmr_sfcdif,
+                       &u.chr_sfcdif, &u.cmc_sfcdif, &u.chc_sfcdif, &u.tgr_urb2d, &u.tvg_urb2d, &u.tt_urb2d});
+  }
   return v;
 }
 
@@ -1210,6 +1354,11 @@ std::vector<const Field3*> PhysicsSuite::fields3() const {
   if (o_.cu_physics == 2) v.insert(v.end(), {&ccldfra, &qcconv, &qiconv});
   if (o_.cu_physics == 5)
     v.insert(v.end(), {&cugd_tten, &cugd_qvten, &cugd_ttens, &cugd_qvtens, &cugd_qcten, &xf_ens, &pr_ens});
+  if (urb_) {
+    const UrbanFields& u = *urb_;
+    v.insert(v.end(), {&u.trl_urb3d, &u.tbl_urb3d, &u.tgl_urb3d, &u.tgrl_urb3d, &u.tvgl_urb3d, &u.smr_urb3d,
+                       &u.smg_urb3d});
+  }
   return v;
 }
 

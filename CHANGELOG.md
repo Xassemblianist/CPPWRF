@@ -68,6 +68,15 @@ a verified configuration, of a configuration key or of an output file is a new m
   added to qc / qi, CCLDFRA combined with CLDFRA); needs a microphysics scheme with cloud water and ice when the
   radiation is on. **Tier verified** (suite case P4BMJF, CPU and CUDA FP64 at tolerance 0).
 
+- Single-layer urban canopy model, `sf_urban_physics = 1` (phys/module_sf_urban.F urban_param_init,
+  urban_var_init and SUBROUTINE urban with SFCDIF_URB, called by the Noah LSM as module_sf_noahdrv.F does), with
+  URBPARM.TBL or, with `use_wudapt_lcz = 1`, URBPARM_LCZ.TBL and their default options; the surface driver's urban
+  10 m wind, PSIM / PSIH / GZ1OZ0, AKHS and AKMS; the UCM state, FRC_URB2D and UTYPE_URB in the wrfout / wrfrst
+  files. One domain, Noah only, no restart. Tier: column_verified (tests/phys/sf_urban: WRF's urban_param_init and
+  urban of the -r8 build against the port on 9000 point-steps per table, tolerance 0); the options need
+  `[cppwrf] allow_unverified = true`. BEP / BEP+BEM (2, 3), slucm_distributed_drag, NUDAPT morphology, the other
+  table options, nests, restarts and cppwrf_real's urban input stay errors.
+
 ### Fixed
 - The restart alarm of a run resumed from a restart file (WRF's or CPPWRF's own) with a restart interval that is not
   a multiple of the time step: the first ring is at the restart time + WRF_ALARM_SECS_TIL_NEXT_RING_51 and the later

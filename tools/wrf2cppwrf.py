@@ -2474,9 +2474,42 @@ class WrfTranslator:
             if aer_opt != 0:
                 self.error(f"WRF aer_opt = {aer_opt} is not supported; CPPWRF supports aer_opt = 0 only.")
 
+        # urban canopy: the single-layer UCM (sf_urban_physics = 1, module_sf_urban.F) with the Noah LSM on one domain,
+        # URBPARM.TBL (use_wudapt_lcz = 0) or URBPARM_LCZ.TBL (1); BEP (2), BEP+BEM (3), slucm_distributed_drag, nests
+        # and restarts with the UCM are not ported (src/phys/sf_urban)
         sf_urban = self.get_opt("physics", "sf_urban_physics", 0)
-        if sf_urban != 0:
-            self.error(f"WRF sf_urban_physics = {sf_urban} (urban canopy) is not supported by CPPWRF.")
+        if sf_urban not in (0, 1):
+            self.error(f"WRF sf_urban_physics = {sf_urban} ({'BEP' if sf_urban == 2 else 'BEP+BEM' if sf_urban == 3 else 'unknown'}"
+                       f" urban canopy) is not supported by CPPWRF; CPPWRF supports 0 and 1 (single-layer UCM).")
+        elif sf_urban == 1:
+            sfs = self.get_opt("physics", "sf_surface_physics", 0)
+            lcz = self.get_opt("physics", "use_wudapt_lcz", 0)
+            drag = self.get_opt("physics", "slucm_distributed_drag", False)
+            ok = True
+            if sfs != 2:
+                self.error(f"WRF sf_urban_physics = 1 with sf_surface_physics = {sfs} is not supported by CPPWRF; the "
+                           "single-layer UCM is ported with the Noah LSM (sf_surface_physics = 2) only.")
+                ok = False
+            if max(1, self._max_dom) > 1:
+                self.error("WRF sf_urban_physics = 1 with nests (max_dom > 1) is not supported by CPPWRF.")
+                ok = False
+            if drag:
+                # check_a_mundo stops slucm_distributed_drag with use_wudapt_lcz = 1
+                self.error("WRF slucm_distributed_drag = .true. (distributed urban drag of the UCM) is not supported "
+                           "by CPPWRF." + (" (wrf.exe also stops: slucm_distributed_drag cannot work with "
+                                           "use_wudapt_lcz)" if lcz == 1 else ""))
+                ok = False
+            if lcz not in (0, 1):
+                self.error(f"WRF use_wudapt_lcz = {lcz} is not supported; CPPWRF supports 0 and 1.")
+                ok = False
+            if self.get_opt("time_control", "restart", False):
+                self.error("WRF restart = .true. with sf_urban_physics = 1 is not supported by CPPWRF (the UCM "
+                           "restart state is not ported).")
+                ok = False
+            if ok:
+                sections.setdefault("phys", {})["sf_urban_physics"] = 1
+                if lcz == 1:
+                    sections["phys"]["use_wudapt_lcz"] = 1
 
         for unsup_key, desc in UNSUPPORTED_DYNAMICS_SWITCHES.items():
             if self.has_opt("dynamics", unsup_key):
@@ -2772,8 +2805,8 @@ class WrfTranslator:
                     if self.has_opt("physics", pk):
                         v_d = self.get_dom_opt("physics", pk, d, None)
                         v_0 = self.get_dom_opt("physics", pk, 0, None)
-                        if pk == "sf_urban_physics" and v_d not in (0, None):
-                            self.error(f"Domain {tag}: WRF sf_urban_physics = {v_d} is not supported by CPPWRF.")
+                        if pk == "sf_urban_physics" and v_d not in (0, None):  # the UCM runs on one domain only
+                            self.error(f"Domain {tag}: WRF sf_urban_physics = {v_d} on a nest is not supported by CPPWRF.")
                         elif pk in SUPPORTED_OPTIONS and v_d is not None and v_d not in SUPPORTED_OPTIONS[pk]:
                             self.error(f"Domain {tag}: WRF {pk} = {v_d} is not supported by CPPWRF.")
                         elif pk == "cu_physics" and v_d != v_0 and v_d != 0:

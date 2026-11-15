@@ -109,6 +109,7 @@ list(APPEND CPPWRF_SOURCES
   ${CMAKE_SOURCE_DIR}/src/phys/bl_qnse/mfshconv.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/lsm_noah/noah.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/lsm_noah/noah_tables.cpp
+  ${CMAKE_SOURCE_DIR}/src/phys/sf_urban/urban_tables.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/lsm_noahmp/noahmp.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/lsm_noahmp/noahmp_tables.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/cu_kf/kf.cpp

@@ -306,6 +306,11 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   o.opt_thcnd = int(cfg.get_int("phys.opt_thcnd", 1));
   o.rdlai2d = cfg.get_bool("phys.rdlai2d", false);      // Noah: LAI from the input instead of the table
   o.usemonalb = cfg.get_bool("phys.usemonalb", false);  // landuse_init and Noah: ALBBCK from the input
+  o.sf_urban_physics = int(cfg.get_int("phys.sf_urban_physics", 0));  // 1: single-layer UCM (with Noah)
+  o.use_wudapt_lcz = int(cfg.get_int("phys.use_wudapt_lcz", 0));      // 1: URBPARM_LCZ.TBL
+  if (o.sf_urban_physics != 0 && cfg.get_bool("real.nested", false))
+    throw std::runtime_error("sf_urban_physics = " + std::to_string(o.sf_urban_physics) +
+                             " on a nest is not supported");
   o.ysu_topdown_pblmix = int(cfg.get_int("phys.ysu_topdown_pblmix", 1));
   o.kim_tofd = cfg.get_bool("phys.kim_tofd", false);
   o.isftcflx = int(cfg.get_int("phys.isftcflx", 0));  // sfclayrev: z0t / z0q and roughness over water
@@ -544,6 +549,18 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     if (in.has("SMCREL")) put_soil(su.smcrel, in.var("SMCREL", n2 * ns));
     // phy_init passes FNDSNOWH = .true. to LSMINIT: SNOWH is never derived from SNOW (0 when not in the input)
     if (in.has("SNOWH")) put2(su.snowh, rd2("SNOWH"));
+    // phy_init: urban_param_init (the PhysicsSuite constructor) and urban_var_init after LSMINIT
+    if (su.urb_) {
+      // input_wrf.F:805-822: the wrfinput's SF_URBAN_PHYSICS attribute must equal the namelist's value
+      const double att = in.att_num("SF_URBAN_PHYSICS", -1.0);
+      if (att >= 0 && int(att) != o.sf_urban_physics)
+        throw std::runtime_error("---- ERROR: Mismatch between namelist and global attribute SF_URBAN_PHYSICS "
+                                 "(namelist " + std::to_string(o.sf_urban_physics) + ", wrfinput " +
+                                 std::to_string(int(att)) + ")");
+      put2(su.urb_->xlat_urb, m.xlat);
+      su.init_urban(in.has("FRC_URB2D") ? rd2("FRC_URB2D") : std::vector<double>(),
+                    in.has("HGT_URB2D") ? rd2("HGT_URB2D") : std::vector<double>());
+    }
   } else if (o.sf_surface_physics == 4) {
     // ---- bl_init / NoahmpWRFinit (Noah-MP)
     put2(su.snoalb, snoalb);

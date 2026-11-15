@@ -21,6 +21,7 @@ is verified against WRF, and the current results. All numbers come from `tests/v
 | PBL | BouLac (8, Bougeault-Lacarrere TKE scheme, over the surface layer 1 or 2; without the BEP urban terms, as CPPWRF has no urban model): module_bl_boulac.F bit for bit in the column driver tests/phys/bl_boulac; suite cases BL1, BL4, BL9 | verified |
 | PBL and surface layer | QNSE PBL (4) with the QNSE surface layer (sf_sfclay_physics 4), mfshconv = 0 or 1 (the EDKF mass-flux shallow convection, WRF's default), fractional_seaice 0: module_bl_qnsepbl.F and module_sf_qnsesfc.F (with QNSESFCINIT's tables) bit for bit in the column driver tests/phys/bl_qnse, module_bl_mfshconvpbl.F's MFSHCONVPBL in tests/phys/bl_mfshconv; suite cases Q1, Q4 (mfshconv 0) and Q1M, Q4M (mfshconv 1) | verified |
 | Radiation | RRTMG LW and SW (4), RRTM LW (1, with RRTMG or Dudhia SW), Dudhia SW (1, with RRTMG or RRTM LW; swrad_scat), CAM ozone and greenhouse gases, cal_cldfra1, McICA (cldovrlp 1-5) and clear sky only (cldovrlp 0), cumulus clouds in the radiation (cu_rad_feedback: Kain-Fritsch, Grell-Freitas; no effect with Tiedtke / New Tiedtke as in WRF) | verified |
+| Urban canopy | single-layer urban canopy model (sf_urban_physics = 1, module_sf_urban.F) with the Noah LSM: URBPARM.TBL (use_wudapt_lcz = 0) and URBPARM_LCZ.TBL (use_wudapt_lcz = 1) with their default options, one domain, no restart; column test tests/phys/sf_urban (urban_param_init and SUBROUTINE urban bit-identical to WRF) | column_verified |
 | Nudging | grid (analysis) nudging, grid_fdda = 1 (PSUFDDAGD: guv, gt, gq, if_no_pbl_nudging_uv / t / q, if_zfac_* / k_zfac_*, fgdt, fgdtzero, if_ramping / dtramp_min, gfdda_end_h, gfdda_interval_m, per domain; wrffdda_d0N from real.exe or cppwrf_real; restarts, nests) | verified |
 | Nesting | static one-way and two-way nests (interp_fcn_sint, bdy_interp1, copy_fcn feedback, sm121/smdsm smoothers, blend_terrain, adjust_tempqv) | verified |
 | Namelist | physics_suite CONUS and tropical (the -1 options), in tools/wrf2cppwrf.py and in the WRF I/O schema | verified |
@@ -36,7 +37,7 @@ column driver is impossible). Such options are listed in `data/option_tiers.txt`
 and tools/wrf2cppwrf.py read; the model stops on them unless `[cppwrf] allow_unverified = true` (namelist.input:
 `&cppwrf allow_unverified = .true. /`), and a run with the switch logs a warning per option and writes the global
 attribute `CPPWRF_UNVERIFIED_OPTIONS` (e.g. `mp_physics=4:column_verified`) into its wrfout and wrfrst files. The
-table has no row. A whole-model proof removes the option's row.
+table lists `sf_urban_physics = 1` and `use_wudapt_lcz = 1` (column_verified); every other option listed here is verified. A whole-model proof removes the option's row.
 
 ## Verification method
 

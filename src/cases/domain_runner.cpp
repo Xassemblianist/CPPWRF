@@ -351,6 +351,10 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
 }
 
 void DomainRunner::load_restart_file(const std::string& path) {
+  // the UCM's restart path (urban_var_init on a restart, grid%declin / hrang of the restart stream) is not ported
+  if (m_.suite && m_.suite->options().sf_urban_physics != 0)
+    throw std::runtime_error("restart with sf_urban_physics = " + std::to_string(m_.suite->options().sf_urban_physics) +
+                             " is not supported: " + path);
   const Grid& g = m_.g;
   dyn::State& st = *m_.st;
   dyn::RK3* rk = m_.rk.get();

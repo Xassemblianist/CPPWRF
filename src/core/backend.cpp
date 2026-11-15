@@ -474,6 +474,14 @@ const char* fatal_message(int code) {
       return "rdlai2d: an urban point with VEGFRA = 0 and LAI <= 0 is not supported (WRF's SFLX sets SHDFAC = 0.05, "
              "skips CANRES for XLAI = 0 and uses the plant coefficient PC of the previous land point, an undefined value)";
     case kFatalAcmRibx: return " RIBX never exceeds RIC";
+    case kFatalUrbanZa:
+      return "ZDC + Z0C + 2m is larger than the 1st WRF level - Stop in subroutine urban - change ZDC and Z0C";
+    case kFatalUrbanSurface:
+      return "sf_urban_physics = 1: an urban land-use point that is water or sea ice is not supported (WRF's surface "
+             "driver gives it the undefined U10_URB2D, PSIM_URB2D, ... of a point lsm skips)";
+    case kFatalUrbanInput:
+      return "sf_urban_physics = 1: urban morphology input (HGT_URB2D > 0, NUDAPT: the UCM reads an undefined U10 and "
+             "SW then) or an LCZ land-use category beyond the categories of URBPARM.TBL is not supported";
     default: return "unknown fatal condition in a physics kernel";
   }
 }

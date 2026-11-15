@@ -713,6 +713,9 @@ enum FatalCode : int {
   kFatalNoahmpGlacierEnergy = 15,    // glacier surface energy balance error > 0.01 W m-2
   kFatalNoahUrbanLai = 16,           // Noah rdlai2d: urban point with VEGFRA = 0 and LAI <= 0 (not a WRF stop)
   kFatalAcmRibx = 17,                // ACM2 PBL: the bulk Richardson number never exceeds RIC in a column
+  kFatalUrbanZa = 18,                // SLUCM: ZDC + Z0C + 2 m >= the first level height (WRF stops)
+  kFatalUrbanSurface = 19,           // SLUCM: an urban category point that is water or sea ice (not a WRF stop)
+  kFatalUrbanInput = 20,             // SLUCM: NUDAPT morphology (HGT_URB2D > 0) or a category beyond the table
 };
 struct FatalError : std::runtime_error {
   int code;

@@ -58,7 +58,7 @@ running.
 - **Options without a port** stop the run at start-up with the option, the value and what is supported. They are:
   - MPI runs and moving nests;
   - vertical nest refinement, ndown.exe;
-  - the urban and lake models;
+  - the urban canopy models other than the single-layer UCM with Noah, and the lake model;
   - spectral and observation nudging;
   - stochastic physics and chemistry;
   - I/O forms other than NetCDF;

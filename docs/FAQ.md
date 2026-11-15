@@ -76,7 +76,7 @@ silently. `physics_suite` and the `-1` options work as in WRF.
 
 - MPI runs (one process: OpenMP threads or one GPU);
 - moving nests, vertical nest refinement, ndown.exe;
-- the urban and lake models;
+- the urban canopy models other than the single-layer UCM (sf_urban_physics = 1 with Noah), and the lake model;
 - the schemes outside the ported list: other microphysics, cumulus, PBL, surface-layer and land-surface schemes,
   including the Pleim-Xiu land surface model;
 - Noah-MP's options outside the listed values;

@@ -16,7 +16,7 @@ statement-by-statement port of the path WRF v4.8.0 executes for
 sf_sfclay_physics = 1 (sfclayrev)   sf_surface_physics = 2 (Noah, num_soil_layers = 4)
 bl_pbl_physics = 1 (YSU)            bldt = 0, isfflx = 1, fractional_seaice = 0
 mp_physics = cu_physics = ra_lw_physics = ra_sw_physics = 0
-real data (specified boundaries), use_theta_m = 1, sf_urban_physics = 0, no lake, sst_update = 0
+real data (specified boundaries), use_theta_m = 1, sf_urban_physics = 0 or 1 (Noah), no lake, sst_update = 0
 ```
 
 Differential test against the **original** WRF code: `tests/phys/suite/` (below). Result: all

@@ -4,7 +4,8 @@
 // phy_prep_part2 for
 //   sf_sfclay_physics = 1 (sfclayrev), sf_surface_physics = 2 (Noah, 4 soil layers),
 //   bl_pbl_physics = 1 (YSU), mp/cu/ra = 0, isfflx = 1, fractional_seaice = 0, use_theta_m = 1,
-//   real data (specified boundaries), sf_urban_physics = 0, no lake model, no SST update.
+//   real data (specified boundaries), sf_urban_physics = 0 or 1 (single-layer UCM with Noah), no lake model,
+//   no SST update.
 // Statement-by-statement port of the WRF driver path (call map: docs/PHYSICS_SUITE.md); the
 // column schemes are the verified ports in src/phys/{sf_sfclayrev,lsm_noah,bl_ysu}.
 //
@@ -29,6 +30,7 @@
 #include "phys/cu_bmj/bmj.hpp"
 #include "phys/cu_kf/kf.hpp"
 #include "phys/cu_kf/kf_tables.hpp"
+#include "phys/sf_urban/urban.hpp"
 #include "phys/driver/phy_prep.hpp"
 #include "phys/driver/radiation.hpp"
 #include "phys/driver/tendency_coupling.hpp"
@@ -130,6 +132,9 @@ struct SuiteOptions {
   bool kim_tofd = false;         // sfclayrev turbulent orographic form drag (WRF 4.8)
   double tofd_factor = 0.003;
   bool rdlai2d = false, usemonalb = false;
+  // single-layer urban canopy model (module_sf_urban.F, called by Noah's lsm): sf_urban_physics = 1 with
+  // sf_surface_physics = 2; use_wudapt_lcz 0: URBPARM.TBL (3 categories), 1: URBPARM_LCZ.TBL (11 LCZ categories)
+  int sf_urban_physics = 0, use_wudapt_lcz = 0;
   int opt_thcnd = 1;  // Noah soil thermal conductivity (1 or 2)
   int seaice_albedo_opt = 0;
   double seaice_albedo_default = 0.65;
@@ -289,6 +294,27 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   Field3 u_ndg_old, v_ndg_old, t_ndg_old, q_ndg_old, ph_ndg_old, u_ndg_new, v_ndg_new, t_ndg_new, q_ndg_new,
       ph_ndg_new, hfx_fdda;
   Field2 mu_ndg_old, mu_ndg_new;
+  // sf_urban_physics = 1 (allocated then): the UCM state of urban_var_init and lsm (Registry grid% names: the
+  // history and restart writers find them by name), the urban fraction FRC_URB2D and category UTYPE_URB2D, the
+  // roof / wall / road layers (num_soil_layers) and the locals of surface_driver lsm fills for the urban points
+  // (U10_URB2D ... AKMS_URB2D, the surface layer's values after SFCDIAGS)
+  struct UrbanFields {
+    UrbanFields(const Grid& g, const Grid& gs);
+    Field2 tr_urb2d, tb_urb2d, tg_urb2d, tc_urb2d, qc_urb2d, uc_urb2d, xxxr_urb2d, xxxb_urb2d, xxxg_urb2d,
+        xxxc_urb2d, sh_urb2d, lh_urb2d, g_urb2d, rn_urb2d, ts_urb2d, frc_urb2d, flxhumr_urb2d, flxhumb_urb2d,
+        flxhumg_urb2d, cmr_sfcdif, chr_sfcdif, cmc_sfcdif, chc_sfcdif, tgr_urb2d, tvg_urb2d, tt_urb2d;
+    Field3 trl_urb3d, tbl_urb3d, tgl_urb3d, tgrl_urb3d, tvgl_urb3d, smr_urb3d, smg_urb3d;
+    IntField2 utype_urb2d;
+    Field2 u10_urb, v10_urb, psim_urb, psih_urb, gz1oz0_urb, akms_urb;  // surface_driver locals (scratch)
+    Field2 xlat_urb;  // grid%XLAT (XLAT_URB2D)
+    IntField2 is_urb;  // lsm ran the UCM at the point this step
+  };
+  std::unique_ptr<UrbanFields> urb_;
+  urban::UrbanTables urban_tables_;  // urban_param_init (URBPARM.TBL / URBPARM_LCZ.TBL)
+  // phy_init's urban_var_init (module_sf_urban.F:3525-4044, not a restart): UTYPE, FRC_URB2D (frc_in: wrfinput's
+  // FRC_URB2D, empty: 0), the state from TSK and TSLB; call after TSK, TSLB and IVGTYP hold the input's values.
+  // hgt_urb (wrfinput's HGT_URB2D, may be empty): NUDAPT morphology at an urban point is refused (not ported).
+  void init_urban(const std::vector<double>& frc_in, const std::vector<double>& hgt_urb);
   Field3 w0avg, cldfra_dp, cldfra_sh, qc_cu, qi_cu, gd_cloud, gd_cloud2, gd_cloud_a, gd_cloud2_a, gd_cldfr;  // cumulus 3D state and diagnostics
   Field2 cldefi, convcld;           // BMJ (cu_physics = 2): precipitation efficiency (restart), convective cloud
   Field3 ccldfra, qcconv, qiconv;   // BMJ: convective cloud fraction, cloud water and ice (restart)

@@ -416,6 +416,7 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `sf_sfclay_physics` | 0, 1 (revised MM5; `isfflx` 0, 1, `isftcflx` 0-2, `iz0tlnd` 0-2, `kim_tofd`, `tofd_factor`), 2 (Eta), 4 (QNSE, with the QNSE PBL; `fractional_seaice` 0, `isfflx` 1), 5 (MYNN; `sf_mynn_sfcflux_land` 0-3, `sf_mynn_sfcflux_water` 0-4), 7 (Pleim-Xiu, with ACM2 and Noah, `fractional_seaice` 0, `isfflx` 1) |
 | `grav_settling` | 0, 1, 2 |
 | `sf_surface_physics`, `num_soil_layers` | 0, 1 (5-layer thermal diffusion, 5 layers; `ifsnow`), 2 (Noah, 4 layers; `opt_thcnd` 1, 2), 4 (Noah-MP v5.1.2, default `&noah_mp` options, one domain) |
+| `sf_urban_physics`, `use_wudapt_lcz` | 0, 1 (single-layer urban canopy model with Noah, one domain, no restart; URBPARM.TBL / URBPARM_LCZ.TBL with their default options in the run directory; tier column_verified: needs `&cppwrf allow_unverified = .true.`); 0, 1 |
 | `rdmaxalb`, `usemonalb`, `rdlai2d`, `fractional_seaice`, `sst_update` | any; any; Noah; 0, 1; 0, 1 |
 | `sst_skin`, `tmn_update`, `lagday` | 0, 1 (skin SST over water, module_sf_sstskin.F); 0, 1 (TMN from the daily mean TSK, module_sf_tmnupdate.F); with `tmn_update = 1` any number of days but 1 (WRF stops there); one value for all domains, Noah (`sf_surface_physics = 2`) only |
 | `ra_lw_physics`, `ra_sw_physics`, `radt` | 0, 1 (RRTM LW / Dudhia SW, paired with each other or with RRTMG), 4 (RRTMG) |
@@ -442,7 +443,8 @@ an error, never silently:
 | `progn = 1`, `do_radar_ref = 1` with `mp_physics = 10`, `mp_physics = 10` in the ideal cases | not ported (prognostic droplet number needs module_mixactivate; Morrison's 10 cm reflectivity is DOUBLE PRECISION, quad in a -r8 WRF) |
 | `cu_physics` other than 0, 1, 2, 3, 5, 6, 16 (93, Grell-Devenyi, is not ported) | not ported |
 | `bl_pbl_physics` other than 0, 1, 2, 5, 7, 8 (e.g. Shin-Hong, 11); `shcu_physics` | not ported |
-| `sf_sfclay_physics` 91 and other values; `sf_urban_physics`, `sf_lake_physics` | not ported |
+| `sf_sfclay_physics` 91 and other values; `sf_lake_physics` | not ported |
+| `sf_urban_physics` 2 / 3 (BEP, BEP+BEM), the UCM with another land-surface model than Noah, on nests or with a restart, `slucm_distributed_drag`, `distributed_ahe_opt`, NUDAPT morphology input (HGT_URB2D > 0), URBPARM.TBL options other than the defaults (green roofs, trees, irrigation, anthropogenic heat, CH_SCHEME 1, TS_SCHEME 2, ...); cppwrf_real with urban input | not ported |
 | `sf_sfclay_physics` 7 without ACM2 or Noah, with `fractional_seaice = 1` or `isfflx = 0` | not ported (the Pleim-Xiu surface layer is verified with ACM2 and Noah; its sea-ice wrapper is not ported) |
 | `sf_sfclay_physics = 4` without the QNSE PBL or with `fractional_seaice = 1` | not ported |
 | `sf_surface_physics` 3, 5, 7, 8 (RUC, CLM, PX, SSiB); the `pxlsm_*` options and PX soil nudging | not ported (PX needs real.exe's 2-layer soil and its own state, LANDUSEF / SOILCTOP / SOILCBOT input and tables) |

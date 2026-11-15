@@ -1312,6 +1312,33 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertNotIn("radt", sec["phys"])
         self.assertEqual(sec["d02"]["phys_radt"], 3)
 
+    def test_urban_canopy(self):
+        # sf_urban_physics = 1 (single-layer UCM) with Noah on one domain, URBPARM.TBL or URBPARM_LCZ.TBL
+        # (use_wudapt_lcz = 1, column_verified: a warning); BEP / BEP+BEM, other land surfaces, distributed drag,
+        # nests and restarts are errors
+        noah = self.FULL.replace("bl_pbl_physics = 0,", "bl_pbl_physics = 1,").replace(
+            "sf_sfclay_physics = 0, sf_surface_physics = 0", "sf_sfclay_physics = 1, sf_surface_physics = 2")
+        t, sec = self.translate(noah.replace("&physics ", "&physics sf_urban_physics = 1, use_wudapt_lcz = 1, "))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["sf_urban_physics"], 1)
+        self.assertEqual(sec["phys"]["use_wudapt_lcz"], 1)
+        self.assertTrue(any("sf_urban_physics = 1: verification tier column_verified" in w for w in t.warnings))
+        t, sec = self.translate(noah.replace("&physics ", "&physics sf_urban_physics = 1, "))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("use_wudapt_lcz", sec["phys"])
+        for extra, msg in (("sf_urban_physics = 2", "BEP urban canopy"), ("sf_urban_physics = 3", "BEP+BEM"),
+                           ("sf_urban_physics = 1, slucm_distributed_drag = .true.", "slucm_distributed_drag"),
+                           ("sf_urban_physics = 1, use_wudapt_lcz = 2", "use_wudapt_lcz = 2"),
+                           ("use_wudapt_lcz = 1", "use_wudapt_lcz")):
+            errs = self.errors(complete(noah.replace("&physics ", "&physics " + extra + ", ")))
+            self.assertTrue(any(msg in e for e in errs), (extra, errs))
+        slab = self.FULL.replace("sf_sfclay_physics = 0, sf_surface_physics = 0", "sf_sfclay_physics = 1, "
+                                 "sf_surface_physics = 1").replace("&physics ", "&physics sf_urban_physics = 1, ")
+        self.assertTrue(any("Noah LSM" in e for e in self.errors(complete(slab))))
+        rst = noah.replace("&physics ", "&physics sf_urban_physics = 1, ").replace("&time_control /",
+                                                                                  "&time_control restart = .true. /")
+        self.assertTrue(any("restart = .true. with sf_urban_physics" in e for e in self.errors(complete(rst))))
+
     def test_cu_rad_feedback_cldovrlp_0(self):
         # cldovrlp 0: RRTMG without clouds; cu_rad_feedback per domain (phy_init's icloud_cu); shallowcu_forced_ra
         # acts only with KF-CuP (cu_physics 10)

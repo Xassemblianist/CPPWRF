@@ -559,6 +559,7 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
       else if (name == "KBCON_SHALLOW") fi = &m_.suite->kbcon_shallow;
       else if (name == "KTOP_SHALLOW") fi = &m_.suite->ktop_shallow;
     }
+    if (!fi && name == "UTYPE_URB" && m_.suite->urb_) fi = &m_.suite->urb_->utype_urb2d;  // sf_urban_physics = 1
     if (!fi) fi = m_.suite->bucket_int(to_lower(name));  // I_RAINC, I_ACSWUPT, ... (bucket_mm, bucket_J)
     if (fi) {
       std::vector<int> h;
@@ -749,6 +750,22 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
     for (std::size_t j = 0; j < dims[0]; ++j)
       for (std::size_t i = 0; i < dims[1]; ++i) out[j * dims[1] + i] = double(h[L.index(int(i), int(j), 0)]);
     return true;
+  }
+  if (m_.suite && m_.suite->urb_) {  // sf_urban_physics = 1
+    const phys::urban::UrbanTables& ut = m_.suite->urban_tables_;
+    if ((name == "DZR" || name == "DZB" || name == "DZG") && dims.size() == 1) {  // urban_param_init's layers [cm]
+      const real* d = name == "DZR" ? ut.dzr : name == "DZB" ? ut.dzb : ut.dzg;
+      out.resize(n);
+      for (std::size_t k = 0; k < n; ++k) out[k] = k < std::size_t(phys::urban::kMaxUrbLayers) ? double(d[k]) : 0.0;
+      return true;
+    }
+    // urban_var_init zeroes the morphology at every point without NUDAPT input (HGT_URB2D > 0 is refused)
+    const std::string uv = to_lower(varname);  // BUILD_AREA_FRACTION, BUILD_SURF_RATIO, BUILD_HEIGHT, MH_URB2D, ...
+    if (uv == "lp_urb2d" || uv == "lb_urb2d" || uv == "hgt_urb2d" || uv == "mh_urb2d" || uv == "stdh_urb2d" ||
+        uv == "lf_urb2d") {
+      out.assign(n, 0.0);
+      return true;
+    }
   }
   if (model_only_) return false;
   auto fb = fed_.find(name);  // nest feedback of a field the model does not carry
