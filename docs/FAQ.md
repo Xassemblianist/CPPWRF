@@ -6,7 +6,7 @@ Yes, in FP64, for the configurations CPPWRF verifies. `cpu-fp64` and `gpu-fp64` 
 at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must equal NaN, and -0 must differ from
 +0.
 
-- **What was compared.** The verification suite runs 242 cases against WRF:
+- **What was compared.** The verification suite runs 259 cases against WRF:
   - real-data domains in the mid-latitudes, the tropics, the Arctic and the Alps;
   - 24 h and 72 h forecasts;
   - nests, restarts, and WRF's idealized cases;
@@ -63,7 +63,7 @@ Blackwell card, and it scales with the number of threads the GPU can hold, so a 
 Beyond that reserve, large domains take about 4 KB per cell in FP32 and 5 KB in FP64.
 
 `cppwrf-fit namelist.input` estimates the memory and the run time of your namelist on your machine. On the CPU, the
-limit is the machine's RAM. Each process is one machine, since CPPWRF has no MPI.
+limit is the machine's RAM. One run is one machine: MPI ranks and tiles are proved on one machine only (docs/MPI.md).
 
 ### Can I use my WRF namelist?
 

@@ -10,9 +10,9 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** All 79 CUDA FP64 runs of the suite match WRF and the CPU build at
-  tolerance 0. They were checked on three GPU generations: L4 (sm_89), RTX PRO 6000 Blackwell (sm_120) and
-  A100 (sm_80).
+- **GPU, FP64: bit-identical to WRF too.** All 122 CUDA FP64 runs of the suite match WRF and the CPU build at
+  tolerance 0. They were checked on the Colab G4 (RTX PRO 6000 Blackwell, sm_120) at main a37a639, and earlier subsets on L4
+  (sm_89) and A100 (sm_80).
 - **GPU, FP32:** the fast mode, compared with WRF by relative L2 error.
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
@@ -51,14 +51,14 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 | Diagnostics and I/O | buckets, precipitation windows, output_diagnostics (auxhist3), WRF NetCDF wrfout / wrfrst, iofields |
 
 WRF's `namelist.input` works as is: `tools/wrf2cppwrf.py` translates it, including `physics_suite`. An option
-without a port is reported as an error and never silently ignored. Still missing: MPI runs, moving nests,
-urban and lake models, and the other schemes listed in [docs/STATUS.md](docs/STATUS.md#not-yet-implemented).
+without a port is reported as an error and never silently ignored. Still missing: runs on several GPUs or nodes
+(MPI ranks are proved on one machine, docs/MPI.md), moving nests, BEP urban and lake models, and the other schemes listed in [docs/STATUS.md](docs/STATUS.md#not-yet-implemented).
 
 ## How it is verified
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
-- **Model runs against WRF** (`tests/verify/wrf_suite.py`): 192 cases plus 33 restart checks. They cover
+- **Model runs against WRF** (`tests/verify/wrf_suite.py`): 259 cases plus 36 restart checks. They cover
   real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
   at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are
   compared with WRF's in every variable and output time.

@@ -44,11 +44,11 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files, for the 242 suite cases (real-data
+  process, in every variable and output time of the wrfout and wrfrst files, for the 259 suite cases (real-data
   domains in the mid-latitudes, the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
-- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (79 GPU runs of the suite, on NVIDIA L4, RTX PRO
-  6000 Blackwell and A100).
+- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (122 GPU runs of the suite on the RTX PRO 6000
+  Blackwell, earlier subsets on NVIDIA L4 and A100).
 - **GPU, FP32**: the fast mode; its distance from WRF real*8 is that of stock WRF real*4 for most physics suites,
   and in the first hour of single runs with ACM2 / Pleim-Xiu, Morrison or the skin SST up to about twice it, as a
   rounding draw rather than a defect (docs/FP32_ACCURACY.md). Use it for forecasts and
@@ -425,8 +425,9 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 
 ### Rejected Options and Why
 
-CPPWRF has no MPI: a run is one process on one node, with OpenMP threads or one GPU (WRF's own result changes with
-its MPI layout; the references are one-process WRF runs). The options below stop the translator and the model with
+CPPWRF runs as one process (OpenMP threads or one GPU), as thread tiles, or as MPI ranks on one machine (section 7,
+"Tiles and MPI ranks"; the same bits for every layout, unlike WRF, whose result changes with its MPI layout; the
+references are one-process WRF runs). The options below stop the translator and the model with
 an error, never silently:
 
 | WRF option | Why |

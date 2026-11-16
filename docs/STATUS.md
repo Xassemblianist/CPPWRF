@@ -243,7 +243,7 @@ inputs, 30 h, every hourly frame) covers XTIME past one day (days*1440 + seconds
 the first whose coszen depends on it) and N3D50 (N3 with d01 dt 50 s, a nest step of 50/3 s, 1 h) a step that is a
 fraction of a second; both pass at tolerance 0 on the CPU (Colab L4, Intel) and in CUDA FP64 (L4).
 
-CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (88 runs with the GPU
+CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (122 runs at main a37a639 with the GPU
 restart cases: R1, T1, P1 to P9, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
 D0V, sst_update, hybrid, nest and ideal cases) passes with tolerance 0 (tests/verify/exact.py, every frame and variable of the history) on Colab's
 L4 (sm_89), RTX PRO 6000 Blackwell "G4" (sm_120) and A100 (sm_80); H100 was not available. The FP64 device code
@@ -338,15 +338,18 @@ MPI + OpenMP, real*4 and real*8; its fastest of five process layouts counts. Eac
 and on: R1, P4 (radt 1 and 15 min), the nest N3 and a 9.1 times larger domain made on the runtime with WPS and
 real.exe. `tools/bench/colab_bench.sh` reproduces it in one session.
 
-Stepping time in seconds per simulated hour, history off:
+Stepping time in seconds per simulated hour, history off (rerun at main c9c95c5, 2026-11-16; WRF's best layout):
 
 | Case | WRF real*4 | WRF real*8 | CPPWRF GPU FP32 | CPPWRF GPU FP64 | CPPWRF CPU FP64 (48 threads) |
 |---|---|---|---|---|---|
-| R1 | 0.86 | 2.15 | 0.12 | 0.51 | 3.77 |
-| P4 | 7.84 | 9.72 | 1.66 | 2.78 | 10.86 |
-| P4, radt 15 min | 2.38 | 4.34 | 0.55 | 1.68 | 7.44 |
-| N3 | 23.8 | 34.0 | 5.25 | 10.4 | 38.8 |
-| L (359 x 269 x 44) | 24.8 | 45.1 | 3.01 | 9.59 | 51.0 |
+| R1 | 0.84 | 1.99 | 0.11 | 0.44 | 4.69 |
+| P4 | 7.46 | 10.71 | 1.47 | 2.35 | 11.40 |
+| P4, radt 15 min | 2.43 | 4.22 | 0.47 | 1.36 | 7.79 |
+| N3 | 24.14 | 34.09 | 4.46 | 8.26 | 38.56 |
+| L (359 x 269 x 44) | 25.72 | 45.18 | 2.50 | 7.52 | 52.43 |
+
+GPU FP32 is 5.1 to 10.3 times faster than WRF real*4, GPU FP64 3.1 to 6.0 times faster than WRF real*8 (docs/PERF.md
+has the first run and the layouts).
 
 Agreement in these runs:
 - The CPU FP64 output is bit-identical to the suite's WRF real*8 references for P4 and N3 (both domains).
