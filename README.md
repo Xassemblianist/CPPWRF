@@ -75,15 +75,15 @@ the same on Intel and AMD processors (`CPPWRF_PORTABLE_LIBMVEC`).
 WRF v4.8.0 and CPPWRF ran on one Google Colab G4 runtime: an AMD EPYC 9B45 (24 cores, 48 hardware threads) and an
 NVIDIA RTX PRO 6000 Blackwell (96 GB). WRF was built there from the release source with its own GNU `configure`
 (MPI, and MPI + OpenMP), in real*4 and real*8; its fastest of five process layouts counts. Each run is 1 simulated
-hour with the same namelist and inputs. The table gives the stepping time in seconds per simulated hour, without
+hour with the same namelist and inputs (CPPWRF main c9c95c5, 2026-11-16). The table gives the stepping time in seconds per simulated hour, without
 start-up and history output ([docs/PERF.md](docs/PERF.md) has the wall times, other layouts and memory):
 
 | Case | WRF real*4, best layout | WRF real*8, best layout | CPPWRF GPU FP32 | CPPWRF GPU FP64 |
 |---|---|---|---|---|
-| P4: 119 x 89 x 44, 15 km, full physics, radt 1 min | 7.84 | 9.72 | 1.66 (4.7x) | 2.78 (3.5x) |
-| P4 with radt 15 min | 2.38 | 4.34 | 0.55 (4.3x) | 1.68 (2.6x) |
-| N3: P4 with a two-way 5 km nest | 23.8 | 34.0 | 5.25 (4.5x) | 10.4 (3.3x) |
-| L: 359 x 269 x 44 (9x P4), radt 15 min | 24.8 | 45.1 | 3.01 (8.2x) | 9.59 (4.7x) |
+| P4: 119 x 89 x 44, 15 km, full physics, radt 1 min | 7.46 | 10.71 | 1.47 (5.1x) | 2.35 (4.6x) |
+| P4 with radt 15 min | 2.43 | 4.22 | 0.47 (5.2x) | 1.36 (3.1x) |
+| N3: P4 with a two-way 5 km nest | 24.1 | 34.1 | 4.46 (5.4x) | 8.26 (4.1x) |
+| L: 359 x 269 x 44 (9x P4), radt 15 min | 25.7 | 45.2 | 2.50 (10.3x) | 7.52 (6.0x) |
 
 The speed-ups in brackets are against WRF real*4 for FP32 and against WRF real*8 for FP64. The GPU's advantage grows
 with the domain size. Whole runs gain less: start-up and NetCDF output are serial in both models. Without history

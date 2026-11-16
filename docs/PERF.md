@@ -56,6 +56,28 @@ reading, as WRF's NetCDF reader allows. The real*4 WRF runs read WRF's single-pr
     15 %, and up to 90 % for the short 48-rank runs;
   - the CPU FP64 times agree within 8 % (R1: 23 %).
 
+**Rerun at main c9c95c5 (2026-11-16)**, the same script, runtime type and cases (131 commits after b30ec5b: the
+column work buffers of PERF2, MPI1's patch layout, the new schemes). WRF real*4's dmpar build did not link in this
+session, so its best layout is the best dm+sm layout (as in the first run, where dm+sm was fastest for real*4 in
+every case). Stepping time in seconds per simulated hour, history off, speed-up of GPU FP32 against WRF real*4's best
+and of GPU FP64 against WRF real*8's best:
+
+| Case | WRF real*4 best | WRF real*8 best | CPPWRF GPU FP32 | CPPWRF GPU FP64 | CPPWRF CPU FP64 | GPU FP32 vs WRF r4 | GPU FP64 vs WRF r8 |
+|---|---|---|---|---|---|---|---|
+| R1 | 0.84 (12 x 4) | 1.99 (12 x 4) | 0.11 | 0.44 | 4.69 | 7.6x | 4.5x |
+| P4 | 7.46 (12 x 4) | 10.71 (24) | 1.47 | 2.35 | 11.40 | 5.1x | 4.6x |
+| P4R15 | 2.43 (12 x 4) | 4.22 (12 x 4) | 0.47 | 1.36 | 7.79 | 5.2x | 3.1x |
+| N3 | 24.14 (24 x 2) | 34.09 (24) | 4.46 | 8.26 | 38.56 | 5.4x | 4.1x |
+| L | 25.72 (24 x 2) | 45.18 (24) | 2.50 | 7.52 | 52.43 | 10.3x | 6.0x |
+
+Wall time with history on (a frame every 10 minutes), GPU FP32 against WRF real*4's best: R1 1.1 / 3.7 s, P4 3.1 /
+13.4 s, P4R15 2.0 / 9.0 s, N3 6.6 / 31.0 s, L 11.1 / 63.9 s. The comparisons of this run: CPU FP64 identical to the
+suite's WRF real*8 reference of P4 (tolerance 0) and GPU FP64 identical to CPU FP64; GPU FP32's relative L2 against
+WRF real*8 at 1 h is that of WRF real*4 (P4: U 6.2e-4 against WRF real*4's 6.6e-4, T 3.5e-5 against 4.0e-5). GPU
+memory peaks (FP32 / FP64): P4 8.3 / 9.1 GB, N3 9.5 / 10.9 GB, L 20.8 / 28.7 GB (P4 and R1 in FP32 fit a 6 GB GPU).
+
+The tables below are the first run (b30ec5b).
+
 Stepping time, in seconds per simulated hour (history off):
 
 | Case | WRF real*4 best | WRF real*8 best | CPPWRF GPU FP32 | CPPWRF GPU FP64 | CPPWRF CPU FP64 | GPU FP32 vs WRF r4 | GPU FP64 vs WRF r8 |
