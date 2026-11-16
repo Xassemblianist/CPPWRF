@@ -121,17 +121,27 @@ struct G3In {
   C2 xland, gsw;
   CI2 kpbl;
 };
-// G3DRV's outputs (cu_g3::g3drv's O): the restart-only results APR_* and XMB_SHALLOW are kept, XF_ENS / PR_ENS
-// (ensdim levels), EDT_OUT (no I/O) and the shallow / deep levels (integer restart fields) are not
+// G3DRV's outputs (cu_g3::g3drv's O): the restart-only results APR_*, XMB_SHALLOW, the shallow levels
+// K22 / KBCON / KTOP_SHALLOW and XF_ENS / PR_ENS (= xfi_ens / pri_ens, ensdim levels) of the interior columns
+// (ibegc .. iendc, jbegc .. jendc); EDT_OUT (no I/O) and KTOP_DEEP (not in the restart stream) are not kept
 struct G3Res {
   V3 cugd_tten, cugd_qvten, cugd_ttens, cugd_qvtens, cugd_qcten, rqccuten, rqicuten, gdc, gdc2;
   V2 raincv, pratec, htop, hbot, xmb_shallow;
   V2 apr[8];
+  I2 k22_shallow, kbcon_shallow, ktop_shallow;
+  V3 xf_ens, pr_ens;
   CPPWRF_HD real apr_in(int i, int j, int n) const { return apr[n](i, j); }
   template <class S, class O, class W>
-  CPPWRF_HD void extra(int i, int j, const S& s, const O& out, W&) const {
+  CPPWRF_HD void extra(int i, int j, const S& s, const O& out, W& w) const {
     for (int n = 0; n < 8; ++n) apr[n](i, j) = s.apr[n];
     xmb_shallow(i, j) = out.xmb_shallow;
+    k22_shallow(i, j) = out.k22_shallow;
+    kbcon_shallow(i, j) = out.kbcon_shallow;
+    ktop_shallow(i, j) = out.ktop_shallow;
+    for (int n = 0; n < cu_g3::ENSDIM; ++n) {
+      xf_ens(i, j, n) = w.xf_ens[n + 1];
+      pr_ens(i, j, n) = w.pr_ens[n + 1];
+    }
   }
 };
 struct KG3 {
@@ -632,7 +642,8 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
                 pt.rqccuten.view(), pt.rqicuten.view(), gd_cloud.view(), gd_cloud2.view(), raincv.view(),
                 pratec.view(), cutop.view(), cubot.view(), xmb_shallow.view(),
                 {apr_gr.view(), apr_w.view(), apr_mc.view(), apr_st.view(), apr_as.view(), apr_capma.view(),
-                 apr_capme.view(), apr_capmi.view()}};
+                 apr_capme.view(), apr_capmi.view()},
+                k22_shallow.view(), kbcon_shallow.view(), ktop_shallow.view(), xf_ens.view(), pr_ens.view()};
     // debug (one patch): CPPWRF_G3_DUMP=file CPPWRF_G3_DUMP_STEP=n writes G3DRV's inputs of step n in the layout of
     // tests/phys/cu_g3 (driver_g3.f90 runs WRF's G3DRV and CONV_GRELL_SPREAD3D on them) and file.out the model's
     // RTHCUTEN, RQVCUTEN, RQCCUTEN, RQICUTEN, RAINCV, PRATEC after CONV_GRELL_SPREAD3D (compare.py --model)

@@ -295,6 +295,10 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // closures APR_* (restart only; MASS_FLUX stays 0), the shallow mass flux
   Field3 cugd_tten, cugd_qvten, cugd_ttens, cugd_qvtens, cugd_qcten;
   Field2 apr_gr, apr_w, apr_mc, apr_st, apr_as, apr_capma, apr_capme, apr_capmi, mass_flux, xmb_shallow;
+  // G3DRV's XF_ENS / PR_ENS (ensdim = 144 levels; Registry r, state without a package) and the shallow
+  // convection's K22 / KBCON / KTOP levels (integer, Registry r): restart only, as G3DRV leaves them
+  Field3 xf_ens, pr_ens;
+  IntField2 k22_shallow, kbcon_shallow, ktop_shallow;
   // every persistent field above, the physics tendencies and the phy_prep diagnostics (by WRF name)
   std::vector<const Field2*> fields2() const;
   std::vector<const Field3*> fields3() const;

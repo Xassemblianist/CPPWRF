@@ -9,7 +9,8 @@ a verified configuration, of a configuration key or of an output file is a new m
 - Grell-3D ensemble cumulus (cu_physics = 5, WRF's module_cu_g3.F): G3DRV with the 3 x 3 neighbours' vertical
   motion and advective forcing (ens4 = 9), CUP_enss_3d with its closure ensemble (maxens 3, maxens2 3, maxens3 16),
   the shallow convection (ishallow = 1), clos_choice, cugd_avedx 1 / 3 (`[phys] cugd_avedx`), APR_* /
-  MASS_FLUX / XMB_SHALLOW and CUGD_* in the restart files, CONV_GRELL_SPREAD3D (the subsidence spreading and the
+  MASS_FLUX / XMB_SHALLOW, XF_ENS / PR_ENS (ensemble_stag = 144), K22 / KBCON / KTOP_SHALLOW and CUGD_* in the
+  restart files (as G3DRV leaves them; read back on restart), CONV_GRELL_SPREAD3D (the subsidence spreading and the
   smoothing over the neighbours, halo exchanges for patched runs), phy_cu_ten, the cumulus clouds of cu_diag = 1.
   Tier: verified (suite cases G3P8, G3P4, G3P4A3 against WRF real*8, CPU and CUDA FP64 at tolerance 0; patch driver
   tests/phys/cu_g3 bit-identical with WRF's module_cu_g3.o on synthetic and model-dumped patches). Grell-Devenyi (93) stays an error.

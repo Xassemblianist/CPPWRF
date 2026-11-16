@@ -554,6 +554,11 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
       else if (name == "CROPCAT") fi = &m_.suite->cropcat;
       else if (name == "PGS" || name == "PGSXY") fi = &m_.suite->pgsxy;
     }
+    if (!fi && m_.suite->options().cu_physics == 5) {  // G3DRV's shallow convection levels (Registry r)
+      if (name == "K22_SHALLOW") fi = &m_.suite->k22_shallow;
+      else if (name == "KBCON_SHALLOW") fi = &m_.suite->kbcon_shallow;
+      else if (name == "KTOP_SHALLOW") fi = &m_.suite->ktop_shallow;
+    }
     if (!fi) fi = m_.suite->bucket_int(to_lower(name));  // I_RAINC, I_ACSWUPT, ... (bucket_mm, bucket_J)
     if (fi) {
       std::vector<int> h;

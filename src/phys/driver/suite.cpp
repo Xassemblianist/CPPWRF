@@ -518,6 +518,11 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
         {&apr_capma, "apr_capma"}, {&apr_capme, "apr_capme"}, {&apr_capmi, "apr_capmi"}, {&mass_flux, "mass_flux"},
         {&xmb_shallow, "xmb_shallow"}};
     for (const auto& [f, n] : g3_2d) *f = Field2(g, Stagger::M, n);
+    Grid ge = g;  // XF_ENS / PR_ENS: (ims:ime, jms:jme, 1:ensdim)
+    ge.nz = cu_g3::ENSDIM;
+    mk3(xf_ens, ge, "xf_ens"); mk3(pr_ens, ge, "pr_ens");
+    k22_shallow = IntField2(g, "k22_shallow"); kbcon_shallow = IntField2(g, "kbcon_shallow");
+    ktop_shallow = IntField2(g, "ktop_shallow");
   }
   mk3(zero3_, g, "zero3");
   dzs.assign(o.num_soil_layers, 0.0);
@@ -937,8 +942,9 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
     v.emplace_back("sfc_rthratenlwc", &rthratenlwc);
     v.emplace_back("sfc_rthratenswc", &rthratenswc);
   }
-  if (o_.cu_physics == 5)  // package g3scheme (Registry r)
-    for (Field3* f : {&cugd_tten, &cugd_qvten, &cugd_ttens, &cugd_qvtens, &cugd_qcten}) v.emplace_back("sfc_" + f->name(), f);
+  if (o_.cu_physics == 5)  // package g3scheme (Registry r); XF_ENS / PR_ENS (state, Registry r)
+    for (Field3* f : {&cugd_tten, &cugd_qvten, &cugd_ttens, &cugd_qvtens, &cugd_qcten, &xf_ens, &pr_ens})
+      v.emplace_back("sfc_" + f->name(), f);
   if (o_.cu_physics == 16 || o_.cu_physics == 3 || o_.cu_physics == 5) {
     v.emplace_back("sfc_rthften", &pt.rthften);
     v.emplace_back("sfc_rqvften", &pt.rqvften);
@@ -969,6 +975,8 @@ std::vector<std::pair<std::string, IntField2*>> PhysicsSuite::carried_int() {
   }
   if (o_.bucket_j > 0)
     for (IntField2& f : i_acrad) v.emplace_back("sfc_" + f.name(), &f);
+  if (o_.cu_physics == 5)  // package g3scheme (Registry r)
+    for (IntField2* f : {&k22_shallow, &kbcon_shallow, &ktop_shallow}) v.emplace_back("sfc_" + f->name(), f);
   return v;
 }
 
@@ -1193,7 +1201,8 @@ std::vector<const Field3*> PhysicsSuite::fields3() const {
     v.insert(v.end(), {&u_ndg_old, &v_ndg_old, &t_ndg_old, &q_ndg_old, &ph_ndg_old, &u_ndg_new, &v_ndg_new, &t_ndg_new,
                        &q_ndg_new, &ph_ndg_new, &hfx_fdda, &pt.rundgdten, &pt.rvndgdten, &pt.rthndgdten, &pt.rqvndgdten});
   if (o_.cu_physics == 2) v.insert(v.end(), {&ccldfra, &qcconv, &qiconv});
-  if (o_.cu_physics == 5) v.insert(v.end(), {&cugd_tten, &cugd_qvten, &cugd_ttens, &cugd_qvtens, &cugd_qcten});
+  if (o_.cu_physics == 5)
+    v.insert(v.end(), {&cugd_tten, &cugd_qvten, &cugd_ttens, &cugd_qvtens, &cugd_qcten, &xf_ens, &pr_ens});
   return v;
 }
 
