@@ -3,8 +3,6 @@
 ishallow = 1 instead of Grell-Freitas-Li; qv only), G3P4 (P4: WSM6, RRTMG, YSU; Grell-3D instead of Kain-Fritsch: the
 QC / QI branches and the cumulus clouds) and G3P4A3 (cugd_avedx = 3), each against its WRF v4.8.0 real*8 run (the
 wrfref workflow of the CI repository, run c12-g3: the inputs of run_P8_r8 / run_P4_r8).
-Pending: moved to tests/verify/cases/ when port_c12_data.tar is staged (then the tier row of data/option_tiers.txt
-and allow_unverified go).
 
 CASES: see tests/verify/cases/__init__.py."""
 from cases.common import WR  # noqa: F401
@@ -12,7 +10,7 @@ from cases.common import WR  # noqa: F401
 _D = "2026-10-12_00:00:00"
 _T = {"U": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0, "RAINC": 0.0}
 _1H = ["run.run_time=3600", "output.out_interval=10", "output.diag_interval=10"]
-_P4 = ["phys.cu_physics=5", "cppwrf.allow_unverified=true"]
+_P4 = ["phys.cu_physics=5"]
 
 CASES = [
     # G3P8: 3 steps (history every step), 1 h, 1 h restarted at 30 min

@@ -57,6 +57,11 @@ port_c11_data.tar
 port_c18_data.tar
 # the WSM5 / WSM3 references (W5, W3: mp_physics 4 / 3 on P4, tests/verify/cases/38_wsm35.py); links into run_P4_r8
 port_c02_data.tar
+# the Grell-3D references (G3P8, G3P4, G3P4A3: cu_physics 5, tests/verify/cases/39_g3.py); links into run_P8_r8 / run_P4_r8
+port_c12_data.tar
+# the QNSE references (Q1, Q4: bl_pbl_physics / sf_sfclay_physics 4, tests/verify/cases/41_qnse.py); links into
+# run_P1_r8 / run_P4_r8
+port_c17_data.tar
 # whole references (every frame and variable) of the tolerance-0 cases and the ideal namelists
 # (tools/colab/stage_data.py --whole --refs-only --no-steps): after the tars above, whose files they replace
 v05_suite_refs.tar

@@ -698,7 +698,7 @@ class TestValidationAndWarnings(unittest.TestCase):
         self.assertEqual(err, [])
         self.assertEqual((gen["phys"]["sf_sfclay_physics"], gen["phys"]["bl_pbl_physics"], gen["phys"]["mfshconv"]),
                          (4, 4, 0))
-        self.assertIn("column_verified", " ".join(warn))
+        self.assertNotIn("verification tier", " ".join(warn))
         for extra_phys in ("", "mfshconv = 1,"):
             err, _, _ = phys(4, 4, extra_phys)
             self.assertIn("mfshconv = 1", " ".join(err), extra_phys)
@@ -1349,7 +1349,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertEqual(t.errors, [])
 
     def test_grell_3d(self):
-        # cu_physics = 5 (Grell-3D, tier column_verified: a warning, allow_unverified passed on); cugd_avedx 1 / 3
+        # cu_physics = 5 (Grell-3D, verified: no tier warning); cugd_avedx 1 / 3
         # (other values rejected), the ensemble sizes fixed; ishallow and clos_choice as with Grell-Freitas;
         # cu_physics = 93 (Grell-Devenyi) is not ported
         t, sec = self.translate(self.NEST + "&physics cu_physics = 5, 5, ishallow = 1, cugd_avedx = 3, "
@@ -1359,7 +1359,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertEqual(sec["phys"]["ishallow"], 1)
         self.assertEqual(sec["phys"]["cugd_avedx"], 3)
         self.assertEqual(sec["phys"]["clos_choice"], 3)
-        self.assertTrue(any("cu_physics" in w and "column_verified" in w for w in t.warnings), t.warnings)
+        self.assertFalse(any("verification tier" in w for w in t.warnings), t.warnings)
         t, sec = self.translate(self.NEST + "&physics cu_physics = 5, 5 /\n")
         self.assertEqual(t.errors, [])
         self.assertNotIn("cugd_avedx", sec["phys"])

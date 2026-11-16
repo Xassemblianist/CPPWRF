@@ -21,6 +21,3 @@
 #
 # Example (WSM5 ported with a column driver, not yet compared with a whole WRF run):
 #   phys.mp_physics   physics.mp_physics   4   column_verified   WSM5 (tests/phys/mp_wsm5)
-phys.cu_physics   physics.cu_physics   5   column_verified   Grell-3D, ishallow 0 / 1, cugd_avedx 1 / 3 (tests/phys/cu_g3)
-phys.bl_pbl_physics   physics.bl_pbl_physics   4   column_verified   QNSE PBL without the EDKF mass flux, mfshconv = 0 (tests/phys/bl_qnse)
-phys.sf_sfclay_physics   physics.sf_sfclay_physics   4   column_verified   QNSE surface layer (tests/phys/bl_qnse)

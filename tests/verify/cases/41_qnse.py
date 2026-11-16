@@ -5,8 +5,6 @@ against its WRF v4.8.0 real*8 run (wrfref workflow of Xassemblianist/cppwrf-data
 run_P1_r8 / run_P4_r8 with physics.bl_pbl_physics = 4, physics.sf_sfclay_physics = 4, physics.mfshconv = 0; Q4 with
 wrfrst at 30 min).
 
-Pending (not loaded) until port_c17_data.tar holds the references; then move it to tests/verify/cases/.
-
 CASES: see tests/verify/cases/__init__.py."""
 from cases.common import WR  # noqa: F401
 

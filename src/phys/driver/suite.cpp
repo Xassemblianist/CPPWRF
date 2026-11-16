@@ -513,10 +513,11 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   if (o.cu_physics == 5) {  // g3init: zeros (no restart) and the restart fields
     mk3(cugd_tten, g, "cugd_tten"); mk3(cugd_qvten, g, "cugd_qvten"); mk3(cugd_ttens, g, "cugd_ttens");
     mk3(cugd_qvtens, g, "cugd_qvtens"); mk3(cugd_qcten, g, "cugd_qcten");
-    for (auto [f, n] : {std::pair<Field2*, const char*>{&apr_gr, "apr_gr"}, {&apr_w, "apr_w"}, {&apr_mc, "apr_mc"},
-                        {&apr_st, "apr_st"}, {&apr_as, "apr_as"}, {&apr_capma, "apr_capma"}, {&apr_capme, "apr_capme"},
-                        {&apr_capmi, "apr_capmi"}, {&mass_flux, "mass_flux"}, {&xmb_shallow, "xmb_shallow"}})
-      *f = Field2(g, Stagger::M, n);
+    const std::pair<Field2*, const char*> g3_2d[] = {
+        {&apr_gr, "apr_gr"}, {&apr_w, "apr_w"}, {&apr_mc, "apr_mc"}, {&apr_st, "apr_st"}, {&apr_as, "apr_as"},
+        {&apr_capma, "apr_capma"}, {&apr_capme, "apr_capme"}, {&apr_capmi, "apr_capmi"}, {&mass_flux, "mass_flux"},
+        {&xmb_shallow, "xmb_shallow"}};
+    for (const auto& [f, n] : g3_2d) *f = Field2(g, Stagger::M, n);
   }
   mk3(zero3_, g, "zero3");
   dzs.assign(o.num_soil_layers, 0.0);
