@@ -15,6 +15,7 @@
 #include "phys/driver/wrf_constants.hpp"
 #include "phys/fogdes/fogdes.hpp"
 #include "phys/lsm_noah/noah.hpp"
+#include "phys/lsm_ruc/ruc.hpp"
 #include "phys/lsm_slab/slab.hpp"
 #include "phys/sf_pxsfclay/pxsfclay.hpp"
 
@@ -772,6 +773,74 @@ struct KSlab {
   }
 };
 
+// RUCLSMSCHEME (module_surface_driver.F:3553-3712, fractional_seaice = 0): ALBBCK = SEAICE_ALBEDO_DEFAULT on the
+// sea-ice points, LSMRUC (module_sf_ruclsm.F; level kts of dz8w, p_phy = grid%p_hyd, t_phy, qv, qc, rho;
+// frpcpn = .true.: SR is passed), CQS / CHS for the 2 m diagnostics and SFCDIAGS_RUCLSM
+struct KRuc {
+  C3 t3d, qv3d, qc3d, p3d, rho3d, dz8w;
+  C2 rainbl, rainncv, snowncv, graupelncv, sr, glw, gsw, flhc, flqc, xice, xland, tmn, shdmin, shdmax, cpm, cqs2,
+      chs2, psfc;
+  CI2 ivgtyp, isltyp;
+  V2 albbck, chs, cqs, vegfra, snow, snowh, snowc, canwat, snoalb, albedo, emiss, lai, mavail, sfcexc, z0, znt, tsk,
+      hfx, qfx, lh, sfcevp, sfcrunoff, udrunoff, acrunoff, grdflx, acsnow, acsnom, qvg, qcg, dew, qsfc, qsg, chklowq,
+      soilt1, tsnav, smstav, smstot, rhosnf, precipfr, snowfallac, t2, th2, q2;
+  V3 smois, sh2o, tslb, smfr3d, keepfr3dflag;
+  const ruc::RucTables* tb;
+  ruc::LsmConfig cf;
+  real seaice_albedo_default;
+  CPPWRF_HD void operator()(int i, int j) const {
+    using namespace wrfc;
+    if (xice(i, j) >= cf.xice_threshold && xice(i, j) <= real(1.)) albbck(i, j) = seaice_albedo_default;
+    ruc::LsmForcing in{};
+    in.rainbl = rainbl(i, j);
+    in.rainncv = rainncv.p ? rainncv(i, j) : real(0.);
+    in.snowncv = snowncv.p ? snowncv(i, j) : real(0.);
+    in.graupelncv = graupelncv.p ? graupelncv(i, j) : real(0.);
+    in.frzfrac = sr(i, j);
+    in.glw = glw(i, j); in.gsw = gsw(i, j); in.albbck = albbck(i, j); in.flhc = flhc(i, j); in.flqc = flqc(i, j);
+    in.chs = chs(i, j); in.xice = xice(i, j); in.xland = xland(i, j); in.tbot = tmn(i, j);
+    in.shdmin = shdmin(i, j); in.shdmax = shdmax(i, j);
+    in.t3d = t3d(i, j, 0); in.qv3d = qv3d(i, j, 0); in.qc3d = qc3d(i, j, 0); in.p8w = p3d(i, j, 0);
+    in.rho3d = rho3d(i, j, 0); in.z3d = dz8w(i, j, 0);
+    in.ivgtyp = ivgtyp(i, j); in.isltyp = isltyp(i, j);
+    ruc::LsmState st{};
+    st.vegfra = vegfra(i, j); st.snow = snow(i, j); st.snowh = snowh(i, j); st.snowc = snowc(i, j);
+    st.canwat = canwat(i, j); st.snoalb = snoalb(i, j); st.alb = albedo(i, j); st.emiss = emiss(i, j);
+    st.lai = lai(i, j); st.mavail = mavail(i, j); st.sfcexc = sfcexc(i, j); st.z0 = z0(i, j); st.znt = znt(i, j);
+    st.soilt = tsk(i, j); st.hfx = hfx(i, j); st.qfx = qfx(i, j); st.lh = lh(i, j); st.sfcevp = sfcevp(i, j);
+    st.sfcrunoff = sfcrunoff(i, j); st.udrunoff = udrunoff(i, j); st.acrunoff = acrunoff(i, j);
+    st.grdflx = grdflx(i, j); st.acsnow = acsnow(i, j); st.snom = acsnom(i, j); st.qvg = qvg(i, j);
+    st.qcg = qcg(i, j); st.dew = dew(i, j); st.qsfc = qsfc(i, j); st.qsg = qsg(i, j); st.chklowq = chklowq(i, j);
+    st.soilt1 = soilt1(i, j); st.tsnav = tsnav(i, j); st.smavail = smstav(i, j); st.smmax = smstot(i, j);
+    st.rhosnf = rhosnf(i, j); st.precipfr = precipfr(i, j); st.snowfallac = snowfallac(i, j);
+    for (int k = 1; k <= cf.nzs; ++k) {
+      st.soilmois[k] = smois(i, j, k - 1); st.sh2o[k] = sh2o(i, j, k - 1); st.tso[k] = tslb(i, j, k - 1);
+      st.smfr3d[k] = smfr3d(i, j, k - 1); st.keepfr3dflag[k] = keepfr3dflag(i, j, k - 1);
+    }
+    ruc::lsmruc_point(cf, *tb, in, st);
+    vegfra(i, j) = st.vegfra; snow(i, j) = st.snow; snowh(i, j) = st.snowh; snowc(i, j) = st.snowc;
+    canwat(i, j) = st.canwat; snoalb(i, j) = st.snoalb; albedo(i, j) = st.alb; emiss(i, j) = st.emiss;
+    lai(i, j) = st.lai; mavail(i, j) = st.mavail; sfcexc(i, j) = st.sfcexc; z0(i, j) = st.z0; znt(i, j) = st.znt;
+    tsk(i, j) = st.soilt; hfx(i, j) = st.hfx; qfx(i, j) = st.qfx; lh(i, j) = st.lh; sfcevp(i, j) = st.sfcevp;
+    sfcrunoff(i, j) = st.sfcrunoff; udrunoff(i, j) = st.udrunoff; acrunoff(i, j) = st.acrunoff;
+    grdflx(i, j) = st.grdflx; acsnow(i, j) = st.acsnow; acsnom(i, j) = st.snom; qvg(i, j) = st.qvg;
+    qcg(i, j) = st.qcg; dew(i, j) = st.dew; qsfc(i, j) = st.qsfc; qsg(i, j) = st.qsg; chklowq(i, j) = st.chklowq;
+    soilt1(i, j) = st.soilt1; tsnav(i, j) = st.tsnav; smstav(i, j) = st.smavail; smstot(i, j) = st.smmax;
+    rhosnf(i, j) = st.rhosnf; precipfr(i, j) = st.precipfr; snowfallac(i, j) = st.snowfallac;
+    for (int k = 1; k <= cf.nzs; ++k) {
+      smois(i, j, k - 1) = st.soilmois[k]; sh2o(i, j, k - 1) = st.sh2o[k]; tslb(i, j, k - 1) = st.tso[k];
+      smfr3d(i, j, k - 1) = st.smfr3d[k]; keepfr3dflag(i, j, k - 1) = st.keepfr3dflag[k];
+    }
+    // CQS and CHS for the 2 m diagnostics, SFCDIAGS_RUCLSM
+    cqs(i, j) = flqc(i, j) / (mavail(i, j) * rho3d(i, j, 0));
+    chs(i, j) = flhc(i, j) / (cpm(i, j) * rho3d(i, j, 0));
+    real t2v = t2(i, j), th2v = th2(i, j), q2v = q2(i, j);
+    ruc::sfcdiags_ruclsm(hfx(i, j), qfx(i, j), tsk(i, j), qsfc(i, j), cqs(i, j), cqs2(i, j), chs2(i, j), t3d(i, j, 0),
+                         qv3d(i, j, 0), rho3d(i, j, 0), p3d(i, j, 0), psfc(i, j), cp, rcp, t2v, th2v, q2v);
+    t2(i, j) = t2v; th2(i, j) = th2v; q2(i, j) = q2v;
+  }
+};
+
 // sst_update = 1, every surface_driver call (module_surface_driver.F:1697-1850, lakemodel = 0): ice and water
 // points follow the SEAICE read from wrflowinp; TSK and the top soil level take the SST over water
 struct KSstUpdate {
@@ -1418,7 +1487,8 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
   }
   if (o_.isfflx != 0) {
     const int nsoil = o_.num_soil_layers;
-    if (o_.sf_surface_physics != 1)  // the LSM branches set RA (module_surface_driver.F:2740, 3543); the slab's does not
+    if (o_.sf_surface_physics != 1 && o_.sf_surface_physics != 3)  // the Noah / Noah-MP branches set RA
+      // (module_surface_driver.F:2740, 3543); the slab's and RUC's do not
       column_for(cols, KNoahRa{wspd.cview(), ust.cview(), ra.view()});
     auto run_seaice = [&]() {
       // ---- seaice_noah (module_sf_noah_seaice_drv.F), DT = model time step ----
@@ -1472,6 +1542,43 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
                              qfx.view(), lh.view(), tsk.view(), qsfc.view(), chklowq.view(), capg.view(), cqs2.view(),
                              sfcevp.view(), achfx.view(), aclhf.view(), q2.view(), t2.view(), th2.view(), tslb.view(),
                              sp, dtbl, dt, g_.nx});
+    } else if (o_.sf_surface_physics == 3) {
+      // ---- LSMRUC (module_sf_ruclsm.F) ----
+      if (s.P_QC < 0) throw std::runtime_error("RUC LSM: the microphysics must carry qc (qc_curr)");
+      KRuc k{};
+      k.t3d = prep.t_phy.cview(); k.qv3d = s.q_2[s.P_QV].cview(); k.qc3d = s.q_2[s.P_QC].cview();
+      k.p3d = prep.p_hyd.cview(); k.rho3d = prep.rho.cview(); k.dz8w = prep.dz8w.cview();
+      k.rainbl = rainbl.cview(); k.rainncv = rainncv.cview();
+      k.snowncv = snowncv_mp_ ? snowncv_mp_->cview() : C2{};
+      k.graupelncv = graupelncv_mp_ ? graupelncv_mp_->cview() : C2{};
+      k.sr = sr.cview(); k.glw = glw.cview(); k.gsw = gsw.cview(); k.flhc = flhc.cview(); k.flqc = flqc.cview();
+      k.xice = xice.cview(); k.xland = xland.cview(); k.tmn = tmn.cview(); k.shdmin = shdmin.cview();
+      k.shdmax = shdmax.cview(); k.cpm = cpm.cview(); k.cqs2 = cqs2.cview(); k.chs2 = chs2.cview();
+      k.psfc = psfc.cview(); k.ivgtyp = ivgtyp.cview(); k.isltyp = isltyp.cview();
+      k.albbck = albbck.view(); k.chs = chs.view(); k.cqs = cqs.view(); k.vegfra = vegfra.view(); k.snow = snow.view();
+      k.snowh = snowh.view(); k.snowc = snowc.view(); k.canwat = canwat.view(); k.snoalb = snoalb.view();
+      k.albedo = albedo.view(); k.emiss = emiss.view(); k.lai = lai.view(); k.mavail = mavail.view();
+      k.sfcexc = sfcexc.view(); k.z0 = z0.view(); k.znt = znt.view(); k.tsk = tsk.view(); k.hfx = hfx.view();
+      k.qfx = qfx.view(); k.lh = lh.view(); k.sfcevp = sfcevp.view(); k.sfcrunoff = sfcrunoff.view();
+      k.udrunoff = udrunoff.view(); k.acrunoff = acrunoff.view(); k.grdflx = grdflx.view(); k.acsnow = acsnow.view();
+      k.acsnom = acsnom.view(); k.qvg = qvg.view(); k.qcg = qcg.view(); k.dew = dew.view(); k.qsfc = qsfc.view();
+      k.qsg = qsg.view(); k.chklowq = chklowq.view(); k.soilt1 = soilt1.view(); k.tsnav = tsnav.view();
+      k.smstav = smstav.view(); k.smstot = smstot.view(); k.rhosnf = rhosnf.view(); k.precipfr = precipfr.view();
+      k.snowfallac = snowfallac.view(); k.t2 = t2.view(); k.th2 = th2.view(); k.q2 = q2.view();
+      k.smois = smois.view(); k.sh2o = sh2o.view(); k.tslb = tslb.view(); k.smfr3d = smfr3d.view();
+      k.keepfr3dflag = keepfr3dflag.view();
+      k.tb = d_ruc_tables_;
+      k.cf.dt = dtbl; k.cf.ktau = int(itimestep); k.cf.nzs = nsoil; k.cf.iswater = o_.iswater;
+      k.cf.isice = o_.isice; k.cf.xice_threshold = xice_threshold;
+      k.cf.myj = o_.bl_pbl_physics == 2 || o_.bl_pbl_physics == 4;  // myjpbl: MYJ or QNSE PBL
+      k.cf.frpcpn = true;                                          // SR is passed by first_rk_step_part1
+      k.cf.rdlai2d = o_.rdlai2d;
+      for (int l = 0; l < nsoil; ++l) k.cf.zs[l + 1] = real(zs[l]);
+      k.cf.c.cp = wrfc::cp; k.cf.c.rovcp = wrfc::rcp; k.cf.c.g0 = wrfc::g; k.cf.c.lv = wrfc::xlv;
+      k.cf.c.stbolt = wrfc::stbolt;
+      k.seaice_albedo_default = real(o_.seaice_albedo_default);
+      column_for(cols, k);
+      fatal_check();
     } else if (o_.sf_surface_physics == 2) {
       // ---- lsm (module_sf_noahdrv.F) ----
       seaice_lsm_pre();

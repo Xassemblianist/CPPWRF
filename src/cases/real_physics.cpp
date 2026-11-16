@@ -12,6 +12,7 @@
 // Every other surface field starts at zero (WRF allocates grid fields zeroed).
 #include <cmath>
 #include <filesystem>
+#include <memory>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -22,6 +23,8 @@
 #include "phys/driver/landuse_tables.hpp"
 #include "phys/driver/suite.hpp"
 #include "phys/lsm_noah/noah.hpp"
+#include "phys/lsm_ruc/ruc.hpp"
+#include "phys/lsm_ruc/ruc_tables.hpp"
 #include "wrf_io/namelist.hpp"
 #ifdef CPPWRF_HAVE_NETCDF
 #include <netcdf.h>
@@ -467,7 +470,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   }
   const std::vector<double> dzs = in.var("DZS", std::size_t(ns));
   for (int k = 0; k < ns; ++k) su.dzs[k] = dzs[k];
-  if (o.sf_surface_physics == 1) {
+  if (o.sf_surface_physics == 1 || o.sf_surface_physics == 3) {  // the slab's diffusion, RUC's levels
     const std::vector<double> zs = in.var("ZS", std::size_t(ns));
     for (int k = 0; k < ns; ++k) su.zs[k] = zs[k];
   }
@@ -510,6 +513,35 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     if (in.has("SMCREL")) put_soil(su.smcrel, in.var("SMCREL", n2 * ns));
     if (in.has("SNOWH")) put2(su.snowh, rd2("SNOWH"));
     if (in.has("CANWAT")) put2(su.canwat, rd2("CANWAT"));
+  } else if (o.sf_surface_physics == 3) {
+    // ---- bl_init / RUCLSMINIT (not a restart): ZNT from the RUC table, MAVAIL, SH2O and SMFR3D; the snow, canopy
+    // and SNOALB fields stay as in wrfinput, as do SOILT1, RHOSNF, SNOWFALLAC and ACRUNOFF (Registry i); LSMRUC's
+    // first step initialises the rest
+    phys::ruc::RucTables* tb = new phys::ruc::RucTables;
+    const std::unique_ptr<phys::ruc::RucTables> tb_own(tb);
+    const std::string err = phys::ruc::read_ruc_tables(o.table_dir, o.mminlu, *tb);
+    if (!err.empty()) throw std::runtime_error("real physics: " + err);
+    put2(su.snoalb, snoalb);
+    if (in.has("SNOWH")) put2(su.snowh, rd2("SNOWH"));
+    if (in.has("CANWAT")) put2(su.canwat, rd2("CANWAT"));
+    for (const auto& [n, f] : {std::pair<const char*, Field2*>{"SOILT1", &su.soilt1}, {"RHOSNF", &su.rhosnf},
+                               {"SNOWFALLAC", &su.snowfallac}, {"ACRUNOFF", &su.acrunoff}})
+      if (in.has(n)) put2(*f, rd2(n));
+    std::vector<double> sh2o(n2 * ns), smfr(n2 * ns), mav(mavail), znt(n2);
+    for (std::size_t p = 0; p < n2; ++p) {
+      const int vt = int(std::lround(lu[p])), st = int(std::lround(isl[p]));
+      if (vt < 1 || vt > tb->lucats || st < 1 || st > tb->slcats)
+        throw std::runtime_error("real physics: RUCLSMINIT: IVGTYP / ISLTYP out of the RUC tables' range");
+      real ts[phys::ruc::kA] = {}, sm[phys::ruc::kA] = {}, sw[phys::ruc::kA] = {}, fr[phys::ruc::kA] = {};
+      for (int k = 0; k < ns; ++k) { ts[k + 1] = real(tslb[p + n2 * k]); sm[k + 1] = real(smois[p + n2 * k]); }
+      real ma = real(mav[p]), z = real(z0[p]);
+      phys::ruc::ruclsminit_point(*tb, ns, vt, st, real(xice[p]), ts, sm, sw, fr, ma, z);
+      for (int k = 0; k < ns; ++k) { sh2o[p + n2 * k] = sw[k + 1]; smfr[p + n2 * k] = fr[k + 1]; }
+      mav[p] = ma; znt[p] = z;
+    }
+    put2(su.mavail, mav); put2(su.znt, znt);
+    put_soil(su.tslb, tslb); put_soil(su.smois, smois); put_soil(su.sh2o, sh2o); put_soil(su.smfr3d, smfr);
+    if (in.has("SMCREL")) put_soil(su.smcrel, in.var("SMCREL", n2 * ns));
   } else if (o.sf_surface_physics == 2) {
     // ---- bl_init / LSMINIT (Noah)
     phys::noah::NoahTables nt;

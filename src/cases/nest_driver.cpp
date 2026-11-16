@@ -245,6 +245,11 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
     if ((k == "phys.sf_surface_physics" || (k.size() > 18 && k.compare(k.size() - 18, 18, "sf_surface_physics") == 0)) &&
         root_cfg.get_int(k, 0) == 4)
       throw std::runtime_error("nested runs with Noah-MP (sf_surface_physics = 4) are not supported: WRF 4.8.0 aborts");
+  // RUC LSM with nests: the nest interpolation / feedback of the ruclsmscheme fields is not ported
+  for (const std::string& k : root_cfg.keys())
+    if ((k == "phys.sf_surface_physics" || (k.size() > 18 && k.compare(k.size() - 18, 18, "sf_surface_physics") == 0)) &&
+        root_cfg.get_int(k, 0) == 3)
+      throw std::runtime_error("nested runs with the RUC LSM (sf_surface_physics = 3) are not supported");
   // aerosol-aware Thompson: the nest's QNWFA2D / QNIFA2D (Registry "d" / "u") are not interpolated / fed back
   if (max_dom > 1 && root_cfg.get_int("phys.mp_physics", 0) == 28)
     throw std::runtime_error("nested runs with mp_physics = 28 (aerosol-aware Thompson) are not supported");

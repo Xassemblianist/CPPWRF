@@ -25,6 +25,8 @@
 #include "phys/driver/suite_internal.hpp"
 #include "phys/driver/wrf_constants.hpp"
 #include "phys/lsm_noah/noah.hpp"
+#include "phys/lsm_ruc/ruc.hpp"
+#include "phys/lsm_ruc/ruc_tables.hpp"
 #include "phys/lsm_slab/slab.hpp"
 #include "phys/sf_urban/urban_tables.hpp"
 
@@ -292,10 +294,10 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   dt_clock_ = wrf_time::from_seconds(g.dt);
   if ((o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 2 && o.sf_sfclay_physics != 4 && o.sf_sfclay_physics != 5 &&
        o.sf_sfclay_physics != 7) ||
-      (o.sf_surface_physics != 1 && o.sf_surface_physics != 2 && o.sf_surface_physics != 4) ||
+      (o.sf_surface_physics < 1 || o.sf_surface_physics > 4) ||
       (o.bl_pbl_physics != 0 && o.bl_pbl_physics != 1 && o.bl_pbl_physics != 2 && o.bl_pbl_physics != 4 &&
        o.bl_pbl_physics != 5 && o.bl_pbl_physics != 7 && o.bl_pbl_physics != 8))
-    throw std::runtime_error("PhysicsSuite: only sf_sfclay_physics=1|2|4|5|7, sf_surface_physics=1|2|4, "
+    throw std::runtime_error("PhysicsSuite: only sf_sfclay_physics=1|2|4|5|7, sf_surface_physics=1|2|3|4, "
                              "bl_pbl_physics=0|1|2|4|5|7|8 (the PX land surface, sf_surface_physics=7, is not ported)");
   // module_physics_init: MYNNPBLSCHEME needs mynnsfc, sfclay or myjsfc (isfc 5, 1 or 2: all of the above).
   // The sea-ice wrappers of sfclayrev / MYJSFC are verified with YSU / MYJ only (no MYNN reference with sea ice)
@@ -474,7 +476,8 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: seaice_thickness_opt/seaice_snowdepth_opt 1 need ICEDEPTH/SNOWSI input");
   if (o.seaice_albedo_opt != 0)
     throw std::runtime_error("PhysicsSuite: seaice_albedo_opt 1 and 2 are not supported (2 needs ALBSI input)");
-  if (o.num_soil_layers > noah::kMaxSoilLevels) throw std::runtime_error("PhysicsSuite: too many soil layers");
+  if (o.num_soil_layers > (o.sf_surface_physics == 3 ? ruc::kMaxSoil : noah::kMaxSoilLevels))
+    throw std::runtime_error("PhysicsSuite: too many soil layers");
   // check_a_mundo sets num_soil_layers = 4 for Noah (SFLX scales ET(1:4) only)
   if (o.sf_surface_physics == 2 && o.num_soil_layers != 4)
     throw std::runtime_error("PhysicsSuite: Noah requires num_soil_layers=4");
@@ -487,6 +490,16 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
       throw std::runtime_error("PhysicsSuite: sst_update=1 with the slab LSM (sf_surface_physics=1) is not supported");
     thc = Field2(g, Stagger::M, "thc");
     capg = Field2(g, Stagger::M, "capg");
+  }
+  if (o.sf_surface_physics == 3) {  // RUC LSM: check_a_mundo's 6 or 9 levels; the ported configuration only
+    if (o.num_soil_layers != 6 && o.num_soil_layers != 9)
+      throw std::runtime_error("PhysicsSuite: the RUC LSM (sf_surface_physics=3) requires num_soil_layers=6 or 9");
+    if (o.fractional_seaice == 1)
+      throw std::runtime_error("PhysicsSuite: fractional_seaice=1 with the RUC LSM is not ported");
+    if (o.sst_update == 1)
+      throw std::runtime_error("PhysicsSuite: sst_update=1 with the RUC LSM (sf_surface_physics=3) is not supported");
+    if (o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 2)  // MYNNSFC has lsm_ruc branches (not ported)
+      throw std::runtime_error("PhysicsSuite: the RUC LSM is ported with sf_sfclay_physics=1 or 2 only");
   }
   if (o.sf_surface_physics == 4) {
     if (o.num_soil_layers != 4) throw std::runtime_error("PhysicsSuite: Noah-MP requires num_soil_layers=4");
@@ -563,6 +576,19 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
       urban::check_urban_table_options(uo, path);
       urb_ = std::make_unique<UrbanFields>(g, gs_);
     }
+  } else if (o.sf_surface_physics == 3) {
+    soilt1 = Field2(g, Stagger::M, "soilt1"); tsnav = Field2(g, Stagger::M, "tsnav");
+    qvg = Field2(g, Stagger::M, "qvg"); qsg = Field2(g, Stagger::M, "qsg"); qcg = Field2(g, Stagger::M, "qcg");
+    dew = Field2(g, Stagger::M, "dew"); rhosnf = Field2(g, Stagger::M, "rhosnf");
+    snowfallac = Field2(g, Stagger::M, "snowfallac"); precipfr = Field2(g, Stagger::M, "precipfr");
+    acrunoff = Field2(g, Stagger::M, "acrunoff");
+    if (o.sf_sfclay_physics != 5) cqs = Field2(g, Stagger::M, "cqs");
+    mk3(smfr3d, gs_, "smfr3d"); mk3(keepfr3dflag, gs_, "keepfr3dflag");
+    auto h = std::make_unique<ruc::RucTables>();
+    const std::string err = ruc::read_ruc_tables(o.table_dir, o.mminlu, *h);
+    if (!err.empty()) throw std::runtime_error("PhysicsSuite: RUC LSM tables: " + err);
+    d_ruc_tables_ = static_cast<ruc::RucTables*>(dev_alloc(sizeof(*h)));
+    copy_to_dev(d_ruc_tables_, h.get(), sizeof(*h));
   } else if (o.sf_surface_physics == 4) {
     auto mk2 = [&](Field2& f, const char* n) { f = Field2(g, Stagger::M, n); };
     mk2(xlat_sfc, "xlat_sfc"); mk2(xlong_sfc, "xlong_sfc");
@@ -942,6 +968,7 @@ void PhysicsSuite::init_noahmp(bool fndsnowh) {
 
 PhysicsSuite::~PhysicsSuite() {
   if (d_noahmp_tables_) dev_free(d_noahmp_tables_);
+  if (d_ruc_tables_) dev_free(d_ruc_tables_);
   if (d_sfclay_tables_) dev_free(d_sfclay_tables_);
   if (d_kf_tables_) dev_free(d_kf_tables_);
   if (d_bmj_tables_) dev_free(d_bmj_tables_);
@@ -1010,6 +1037,11 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
   }
   if (o_.tmn_update == 1)
     for (Field2* f : {&tyr, &tyra, &tdly}) v.emplace_back("sfc_" + f->name(), f);
+  if (o_.sf_surface_physics == 3) {  // LSMRUC's state (wrfrst: SOILT1, TSNAV, QVG, QSG, QCG, RHOSNF, ...)
+    for (Field2* f : {&soilt1, &tsnav, &qvg, &qsg, &qcg, &dew, &rhosnf, &snowfallac, &precipfr, &acrunoff})
+      v.emplace_back("sfc_" + f->name(), f);
+    if (o_.sf_sfclay_physics != 5) v.emplace_back("sfc_cqs", &cqs);
+  }
   if (o_.sf_surface_physics == 1) {  // THC and CAPG are restart fields (phy_init does not run landuse_init then)
     v.emplace_back("sfc_thc", &thc);
     v.emplace_back("sfc_capg", &capg);
@@ -1073,6 +1105,10 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
         v.emplace_back("sfc_" + f->name(), f);
     if (o_.tke_budget == 1)
       for (Field3* f : {&qshear, &qbuoy, &qdiss, &qwt, &dqke}) v.emplace_back("sfc_" + f->name(), f);
+  }
+  if (o_.sf_surface_physics == 3) {
+    v.emplace_back("sfc_smfr3d", &smfr3d);
+    v.emplace_back("sfc_keepfr3dflag", &keepfr3dflag);
   }
   if (o_.sf_surface_physics == 4) {
     for (Field3* f : {&tsnoxy, &snicexy, &snliqxy, &zsnsoxy, &albsoildirxy, &albsoildifxy, &smoiseq, &acc_etranixy})
@@ -1319,6 +1355,10 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
   if (o_.prec_acc_opt) v.insert(v.end(), {&prec_acc_c, &prec_acc_nc, &snow_acc_nc});
   v.insert(v.end(), clwrf_.begin(), clwrf_.end());
   if (o_.sf_surface_physics == 1) v.push_back(&capg);  // THC: phy_init's landuse_init value (WrfHistory)
+  if (o_.sf_surface_physics == 3) {
+    v.insert(v.end(), {&soilt1, &tsnav, &qvg, &qsg, &qcg, &dew, &rhosnf, &snowfallac, &precipfr, &acrunoff});
+    if (o_.sf_sfclay_physics != 5) v.push_back(&cqs);
+  }
   if (o_.fdda.grid_fdda == 1) v.insert(v.end(), {&mu_ndg_old, &mu_ndg_new});
   if (o_.cu_physics == 2) v.insert(v.end(), {&cldefi, &convcld});
   if (o_.cu_physics == 5)
@@ -1339,6 +1379,7 @@ std::vector<const Field3*> PhysicsSuite::fields3() const {
   if (o_.sf_surface_physics == 4) {
     v.insert(v.end(), {&tsnoxy, &snicexy, &snliqxy, &zsnsoxy, &albsoildirxy, &albsoildifxy, &smoiseq, &acc_etranixy});
   }
+  if (o_.sf_surface_physics == 3) v.insert(v.end(), {&smfr3d, &keepfr3dflag});
   if (o_.gwd_opt == 1) v.insert(v.end(), {&dtaux3d, &dtauy3d});
   if (o_.tmn_update == 1) v.push_back(&tlag);
   if (o_.bl_pbl_physics == 8) v.insert(v.end(), {&wu_tur, &wv_tur, &wt_tur, &wq_tur});

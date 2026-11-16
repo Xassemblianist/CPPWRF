@@ -612,10 +612,10 @@ CPPWRF_HD inline void soil(const Geo& g, const Atm& a, const Consts& c, const Ru
 }
 
 // SICE: snow-free sea ice (tice, rhosice unused there)
-CPPWRF_HD inline void sice(const Geo& g, const Atm& a, const Consts& c, const RucTables& tb, real prcpms, real rainf,
-                           real emiss, real rnet, const real* capice, const real* thdifice, real* tso, real& dew,
-                           real& soilt, real& qvg, real& qsg, real& qcg, real& eeta, real& qfx, real& hfx, real& s,
-                           real& evapl, real& prcpl, real& fltot) {
+CPPWRF_HD inline void sice_balance(const Geo& g, const Atm& a, const Consts& c, const RucTables& tb, real prcpms,
+                                   real rainf, real emiss, real rnet, const real* capice, const real* thdifice,
+                                   real* tso, real& dew, real& soilt, real& qvg, real& qsg, real& qcg, real& eeta,
+                                   real& qfx, real& hfx, real& s, real& evapl, real& prcpl, real& fltot) {
   const int nzs = g.nzs, nzs1 = nzs - 1;
   const real delt = g.delt, cp = c.cp;
   const real cvw = c.cw;
@@ -1686,8 +1686,8 @@ CPPWRF_HD inline void sfctmp(const Geo& g, const Atm& a, const Consts& c, const 
         p.smelt = 0;
         fs.runoff1 = 0;
         fs.runoff2 = 0;
-        sice(g, at, c, tb, p.prcpms, rainf, real(0.98), rnet, capice, thdifice, ts1ds, fs.dew, soilts, qvgs, qsgs, qcgs,
-             fs.eeta, fs.qfx, fs.hfx, fs.s, fs.evapl, fs.prcpl, fs.fltot);
+        sice_balance(g, at, c, tb, p.prcpms, rainf, real(0.98), rnet, capice, thdifice, ts1ds, fs.dew, soilts, qvgs,
+                     qsgs, qcgs, fs.eeta, fs.qfx, fs.hfx, fs.s, fs.evapl, fs.prcpl, fs.fltot);
         p.edir1 = p.eeta * real(1.e-3);
         p.ec1 = 0;
         p.ett1 = 0;
@@ -1837,8 +1837,8 @@ CPPWRF_HD inline void sfctmp(const Geo& g, const Atm& a, const Consts& c, const 
       if (p.alb != albice) gswnew = p.gsw / (real(1.) - p.alb) * (real(1.) - albice);
       p.alb = albice;
       rnet = gswnew + xinet;
-      sice(g, at, c, tb, p.prcpms, rainf, p.emiss, rnet, capice, thdifice, p.ts1d, p.dew, p.soilt, p.qvg, p.qsg, p.qcg,
-           p.eeta, p.qfx, p.hfx, p.s, p.evapl, p.prcpl, p.fltot);
+      sice_balance(g, at, c, tb, p.prcpms, rainf, p.emiss, rnet, capice, thdifice, p.ts1d, p.dew, p.soilt, p.qvg,
+                   p.qsg, p.qcg, p.eeta, p.qfx, p.hfx, p.s, p.evapl, p.prcpl, p.fltot);
       p.edir1 = p.eeta * real(1.e-3);
       p.ec1 = 0;
       p.ett1 = 0;

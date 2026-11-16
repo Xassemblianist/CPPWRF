@@ -849,6 +849,36 @@ class TestValidationAndWarnings(unittest.TestCase):
         t.translate()
         self.assertIn("mp_physics = 4 (WSM5) is supported for real-data runs only", " ".join(t.errors))
 
+    def test_ruc_lsm(self):
+        # sf_surface_physics = 3 (module_sf_ruclsm.F): 6 or 9 soil levels (check_a_mundo), sfclayrev or MYJSFC, a
+        # microphysics with qc; column-verified (tier warning); MYNNSFC, mosaic_lu / mosaic_soil, sst_update, nests
+        # and other level counts are errors
+        def phys(extra, sfc=1, pbl=1, mp=6, nl=9, more=""):
+            t = WrfTranslator(parse_namelist(real_case(f"""
+            &time_control /
+            &domains time_step = 60 /
+            &physics mp_physics = {mp}, sf_sfclay_physics = {sfc}, sf_surface_physics = 3, bl_pbl_physics = {pbl},
+                     num_soil_layers = {nl}{extra} /
+            &dynamics /
+            {more}""")))
+            gen = t.translate()
+            return t.errors, t.warnings, gen.get("phys", {})
+        for nl, sfc, pbl in ((9, 1, 1), (6, 1, 1), (9, 2, 2)):
+            err, warn, p = phys("", sfc, pbl, nl=nl)
+            self.assertEqual(err, [])
+            self.assertEqual((p["sf_surface_physics"], p["num_soil_layers"]), (3, nl))
+            self.assertIn("sf_surface_physics = 3: verification tier column_verified", " ".join(warn))
+        err, _, p = phys(", rdlai2d = .true.")
+        self.assertEqual((err, p["rdlai2d"]), ([], True))
+        for kw, msg in (({"nl": 4}, "num_soil_layers = 4"), ({"sfc": 5, "pbl": 5}, "MYNN surface layer"),
+                        ({"mp": 0}, "cloud water"), ({"extra": ", mosaic_lu = 1"}, "mosaic_lu"),
+                        ({"extra": ", mosaic_soil = 1"}, "mosaic_soil"),
+                        ({"extra": ", fractional_seaice = 1"}, "fractional_seaice = 1"),
+                        ({"extra": ", sst_update = 1"}, "sst_update = 1 with sf_surface_physics = 3")):
+            kw.setdefault("extra", "")
+            err, _, _ = phys(**kw)
+            self.assertIn(msg, " ".join(err), kw)
+
     def test_force_read_thompson(self):
         def phys(mp, extra):
             t = WrfTranslator(parse_namelist(real_case(f"""

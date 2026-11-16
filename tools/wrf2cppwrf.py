@@ -425,6 +425,7 @@ SUPPORTED_OPTIONS = {
         0: "None / off",
         1: "5-layer thermal diffusion land surface (slab)",
         2: "Unified Noah land surface model (4 soil layers)",
+        3: "RUC land surface model (6 or 9 soil levels)",
         4: "Noah-MP land surface model (v5.1.2, 4 soil layers)",
     },
     "bl_pbl_physics": {
@@ -551,6 +552,8 @@ DEFAULT_ONLY_OPTIONS = {
     # physics and surface options of WRF's drivers that CPPWRF does not port (they change results or the output)
     ("physics", "ua_phys"): (False, "UA Noah snow physics"),
     ("physics", "sf_surface_mosaic"): (0, "Noah mosaic land use"),
+    ("physics", "mosaic_lu"): (0, "RUC LSM mosaic land use"),
+    ("physics", "mosaic_soil"): (0, "RUC LSM mosaic soil"),
     ("physics", "sf_ocean_physics"): (0, "ocean mixed layer / 3-D ocean model"),
     ("physics", "omlcall"): (0, "ocean mixed layer"),
     ("physics", "aercu_opt"): (0, "aerosol-aware cumulus"),
@@ -1963,6 +1966,19 @@ class WrfTranslator:
                                    "CPPWRF supports 0 and 1.")
                     elif ifsnow != 1:
                         sections["phys"]["ifsnow"] = ifsnow
+                elif sf_surface == 3:
+                    # check_a_mundo: RUC keeps 6 or 9 levels (other values become 6: rejected here)
+                    num_soil = self.get_opt("physics", "num_soil_layers", 6)
+                    if num_soil not in (6, 9):
+                        self.error(f"WRF num_soil_layers = {num_soil} is not supported with sf_surface_physics = 3; "
+                                   "CPPWRF requires the RUC LSM's 6 or 9 soil levels.")
+                    else:
+                        sections["phys"]["num_soil_layers"] = num_soil
+                    if sf_sfclay not in (1, 2):
+                        self.error("WRF sf_surface_physics = 3 (RUC) is supported with sf_sfclay_physics = 1 or 2 only "
+                                   "(the MYNN surface layer's RUC branches are not ported).")
+                    if mp_physics == 0:
+                        self.error("WRF sf_surface_physics = 3 (RUC) needs a microphysics with cloud water (qc_curr).")
                 elif sf_surface != 0:
                     # check_a_mundo uses 4 layers for Noah and Noah-MP, but the history output keeps the
                     # namelist's soil dimension (P1 with num_soil_layers = 5: same values, ZS/TSLB/SMOIS shapes differ)
@@ -2005,8 +2021,8 @@ class WrfTranslator:
                 if sstu not in (0, 1):
                     self.error(f"WRF sst_update = {sstu} is not supported; CPPWRF supports 0 and 1.")
                 elif sstu == 1:
-                    if sf_surface == 1:
-                        self.error("WRF sst_update = 1 with sf_surface_physics = 1 (slab) is not supported "
+                    if sf_surface in (1, 3):
+                        self.error(f"WRF sst_update = 1 with sf_surface_physics = {sf_surface} is not supported "
                                    "(no reference run).")
                     if self.get_opt("time_control", "io_form_auxinput4", 0) == 0:
                         self.error("WRF sst_update = 1 needs io_form_auxinput4 /= 0 (as WRF).")
@@ -2418,7 +2434,8 @@ class WrfTranslator:
         usemonalb, rdlai2d = self.get_opt("physics", "usemonalb", False), self.get_opt("physics", "rdlai2d", False)
         if case_name == "real" and bool(usemonalb):
             sections.setdefault("phys", {})["usemonalb"] = True
-        if 2 in self.get_opt_list("physics", "sf_surface_physics")[:max(1, self._max_dom)] and bool(rdlai2d):
+        if any(v in (2, 3) for v in self.get_opt_list("physics", "sf_surface_physics")[:max(1, self._max_dom)]) \
+                and bool(rdlai2d):
             sections.setdefault("phys", {})["rdlai2d"] = True
 
         # surface fluxes (surface layer, LSM and the diffusion's surface flux), cloud fractions in RRTMG
@@ -2673,6 +2690,8 @@ class WrfTranslator:
             if 4 in self.get_opt_list("physics", "sf_surface_physics")[:max_dom]:
                 # wrf.exe 4.8.0 aborts in the nest run's first history output (heap corruption in open_w_dataset)
                 self.error("WRF sf_surface_physics = 4 (Noah-MP) with nests is not supported: WRF 4.8.0 aborts.")
+            if 3 in self.get_opt_list("physics", "sf_surface_physics")[:max_dom]:
+                self.error("WRF sf_surface_physics = 3 (RUC) with nests is not supported by CPPWRF.")
 
             feedback = self.get_dom_opt("domains", "feedback", 0, 1)
             if feedback not in (0, 1):

@@ -23,3 +23,4 @@
 #   phys.mp_physics   physics.mp_physics   4   column_verified   WSM5 (tests/phys/mp_wsm5)
 phys.sf_urban_physics   physics.sf_urban_physics   1   column_verified   single-layer urban canopy model with Noah (tests/phys/sf_urban)
 phys.use_wudapt_lcz     physics.use_wudapt_lcz     1   column_verified   SLUCM on URBPARM_LCZ.TBL (tests/phys/sf_urban)
+phys.sf_surface_physics   physics.sf_surface_physics   3   column_verified   RUC LSM, 6 / 9 levels (tests/phys/lsm_ruc)

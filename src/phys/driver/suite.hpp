@@ -42,6 +42,10 @@
 #include "phys/sf_mynn/mynnsfc_common.hpp"
 #include "phys/sf_sfclayrev/sfclayrev.hpp"
 
+namespace cppwrf::phys::ruc {
+struct RucTables;
+}
+
 namespace cppwrf::phys::driver {
 
 // Integer 2D field (ivgtyp, isltyp, kpbl), mass points, same layout as Field2.
@@ -88,7 +92,8 @@ struct FddaOptions {
 struct SuiteOptions {
   int sf_sfclay_physics = 1;     // 1 = SFCLAYREVSCHEME, 2 = MYJSFCSCHEME, 4 = QNSESFCSCHEME, 5 = MYNNSFCSCHEME,
                                  // 7 = PXSFCSCHEME
-  int sf_surface_physics = 2;    // 1 = SLABSCHEME, 2 = LSMSCHEME (Noah), 4 = NOAHMPSCHEME (Noah-MP v5.1.2)
+  int sf_surface_physics = 2;    // 1 = SLABSCHEME, 2 = LSMSCHEME (Noah), 3 = RUCLSMSCHEME,
+                                 // 4 = NOAHMPSCHEME (Noah-MP v5.1.2)
   int bl_pbl_physics = 1;        // 1 = YSUSCHEME, 2 = MYJPBLSCHEME, 4 = QNSEPBLSCHEME, 5 = MYNNPBLSCHEME,
                                  // 7 = ACMPBLSCHEME, 8 = BOULACSCHEME
   int mfshconv = 1;              // QNSE's EDKF mass flux (WRF's default 1: module_bl_mfshconvpbl.F; or 0)
@@ -249,6 +254,9 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   IntField2 isnowxy, cropcat, pgsxy;
   IntField2 noahmp_ranland;  // not in the restart file (NoahmpIO is initialised again)
   Field2 thc, capg;           // slab (sf_surface_physics == 1): thermal inertia (landuse_init), heat capacity
+  // RUC LSM (sf_surface_physics == 3): package ruclsmscheme and LSMRUC's other grid arrays
+  Field2 soilt1, tsnav, qvg, qsg, qcg, dew, rhosnf, snowfallac, precipfr, acrunoff;
+  Field3 smfr3d, keepfr3dflag;
   Field3 tsnoxy, snicexy, snliqxy, zsnsoxy, albsoildirxy, albsoildifxy, smoiseq, acc_etranixy;
   std::vector<double> dzs;            // soil layer thicknesses (m)
   std::vector<double> zs;             // soil layer centre depths (m; the slab's diffusion)
@@ -415,6 +423,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   noah::NoahTables noah_tables_;
   noahmp::NoahmpTables noahmp_tables_;
   noahmp::NoahmpTables* d_noahmp_tables_ = nullptr;              // device copy, uploaded once
+  ruc::RucTables* d_ruc_tables_ = nullptr;                       // RUC LSM tables (RUCLSMINIT), device copy
   sfclayrev::SFClayRevTables<real>* d_sfclay_tables_ = nullptr;  // device copy, uploaded once
   sf_myjsfc::MYJSFCTableManager myjsfc_tables_;                  // host/device copy, uploaded once
   std::unique_ptr<sf_qnsesfc::QNSESFCTableManager> qnsesfc_tables_;  // QNSESFCINIT's (sf_sfclay_physics = 4)
