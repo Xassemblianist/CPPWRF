@@ -7,6 +7,7 @@
 #include "core/column_work.hpp"
 #include "phys/bl_gwdo/gwdo.hpp"
 #include "phys/bl_myj/myjpbl.hpp"
+#include "phys/bl_qnse/mfshconv.hpp"
 #include "phys/bl_qnse/qnsepbl.hpp"
 #include "phys/bl_mynn/mynnedmf.hpp"
 #include "phys/bl_ysu/ysu.hpp"
@@ -387,9 +388,24 @@ void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
         kpbl.view(), mixht.view(), pt.rublten.view(), pt.rvblten.view(), pt.rthblten.view(), pt.rqvblten.view(),
         pt.rqcblten.view(), pt.rqiblten.view(), cols, dt, stepbl, g_.nz, /*has_qi=*/true);
   } else if (o_.bl_pbl_physics == 4) {
-    // QNSEPBLSCHEME (module_pbl_driver.F:1549-1592, mfshconv = 0): DT=dt, STEPBL=stepbl, PMID=p_phy, PINT=p8w,
-    // T=t_phy, EXNER=pi_phy, CWM=qc_curr (zero without qc), U/V=u_phy/v_phy, CORF=f, ELFLX=lh, HFX=hfx; WTHV_MF and
-    // LM_BL89 (the zeroed u_phytmp / v_phytmp) are not read. The tendencies are added to the zeroed RxBLTEN.
+    // QNSEPBLSCHEME (module_pbl_driver.F:1549-1592). mfshconv = 1: MFSHCONVPBL first (DT=dt, STEPBL=stepbl,
+    // DZ=dz8w, RHO=rho, PMID=p_phy, TH=th_phy, EXNER=pi_phy, QV=qv_curr, HFX, QFX, TKE=tke_pbl, RC_MF; HT, PINT, QC,
+    // U and V are not read): it assigns RTHBLTEN / RQVBLTEN (and 0 to RUBLTEN, RVBLTEN, RQCBLTEN: the zeros here);
+    // its WTHV / PLM_BL89 (u_phytmp / v_phytmp) are not read by QNSEPBL and are not computed. The tile of its
+    // vectorised exner (the libmvec lanes) is the domain's mass points (WRF's references: one patch, one tile).
+    if (o_.mfshconv == 1) {
+      mfshconv::MFSHCONVKernel km{};
+      km.dz = prep.dz8w.cview(); km.rho = prep.rho.cview(); km.pmid = prep.p_hyd.cview(); km.th = prep.th_phy.cview();
+      km.exner = prep.pi_phy.cview(); km.qv = s.q_2[s.P_QV].cview(); km.tke = tke_pbl.cview();
+      km.hfx = hfx.cview(); km.qfx = qfx.cview(); km.rc_mf = rc_mf.view();
+      km.rthblten = pt.rthblten.view(); km.rqvblten = pt.rqvblten.view();
+      km.dt = dt; km.stepbl = stepbl; km.nz = g_.nz;
+      km.tile_i0 = 0; km.tile_j0 = 0; km.tile_nx = g_.nx; km.tile_n = g_.nx * g_.ny;
+      mfshconv::run_mfshconv(km, cols);
+    }
+    // QNSEPBL: DT=dt, STEPBL=stepbl, PMID=p_phy, PINT=p8w, T=t_phy, EXNER=pi_phy, CWM=qc_curr (zero without qc),
+    // U/V=u_phy/v_phy, CORF=f, ELFLX=lh, HFX=hfx; WTHV_MF and LM_BL89 are not read. The tendencies are added to
+    // RxBLTEN (zeroed, or the EDKF's).
     const C2 ht_v = b.ht.uniform() ? slice0(zero3_) : C2{b.ht.data(), int(b.ht.layout().sj)};
     qnsepbl::QNSEPBLKernel k{};
     k.ht = ht_v; k.dz = prep.dz8w.cview(); k.pmid = prep.p_hyd.cview(); k.pint = prep.p_hyd_w.cview();

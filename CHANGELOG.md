@@ -20,6 +20,13 @@ a verified configuration, of a configuration key or of an output file is a new m
   two CPUs), perturbed starts and 24 h runs: no FP32 port defect, no output change. tools/bench/colab_fp32.sh
   --extra (GPU FP32 without FMA, CPU FP32) and --data; fp32_run.py's cases P4S / ACM7S / MORRS / SKVS, ACM7L / MORRL
   / SKVL and the perturbed-start E cases (data fp2_data.tar).
+- EDKF mass-flux shallow convection of the QNSE PBL (`mfshconv = 1`, WRF's default with bl_pbl_physics = 4), tier
+  **verified** (suite cases Q1M / Q4M against WRF real*8, CPU and CUDA FP64): WRF's module_bl_mfshconvpbl.F (theta_l / r_t,
+  the dry and cloudy updraft from the surface buoyancy flux with the BL89 upward length, the entrainment and
+  detrainment of COMPUTE_ENTR_DETR, the explicit mass-flux transport of theta_l and r_t, the convective cloud water
+  RC_MF, in the restart files) before QNSEPBL, with libmvec's pow lanes over the tile. Bit for bit with WRF's
+  compiled MFSHCONVPBL in tests/phys/bl_mfshconv (ctest test_phys_bl_mfshconv). A QNSE namelist without mfshconv
+  now runs WRF's default instead of stopping.
 - BouLac PBL (bl_pbl_physics = 8), tier **verified**: WRF's module_bl_boulac.F (pbl_height, the length
   scales up / down of Bougeault and Lacarrere, the TKE equation and the implicit diffusion of u, v, theta, qv and qc
   with the Troen-Mahrt counter-gradient term) for one column, over the revised MM5 or the Eta surface layer, without
@@ -31,8 +38,8 @@ a verified configuration, of a configuration key or of an output file is a new m
   module_bl_qnsepbl.F (MYJ's TKE scheme with the QNSE mixing length in stable layers, the QNSE stability functions
   of the exchange coefficients, the production / dissipation of TKE with libmvec's pow lanes) and module_sf_qnsesfc.F
   (QNSESFCINIT's QNSE stability-function tables, PRT0, the topographic Zilitinkevich factor, THZ0 from the surface
-  heat flux over land), with mfshconv = 0 only: the EDKF mass flux (WRF's default mfshconv = 1,
-  module_bl_mfshconvpbl.F) and QNSESFC_SEAICE_WRAPPER stay errors. Bit for bit with WRF's compiled routines in
+  heat flux over land), with mfshconv = 0 (the EDKF mass flux: the entry above); QNSESFC_SEAICE_WRAPPER stays an
+  error. Bit for bit with WRF's compiled routines in
   tests/phys/bl_qnse (ctest test_phys_bl_qnse) and suite cases Q1 / Q4 against WRF real*8 (CPU and CUDA FP64). New key `[phys] mfshconv` (default 1, as WRF's Registry).
 - Verification tiers of options: `data/option_tiers.txt` lists option values merged before their whole-model WRF
   comparison as column_verified (bit-identical to WRF's Fortran in a column driver) or unverified (ported only).

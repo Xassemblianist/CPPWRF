@@ -682,8 +682,8 @@ class TestValidationAndWarnings(unittest.TestCase):
 
     def test_qnse(self):
         # bl_pbl_physics = 4 (module_bl_qnsepbl.F) with sf_sfclay_physics = 4 (module_physics_init: 'use qnsesfc scheme
-        # for this pbl option'); column-verified (data/option_tiers.txt: a warning). Only mfshconv = 0 is ported (WRF's
-        # default 1 runs the EDKF mass flux, module_bl_mfshconvpbl.F); no sea-ice wrapper, no isfflx = 0
+        # for this pbl option'); column-verified (data/option_tiers.txt: a warning). mfshconv 0 or 1 (WRF's default 1
+        # runs the EDKF mass flux, module_bl_mfshconvpbl.F; column-verified too); no sea-ice wrapper, no isfflx = 0
         def phys(sfc, pbl, extra_phys="mfshconv = 0,", extra=""):
             t = WrfTranslator(parse_namelist(real_case(f"""
             &time_control /
@@ -699,9 +699,12 @@ class TestValidationAndWarnings(unittest.TestCase):
         self.assertEqual((gen["phys"]["sf_sfclay_physics"], gen["phys"]["bl_pbl_physics"], gen["phys"]["mfshconv"]),
                          (4, 4, 0))
         self.assertNotIn("verification tier", " ".join(warn))
-        for extra_phys in ("", "mfshconv = 1,"):
-            err, _, _ = phys(4, 4, extra_phys)
-            self.assertIn("mfshconv = 1", " ".join(err), extra_phys)
+        for extra_phys in ("", "mfshconv = 1,"):  # WRF's default: the EDKF mass flux, written to [phys]
+            err, warn, gen = phys(4, 4, extra_phys)
+            self.assertEqual((err, gen["phys"]["mfshconv"]), ([], 1), extra_phys)
+            self.assertNotIn("verification tier", " ".join(warn), extra_phys)
+        err, _, _ = phys(4, 4, "mfshconv = 2,")
+        self.assertIn("supports 0 and 1", " ".join(err))
         err, _, gen = phys(1, 1, "mfshconv = 1,")  # check_a_mundo resets it for the other PBL schemes
         self.assertEqual(err, [])
         self.assertNotIn("mfshconv", gen["phys"])

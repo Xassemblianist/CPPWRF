@@ -12,6 +12,7 @@
 #include "phys/bl_boulac/boulac.hpp"
 #include "phys/bl_gwdo/gwdo.hpp"
 #include "phys/bl_myj/myjpbl.hpp"
+#include "phys/bl_qnse/mfshconv.hpp"
 #include "phys/bl_qnse/qnsepbl.hpp"
 #include "phys/bl_mynn/mynnedmf.hpp"
 #include "phys/bl_ysu/ysu.hpp"
@@ -336,16 +337,15 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   if (o.bl_pbl_physics == 2 && o.sf_sfclay_physics != 2)
     throw std::runtime_error("PhysicsSuite: bl_pbl_physics=2 (MYJ) needs sf_sfclay_physics=2, as WRF");
   // QNSEPBLSCHEME: 'use qnsesfc scheme for this pbl option' (isfc 4); QNSESFC is ported with the QNSE PBL only (the
-  // other PBL schemes stop on isfc 4 in WRF, and no PBL scheme is unproven), without the EDKF mass flux (mfshconv = 1,
-  // module_bl_mfshconvpbl.F) and without QNSESFC_SEAICE_WRAPPER
+  // other PBL schemes stop on isfc 4 in WRF, and no PBL scheme is unproven), with or without the EDKF mass flux
+  // (mfshconv = 1 or 0: module_bl_mfshconvpbl.F before QNSEPBL) and without QNSESFC_SEAICE_WRAPPER
   if (o.bl_pbl_physics == 4 && o.sf_sfclay_physics != 4)
     throw std::runtime_error("PhysicsSuite: bl_pbl_physics=4 (QNSE) needs sf_sfclay_physics=4, as WRF");
   if (o.sf_sfclay_physics == 4 && o.bl_pbl_physics != 4)
     throw std::runtime_error("PhysicsSuite: sf_sfclay_physics=4 (QNSE surface layer) is supported with "
                              "bl_pbl_physics=4 only");
-  if (o.bl_pbl_physics == 4 && o.mfshconv != 0)
-    throw std::runtime_error("PhysicsSuite: bl_pbl_physics=4 with mfshconv=1 (the EDKF mass-flux shallow convection, "
-                             "module_bl_mfshconvpbl.F, WRF's default) is not ported; set phys.mfshconv = 0");
+  if (o.bl_pbl_physics == 4 && o.mfshconv != 0 && o.mfshconv != 1)
+    throw std::runtime_error("PhysicsSuite: mfshconv must be 0 or 1 (the EDKF mass flux of the QNSE PBL)");
   if (o.sf_sfclay_physics == 4 && o.fractional_seaice == 1)
     throw std::runtime_error("PhysicsSuite: sf_sfclay_physics=4 with fractional_seaice=1 (QNSESFC_SEAICE_WRAPPER) is "
                              "not ported");
@@ -643,6 +643,11 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   if (o.bl_pbl_physics == 4) {  // qnsepblinit (not restart): TKE_PBL = EPSQ2L = 0.01 (a restart reads it from wrfrst)
     qnsepbl::qnsepbl_reserve(g.columns());  // CUDA FP64: its column arrays in the work buffer
     tke_pbl.fill_host([](int, int, int) { return 0.01; });
+    // mfshconvpblinit zeroes the EDKF diagnostics only (not kept here); RC_MF starts at the Registry's 0
+    if (o.mfshconv == 1) {
+      mfshconv::mfshconv_reserve(g.columns());
+      mk3(rc_mf, g, "rc_mf");
+    }
   }
   if (o.bl_pbl_physics == 8) {  // boulacinit (not restart): TKE_PBL = 0.0001 (a restart reads it from wrfrst)
     tke_pbl.fill_host([](int, int, int) { return 0.0001; });
@@ -921,6 +926,7 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
     }
     for (Field3* f : {&wu_tur, &wv_tur, &wt_tur, &wq_tur}) v.emplace_back("sfc_" + f->name(), f);
   }
+  if (o_.bl_pbl_physics == 4 && o_.mfshconv == 1) v.emplace_back("sfc_rc_mf", &rc_mf);  // RC_MF (Registry r)
   if (o_.bl_pbl_physics == 5) {
     for (Field3* f : {&qke, &tsq, &qsq, &cov, &sh3d, &sm3d, &qc_bl, &qi_bl, &cldfra_bl})
       v.emplace_back("sfc_" + f->name(), f);
@@ -1192,6 +1198,7 @@ std::vector<const Field3*> PhysicsSuite::fields3() const {
   if (o_.gwd_opt == 1) v.insert(v.end(), {&dtaux3d, &dtauy3d});
   if (o_.tmn_update == 1) v.push_back(&tlag);
   if (o_.bl_pbl_physics == 8) v.insert(v.end(), {&wu_tur, &wv_tur, &wt_tur, &wq_tur});
+  if (o_.bl_pbl_physics == 4 && o_.mfshconv == 1) v.push_back(&rc_mf);
   if (o_.bl_pbl_physics == 5) {
     v.insert(v.end(), {&qke, &tsq, &qsq, &cov, &sh3d, &sm3d, &qc_bl, &qi_bl, &cldfra_bl});
     if (o_.bl_mynn_output > 0) v.insert(v.end(), {&edmf_a, &edmf_w, &edmf_thl, &edmf_qt, &edmf_ent, &edmf_qc});

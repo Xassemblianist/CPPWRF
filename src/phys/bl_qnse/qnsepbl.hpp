@@ -2,7 +2,7 @@
 #pragma once
 // Port of WRF 4.8.0 phys/module_bl_qnsepbl.F (qnsepbl, mixlen, prodq2, difcof, vdifh; vdifq and vdifv are MYJ's,
 // statement for statement, and come from bl_myj/myjpbl.hpp): the QNSE PBL scheme (bl_pbl_physics = 4) without the
-// EDKF mass flux (mfshconv = 0: WTHV_MF and LM_BL89 are zero and, as in WRF, not read).
+// EDKF mass flux (mfshconv = 1 runs bl_qnse/mfshconv.hpp before; WTHV_MF and LM_BL89 are, as in WRF, not read).
 
 #include "phys/bl_myj/myjpbl.hpp"
 

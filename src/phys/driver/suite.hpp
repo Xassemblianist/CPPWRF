@@ -89,7 +89,7 @@ struct SuiteOptions {
   int sf_surface_physics = 2;    // 1 = SLABSCHEME, 2 = LSMSCHEME (Noah), 4 = NOAHMPSCHEME (Noah-MP v5.1.2)
   int bl_pbl_physics = 1;        // 1 = YSUSCHEME, 2 = MYJPBLSCHEME, 4 = QNSEPBLSCHEME, 5 = MYNNPBLSCHEME,
                                  // 7 = ACMPBLSCHEME, 8 = BOULACSCHEME
-  int mfshconv = 1;              // QNSE's EDKF mass flux (WRF's default 1; only 0 is ported)
+  int mfshconv = 1;              // QNSE's EDKF mass flux (WRF's default 1: module_bl_mfshconvpbl.F; or 0)
   int icloud_bl = 1;             // MYNN subgrid clouds in the radiation (CLDFRA_BL, QC_BL, QI_BL)
   mynnedmf::Options mynn;        // bl_mynn_* options of the MYNN-EDMF PBL
   int bl_mynn_mixscalars = 0;    // MYNN mixing of WRF's generic scalar (not connected in WRF: no effect)
@@ -250,6 +250,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   Field3 exch_h, exch_m;              // M (WRF kme-sized; levels 0..nz-1 used)
   Field3 tke_pbl, el_pbl;             // MYJ PBL 3D TKE and master length scale (el_pbl: MYNN too; BouLac: TKE, dlk)
   Field3 wu_tur, wv_tur, wt_tur, wq_tur;  // BouLac (bl_pbl_physics = 8) turbulent fluxes (Registry r)
+  Field3 rc_mf;  // QNSE's EDKF mass flux (mfshconv = 1): its cloud water (Registry r), the only EDKF state
   // MYNN-EDMF state (bl_pbl_physics = 5): 2*TKE, variances, stability functions, subgrid clouds
   Field3 qke, tsq, qsq, cov, sh3d, sm3d, qc_bl, qi_bl, cldfra_bl;
   Field3 edmf_a, edmf_w, edmf_thl, edmf_qt, edmf_ent, edmf_qc;  // bl_mynn_output = 1

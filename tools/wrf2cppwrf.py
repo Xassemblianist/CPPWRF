@@ -431,7 +431,7 @@ SUPPORTED_OPTIONS = {
         0: "None / off",
         1: "YSU (Yonsei University) planetary boundary layer",
         2: "MYJ (Mellor-Yamada-Janjic) planetary boundary layer",
-        4: "QNSE (quasi-normal scale elimination) planetary boundary layer (column-verified, mfshconv = 0)",
+        4: "QNSE (quasi-normal scale elimination) planetary boundary layer (column-verified; mfshconv 0, 1)",
         5: "MYNN-EDMF planetary boundary layer",
         7: "ACM2 (Asymmetric Convective Model 2) planetary boundary layer",
         8: "BouLac (Bougeault-Lacarrere) TKE planetary boundary layer (column-verified, without BEP urban)",
@@ -2183,8 +2183,8 @@ class WrfTranslator:
                     self.error("WRF bl_pbl_physics = 8 (BouLac) needs sf_sfclay_physics = 1 or 2 "
                                "(module_physics_init: use sfclay or myjsfc scheme for this pbl option).")
                 # module_physics_init.F pbl_select: QNSE needs isfc = 4 (qnsesfc); QNSESFC is ported with the QNSE PBL
-                # only, without the EDKF mass flux (mfshconv = 1, WRF's default: module_bl_mfshconvpbl.F; check_a_mundo
-                # resets mfshconv to 0 for the other PBL schemes) and without QNSESFC_SEAICE_WRAPPER
+                # only, with or without the EDKF mass flux (mfshconv = 1, WRF's default: module_bl_mfshconvpbl.F;
+                # check_a_mundo resets mfshconv to 0 for the other PBL schemes), without QNSESFC_SEAICE_WRAPPER
                 if bl_pbl == 4 and sf_sfclay != 4:
                     self.error("WRF bl_pbl_physics = 4 (QNSE) needs sf_sfclay_physics = 4 "
                                "(module_physics_init: use qnsesfc scheme for this pbl option).")
@@ -2193,12 +2193,14 @@ class WrfTranslator:
                                "(QNSE) only by CPPWRF.")
                 mfshconv = self.get_opt_list("physics", "mfshconv")[:max(1, self._max_dom)] or [1]
                 if bl_pbl == 4:
-                    if any(v != 0 for v in mfshconv):
-                        self.error("WRF mfshconv = 1 (WRF's default with bl_pbl_physics = 4: the EDKF mass-flux shallow "
-                                   "convection of module_bl_mfshconvpbl.F) is not supported by CPPWRF; set "
-                                   "mfshconv = 0.")
+                    # the EDKF mass flux (WRF's default 1) or none; always written, so that the tier table sees it
+                    if any(v not in (0, 1) for v in mfshconv):
+                        self.error(f"WRF mfshconv = {mfshconv}: CPPWRF supports 0 and 1 (the EDKF mass-flux shallow "
+                                   "convection of module_bl_mfshconvpbl.F).")
+                    elif len(set(mfshconv)) > 1:
+                        self.error(f"WRF mfshconv = {mfshconv}: CPPWRF needs the same value on every domain.")
                     else:
-                        sections["phys"]["mfshconv"] = 0
+                        sections["phys"]["mfshconv"] = mfshconv[0]
                 if sf_sfclay == 4 and fsi == 1:
                     self.error("WRF sf_sfclay_physics = 4 with fractional_seaice = 1 (QNSESFC_SEAICE_WRAPPER) is not "
                                "supported by CPPWRF.")
