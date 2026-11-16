@@ -5,8 +5,6 @@ mfshconv = 1, each against its WRF v4.8.0 real*8 run (wrfref workflow of Xassemb
 c17b-mfshconv: the inputs of run_P1_r8 / run_P4_r8 with physics.bl_pbl_physics = 4, physics.sf_sfclay_physics = 4,
 physics.mfshconv = 1; wrfrst at 30 min). The restarts carry RC_MF, the scheme's state.
 
-Pending (not loaded) until port_c17b_data.tar holds the references; then move it to tests/verify/cases/.
-
 CASES: see tests/verify/cases/__init__.py."""
 from cases.common import WR  # noqa: F401
 
