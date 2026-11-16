@@ -24,7 +24,7 @@ for _n, _s in (("U4", "p4u"), ("U4L", "p4ul")):
          f"{_run}/wrfout_d01_{_D}", 3600, _T),
     ]
 CASES += [
-    # CUDA FP64 (exact) and FP32 (tolerances measured on the G4, about 3x)
+    # CUDA FP64 (exact) and FP32 (about 3x the G4 measurement: U 6.2e-4 W 1.6e-2 THM 8.3e-6 QV 5.2e-4)
     ("real_p4u_r8_fp64_cuda_1h", "cuda_dp", "configs/real_p4u_r8.ini", [f"real.dir={WR}/run_U4_r8"] + _1H,
      f"{WR}/run_U4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "TSK": 0.0}),
     ("real_p4u_fp32_1h", "cuda", "configs/real_p4u_r8.ini", [f"real.dir={WR}/run_U4_r8"] + _1H,

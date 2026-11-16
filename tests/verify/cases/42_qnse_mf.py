@@ -25,12 +25,11 @@ for _n in ("1", "4"):
          f"{_run}/wrfout_d01_{_D}", 3600, _T),
     ]
 CASES += [
-    # CUDA FP64 and FP32: tolerances not measured yet (Q4's placeholders; the merge train measures them, ~3x the
-    # relative L2 of a G4 run)
+    # CUDA FP64 (exact) and FP32 (about 3x the G4 measurement: U 3.8e-4 W 1.8e-2 THM 5.4e-6 QV 3.5e-4)
     ("real_q4m_r8_fp64_cuda_1h", "cuda_dp", "configs/real_q4m_r8.ini", ["real.dir=" + f"{WR}/run_Q4M_r8"] + _1H,
      f"{WR}/run_Q4M_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_q4m_fp32_1h", "cuda", "configs/real_q4m_r8.ini", ["real.dir=" + f"{WR}/run_Q4M_r8"] + _1H,
-     f"{WR}/run_Q4M_r8/wrfout_d01_{_D}", 3600, {"U": 2.1e-3, "W": 6.6e-2, "THM": 2.8e-5, "QV": 1.7e-3}),
+     f"{WR}/run_Q4M_r8/wrfout_d01_{_D}", 3600, {"U": 1.1e-3, "W": 5.4e-2, "THM": 1.6e-5, "QV": 1.1e-3}),
 ]
 
 STATUS = [
