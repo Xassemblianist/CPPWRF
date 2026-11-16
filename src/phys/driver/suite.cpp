@@ -15,6 +15,7 @@
 #include "phys/bl_mynn/mynnedmf.hpp"
 #include "phys/bl_ysu/ysu.hpp"
 #include "phys/cu_bmj/bmj_tables.hpp"
+#include "phys/cu_g3/g3.hpp"
 #include "phys/cu_gfl/gfl.hpp"
 #include "phys/cu_ntiedtke/ntiedtke.hpp"
 #include "phys/cu_tiedtke/tiedtke.hpp"
@@ -358,10 +359,19 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: sf_mynn_sfcflux_land 0..3 and sf_mynn_sfcflux_water 0..4 are ported");
   if (o.sf_sfclay_physics == 5 && o.fractional_seaice == 1)
     throw std::runtime_error("PhysicsSuite: sf_sfclay_physics=5 with fractional_seaice=1 (MYNN_SEAICE_WRAPPER) is not ported");
-  if (o.cu_physics != 0 && o.cu_physics != 1 && o.cu_physics != 2 && o.cu_physics != 3 && o.cu_physics != 6 &&
-      o.cu_physics != 16)
+  if (o.cu_physics != 0 && o.cu_physics != 1 && o.cu_physics != 2 && o.cu_physics != 3 && o.cu_physics != 5 &&
+      o.cu_physics != 6 && o.cu_physics != 16)
     throw std::runtime_error("PhysicsSuite: only cu_physics=0, 1 (Kain-Fritsch), 2 (Betts-Miller-Janjic), "
-                             "3 (Grell-Freitas-Li), 6 (Tiedtke) or 16 (New Tiedtke)");
+                             "3 (Grell-Freitas-Li), 5 (Grell-3D), 6 (Tiedtke) or 16 (New Tiedtke); 93 (Grell-Devenyi) "
+                             "is not ported");
+  if (o.cu_physics == 5 && g.nz > cu_g3::kMaxLevels)
+    throw std::runtime_error("PhysicsSuite: nz exceeds the Grell-3D column limit");
+  // G3DRV: cugd_avedx > 1 is the high-resolution branch with sub_spread = 1/(cugd_avedx**2 - 1); WRF documents 1
+  // and 3, the ones ported
+  if (o.cu_physics == 5 && o.cugd_avedx != 1 && o.cugd_avedx != 3)
+    throw std::runtime_error("PhysicsSuite: cugd_avedx must be 1 or 3 (Grell-3D)");
+  if (o.cu_physics == 5 && o.gf_ichoice > 16)
+    throw std::runtime_error("PhysicsSuite: clos_choice must be at most 16");
   if (o.cu_physics == 2 && g.nz > cu_bmj::kMaxLevels)
     throw std::runtime_error("PhysicsSuite: nz exceeds the Betts-Miller-Janjic column limit");
   if (o.cu_physics == 3 && g.nz > cu_gfl::kMaxLevels)
@@ -481,6 +491,14 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   mk3(gd_cloud, g, "gd_cloud"); mk3(gd_cloud2, g, "gd_cloud2");
   mk3(gd_cloud_a, g, "gd_cloud_a"); mk3(gd_cloud2_a, g, "gd_cloud2_a");
   mk3(gd_cldfr, g, "gd_cldfr");
+  if (o.cu_physics == 5) {  // g3init: zeros (no restart) and the restart fields
+    mk3(cugd_tten, g, "cugd_tten"); mk3(cugd_qvten, g, "cugd_qvten"); mk3(cugd_ttens, g, "cugd_ttens");
+    mk3(cugd_qvtens, g, "cugd_qvtens"); mk3(cugd_qcten, g, "cugd_qcten");
+    for (auto [f, n] : {std::pair<Field2*, const char*>{&apr_gr, "apr_gr"}, {&apr_w, "apr_w"}, {&apr_mc, "apr_mc"},
+                        {&apr_st, "apr_st"}, {&apr_as, "apr_as"}, {&apr_capma, "apr_capma"}, {&apr_capme, "apr_capme"},
+                        {&apr_capmi, "apr_capmi"}, {&mass_flux, "mass_flux"}, {&xmb_shallow, "xmb_shallow"}})
+      *f = Field2(g, Stagger::M, n);
+  }
   mk3(zero3_, g, "zero3");
   dzs.assign(o.num_soil_layers, 0.0);
   zs.assign(o.num_soil_layers, 0.0);
@@ -830,6 +848,10 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
     for (Field2* f : {&mu_ndg_old, &mu_ndg_new}) v.emplace_back("sfc_" + f->name(), f);
   if (o_.cu_physics == 2)  // package bmjscheme and CLDEFI (Registry r)
     for (Field2* f : {&cldefi, &convcld}) v.emplace_back("sfc_" + f->name(), f);
+  if (o_.cu_physics == 5)  // Grell-3D: APR_* (Registry r), MASS_FLUX, XMB_SHALLOW
+    for (Field2* f : {&apr_gr, &apr_w, &apr_mc, &apr_st, &apr_as, &apr_capma, &apr_capme, &apr_capmi, &mass_flux,
+                      &xmb_shallow})
+      v.emplace_back("sfc_" + f->name(), f);
   if (o_.sf_surface_physics == 4) {
     for (Field2* f : {&xlat_sfc, &xlong_sfc, &tvxy, &tgxy, &canicexy, &canliqxy, &eahxy, &tahxy, &cmxy, &chxy,
                       &fwetxy, &sneqvoxy, &alboldxy, &qsnowxy, &qrainxy, &wslakexy, &zwtxy, &waxy, &wtxy, &lfmassxy,
@@ -886,7 +908,9 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
     v.emplace_back("sfc_rthratenlwc", &rthratenlwc);
     v.emplace_back("sfc_rthratenswc", &rthratenswc);
   }
-  if (o_.cu_physics == 16 || o_.cu_physics == 3) {
+  if (o_.cu_physics == 5)  // package g3scheme (Registry r)
+    for (Field3* f : {&cugd_tten, &cugd_qvten, &cugd_ttens, &cugd_qvtens, &cugd_qcten}) v.emplace_back("sfc_" + f->name(), f);
+  if (o_.cu_physics == 16 || o_.cu_physics == 3 || o_.cu_physics == 5) {
     v.emplace_back("sfc_rthften", &pt.rthften);
     v.emplace_back("sfc_rqvften", &pt.rqvften);
   }
@@ -986,7 +1010,7 @@ void PhysicsSuite::part1(dyn::State& s, const dyn::BaseState& b, dyn::Tendencies
   pbl_driver(s, b);
   vmdump::dump("vm_pbl", 1, {&pt.rublten, &pt.rvblten, &pt.rthblten, &pt.rqvblten, &exch_h}, {&pblh});
   cumulus_driver(s, b);
-  if (o_.cu_physics == 3) convtrans_prep(s);
+  if (o_.cu_physics == 3 || o_.cu_physics == 5) convtrans_prep(s);  // cu_diag = 1 (check_a_mundo)
   fddagd_driver(s, b);
 }
 
@@ -1117,6 +1141,9 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
   if (o_.sf_surface_physics == 1) v.push_back(&capg);  // THC: phy_init's landuse_init value (WrfHistory)
   if (o_.fdda.grid_fdda == 1) v.insert(v.end(), {&mu_ndg_old, &mu_ndg_new});
   if (o_.cu_physics == 2) v.insert(v.end(), {&cldefi, &convcld});
+  if (o_.cu_physics == 5)
+    v.insert(v.end(), {&apr_gr, &apr_w, &apr_mc, &apr_st, &apr_as, &apr_capma, &apr_capme, &apr_capmi, &mass_flux,
+                       &xmb_shallow});
   return v;
 }
 
@@ -1137,6 +1164,7 @@ std::vector<const Field3*> PhysicsSuite::fields3() const {
     v.insert(v.end(), {&u_ndg_old, &v_ndg_old, &t_ndg_old, &q_ndg_old, &ph_ndg_old, &u_ndg_new, &v_ndg_new, &t_ndg_new,
                        &q_ndg_new, &ph_ndg_new, &hfx_fdda, &pt.rundgdten, &pt.rvndgdten, &pt.rthndgdten, &pt.rqvndgdten});
   if (o_.cu_physics == 2) v.insert(v.end(), {&ccldfra, &qcconv, &qiconv});
+  if (o_.cu_physics == 5) v.insert(v.end(), {&cugd_tten, &cugd_qvten, &cugd_ttens, &cugd_qvtens, &cugd_qcten});
   return v;
 }
 

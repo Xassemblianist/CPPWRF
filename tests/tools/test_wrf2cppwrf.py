@@ -1314,6 +1314,30 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                               "ra_sw_physics = 2*4, bmj_rad_feedback = .true. /\n")
         self.assertEqual(t.errors, [])
 
+    def test_grell_3d(self):
+        # cu_physics = 5 (Grell-3D, tier column_verified: a warning, allow_unverified passed on); cugd_avedx 1 / 3
+        # (other values rejected), the ensemble sizes fixed; ishallow and clos_choice as with Grell-Freitas;
+        # cu_physics = 93 (Grell-Devenyi) is not ported
+        t, sec = self.translate(self.NEST + "&physics cu_physics = 5, 5, ishallow = 1, cugd_avedx = 3, "
+                                "clos_choice = 3 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["cu_physics"], 5)
+        self.assertEqual(sec["phys"]["ishallow"], 1)
+        self.assertEqual(sec["phys"]["cugd_avedx"], 3)
+        self.assertEqual(sec["phys"]["clos_choice"], 3)
+        self.assertTrue(any("cu_physics" in w and "column_verified" in w for w in t.warnings), t.warnings)
+        t, sec = self.translate(self.NEST + "&physics cu_physics = 5, 5 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("cugd_avedx", sec["phys"])
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 5, 5, cugd_avedx = 2 /\n")
+        self.assertTrue(any("cugd_avedx = 2" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 5, 5, maxens3 = 12 /\n")
+        self.assertTrue(any("maxens3 = 12" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 93, 93 /\n")
+        self.assertTrue(any("Grell-Devenyi" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 5, 5, ra_sw_physics = 2*1, cu_rad_feedback = .true. /\n")
+        self.assertTrue(any("Dudhia shortwave" in e for e in t.errors), t.errors)
+
     def test_nest_entries_take_registry_defaults(self):
         # r32cudt1 / r32bldt1: a nest without a cudt / bldt entry calls the scheme every step (Registry default 0,
         # rconfig CUDT / BLDT in upper case)

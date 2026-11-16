@@ -207,7 +207,7 @@ void update_phy_ten(dyn::Tendencies& t, PhysicsTendencies& pt, const dyn::State&
     add.add(ar, KAdd::A2A, t.t_tendf, pt.rthcuten);
     if (s.P_QV >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QV], pt.rqvcuten);
   }
-  if (f.cu_physics == 3) {  // phy_cu_ten, GFLSCHEME: no momentum (RUCUTEN/RVCUTEN are not added)
+  if (f.cu_physics == 3 || f.cu_physics == 5) {  // phy_cu_ten, GFLSCHEME / G3SCHEME: no momentum (RUCUTEN/RVCUTEN)
     add.add(ar, KAdd::A2A, t.t_tendf, pt.rthcuten);
     if (s.P_QV >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QV], pt.rqvcuten);
     if (s.P_QC >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QC], pt.rqccuten);
@@ -261,7 +261,7 @@ void phy_prep_part2(PhysicsTendencies& pt, const dyn::State& s, const dyn::BaseS
     if (s.P_QI >= 0) decouple(pt.rqiblten);
   }
   if ((f.cu_physics == 1 || f.cu_physics == 6) && s.P_QV >= 0) decouple(pt.rqvften);  // KFETASCHEME, TIEDTKESCHEME: RQVFTEN only
-  if (f.cu_physics == 16 || f.cu_physics == 3) {  // advective forcing of the cumulus scheme
+  if (f.cu_physics == 16 || f.cu_physics == 3 || f.cu_physics == 5) {  // advective forcing of the cumulus scheme
     if (s.P_QV >= 0) decouple(pt.rqvften);
     decouple(pt.rthften);
   }
@@ -272,7 +272,7 @@ void phy_prep_part2(PhysicsTendencies& pt, const dyn::State& s, const dyn::BaseS
     if (f.grid_fdda == 1 && s.P_QV >= 0) decouple(pt.rqvndgdten);  // grid_fdda = 2 decouples RPHNDGDTEN instead
   }
   batch.run();
-  if (f.cu_physics == 16 || f.cu_physics == 3) {
+  if (f.cu_physics == 16 || f.cu_physics == 3 || f.cu_physics == 5) {
     if (f.theta_m)
       parallel_for(mr, KDryThetaForcing{pt.rthften.view(), pt.rqvften.cview(), s.t_2.cview(), s.q_2[s.P_QV].cview()});
   }

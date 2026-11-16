@@ -92,14 +92,15 @@ struct SuiteOptions {
   int bl_mynn_output = 0;        // 1: EDMF_A, EDMF_W, EDMF_THL, EDMF_QT, EDMF_ENT, EDMF_QC (and zero SUB_/DET_*3D)
   int tke_budget = 0;            // 1: the MYNN TKE budget (QSHEAR, QBUOY, QDISS, QWT, DQKE)
   int grav_settling = 0;         // 1, 2: fog water deposition (module_sf_fogdes.F / module_bl_fogdes.F)
-  int cu_physics = 0;            // 0 = none, 1 = KFETASCHEME, 2 = BMJSCHEME, 3 = GFLSCHEME, 6 = TIEDTKESCHEME,
-                                 // 16 = NTIEDTKESCHEME
+  int cu_physics = 0;            // 0 = none, 1 = KFETASCHEME, 2 = BMJSCHEME, 3 = GFLSCHEME, 5 = G3SCHEME,
+                                 // 6 = TIEDTKESCHEME, 16 = NTIEDTKESCHEME
   bool bmj_rad_feedback = false;  // BMJ: its convective clouds in the radiation (rad.bmj_feedback)
   int gwd_opt = 0;                // 1 = KIM orographic gravity wave drag (bl_gwdo)
   double gwd_dx_factor = 2.0;     // effective grid factor of the gwd stress (WRF gwd_dx_factor)
   bool gwd_if_nonhyd = true;      // nonhydrostatic effect (WRF gwd_if_nonhyd)
   int ishallow = 0;              // Grell-Freitas-Li shallow convection (WRF ishallow)
-  int gf_ichoice = 0;            // Grell-Freitas-Li closure (WRF clos_choice)
+  int gf_ichoice = 0;            // Grell-Freitas-Li and Grell-3D closure (WRF clos_choice)
+  int cugd_avedx = 1;            // Grell-3D subsidence spreading (WRF cugd_avedx: 1 or 3)
   int num_soil_layers = 4;
   double bldt = 0;               // minutes; 0 = every step
   double cudt = 0;               // minutes; 0 = every step
@@ -159,10 +160,14 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   void after_rk(const dyn::State& s, const dyn::BaseState& b) override;
   // diagnostics_driver: diagnostic_output_calc (buckets and prec_acc_dt accumulations), clwrf_output_calc
   void after_all_rk_steps() override;
-  Field3* th_forcing() override { return o_.cu_physics == 16 || o_.cu_physics == 3 ? &pt.rthften : nullptr; }
+  Field3* th_forcing() override {
+    return o_.cu_physics == 16 || o_.cu_physics == 3 || o_.cu_physics == 5 ? &pt.rthften : nullptr;
+  }
   // rk_scalar_tend sets RQVFTEN for Kain-Fritsch too (module_em.F), though KF does not use it
   Field3* qv_forcing() override {
-    return o_.cu_physics == 16 || o_.cu_physics == 3 || o_.cu_physics == 1 || o_.cu_physics == 6 ? &pt.rqvften : nullptr;
+    return o_.cu_physics == 16 || o_.cu_physics == 3 || o_.cu_physics == 5 || o_.cu_physics == 1 || o_.cu_physics == 6
+               ? &pt.rqvften
+               : nullptr;
   }
 
   long itimestep = 0;  // WRF grid%itimestep (incremented in part1, as solve_em does per step)
@@ -276,6 +281,10 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   Field3 w0avg, cldfra_dp, cldfra_sh, qc_cu, qi_cu, gd_cloud, gd_cloud2, gd_cloud_a, gd_cloud2_a, gd_cldfr;  // cumulus 3D state and diagnostics
   Field2 cldefi, convcld;           // BMJ (cu_physics = 2): precipitation efficiency (restart), convective cloud
   Field3 ccldfra, qcconv, qiconv;   // BMJ: convective cloud fraction, cloud water and ice (restart)
+  // Grell-3D (cu_physics = 5): G3DRV's tendencies before CONV_GRELL_SPREAD3D (restart) and its precipitation
+  // closures APR_* (restart only; MASS_FLUX stays 0), the shallow mass flux
+  Field3 cugd_tten, cugd_qvten, cugd_ttens, cugd_qvtens, cugd_qcten;
+  Field2 apr_gr, apr_w, apr_mc, apr_st, apr_as, apr_capma, apr_capme, apr_capmi, mass_flux, xmb_shallow;
   // every persistent field above, the physics tendencies and the phy_prep diagnostics (by WRF name)
   std::vector<const Field2*> fields2() const;
   std::vector<const Field3*> fields3() const;

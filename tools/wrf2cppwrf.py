@@ -439,6 +439,7 @@ SUPPORTED_OPTIONS = {
         1: "Kain-Fritsch cumulus parameterization",
         2: "Betts-Miller-Janjic cumulus parameterization",
         3: "Grell-Freitas cumulus parameterization",
+        5: "Grell 3D ensemble cumulus parameterization",
         6: "Tiedtke cumulus parameterization",
         16: "New Tiedtke cumulus parameterization",
     },
@@ -2302,22 +2303,44 @@ class WrfTranslator:
         if self.get_opt("physics", "ra_sw_physics", 0) == 1:
             for d in range(max(1, self._max_dom)):
                 if (bool(self.get_dom_opt("physics", "cu_rad_feedback", d, False))
-                        and self.get_dom_opt("physics", "cu_physics", d, 0) == 3):
-                    self.error(f"WRF cu_rad_feedback with Grell-Freitas cumulus and the Dudhia shortwave (ra_sw_physics = "
+                        and self.get_dom_opt("physics", "cu_physics", d, 0) in (3, 5)):
+                    scheme = ("Grell-Freitas" if self.get_dom_opt("physics", "cu_physics", d, 0) == 3
+                              else "Grell-3D")  # Grell-3D: the same icloud_cu = 1 clouds (unproven, also rejected)
+                    self.error(f"WRF cu_rad_feedback with {scheme} cumulus and the Dudhia shortwave (ra_sw_physics = "
                                f"1) on domain {d + 1} is not supported (wrf.exe writes NaN cloud fractions there).")
                     break
 
+        # Grell-3D (cu_physics = 5): cugd_avedx 1 or 3 (G3DRV's high-resolution branch for > 1, sub_spread
+        # 1/(cugd_avedx**2 - 1); 1 and 3 ported); the ensemble sizes are G3DRV's constants (WRF's defaults)
+        if any(self.get_dom_opt("physics", "cu_physics", d, 0) == 5 for d in range(max(1, self._max_dom))):
+            avedx = self.get_opt("physics", "cugd_avedx", 1)
+            if avedx not in (1, 3):
+                self.error(f"WRF cugd_avedx = {avedx} is not supported with Grell-3D (cu_physics = 5); CPPWRF "
+                           "supports 1 and 3.")
+            elif avedx != 1:
+                sections.setdefault("phys", {})["cugd_avedx"] = avedx
+            for key, dflt in (("maxiens", 1), ("maxens", 3), ("maxens2", 3), ("maxens3", 16), ("ensdim", 144)):
+                if self.get_opt("physics", key, dflt) != dflt:
+                    self.error(f"WRF {key} = {self.get_opt('physics', key, dflt)} is not supported with Grell-3D "
+                               f"(cu_physics = 5); CPPWRF supports the default {dflt}.")
+        for d in range(max(1, self._max_dom)):
+            if self.get_dom_opt("physics", "cu_physics", d, 0) == 93:
+                self.error(f"WRF cu_physics = 93 (Grell-Devenyi, module_cu_gd.F) on domain {d + 1} is not ported; "
+                           "use cu_physics = 5 (Grell-3D) or 3 (Grell-Freitas).")
+                break
+
         if self.has_opt("physics", "ishallow"):
-            # module_cu_gfl_wrf: the shallow plume runs for ishallow == 1 only; the other ported schemes ignore it
+            # module_cu_gfl_wrf / module_cu_g3: the shallow plume runs for ishallow == 1 only; the other ported schemes
+            # ignore it
             if self.get_opt("physics", "ishallow", 0) == 1:
                 sections.setdefault("phys", {})["ishallow"] = 1
 
         # check_a_mundo: cu_diag = 1 needs a Grell scheme (GF, G3, GD) or KF-CuP on that domain (fatal otherwise);
         # with those schemes it is set to 1 whatever the namelist says
         for d, cu_diag in enumerate(self.get_opt_list("physics", "cu_diag")[:max(1, self._max_dom)]):
-            if cu_diag == 1 and self.get_dom_opt("physics", "cu_physics", d, 0) != 3:
-                self.error(f"WRF cu_diag = 1 on domain {d + 1} requires Grell-Freitas cumulus (cu_physics = 3); "
-                           "wrf.exe stops.")
+            if cu_diag == 1 and self.get_dom_opt("physics", "cu_physics", d, 0) not in (3, 5):
+                self.error(f"WRF cu_diag = 1 on domain {d + 1} requires Grell-Freitas or Grell-3D cumulus "
+                           "(cu_physics = 3 or 5); wrf.exe stops.")
 
         if self.has_opt("physics", "clos_choice"):
             clos_choice = self.get_opt("physics", "clos_choice", 0)
@@ -2339,7 +2362,7 @@ class WrfTranslator:
                 self.error(f"WRF convtrans_avglen_m = {convtrans} must be > 0.")
             elif float(convtrans) != 30.0:
                 sections.setdefault("phys", {})["convtrans_avglen_m"] = convtrans
-            # convtrans_prep (cu_diag = 1: Grell-Freitas): stepave = convtrans_avglen_m*60./dt, then MOD(ktau, stepave)
+            # convtrans_prep (cu_diag = 1: Grell-Freitas, Grell-3D): stepave = convtrans_avglen_m*60./dt, then MOD(ktau, stepave)
             # divides by zero when stepave is 0 (WRF stops with a floating-point exception)
             dts = [dt]
             for d in range(1, max(1, self._max_dom)):
@@ -2350,7 +2373,7 @@ class WrfTranslator:
                 # with the adaptive time step convtrans_prep decides by the time (no MOD)
                 if self.get_opt("domains", "use_adaptive_time_step", False):
                     break
-                if self.get_dom_opt("physics", "cu_physics", d, 0) == 3 and int(float(convtrans) * 60.0 / dt_d) < 1:
+                if self.get_dom_opt("physics", "cu_physics", d, 0) in (3, 5) and int(float(convtrans) * 60.0 / dt_d) < 1:
                     self.error(f"WRF convtrans_avglen_m = {convtrans} is shorter than domain {d + 1}'s time step "
                                f"({dt_d} s): WRF's convtrans_prep divides by zero (MOD(ktau, 0)).")
 

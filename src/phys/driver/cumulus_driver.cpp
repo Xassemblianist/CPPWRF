@@ -9,8 +9,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <vector>
 
 #include "phys/cu_bmj/bmj.hpp"
+#include "phys/cu_g3/g3.hpp"
 #include "phys/cu_gfl/gfl.hpp"
 #include "phys/cu_ntiedtke/ntiedtke.hpp"
 #include "phys/cu_tiedtke/tiedtke.hpp"
@@ -94,6 +98,76 @@ struct KGrellFreitasRunner {
   static constexpr std::size_t kWorkBytes = cu_gfl::Tier<L, real>::kWorkBytes;
   void set_work(const ColumnWork& w) { k.work = w; }
   CPPWRF_HD void operator()(int i, int j) const { k.template run<L>(i, j); }
+};
+
+// ------------------------------------------------------------------------------------------------ Grell-3D
+// module_cumulus_driver.F (cu_physics = 5, G3SCHEME): RTHFTEN = (RTHFTEN + RTHRATEN + RTHBLTEN)*pi and
+// RQVFTEN += RQVBLTEN (:867-885), G3DRV (module_cu_g3.F) per column, then CONV_GRELL_SPREAD3D (:1596-1617)
+struct KG3Forcing {
+  int nz;
+  V3 rthften, rqvften;
+  C3 rthraten, rthblten, rqvblten, pi;
+  CPPWRF_HD void operator()(int i, int j) const {
+    for (int k = 0; k < nz; ++k) {
+      rthften(i, j, k) = (rthften(i, j, k) + rthraten(i, j, k) + rthblten(i, j, k)) * pi(i, j, k);
+      rqvften(i, j, k) = rqvften(i, j, k) + rqvblten(i, j, k);
+    }
+  }
+};
+// G3DRV's inputs (cu_g3::g3_gather's F)
+struct G3In {
+  C3 t, q, p, u, v, rho, pi, w, p8w, rthften, rqvften, rthblten, rqvblten;
+  BView2<const real> ht;
+  C2 xland, gsw;
+  CI2 kpbl;
+};
+// G3DRV's outputs (cu_g3::g3drv's O): the restart-only results APR_* and XMB_SHALLOW are kept, XF_ENS / PR_ENS
+// (ensdim levels), EDT_OUT (no I/O) and the shallow / deep levels (integer restart fields) are not
+struct G3Res {
+  V3 cugd_tten, cugd_qvten, cugd_ttens, cugd_qvtens, cugd_qcten, rqccuten, rqicuten, gdc, gdc2;
+  V2 raincv, pratec, htop, hbot, xmb_shallow;
+  V2 apr[8];
+  CPPWRF_HD real apr_in(int i, int j, int n) const { return apr[n](i, j); }
+  template <class S, class O, class W>
+  CPPWRF_HD void extra(int i, int j, const S& s, const O& out, W&) const {
+    for (int n = 0; n < 8; ++n) apr[n](i, j) = s.apr[n];
+    xmb_shallow(i, j) = out.xmb_shallow;
+  }
+};
+struct KG3 {
+  cu_g3::G3Call<real> c;
+  G3In in;
+  G3Res o;
+  ColumnWork work{};
+  static constexpr std::size_t kWorkBytes = cu_g3::kWorkBytes<real>;
+  void set_work(const ColumnWork& w) { work = w; }
+  CPPWRF_HD void operator()(int i, int j) const {
+    using R = real;
+    CPPWRF_COLUMN_SLOTS(work, i, j)
+    CPPWRF_COLUMN_STRUCT(cu_g3::G3Work<R>, w, CPPWRF_G3_ARRAYS)
+    cu_g3::g3drv<real>(c, in, o, i, j, w);
+  }
+};
+struct G3SpreadIn {
+  C3 tten, qvten, ttens, qvtens, qv, pi;
+};
+struct G3SpreadRes {
+  V3 rthcuten, rqvcuten, rqccuten, rqicuten;
+  V2 raincv, pratec;
+};
+struct KG3Spread {
+  cu_g3::G3Call<real> c;
+  G3SpreadIn in;
+  G3SpreadRes o;
+  ColumnWork work{};
+  static constexpr std::size_t kWorkBytes = cu_g3::kSpreadWorkBytes<real>;
+  void set_work(const ColumnWork& w) { work = w; }
+  CPPWRF_HD void operator()(int i, int j) const {
+    using R = real;
+    CPPWRF_COLUMN_SLOTS(work, i, j)
+    CPPWRF_COLUMN_STRUCT(cu_g3::G3SpreadWork<R>, w, CPPWRF_G3_SPREAD_ARRAYS)
+    cu_g3::g3_spread_column<real>(c, in, o, i, j, w);
+  }
 };
 
 // ------------------------------------------------------------ convtrans_prep
@@ -432,6 +506,7 @@ std::size_t cumulus_work_bytes(int cu_physics, int nz) {
   if (cu_physics == 3)
     return nz <= 48 ? KGrellFreitasRunner<48>::kWorkBytes : KGrellFreitasRunner<cu_gfl::kMaxLevels>::kWorkBytes;
   if (cu_physics == 2) return KBmj::kWorkBytes;
+  if (cu_physics == 5) return KG3::kWorkBytes > KG3Spread::kWorkBytes ? KG3::kWorkBytes : KG3Spread::kWorkBytes;
   if (cu_physics == 6) return KTiedtke::kWorkBytes;
   if (cu_physics == 16) return KNTiedtke::kWorkBytes;
   return 0;
@@ -532,6 +607,89 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
       w3(pt.rthcuten, nz); w3(pt.rqvcuten, nz); w3(pt.rqccuten, nz); w3(pt.rqicuten, nz);
       w3(pt.rucuten, nz); w3(pt.rvcuten, nz);
       w2(raincv); w2(pratec); w2(cutop); w2(cubot);
+      std::fclose(f);
+    }
+    return;
+  }
+  if (o_.cu_physics == 5) {
+    column_for(g_.columns(), KG3Forcing{g_.nz, pt.rthften.view(), pt.rqvften.view(), pt.rthraten.cview(),
+                                        pt.rthblten.cview(), pt.rqvblten.cview(), prep.pi_phy.cview()});
+    tile::exchange(pt.rthften, pt.rqvften, s.w_2);  // HALO_CUP_G3_IN: G3DRV reads the 3 x 3 neighbours
+    cu_g3::G3Call<real> c{};
+    c.nx = g_.nx; c.ny = g_.ny; c.nz = g_.nz;
+    c.dt = real(g_.dt); c.dx = real(g_.dx); c.xlv = xlv; c.cp = cp; c.g = g; c.r_v = r_v;
+    c.cugd_avedx = o_.cugd_avedx; c.ishallow = o_.ishallow; c.ichoice = o_.gf_ichoice;
+    c.periodic_x = g_.bc_x == BC::Periodic; c.periodic_y = g_.bc_y == BC::Periodic;
+    c.f_qc = s.P_QC >= 0; c.f_qi = s.P_QI >= 0;
+    KG3 k{};
+    k.c = c;
+    k.in = G3In{prep.t_phy.cview(), s.q_2[s.P_QV].cview(), prep.p_hyd.cview(), prep.u_phy.cview(),
+                prep.v_phy.cview(), prep.rho.cview(), prep.pi_phy.cview(), s.w_2.cview(), prep.p_hyd_w.cview(),
+                pt.rthften.cview(), pt.rqvften.cview(), pt.rthblten.cview(), pt.rqvblten.cview(), b.ht.view(),
+                xland.cview(), gsw.cview(), kpbl.cview()};
+    // first_rk_step_part1 passes HTOP=grid%cutop, HBOT=grid%cubot; advance_ppt's CASE DEFAULT leaves HTOP / HBOT
+    k.o = G3Res{cugd_tten.view(), cugd_qvten.view(), cugd_ttens.view(), cugd_qvtens.view(), cugd_qcten.view(),
+                pt.rqccuten.view(), pt.rqicuten.view(), gd_cloud.view(), gd_cloud2.view(), raincv.view(),
+                pratec.view(), cutop.view(), cubot.view(), xmb_shallow.view(),
+                {apr_gr.view(), apr_w.view(), apr_mc.view(), apr_st.view(), apr_as.view(), apr_capma.view(),
+                 apr_capme.view(), apr_capmi.view()}};
+    // debug (one patch): CPPWRF_G3_DUMP=file CPPWRF_G3_DUMP_STEP=n writes G3DRV's inputs of step n in the layout of
+    // tests/phys/cu_g3 (driver_g3.f90 runs WRF's G3DRV and CONV_GRELL_SPREAD3D on them) and file.out the model's
+    // RTHCUTEN, RQVCUTEN, RQCCUTEN, RQICUTEN, RAINCV, PRATEC after CONV_GRELL_SPREAD3D (compare.py --model)
+    const char* dump = std::getenv("CPPWRF_G3_DUMP");
+    const char* dstep = std::getenv("CPPWRF_G3_DUMP_STEP");
+    const bool dumping = dump && dstep && itimestep == std::atol(dstep) && !g_.patched();
+    auto w3 = [&](std::FILE* f, const Field3& x, int nk) {
+      std::vector<real> h;
+      x.download(h);
+      const Layout& L = x.layout();
+      for (int j = 0; j < g_.ny; ++j)
+        for (int kk = 0; kk < nk; ++kk)
+          for (int i = 0; i < g_.nx; ++i) {
+            const double v = double(h[L.index(i, j, kk)]);
+            std::fwrite(&v, sizeof(double), 1, f);
+          }
+    };
+    auto w2 = [&](std::FILE* f, const auto& x, bool uniform = false) {
+      std::vector<std::conditional_t<std::is_same_v<std::decay_t<decltype(x)>, IntField2>, int, real>> h;
+      x.download(h);
+      const Layout& L = x.layout();
+      for (int j = 0; j < g_.ny; ++j)
+        for (int i = 0; i < g_.nx; ++i) {
+          const double v = double(uniform ? h[L.index(0, 0, 0)] : h[L.index(i, j, 0)]);
+          std::fwrite(&v, sizeof(double), 1, f);
+        }
+    };
+    if (dumping) {
+      std::FILE* f = std::fopen(dump, "wb");
+      const int hd[8] = {g_.nx, g_.ny, g_.nz, c.cugd_avedx, c.ishallow, c.ichoice, int(c.f_qc), int(c.f_qi)};
+      const double sc[2] = {double(c.dt), double(c.dx)};
+      std::fwrite(hd, sizeof(int), 8, f);
+      std::fwrite(sc, sizeof(double), 2, f);
+      const int nz = g_.nz;
+      const Field3* in3[11] = {&prep.u_phy, &prep.v_phy, &prep.t_phy, &s.q_2[s.P_QV], &prep.p_hyd, &prep.pi_phy,
+                               &prep.rho, &pt.rthften, &pt.rqvften, &pt.rthblten, &pt.rqvblten};
+      for (const Field3* x : in3) w3(f, *x, nz);
+      w3(f, s.w_2, nz + 1);
+      w3(f, prep.p_hyd_w, nz + 1);
+      w2(f, b.ht, b.ht.uniform());
+      w2(f, xland); w2(f, gsw); w2(f, kpbl);
+      for (const Field2* x : {&apr_gr, &apr_w, &apr_mc, &apr_st, &apr_as, &apr_capma, &apr_capme, &apr_capmi}) w2(f, *x);
+      std::fclose(f);
+    }
+    column_for_work(g_.columns(), k);
+    tile::exchange(cugd_tten, cugd_qvten, cugd_ttens, cugd_qvtens);  // HALO_CUP_G3_OUT
+    KG3Spread sp{};
+    sp.c = c;
+    sp.in = G3SpreadIn{cugd_tten.cview(), cugd_qvten.cview(), cugd_ttens.cview(), cugd_qvtens.cview(),
+                       s.q_2[s.P_QV].cview(), prep.pi_phy.cview()};
+    sp.o = G3SpreadRes{pt.rthcuten.view(), pt.rqvcuten.view(), pt.rqccuten.view(), pt.rqicuten.view(), raincv.view(),
+                       pratec.view()};
+    column_for_work(g_.columns(), sp);
+    if (dumping) {
+      std::FILE* f = std::fopen((std::string(dump) + ".out").c_str(), "wb");
+      for (const Field3* x : {&pt.rthcuten, &pt.rqvcuten, &pt.rqccuten, &pt.rqicuten}) w3(f, *x, g_.nz);
+      w2(f, raincv); w2(f, pratec);
       std::fclose(f);
     }
     return;
