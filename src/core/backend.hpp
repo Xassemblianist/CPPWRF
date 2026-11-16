@@ -716,6 +716,7 @@ enum FatalCode : int {
   kFatalUrbanZa = 18,                // SLUCM: ZDC + Z0C + 2 m >= the first level height (WRF stops)
   kFatalUrbanSurface = 19,           // SLUCM: an urban category point that is water or sea ice (not a WRF stop)
   kFatalUrbanInput = 20,             // SLUCM: NUDAPT morphology (HGT_URB2D > 0) or a category beyond the table
+  kFatalRucVilka = 30,               // RUC LSM VILKA: the saturation table index leaves 1..5000
 };
 struct FatalError : std::runtime_error {
   int code;
