@@ -36,6 +36,7 @@
 #include "phys/lsm_noahmp/noahmp.hpp"
 #include "phys/lsm_noahmp/noahmp_tables.hpp"
 #include "phys/sf_myjsfc/myjsfc.hpp"
+#include "phys/sf_qnsesfc/qnsesfc.hpp"
 #include "phys/sf_mynn/mynnsfc_common.hpp"
 #include "phys/sf_sfclayrev/sfclayrev.hpp"
 
@@ -83,9 +84,12 @@ struct FddaOptions {
 
 // Namelist options of the P1/P2 suite (WRF Registry defaults unless noted).
 struct SuiteOptions {
-  int sf_sfclay_physics = 1;     // 1 = SFCLAYREVSCHEME, 2 = MYJSFCSCHEME, 5 = MYNNSFCSCHEME, 7 = PXSFCSCHEME
+  int sf_sfclay_physics = 1;     // 1 = SFCLAYREVSCHEME, 2 = MYJSFCSCHEME, 4 = QNSESFCSCHEME, 5 = MYNNSFCSCHEME,
+                                 // 7 = PXSFCSCHEME
   int sf_surface_physics = 2;    // 1 = SLABSCHEME, 2 = LSMSCHEME (Noah), 4 = NOAHMPSCHEME (Noah-MP v5.1.2)
-  int bl_pbl_physics = 1;        // 1 = YSUSCHEME, 2 = MYJPBLSCHEME, 5 = MYNNPBLSCHEME, 7 = ACMPBLSCHEME, 8 = BOULACSCHEME
+  int bl_pbl_physics = 1;        // 1 = YSUSCHEME, 2 = MYJPBLSCHEME, 4 = QNSEPBLSCHEME, 5 = MYNNPBLSCHEME,
+                                 // 7 = ACMPBLSCHEME, 8 = BOULACSCHEME
+  int mfshconv = 1;              // QNSE's EDKF mass flux (WRF's default 1; only 0 is ported)
   int icloud_bl = 1;             // MYNN subgrid clouds in the radiation (CLDFRA_BL, QC_BL, QI_BL)
   mynnedmf::Options mynn;        // bl_mynn_* options of the MYNN-EDMF PBL
   int bl_mynn_mixscalars = 0;    // MYNN mixing of WRF's generic scalar (not connected in WRF: no effect)
@@ -149,6 +153,12 @@ struct SuiteOptions {
   int auxhist3_interval = 0;
   FddaOptions fdda;  // grid nudging (fddagd_driver)
 };
+
+// The MYJ / QNSE family (MYJSFC or QNSESFC, MYJPBL or QNSEPBL): THZ0, QZ0, UZ0, VZ0, AKHS, AKMS, CT, the shelter
+// diagnostics, U10E / V10E, TKE_PBL, EL_PBL and LOWLYR are state (wrfrst)
+inline bool myj_family(const SuiteOptions& o) {
+  return o.sf_sfclay_physics == 2 || o.sf_sfclay_physics == 4 || o.bl_pbl_physics == 2 || o.bl_pbl_physics == 4;
+}
 
 class PhysicsSuite : public dyn::ColumnPhysics {
  public:
@@ -376,6 +386,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   noahmp::NoahmpTables* d_noahmp_tables_ = nullptr;              // device copy, uploaded once
   sfclayrev::SFClayRevTables<real>* d_sfclay_tables_ = nullptr;  // device copy, uploaded once
   sf_myjsfc::MYJSFCTableManager myjsfc_tables_;                  // host/device copy, uploaded once
+  std::unique_ptr<sf_qnsesfc::QNSESFCTableManager> qnsesfc_tables_;  // QNSESFCINIT's (sf_sfclay_physics = 4)
   cu_kf::KFTables<real>* d_kf_tables_ = nullptr;                 // device copy, uploaded once
   cu_bmj::BmjTables<real>* d_bmj_tables_ = nullptr;              // BMJINIT's tables, device copy
   mynnsfc::PsiTables* d_mynn_psi_ = nullptr;                     // MYNN psi_init tables, device copy

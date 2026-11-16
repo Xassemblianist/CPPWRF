@@ -80,7 +80,8 @@ foreach(t "kessler;mp_kessler;${PHYS_BIN}"
           "lsm_noahmp;lsm_noahmp;${PHYS_BIN}/lsm_noahmp_test"
           "bl_mynn;bl_mynn;${PHYS_BIN}/bl_mynn_test"
           "sf_mynn;sf_mynn;${PHYS_BIN}/sf_mynn_test"
-          "bl_boulac;bl_boulac;${PHYS_BIN}/bl_boulac_test")
+          "bl_boulac;bl_boulac;${PHYS_BIN}/bl_boulac_test"
+          "bl_qnse;bl_qnse;${PHYS_BIN}/bl_qnse_test")
   list(GET t 0 name)
   list(GET t 1 dir)
   list(GET t 2 work)
@@ -88,3 +89,5 @@ foreach(t "kessler;mp_kessler;${PHYS_BIN}"
            WORKING_DIRECTORY ${PHYS_BIN})
   set_tests_properties(test_phys_${name} PROPERTIES LABELS diff SKIP_RETURN_CODE 77)
 endforeach()
+# the QNSE driver builds with the parent's -march choice (CPPWRF_NATIVE)
+set_tests_properties(test_phys_bl_qnse PROPERTIES ENVIRONMENT "CPPWRF_TEST_MARCH=${CPPWRF_TEST_MARCH}")

@@ -417,6 +417,7 @@ SUPPORTED_OPTIONS = {
         0: "None / off",
         1: "Revised MM5 surface layer (sfclayrev)",
         2: "Eta similarity surface layer (MYJ)",
+        4: "QNSE surface layer (with the QNSE PBL; column-verified)",
         5: "MYNN surface layer",
         7: "Pleim-Xiu surface layer (with the ACM2 PBL and Noah)",
     },
@@ -430,6 +431,7 @@ SUPPORTED_OPTIONS = {
         0: "None / off",
         1: "YSU (Yonsei University) planetary boundary layer",
         2: "MYJ (Mellor-Yamada-Janjic) planetary boundary layer",
+        4: "QNSE (quasi-normal scale elimination) planetary boundary layer (column-verified, mfshconv = 0)",
         5: "MYNN-EDMF planetary boundary layer",
         7: "ACM2 (Asymmetric Convective Model 2) planetary boundary layer",
         8: "BouLac (Bougeault-Lacarrere) TKE planetary boundary layer (column-verified, without BEP urban)",
@@ -2180,6 +2182,26 @@ class WrfTranslator:
                 if bl_pbl == 8 and sf_sfclay not in (1, 2):
                     self.error("WRF bl_pbl_physics = 8 (BouLac) needs sf_sfclay_physics = 1 or 2 "
                                "(module_physics_init: use sfclay or myjsfc scheme for this pbl option).")
+                # module_physics_init.F pbl_select: QNSE needs isfc = 4 (qnsesfc); QNSESFC is ported with the QNSE PBL
+                # only, without the EDKF mass flux (mfshconv = 1, WRF's default: module_bl_mfshconvpbl.F; check_a_mundo
+                # resets mfshconv to 0 for the other PBL schemes) and without QNSESFC_SEAICE_WRAPPER
+                if bl_pbl == 4 and sf_sfclay != 4:
+                    self.error("WRF bl_pbl_physics = 4 (QNSE) needs sf_sfclay_physics = 4 "
+                               "(module_physics_init: use qnsesfc scheme for this pbl option).")
+                if sf_sfclay == 4 and bl_pbl != 4:
+                    self.error("WRF sf_sfclay_physics = 4 (QNSE surface layer) is supported with bl_pbl_physics = 4 "
+                               "(QNSE) only by CPPWRF.")
+                mfshconv = self.get_opt_list("physics", "mfshconv")[:max(1, self._max_dom)] or [1]
+                if bl_pbl == 4:
+                    if any(v != 0 for v in mfshconv):
+                        self.error("WRF mfshconv = 1 (WRF's default with bl_pbl_physics = 4: the EDKF mass-flux shallow "
+                                   "convection of module_bl_mfshconvpbl.F) is not supported by CPPWRF; set "
+                                   "mfshconv = 0.")
+                    else:
+                        sections["phys"]["mfshconv"] = 0
+                if sf_sfclay == 4 and fsi == 1:
+                    self.error("WRF sf_sfclay_physics = 4 with fractional_seaice = 1 (QNSESFC_SEAICE_WRAPPER) is not "
+                               "supported by CPPWRF.")
                 if bl_pbl == 11:
                     self.error("WRF bl_pbl_physics = 11 (Shin-Hong scale-aware PBL, physics_mmm/bl_shinhong.F90) is "
                                "not supported by CPPWRF.")
@@ -2405,9 +2427,10 @@ class WrfTranslator:
             sections.setdefault("phys", {})["isfflx"] = isfflx
         # isfflx 0 skips the LSMs (module_surface_driver.F:2622), the only writers of CHKLOWQ, an uninitialised
         # i1 array of solve_em that MYJPBL reads for the surface moisture flux (module_bl_myjpbl.F:548, 576)
-        if isfflx == 0 and 2 in self.get_opt_list("physics", "bl_pbl_physics"):
-            self.error("WRF isfflx = 0 with bl_pbl_physics = 2 (MYJ) is not supported: WRF's MYJ PBL reads CHKLOWQ, "
-                       "which only the land surface schemes set and isfflx = 0 skips (uninitialised memory).")
+        if isfflx == 0 and any(v in (2, 4) for v in self.get_opt_list("physics", "bl_pbl_physics")):
+            self.error("WRF isfflx = 0 with bl_pbl_physics = 2 (MYJ) or 4 (QNSE) is not supported: WRF's MYJ and QNSE "
+                       "PBLs read CHKLOWQ, which only the land surface schemes set and isfflx = 0 skips (uninitialised "
+                       "memory).")
 
         icloud = self.get_opt("physics", "icloud", 1)
         if icloud not in (0, 1):

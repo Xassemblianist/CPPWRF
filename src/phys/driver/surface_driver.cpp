@@ -160,8 +160,9 @@ struct KMyjsfcPost {
   V2 ustm, wspd, ch;
   C2 ust, chs;
   C3 u_phy, v_phy;
+  bool set_ustm = true;  // MYJSFCSCHEME sets USTM = UST, QNSESFCSCHEME does not
   CPPWRF_HD void operator()(int i, int j) const {
-    ustm(i, j) = ust(i, j);
+    if (set_ustm) ustm(i, j) = ust(i, j);
     real w = std::sqrt(u_phy(i, j, 0) * u_phy(i, j, 0) + v_phy(i, j, 0) * v_phy(i, j, 0));
     wspd(i, j) = w > real(0.001) ? w : real(0.001);
     ch(i, j) = chs(i, j);
@@ -1221,6 +1222,28 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
     }
     column_for(cols, KMyjsfcPost{ustm.view(), wspd.view(), ch.view(), ust.cview(), chs.cview(),
                                  prep.u_phy.cview(), prep.v_phy.cview()});
+  } else if (o_.sf_sfclay_physics == 4) {
+    // QNSESFC (module_surface_driver.F:2301-2380, fractional_seaice = 0, scm_force_flux = 0): u_phy, v_phy,
+    // p_phy=grid%p_hyd, p8w=grid%p_hyd_w, Q2=tke_pbl, Z0BASE=z0; then WSPD and CH (no USTM, unlike MYJSFC)
+    const C2 ht_v = b.ht.uniform() ? slice0(zero3_) : C2{b.ht.data(), int(b.ht.layout().sj)};
+    sf_qnsesfc::QNSESFCKernel k{};
+    k.ht = ht_v; k.dz = prep.dz8w.cview(); k.pmid = prep.p_hyd.cview(); k.pint = prep.p_hyd_w.cview();
+    k.th = prep.th_phy.cview(); k.t = prep.t_phy.cview(); k.qv = s.q_2[s.P_QV].cview();
+    k.qc = s.P_QC >= 0 ? s.q_2[s.P_QC].cview() : zero3_.cview(); k.u = prep.u_phy.cview(); k.v = prep.v_phy.cview();
+    k.q2 = tke_pbl.cview(); k.tsk = tsk.cview(); k.xland = xland.cview(); k.z0base = z0.cview();
+    k.mavail = mavail.cview(); k.lowlyr = lowlyr.cview();
+    k.qsfc = qsfc.view(); k.thz0 = thz0.view(); k.qz0 = qz0.view(); k.uz0 = uz0.view(); k.vz0 = vz0.view();
+    k.ustar = ust.view(); k.znt = znt.view(); k.pblh = pblh.view(); k.rmol = rmol.view(); k.akhs = akhs.view();
+    k.akms = akms.view(); k.hfx = hfx.view(); k.qfx = qfx.view();
+    k.rib = br.view(); k.chs = chs.view(); k.chs2 = chs2.view(); k.cqs2 = cqs2.view(); k.flx_lh = lh.view();
+    k.flhc = flhc.view(); k.flqc = flqc.view(); k.qgh = qgh.view(); k.cpm = cpm.view(); k.ct = ct.view();
+    k.u10 = u10.view(); k.v10 = v10.view(); k.t02 = t2.view(); k.th02 = th2.view(); k.tshltr = tshltr.view();
+    k.th10 = th10.view(); k.q02 = q2.view(); k.qshltr = qshltr.view(); k.q10 = q10.view(); k.pshltr = pshltr.view();
+    k.u10e = u10e.view(); k.v10e = v10e.view();
+    k.tables = qnsesfc_tables_->get_tables(); k.itimestep = int(itimestep); k.nz = nz;
+    sf_qnsesfc::run_qnsesfc(k, cols);
+    column_for(cols, KMyjsfcPost{ustm.view(), wspd.view(), ch.view(), ust.cview(), chs.cview(), prep.u_phy.cview(),
+                                 prep.v_phy.cview(), false});
   } else if (o_.sf_sfclay_physics == 5) {
     // MYNNSFC (module_surface_driver.F: u3d=u_phytmp, v3d=v_phytmp, t3d=t_phy, qv3d=qv_curr, p3d=p_phy
     // (grid%p_hyd), dz8w, rho3d=rho, psfcpa=psfc, dx=dx2d; fractional_seaice = 0)
@@ -1361,7 +1384,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       pre.nsoil = nsoil; pre.itimestep = int(itimestep); pre.isurban = o_.isurban; pre.isice = o_.isice;
       pre.sf_urban_physics = 0;
       for (int n = 0; n < 11; ++n) pre.lcz[n] = noah_tables_.lcz[n];
-      pre.myj = (o_.sf_sfclay_physics == 2); pre.frpcpn = true;  // SR is passed by first_rk_step_part1
+      pre.myj = (o_.sf_sfclay_physics == 2 || o_.sf_sfclay_physics == 4); pre.frpcpn = true;  // SR is passed by first_rk_step_part1
       pre.rdlai2d = o_.rdlai2d; pre.dt = dtbl; pre.xice_threshold = xice_threshold;
       column_for(cols, pre);
 

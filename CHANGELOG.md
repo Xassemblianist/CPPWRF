@@ -26,6 +26,14 @@ a verified configuration, of a configuration key or of an output file is a new m
   qi tendency (phy_bl_ten). Bit for bit with WRF's compiled routine in tests/phys/bl_boulac (ctest
   test_phys_bl_boulac) and suite cases BL1 / BL4 / BL9 against WRF real*8 (CPU and CUDA FP64 at tolerance 0).
   Shin-Hong (bl_pbl_physics = 11) stays an error.
+- QNSE PBL (bl_pbl_physics = 4) and surface layer (sf_sfclay_physics = 4), tier **column_verified**: WRF's
+  module_bl_qnsepbl.F (MYJ's TKE scheme with the QNSE mixing length in stable layers, the QNSE stability functions
+  of the exchange coefficients, the production / dissipation of TKE with libmvec's pow lanes) and module_sf_qnsesfc.F
+  (QNSESFCINIT's QNSE stability-function tables, PRT0, the topographic Zilitinkevich factor, THZ0 from the surface
+  heat flux over land), with mfshconv = 0 only: the EDKF mass flux (WRF's default mfshconv = 1,
+  module_bl_mfshconvpbl.F) and QNSESFC_SEAICE_WRAPPER stay errors. Bit for bit with WRF's compiled routines in
+  tests/phys/bl_qnse (ctest test_phys_bl_qnse); runs with `[cppwrf] allow_unverified = true` until its whole-model
+  WRF cases pass. New key `[phys] mfshconv` (default 1, as WRF's Registry).
 - Verification tiers of options: `data/option_tiers.txt` lists option values merged before their whole-model WRF
   comparison as column_verified (bit-identical to WRF's Fortran in a column driver) or unverified (ported only).
   The model and cppwrf_real stop on such a value, naming option, value and tier, unless `[cppwrf] allow_unverified =

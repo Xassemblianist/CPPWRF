@@ -260,6 +260,8 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   o.sf_sfclay_physics = int(cfg.get_int("phys.sf_sfclay_physics", 0));
   o.sf_surface_physics = int(cfg.get_int("phys.sf_surface_physics", 0));
   o.bl_pbl_physics = int(cfg.get_int("phys.bl_pbl_physics", 0));
+  o.mfshconv = int(cfg.get_int("phys.mfshconv", 1));  // QNSE's EDKF (Registry default 1; check_a_mundo: 0 unless 4)
+  if (o.bl_pbl_physics != 4) o.mfshconv = 0;
   o.icloud_bl = int(cfg.get_int("phys.icloud_bl", 1));
   o.mynn.cloudpdf = int(cfg.get_int("phys.bl_mynn_cloudpdf", 2));  // MYNN-EDMF options (WRF's Registry names)
   o.mynn.mixlength = int(cfg.get_int("phys.bl_mynn_mixlength", 1));
@@ -454,7 +456,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
                                                    {"U10", &su.u10}, {"V10", &su.v10}, {"PSFC", &su.psfc}};
   for (const auto& [n, f] : diag)
     if (in.has(n)) put2(*f, rd2(n));
-  if (o.sf_sfclay_physics == 2) {  // phy_init (module_physics_init.F): u10e = u10, v10e = v10 for MYJSFCSCHEME
+  if (o.sf_sfclay_physics == 2 || o.sf_sfclay_physics == 4) {  // phy_init: u10e = u10, v10e = v10 for MYJSFC, QNSESFC
     if (in.has("U10")) put2(su.u10e, rd2("U10"));
     if (in.has("V10")) put2(su.v10e, rd2("V10"));
   }
@@ -466,7 +468,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   }
 
   // ---- phy_init / myjsfcinit
-  put_const(su.ust, o.sf_sfclay_physics == 2 ? 0.1 : 0.0001);
+  put_const(su.ust, o.sf_sfclay_physics == 2 || o.sf_sfclay_physics == 4 ? 0.1 : 0.0001);  // myjsfcinit, qnsesfcinit
   put_const(su.dx2d, g.dx);
   put_const(su.ctopo, 1.0); put_const(su.ctopo2, 1.0);
   {

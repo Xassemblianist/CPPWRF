@@ -680,6 +680,40 @@ class TestValidationAndWarnings(unittest.TestCase):
         err, _, _ = phys(1, 11)
         self.assertIn("Shin-Hong", " ".join(err))
 
+    def test_qnse(self):
+        # bl_pbl_physics = 4 (module_bl_qnsepbl.F) with sf_sfclay_physics = 4 (module_physics_init: 'use qnsesfc scheme
+        # for this pbl option'); column-verified (data/option_tiers.txt: a warning). Only mfshconv = 0 is ported (WRF's
+        # default 1 runs the EDKF mass flux, module_bl_mfshconvpbl.F); no sea-ice wrapper, no isfflx = 0
+        def phys(sfc, pbl, extra_phys="mfshconv = 0,", extra=""):
+            t = WrfTranslator(parse_namelist(real_case(f"""
+            &time_control /
+            &domains time_step = 60 /
+            &physics mp_physics = 6, sf_sfclay_physics = {sfc}, sf_surface_physics = 2, bl_pbl_physics = {pbl},
+             {extra_phys} /
+            &dynamics /
+            {extra}""")))
+            gen = t.translate()
+            return t.errors, t.warnings, gen
+        err, warn, gen = phys(4, 4)
+        self.assertEqual(err, [])
+        self.assertEqual((gen["phys"]["sf_sfclay_physics"], gen["phys"]["bl_pbl_physics"], gen["phys"]["mfshconv"]),
+                         (4, 4, 0))
+        self.assertIn("column_verified", " ".join(warn))
+        for extra_phys in ("", "mfshconv = 1,"):
+            err, _, _ = phys(4, 4, extra_phys)
+            self.assertIn("mfshconv = 1", " ".join(err), extra_phys)
+        err, _, gen = phys(1, 1, "mfshconv = 1,")  # check_a_mundo resets it for the other PBL schemes
+        self.assertEqual(err, [])
+        self.assertNotIn("mfshconv", gen["phys"])
+        for sfc, pbl, msg in ((1, 4, "needs sf_sfclay_physics = 4"), (4, 1, "with bl_pbl_physics = 4"),
+                              (4, 2, "with bl_pbl_physics = 4")):
+            err, _, _ = phys(sfc, pbl)
+            self.assertIn(msg, " ".join(err), (sfc, pbl))
+        err, _, _ = phys(4, 4, "mfshconv = 0, fractional_seaice = 1,")
+        self.assertIn("QNSESFC_SEAICE_WRAPPER", " ".join(err))
+        err, _, _ = phys(4, 4, "mfshconv = 0, isfflx = 0,")
+        self.assertIn("4 (QNSE)", " ".join(err))
+
     def test_acm2_pleim_xiu(self):
         # bl_pbl_physics = 7 (module_bl_acm.F) over sf_sfclay_physics = 1 or 7 (module_physics_init: 'use sfclay or
         # pxsfc scheme for this pbl option'), with qc and qi; the Pleim-Xiu surface layer with ACM2 and Noah; the PX

@@ -12,6 +12,7 @@
 #include "phys/bl_boulac/boulac.hpp"
 #include "phys/bl_gwdo/gwdo.hpp"
 #include "phys/bl_myj/myjpbl.hpp"
+#include "phys/bl_qnse/qnsepbl.hpp"
 #include "phys/bl_mynn/mynnedmf.hpp"
 #include "phys/bl_ysu/ysu.hpp"
 #include "phys/cu_bmj/bmj_tables.hpp"
@@ -287,12 +288,13 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
       chs2(g, Stagger::M, "chs2"), cqs2(g, Stagger::M, "cqs2"), cpm(g, Stagger::M, "cpm"),
       u_phytmp(g, Stagger::M, "u_phytmp"), v_phytmp(g, Stagger::M, "v_phytmp"), t1_lag_(g, Stagger::M, "t1_lag"), coszen(g, Stagger::M, "coszen"), rthratenlw(g, Stagger::M, "rthratenlw"), rthratensw(g, Stagger::M, "rthratensw"), rthratenlwc(g, Stagger::M, "rthratenlwc"), rthratenswc(g, Stagger::M, "rthratenswc"), o3rad(g, Stagger::M, "o3rad"), lwcf(g, Stagger::M, "lwcf"), swcf(g, Stagger::M, "swcf"), hrang(g, Stagger::M, "hrang"), uratx(g, Stagger::M, "uratx"), vratx(g, Stagger::M, "vratx"), tratx(g, Stagger::M, "tratx"), ra(g, Stagger::M, "ra"), rs(g, Stagger::M, "rs"), shall(g, Stagger::M, "shall"), lwupt(g, Stagger::M, "lwupt"), lwuptc(g, Stagger::M, "lwuptc"), lwdnt(g, Stagger::M, "lwdnt"), lwdntc(g, Stagger::M, "lwdntc"), lwupb(g, Stagger::M, "lwupb"), lwupbc(g, Stagger::M, "lwupbc"), lwdnb(g, Stagger::M, "lwdnb"), lwdnbc(g, Stagger::M, "lwdnbc"), olr(g, Stagger::M, "olr"), swupt(g, Stagger::M, "swupt"), swuptc(g, Stagger::M, "swuptc"), swdnt(g, Stagger::M, "swdnt"), swdntc(g, Stagger::M, "swdntc"), swupb(g, Stagger::M, "swupb"), swupbc(g, Stagger::M, "swupbc"), swdnb(g, Stagger::M, "swdnb"), swdnbc(g, Stagger::M, "swdnbc"), swvisdir(g, Stagger::M, "swvisdir"), swvisdif(g, Stagger::M, "swvisdif"), swnirdir(g, Stagger::M, "swnirdir"), swnirdif(g, Stagger::M, "swnirdif"), swddir(g, Stagger::M, "swddir"), swddni(g, Stagger::M, "swddni"), swddif(g, Stagger::M, "swddif"), swddirc(g, Stagger::M, "swddirc"), swddnic(g, Stagger::M, "swddnic"), diffuse_frac(g, Stagger::M, "diffuse_frac"), aclwupt(g, Stagger::M, "aclwupt"), aclwuptc(g, Stagger::M, "aclwuptc"), aclwdnt(g, Stagger::M, "aclwdnt"), aclwdntc(g, Stagger::M, "aclwdntc"), aclwupb(g, Stagger::M, "aclwupb"), aclwupbc(g, Stagger::M, "aclwupbc"), aclwdnb(g, Stagger::M, "aclwdnb"), aclwdnbc(g, Stagger::M, "aclwdnbc"), acswupt(g, Stagger::M, "acswupt"), acswuptc(g, Stagger::M, "acswuptc"), acswdnt(g, Stagger::M, "acswdnt"), acswdntc(g, Stagger::M, "acswdntc"), acswupb(g, Stagger::M, "acswupb"), acswupbc(g, Stagger::M, "acswupbc"), acswdnb(g, Stagger::M, "acswdnb"), acswdnbc(g, Stagger::M, "acswdnbc"), g_(g), gs_(g), o_(o) {
   dt_clock_ = wrf_time::from_seconds(g.dt);
-  if ((o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 2 && o.sf_sfclay_physics != 5 && o.sf_sfclay_physics != 7) ||
+  if ((o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 2 && o.sf_sfclay_physics != 4 && o.sf_sfclay_physics != 5 &&
+       o.sf_sfclay_physics != 7) ||
       (o.sf_surface_physics != 1 && o.sf_surface_physics != 2 && o.sf_surface_physics != 4) ||
-      (o.bl_pbl_physics != 0 && o.bl_pbl_physics != 1 && o.bl_pbl_physics != 2 && o.bl_pbl_physics != 5 &&
-       o.bl_pbl_physics != 7 && o.bl_pbl_physics != 8))
-    throw std::runtime_error("PhysicsSuite: only sf_sfclay_physics=1|2|5|7, sf_surface_physics=1|2|4, "
-                             "bl_pbl_physics=0|1|2|5|7|8 (the PX land surface, sf_surface_physics=7, is not ported)");
+      (o.bl_pbl_physics != 0 && o.bl_pbl_physics != 1 && o.bl_pbl_physics != 2 && o.bl_pbl_physics != 4 &&
+       o.bl_pbl_physics != 5 && o.bl_pbl_physics != 7 && o.bl_pbl_physics != 8))
+    throw std::runtime_error("PhysicsSuite: only sf_sfclay_physics=1|2|4|5|7, sf_surface_physics=1|2|4, "
+                             "bl_pbl_physics=0|1|2|4|5|7|8 (the PX land surface, sf_surface_physics=7, is not ported)");
   // module_physics_init: MYNNPBLSCHEME needs mynnsfc, sfclay or myjsfc (isfc 5, 1 or 2: all of the above).
   // The sea-ice wrappers of sfclayrev / MYJSFC are verified with YSU / MYJ only (no MYNN reference with sea ice)
   if (o.bl_pbl_physics == 5 && o.fractional_seaice == 1)
@@ -333,6 +335,20 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: bl_pbl_physics=1 (YSU) needs sf_sfclay_physics=1, as WRF");
   if (o.bl_pbl_physics == 2 && o.sf_sfclay_physics != 2)
     throw std::runtime_error("PhysicsSuite: bl_pbl_physics=2 (MYJ) needs sf_sfclay_physics=2, as WRF");
+  // QNSEPBLSCHEME: 'use qnsesfc scheme for this pbl option' (isfc 4); QNSESFC is ported with the QNSE PBL only (the
+  // other PBL schemes stop on isfc 4 in WRF, and no PBL scheme is unproven), without the EDKF mass flux (mfshconv = 1,
+  // module_bl_mfshconvpbl.F) and without QNSESFC_SEAICE_WRAPPER
+  if (o.bl_pbl_physics == 4 && o.sf_sfclay_physics != 4)
+    throw std::runtime_error("PhysicsSuite: bl_pbl_physics=4 (QNSE) needs sf_sfclay_physics=4, as WRF");
+  if (o.sf_sfclay_physics == 4 && o.bl_pbl_physics != 4)
+    throw std::runtime_error("PhysicsSuite: sf_sfclay_physics=4 (QNSE surface layer) is supported with "
+                             "bl_pbl_physics=4 only");
+  if (o.bl_pbl_physics == 4 && o.mfshconv != 0)
+    throw std::runtime_error("PhysicsSuite: bl_pbl_physics=4 with mfshconv=1 (the EDKF mass-flux shallow convection, "
+                             "module_bl_mfshconvpbl.F, WRF's default) is not ported; set phys.mfshconv = 0");
+  if (o.sf_sfclay_physics == 4 && o.fractional_seaice == 1)
+    throw std::runtime_error("PhysicsSuite: sf_sfclay_physics=4 with fractional_seaice=1 (QNSESFC_SEAICE_WRAPPER) is "
+                             "not ported");
   // ACMPBLSCHEME: 'use sfclay or pxsfc scheme for this pbl option' (isfc 1 or 7)
   if (o.bl_pbl_physics == 7 && o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 7)
     throw std::runtime_error("PhysicsSuite: bl_pbl_physics=7 (ACM2) needs sf_sfclay_physics=1 or 7, as WRF");
@@ -346,9 +362,9 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: sf_sfclay_physics=7 (Pleim-Xiu) is supported with bl_pbl_physics=7, "
                              "sf_surface_physics=2, fractional_seaice=0 and isfflx=1 only");
   // isfflx 0 skips the LSMs, the only writers of CHKLOWQ (uninitialised in WRF), which MYJPBL reads
-  if (o.bl_pbl_physics == 2 && o.isfflx == 0)
-    throw std::runtime_error("PhysicsSuite: bl_pbl_physics=2 (MYJ) with isfflx=0 is not supported (WRF reads an "
-                             "uninitialised CHKLOWQ)");
+  if ((o.bl_pbl_physics == 2 || o.bl_pbl_physics == 4) && o.isfflx == 0)
+    throw std::runtime_error("PhysicsSuite: bl_pbl_physics=2 (MYJ) or 4 (QNSE) with isfflx=0 is not supported (WRF "
+                             "reads an uninitialised CHKLOWQ)");
   // isftcflx / iz0tlnd: sfclayrev's forms (MYJSFC ignores them as WRF's); iz0tlnd > 2 leaves czil undefined in WRF
   if (o.isftcflx < 0 || o.isftcflx > 2 || o.iz0tlnd < 0 || o.iz0tlnd > 2)
     throw std::runtime_error("PhysicsSuite: isftcflx and iz0tlnd must be 0, 1 or 2");
@@ -475,6 +491,9 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: nz exceeds the MYJ column limit");
   if (o.sf_sfclay_physics == 2 && g.nz > sf_myjsfc::kMaxLevels)
     throw std::runtime_error("PhysicsSuite: nz exceeds the MYJSFC column limit");
+  if ((o.bl_pbl_physics == 4 && g.nz > qnsepbl::kMaxLevels) ||
+      (o.sf_sfclay_physics == 4 && g.nz > sf_qnsesfc::kMaxLevels))
+    throw std::runtime_error("PhysicsSuite: nz exceeds the QNSE column limit");
   if (o.gwd_opt != 0 && o.gwd_opt != 1)
     throw std::runtime_error("PhysicsSuite: only gwd_opt=0 or 1 (GWDO)");
   if (o.gwd_opt == 1 && g.nz > bl_gwdo::kMaxLevels)
@@ -574,6 +593,11 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     lowlyr.upload(std::vector<int>(lowlyr.layout().total, 1));  // myjsfcinit: LOWLYR = 1
     ust.fill_host([](int, int, int) { return 0.1; });           // myjsfcinit: USTAR = 0.1
   }
+  if (o.sf_sfclay_physics == 4) {  // qnsesfcinit (not restart): LOWLYR = 1, USTAR = 0.1, the tables
+    lowlyr.upload(std::vector<int>(lowlyr.layout().total, 1));
+    ust.fill_host([](int, int, int) { return 0.1; });
+    qnsesfc_tables_ = std::make_unique<sf_qnsesfc::QNSESFCTableManager>();
+  }
   if (o.sf_sfclay_physics == 5) {  // mynnsfc_init -> psi_init
     mynnsfc::PsiTables* h = new mynnsfc::PsiTables;
     mynnsfc::psi_init(*h);
@@ -609,6 +633,10 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     myjpbl::myjpbl_reserve(g.columns());  // CUDA FP64: its column arrays in the work buffer
     lowlyr.upload(std::vector<int>(lowlyr.layout().total, 1));
     tke_pbl.fill_host([](int, int, int) { return 0.2; });       // myjpblinit: TKE_MYJ = EPSQ2 = 0.2
+  }
+  if (o.bl_pbl_physics == 4) {  // qnsepblinit (not restart): TKE_PBL = EPSQ2L = 0.01 (a restart reads it from wrfrst)
+    qnsepbl::qnsepbl_reserve(g.columns());  // CUDA FP64: its column arrays in the work buffer
+    tke_pbl.fill_host([](int, int, int) { return 0.01; });
   }
   if (o.bl_pbl_physics == 8) {  // boulacinit (not restart): TKE_PBL = 0.0001 (a restart reads it from wrfrst)
     tke_pbl.fill_host([](int, int, int) { return 0.0001; });
@@ -815,7 +843,7 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
                     &ctopo, &ctopo2, &ck, &cka, &cd, &cda, &wstar, &delta, &hol, &rainc, &rainsh, &pratec, &pratesh, &nca, &htop, &hbot,
                     &cutop, &cubot, &cuppt, &coszen})
     v.emplace_back("sfc_" + f->name(), f);
-  if (o_.sf_sfclay_physics == 2 || o_.bl_pbl_physics == 2) {
+  if (myj_family(o_)) {
     for (Field2* f : {&thz0, &uz0, &vz0, &akhs, &akms, &ct, &tshltr, &th10, &qshltr, &q10, &pshltr, &u10e, &v10e, &mixht})
       v.emplace_back("sfc_" + f->name(), f);
   }
@@ -876,7 +904,7 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
                     &pt.rqicuten, &pt.rqscuten})
     v.emplace_back("sfc_" + f->name(), f);
   if (o_.tmn_update == 1) v.emplace_back("sfc_tlag", &tlag);
-  if (o_.sf_sfclay_physics == 2 || o_.bl_pbl_physics == 2) {
+  if (myj_family(o_)) {
     v.emplace_back("sfc_tke_pbl", &tke_pbl);
     v.emplace_back("sfc_el_pbl", &el_pbl);
   }
@@ -928,7 +956,7 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
 
 std::vector<std::pair<std::string, IntField2*>> PhysicsSuite::carried_int() {
   std::vector<std::pair<std::string, IntField2*>> v = {{"sfc_ivgtyp", &ivgtyp}, {"sfc_isltyp", &isltyp}, {"sfc_kpbl", &kpbl}};
-  if (o_.sf_sfclay_physics == 2 || o_.bl_pbl_physics == 2) v.emplace_back("sfc_lowlyr", &lowlyr);
+  if (myj_family(o_)) v.emplace_back("sfc_lowlyr", &lowlyr);
   if (o_.sf_surface_physics == 4) {
     v.emplace_back("sfc_isnowxy", &isnowxy);
     v.emplace_back("sfc_cropcat", &cropcat);
@@ -1016,7 +1044,7 @@ void PhysicsSuite::part1(dyn::State& s, const dyn::BaseState& b, dyn::Tendencies
 
 void PhysicsSuite::part2(const dyn::State& s, const dyn::BaseState& b, dyn::Tendencies& t) {
   const CouplingFlags f{radiation_on(), o_.bl_pbl_physics > 0, o_.cu_physics, o_.use_theta_m == 1, o_.fdda.grid_fdda,
-                        o_.bl_pbl_physics != 8};
+                        o_.bl_pbl_physics != 8 && o_.bl_pbl_physics != 4};
   calculate_phy_tend(pt, s, b, g_, f);
   update_phy_ten(t, pt, s, g_, f);
   if (o_.use_theta_m == 1) {
@@ -1038,7 +1066,7 @@ void PhysicsSuite::after_rk(const dyn::State& s, const dyn::BaseState& b) {
   advance_ppt(s);
   phy_prep_part2(pt, s, b, g_,
                  CouplingFlags{radiation_on(), o_.bl_pbl_physics > 0, o_.cu_physics, o_.use_theta_m == 1, o_.fdda.grid_fdda,
-                               o_.bl_pbl_physics != 8});
+                               o_.bl_pbl_physics != 8 && o_.bl_pbl_physics != 4});
 }
 
 // module_after_all_rk_steps.F -> diagnostics_driver -> diagnostic_output_calc, then clwrf_output_calc, at the end of

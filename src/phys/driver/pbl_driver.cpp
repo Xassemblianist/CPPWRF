@@ -7,6 +7,7 @@
 #include "core/column_work.hpp"
 #include "phys/bl_gwdo/gwdo.hpp"
 #include "phys/bl_myj/myjpbl.hpp"
+#include "phys/bl_qnse/qnsepbl.hpp"
 #include "phys/bl_mynn/mynnedmf.hpp"
 #include "phys/bl_ysu/ysu.hpp"
 #include "phys/driver/wrf_constants.hpp"
@@ -331,7 +332,8 @@ struct KBlFogdes {
 };
 }  // namespace
 
-// module_pbl_driver.F pbl_driver for YSUSCHEME / MYJPBLSCHEME / MYNNPBLSCHEME / ACMPBLSCHEME / BOULACSCHEME
+// module_pbl_driver.F pbl_driver for YSUSCHEME / MYJPBLSCHEME / QNSEPBLSCHEME / MYNNPBLSCHEME / ACMPBLSCHEME /
+// BOULACSCHEME
 namespace suite_detail {
 std::size_t gwdo_work_bytes() { return KGwdo::kWorkBytes; }
 }  // namespace suite_detail
@@ -384,6 +386,26 @@ void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
         qsfc.view(), thz0.view(), qz0.view(), ct.view(), tke_pbl.view(), exch_h.view(), el_pbl.view(), pblh.view(),
         kpbl.view(), mixht.view(), pt.rublten.view(), pt.rvblten.view(), pt.rthblten.view(), pt.rqvblten.view(),
         pt.rqcblten.view(), pt.rqiblten.view(), cols, dt, stepbl, g_.nz, /*has_qi=*/true);
+  } else if (o_.bl_pbl_physics == 4) {
+    // QNSEPBLSCHEME (module_pbl_driver.F:1549-1592, mfshconv = 0): DT=dt, STEPBL=stepbl, PMID=p_phy, PINT=p8w,
+    // T=t_phy, EXNER=pi_phy, CWM=qc_curr (zero without qc), U/V=u_phy/v_phy, CORF=f, ELFLX=lh, HFX=hfx; WTHV_MF and
+    // LM_BL89 (the zeroed u_phytmp / v_phytmp) are not read. The tendencies are added to the zeroed RxBLTEN.
+    const C2 ht_v = b.ht.uniform() ? slice0(zero3_) : C2{b.ht.data(), int(b.ht.layout().sj)};
+    qnsepbl::QNSEPBLKernel k{};
+    k.ht = ht_v; k.dz = prep.dz8w.cview(); k.pmid = prep.p_hyd.cview(); k.pint = prep.p_hyd_w.cview();
+    k.th = prep.th_phy.cview(); k.t = prep.t_phy.cview(); k.exner = prep.pi_phy.cview();
+    k.qv = s.q_2[s.P_QV].cview(); k.cwm = flag_qc ? s.q_2[s.P_QC].cview() : zero3_.cview();
+    k.u = prep.u_phy.cview(); k.v = prep.v_phy.cview();
+    k.tsk = tsk.cview(); k.chklowq = chklowq.cview(); k.corf = b.f.view(); k.xland = xland.cview();
+    k.sice = xice.cview(); k.snow = snow.cview(); k.elflx = lh.cview(); k.hfx = hfx.cview(); k.lowlyr = lowlyr.cview();
+    k.qsfc = qsfc.view(); k.qz0 = qz0.view(); k.thz0 = thz0.view(); k.uz0 = uz0.view(); k.vz0 = vz0.view();
+    k.ustar = ust.view(); k.znt = znt.view(); k.ct = ct.view(); k.akhs = akhs.view(); k.akms = akms.view();
+    k.pblh = pblh.view(); k.kpbl = kpbl.view();
+    k.tke = tke_pbl.view(); k.exch_h = exch_h.view(); k.exch_m = exch_m.view(); k.el_myj = el_pbl.view();
+    k.rublten = pt.rublten.view(); k.rvblten = pt.rvblten.view(); k.rthblten = pt.rthblten.view();
+    k.rqvblten = pt.rqvblten.view(); k.rqcblten = pt.rqcblten.view();
+    k.dt = dt; k.stepbl = stepbl; k.nz = g_.nz;
+    qnsepbl::run_qnsepbl(k, cols);
   } else if (o_.bl_pbl_physics == 5) {
     // MYNNPBLSCHEME (module_pbl_driver.F: initflag = 1 at itimestep 1, delt = dtbl, dz = dz8w, dxc = dx,
     // u = u_phy, v = v_phy, w = w_2, p = p_phy, exner = pi_phy, T3D = t_phy, ts = tsk, ps = psfc)

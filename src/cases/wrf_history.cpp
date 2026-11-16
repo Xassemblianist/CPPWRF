@@ -186,6 +186,7 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
     c.set("sf_sfclay_physics", std::to_string(o.sf_sfclay_physics));
     c.set("sf_surface_physics", std::to_string(o.sf_surface_physics));
     c.set("bl_pbl_physics", std::to_string(o.bl_pbl_physics));
+    c.set("mfshconv", std::to_string(o.mfshconv));  // the global attribute MFSHCONV
     c.set("cu_physics", std::to_string(o.cu_physics));
     c.set("ra_lw_physics", std::to_string(o.rad.ra_lw_physics));
     c.set("ra_sw_physics", std::to_string(o.rad.ra_sw_physics));
