@@ -425,7 +425,7 @@ SUPPORTED_OPTIONS = {
         0: "None / off",
         1: "5-layer thermal diffusion land surface (slab)",
         2: "Unified Noah land surface model (4 soil layers)",
-        3: "RUC land surface model (6 or 9 soil levels)",
+        3: "RUC land surface model (6 or 9 soil levels, column-verified)",
         4: "Noah-MP land surface model (v5.1.2, 4 soil layers)",
     },
     "bl_pbl_physics": {

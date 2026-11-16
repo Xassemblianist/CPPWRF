@@ -53,6 +53,13 @@ a verified configuration, of a configuration key or of an output file is a new m
   loops, SNOWNC / SR, the effective radii for RRTMG (has_reqc = has_reqi = has_reqs = 1); real data. Tier:
   verified (suite cases W3 / W5 against WRF real*8, CPU and CUDA FP64 at tolerance 0; column driver
   tests/phys/mp_wsm35, bit for bit with the -r8 build's wsm3 / wsm5). Not ported (errors): `do_radar_ref = 1` with them, the ideal cases, WSM7 (24), WSM6R (106).
+- RUC land surface model, `sf_surface_physics = 3` with 6 or 9 soil levels (phys/module_sf_ruclsm.F,
+  module_sf_sfcdiags_ruclsm.F): RUCLSMINIT, LSMRUC's land, snow (one- and two-layer snow), sea-ice, land-ice and
+  water points, the frozen-soil and snow-melt paths, SFCDIAGS_RUCLSM; the ruclsmscheme fields (SOILT1, SMFR3D,
+  KEEPFR3DFLAG, RHOSNF, SNOWFALLAC, ACRUNOFF) and QVG / QSG / QCG / TSNAV / DEW in the history and restart files;
+  USGS-RUC / MODI-RUC tables; input from WRF's real.exe. Tier: column_verified (tests/phys/lsm_ruc, ctest
+  test_phys_lsm_ruc: bit for bit with the -r8 build over six configurations). Not ported (errors): mosaic_lu /
+  mosaic_soil 1, fractional_seaice 1, sst_update 1, the MYNN surface layer, nests, cppwrf_real's RUC soil levels.
 - P3 microphysics with one ice category, `mp_physics = 50` (constant droplet number) and `51` (predicted droplet
   number QNCLOUD), phys/module_mp_p3.F: rime mass and volume QIR / QIB, TH_OLD / QV_OLD in the restart files, P3's
   REFL_10CM and effective radii for RRTMG; real data, one domain. Tier: verified (suite cases P3MP and P3NC against
