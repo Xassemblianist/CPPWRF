@@ -118,7 +118,7 @@ def write_wrfout(path, times, seed=0, bucket=None, rot=True):
             v[k] = ds.createVariable(k, "f4", ("Time", "bottom_top_stag", "south_north", "west_east"))
         v["T2"].units = "K"
         for i, tm in enumerate(times):
-            tv[i] = netCDF4.stringtochar(np.array([tm.strftime("%Y-%m-%d_%H:%M:%S")], "S19"))
+            tv[i] = np.frombuffer(tm.strftime("%Y-%m-%d_%H:%M:%S").encode(), "S1")
             v["XLAT"][i] = np.linspace(40, 41, ny)[:, None] * np.ones((1, nx))
             v["XLONG"][i] = np.linspace(28, 30, nx)[None, :] * np.ones((ny, 1))
             v["T2"][i] = 290.0 + (tm - datetime.datetime(2026, 10, 12)).total_seconds() / 3600.0

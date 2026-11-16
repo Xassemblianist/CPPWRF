@@ -180,7 +180,7 @@ def write_wrfout(path, times, fault=None, drop=None):
         if n != drop:
             ds.createVariable(n, "f8", ("Time",) + dims).setncatts({"MemoryOrder": "XYZ", "units": "m s-1"})
     for it, t in enumerate(times):
-        ts[it] = netCDF4.stringtochar(np.array([t], "S19"))
+        ts[it] = np.frombuffer(t.encode(), "S1")
         for n, dims in vs.items():
             a = rng.standard_normal([len(ds.dimensions[x]) for x in dims])
             if n == "W":

@@ -71,7 +71,7 @@ def write_full_wrfout(path, times, nz=30, ny=12, nx=14, dtype="f4"):
         mk = lambda name, dims, typ=dtype: ds.createVariable(name, typ, dims)  # noqa: E731
         for i, tm in enumerate(times):
             h = (tm - T0).total_seconds() / 3600.0
-            tv[i] = netCDF4.stringtochar(np.array([tm.strftime("%Y-%m-%d_%H:%M:%S")], "S19"))
+            tv[i] = np.frombuffer(tm.strftime("%Y-%m-%d_%H:%M:%S").encode(), "S1")
             vals = {
                 "XLAT": (d2, lat), "XLONG": (d2, lon), "HGT": (d2, zs), "PSFC": (d2, p[0] * 1.002),
                 "T2": (d2, t[0] + 0.5 - 0.3 * h), "Q2": (d2, q[0]), "U10": (d2, np.full((ny, nx), 3.0)),
