@@ -64,6 +64,10 @@ port_c12_data.tar
 port_c17_data.tar
 # the EDKF references (Q1M, Q4M: QNSE with mfshconv 1, tests/verify/cases/42_qnse_mf.py); links into run_P1_r8 / run_P4_r8
 port_c17b_data.tar
+# the urban canopy references (U4, U4L: sf_urban_physics 1, tests/verify/cases/43_urban.py); links into run_P4_r8
+port_b14_data.tar
+# the RUC references (RUC4, RUC4J: sf_surface_physics 3, tests/verify/cases/56_ruc.py; real.exe's inputs)
+port_c23_data.tar
 # whole references (every frame and variable) of the tolerance-0 cases and the ideal namelists
 # (tools/colab/stage_data.py --whole --refs-only --no-steps): after the tars above, whose files they replace
 v05_suite_refs.tar

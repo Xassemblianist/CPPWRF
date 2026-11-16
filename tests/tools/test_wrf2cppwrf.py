@@ -867,7 +867,7 @@ class TestValidationAndWarnings(unittest.TestCase):
             err, warn, p = phys("", sfc, pbl, nl=nl)
             self.assertEqual(err, [])
             self.assertEqual((p["sf_surface_physics"], p["num_soil_layers"]), (3, nl))
-            self.assertIn("sf_surface_physics = 3: verification tier column_verified", " ".join(warn))
+            self.assertNotIn("verification tier", " ".join(warn))
         err, _, p = phys(", rdlai2d = .true.")
         self.assertEqual((err, p["rdlai2d"]), ([], True))
         for kw, msg in (({"nl": 4}, "num_soil_layers = 4"), ({"sfc": 5, "pbl": 5}, "MYNN surface layer"),
@@ -1344,7 +1344,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
 
     def test_urban_canopy(self):
         # sf_urban_physics = 1 (single-layer UCM) with Noah on one domain, URBPARM.TBL or URBPARM_LCZ.TBL
-        # (use_wudapt_lcz = 1, column_verified: a warning); BEP / BEP+BEM, other land surfaces, distributed drag,
+        # (use_wudapt_lcz = 1); BEP / BEP+BEM, other land surfaces, distributed drag,
         # nests and restarts are errors
         noah = self.FULL.replace("bl_pbl_physics = 0,", "bl_pbl_physics = 1,").replace(
             "sf_sfclay_physics = 0, sf_surface_physics = 0", "sf_sfclay_physics = 1, sf_surface_physics = 2")
@@ -1352,7 +1352,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["sf_urban_physics"], 1)
         self.assertEqual(sec["phys"]["use_wudapt_lcz"], 1)
-        self.assertTrue(any("sf_urban_physics = 1: verification tier column_verified" in w for w in t.warnings))
+        self.assertFalse(any("verification tier" in w for w in t.warnings), t.warnings)
         t, sec = self.translate(noah.replace("&physics ", "&physics sf_urban_physics = 1, "))
         self.assertEqual(t.errors, [])
         self.assertNotIn("use_wudapt_lcz", sec["phys"])

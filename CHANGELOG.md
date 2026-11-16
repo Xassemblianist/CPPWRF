@@ -57,8 +57,9 @@ a verified configuration, of a configuration key or of an output file is a new m
   module_sf_sfcdiags_ruclsm.F): RUCLSMINIT, LSMRUC's land, snow (one- and two-layer snow), sea-ice, land-ice and
   water points, the frozen-soil and snow-melt paths, SFCDIAGS_RUCLSM; the ruclsmscheme fields (SOILT1, SMFR3D,
   KEEPFR3DFLAG, RHOSNF, SNOWFALLAC, ACRUNOFF) and QVG / QSG / QCG / TSNAV / DEW in the history and restart files;
-  USGS-RUC / MODI-RUC tables; input from WRF's real.exe. Tier: column_verified (tests/phys/lsm_ruc, ctest
-  test_phys_lsm_ruc: bit for bit with the -r8 build over six configurations). Not ported (errors): mosaic_lu /
+  USGS-RUC / MODI-RUC tables; input from WRF's real.exe. **Tier verified**: suite cases RUC4 (9 levels) and RUC4J
+  (MYJSFC + MYJ, 6 levels), 3 steps, 1 h and restarted at 30 min, against WRF real*8 (CPU FP64 and CUDA FP64 at
+  tolerance 0); column driver tests/phys/lsm_ruc (bit for bit with the -r8 build over six configurations). Not ported (errors): mosaic_lu /
   mosaic_soil 1, fractional_seaice 1, sst_update 1, the MYNN surface layer, nests, cppwrf_real's RUC soil levels.
 - P3 microphysics with one ice category, `mp_physics = 50` (constant droplet number) and `51` (predicted droplet
   number QNCLOUD), phys/module_mp_p3.F: rime mass and volume QIR / QIB, TH_OLD / QV_OLD in the restart files, P3's
@@ -79,9 +80,9 @@ a verified configuration, of a configuration key or of an output file is a new m
   urban_var_init and SUBROUTINE urban with SFCDIF_URB, called by the Noah LSM as module_sf_noahdrv.F does), with
   URBPARM.TBL or, with `use_wudapt_lcz = 1`, URBPARM_LCZ.TBL and their default options; the surface driver's urban
   10 m wind, PSIM / PSIH / GZ1OZ0, AKHS and AKMS; the UCM state, FRC_URB2D and UTYPE_URB in the wrfout / wrfrst
-  files. One domain, Noah only, no restart. Tier: column_verified (tests/phys/sf_urban: WRF's urban_param_init and
-  urban of the -r8 build against the port on 9000 point-steps per table, tolerance 0); the options need
-  `[cppwrf] allow_unverified = true`. BEP / BEP+BEM (2, 3), slucm_distributed_drag, NUDAPT morphology, the other
+  files. One domain, Noah only, no restart. **Tier verified**: suite cases U4 (URBPARM.TBL) and U4L (URBPARM_LCZ.TBL),
+  3 steps and 1 h against WRF real*8 (CPU FP64 and CUDA FP64 at tolerance 0); column driver tests/phys/sf_urban
+  (WRF's urban_param_init and urban of the -r8 build, 9000 point-steps per table, tolerance 0). BEP / BEP+BEM (2, 3), slucm_distributed_drag, NUDAPT morphology, the other
   table options, nests, restarts and cppwrf_real's urban input stay errors.
 
 ### Fixed
