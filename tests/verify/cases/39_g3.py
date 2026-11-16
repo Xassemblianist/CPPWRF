@@ -32,8 +32,9 @@ CASES = [
      f"{WR}/run_G3P8_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_p4g3_r8_fp64_cuda_1h", "cuda_dp", "configs/real_p4_r8.ini", ["real.dir=" + f"{WR}/run_G3P4_r8"] + _P4 + _1H,
      f"{WR}/run_G3P4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
+    # FP32: measured on the G4 2026-11-16, tolerances about 3x (CUDA FP64 exact)
     ("real_p8g3_fp32_1h", "cuda", "configs/real_p8g3_r8.ini", ["real.dir=" + f"{WR}/run_G3P8_r8"] + _1H,
-     f"{WR}/run_G3P8_r8/wrfout_d01_{_D}", 3600, {"U": 2e-3, "W": 5e-2, "THM": 3e-5, "QV": 8e-4}),
+     f"{WR}/run_G3P8_r8/wrfout_d01_{_D}", 3600, {"U": 9.3e-4, "W": 2.9e-2, "THM": 1.8e-5, "QV": 1.1e-3}),
 ]
 
 STATUS = [

@@ -30,8 +30,9 @@ CASES += [
     # relative L2 of a G4 run)
     ("real_q4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_q4_r8.ini", ["real.dir=" + f"{WR}/run_Q4_r8"] + _1H,
      f"{WR}/run_Q4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
+    # FP32: measured on the G4 2026-11-16, tolerances about 3x (CUDA FP64 exact)
     ("real_q4_fp32_1h", "cuda", "configs/real_q4_r8.ini", ["real.dir=" + f"{WR}/run_Q4_r8"] + _1H,
-     f"{WR}/run_Q4_r8/wrfout_d01_{_D}", 3600, {"U": 2.1e-3, "W": 6.6e-2, "THM": 2.8e-5, "QV": 1.7e-3}),
+     f"{WR}/run_Q4_r8/wrfout_d01_{_D}", 3600, {"U": 8.1e-4, "W": 3.0e-2, "THM": 1.6e-5, "QV": 6.6e-4}),
 ]
 
 STATUS = [
