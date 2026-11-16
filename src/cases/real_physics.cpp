@@ -524,8 +524,9 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     put2(su.snoalb, snoalb);
     if (in.has("SNOWH")) put2(su.snowh, rd2("SNOWH"));
     if (in.has("CANWAT")) put2(su.canwat, rd2("CANWAT"));
-    for (const auto& [n, f] : {std::pair<const char*, Field2*>{"SOILT1", &su.soilt1}, {"RHOSNF", &su.rhosnf},
-                               {"SNOWFALLAC", &su.snowfallac}, {"ACRUNOFF", &su.acrunoff}})
+    const std::pair<const char*, Field2*> ruc_in[] = {
+        {"SOILT1", &su.soilt1}, {"RHOSNF", &su.rhosnf}, {"SNOWFALLAC", &su.snowfallac}, {"ACRUNOFF", &su.acrunoff}};
+    for (const auto& [n, f] : ruc_in)
       if (in.has(n)) put2(*f, rd2(n));
     std::vector<double> sh2o(n2 * ns), smfr(n2 * ns), mav(mavail), znt(n2);
     for (std::size_t p = 0; p < n2; ++p) {
