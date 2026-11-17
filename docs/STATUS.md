@@ -353,7 +353,7 @@ CPU and CUDA FP64 at tolerance 0. WRF's MYNN defaults (`bl_mynn_edmf` 1, `bl_myn
 `bl_mynn_cloudmix` 1, `bl_mynn_cloudpdf` 2, `bl_mynn_closure` 2.6) are what the MYNN, MYNNSF1 and MYNNSF2 cases run
 (their WRF namelists leave them at the Registry defaults); MYNNX1 / MYNNX2 run the other values with a port.
 `moist_adv_opt` / `scalar_adv_opt` / `tke_adv_opt` 2 (monotonic, advect_scalar_mono), 3 (WENO) and 4 (positive-definite
-WENO), and `momentum_adv_opt` 3 (WENO, advect_weno_u / _v / _w) are verified at model level (tests/verify/cases/44_advection.py:
+WENO), and `momentum_adv_opt` 3 (WENO, advect_weno_u / _v / _w) are verified at model level (tests/verify/cases/46_advection.py:
 MO4, MOK4, MOMY, MON3, WE4, WP4, WM4, WK4, WMY, WN3, 3 min and 1 h at tolerance 0) and column by column against WRF's
 advection routines (tests/dyn/advection). The WENO references come from WRF built with -r8 -double-8: in the plain -r8
 build the WENO routines' DOUBLE PRECISION locals are real*16. Monotonic advection needs h_sca_adv_order 5 and
