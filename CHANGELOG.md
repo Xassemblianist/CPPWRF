@@ -6,6 +6,14 @@ a verified configuration, of a configuration key or of an output file is a new m
 ## Unreleased
 
 ### Added
+- WDM6 and WDM5 microphysics, `mp_physics = 16` (`hail_opt` 0 / 1) and `14` (phys/module_mp_wdm6.F,
+  module_mp_wdm5.F): double-moment warm rain with the CCN, cloud and rain numbers (scalars QNCCN, QNCLOUD, QNRAIN),
+  `[phys] ccn_conc` (start_em's fill when the input has no CCN, the CCN reset of the first step, the inflow value of
+  flow_dep_bdy_qnn), WDM6's land-mask dependent autoconversion threshold, WRF's libmvec lanes of the vectorised
+  loops, SNOWNC / GRAUPELNC / SR, the effective radii for RRTMG; real data, one domain. Tier: verified (suite cases
+  D6, D6H, D6C, D5 against WRF real*8 at tolerance 0; column driver tests/phys/mp_wdm, bit for bit with the -r8
+  build's wdm6 / wdm5). Not ported (errors): `do_radar_ref = 1` with them, nests, the ideal cases, WDM6 without the
+  column physics, WDM7 (26).
 - Grell-3D ensemble cumulus (cu_physics = 5, WRF's module_cu_g3.F): G3DRV with the 3 x 3 neighbours' vertical
   motion and advective forcing (ens4 = 9), CUP_enss_3d with its closure ensemble (maxens 3, maxens2 3, maxens3 16),
   the shallow convection (ishallow = 1), clos_choice, cugd_avedx 1 / 3 (`[phys] cugd_avedx`), APR_* /
