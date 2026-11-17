@@ -61,6 +61,8 @@ CASES += [
      f"{WR}/run_WE4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "QRAIN": 0.0}),
     ("real_wm4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_wm4_r8.ini", [f"real.dir={WR}/run_WM4_r8"] + _1H,
      f"{WR}/run_WM4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
+    ("real_wm4_fp32_1h", "cuda", "configs/real_wm4_r8.ini", [f"real.dir={WR}/run_WM4_r8"] + _1H,
+     f"{WR}/run_WM4_r8/wrfout_d01_{_D}", 3600, {"U": 1.9e-3, "W": 5.1e-2, "THM": 2.6e-5, "QV": 1.6e-3}),
 ]
 
 STATUS = [
