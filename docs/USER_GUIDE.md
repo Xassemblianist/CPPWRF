@@ -396,7 +396,8 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `diff_6th_opt`, `diff_6th_factor` | 0, 1, 2 |
 | `damp_opt`, `zdamp`, `dampcoef`, `w_damping`, `w_crit_cfl` | 0-3; any; 0, 1 |
 | `h_mom_adv_order` = `h_sca_adv_order`, `v_mom_adv_order` = `v_sca_adv_order` | 5, 6; 3, 4 |
-| `moist_adv_opt`, `scalar_adv_opt`, `tke_adv_opt` | 0, 1 |
+| `moist_adv_opt`, `scalar_adv_opt`, `tke_adv_opt` | 0, 1, 2 (monotonic: h 5 / v 3 orders), 3 (WENO), 4 (positive-definite WENO) |
+| `momentum_adv_opt` | 1, 3 (WENO) |
 | `hybrid_opt`, `etac` | 0, 2 (real.exe makes the coordinate) |
 | `hypsometric_opt` | 1, 2 |
 | `epssm`, `smdiv`, `emdiv`, `time_step_sound`, `top_lid`, `base_temp`, `iso_temp` | any |
@@ -625,8 +626,9 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[dyn]` | `damp_opt` | integer | `0` | Upper damping layer (0 = off, 1 = diffusive layer, 2 = Rayleigh relaxation, 3 = implicit Rayleigh damping of $w$) | `damp_opt` |
 | `[dyn]` | `zdamp` | double | `5000.0` | Depth of upper Rayleigh damping sponge layer in meters | `zdamp` |
 | `[dyn]` | `dampcoef` | double | `0.2` | Rayleigh damping coefficient ($s^{-1}$) | `dampcoef` |
-| `[dyn]` | `moist_adv_opt` | integer | `1` | Moisture advection scheme (0 = standard, 1 = positive-definite) | `moist_adv_opt` |
-| `[dyn]` | `scalar_adv_opt`, `tke_adv_opt` | integer | `1` | Scalar and TKE advection scheme (0 = standard, 1 = positive-definite) | `scalar_adv_opt`, `tke_adv_opt` |
+| `[dyn]` | `moist_adv_opt` | integer | `1` | Moisture advection scheme (0 = standard, 1 = positive-definite, 2 = monotonic, 3 = WENO, 4 = positive-definite WENO) | `moist_adv_opt` |
+| `[dyn]` | `scalar_adv_opt`, `tke_adv_opt` | integer | `1` | Scalar and TKE advection scheme (as `moist_adv_opt`) | `scalar_adv_opt`, `tke_adv_opt` |
+| `[dyn]` | `momentum_adv_opt` | integer | `1` | Momentum advection (1 = standard, 3 = WENO on the last RK stage) | `momentum_adv_opt` |
 | `[dyn]` | `hybrid_opt`, `etac`, `hypsometric_opt` | int/double | `0`/`2`, `0.2`, `1`/`2` | Hybrid vertical coordinate option, transition $\eta_c$, and hypsometric integration option | `hybrid_opt`, `etac`, `hypsometric_opt` |
 | `[dyn]` | `epssm` | double | `0.1` | Acoustic small-step forward-centering factor | `epssm` |
 | `[dyn]` | `smdiv`, `emdiv` | double | `0.1`, `0.01` | Acoustic divergence and external mode filters | `smdiv`, `emdiv` |

@@ -188,7 +188,6 @@ CPPWRF runs these features only at WRF's default value (another value is an erro
 
 | Option | WRF default | Feature without a port |
 |---|---|---|
-| `&dynamics.momentum_adv_opt` | `1` | WENO momentum advection |
 | `&dynamics.phi_adv_z` | `1` | geopotential advection without double-staggered omega |
 | `&physics.no_mp_heating` | `0` | microphysics without latent heating |
 | `&physics.mp_zero_out` | `0` | microphysics zero-out of small moist values |

@@ -150,9 +150,34 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | M4C5 | M4 with cudt = 5 | 1 h |
 | M9 | P9 (MYJ, no microphysics) with the multi-scale Kain-Fritsch | 1 h |
 | M3N | N3 two-way nest with the multi-scale Kain-Fritsch on both domains | 1 h |
+| P9BMJ | P9 with the Betts-Miller-Janjic cumulus (cu_physics 2; restarted at 30 min; cudt 5) | 1 h |
+| P4BMJ | P4 with BMJ instead of Kain-Fritsch, without and with bmj_rad_feedback | 1 h |
+| BL1 | P1 with the BouLac PBL (bl_pbl_physics 8; restarted at 30 min) | 1 h |
+| BL4 | P4 with the BouLac PBL | 1 h |
+| BL9 | P9 with the BouLac PBL over the Eta surface layer | 1 h |
+| W5 | P4 with WSM5 (mp_physics 4) instead of WSM6; restarted at 30 min | 1 h |
+| W3 | P4 with WSM3 (mp_physics 3) instead of WSM6; restarted at 30 min | 1 h |
+| G3P8 | P8 with the Grell-3D cumulus (cu_physics 5, ishallow 1; restarted at 30 min) | 1 h |
+| G3P4 | P4 with Grell-3D instead of Kain-Fritsch (cugd_avedx 1 and 3) | 1 h |
 | V1 | tropics (Bay of Bengal), Mercator, 15 km, P4 physics | 6 h |
 | V2 | Arctic (Svalbard), polar stereographic, 15 km, P4 physics (sea ice, glacier land ice) | 6 h |
 | V3 | Alps, Lambert, 3 km, Thompson + MYJ + Eta + Noah-MP + RRTMG (radt 5), no cumulus | 2 h |
+| Q1 | P1 with the QNSE PBL and surface layer (bl_pbl_physics 4, sf_sfclay_physics 4, mfshconv 0) | 1 h |
+| Q4 | P4 with the QNSE PBL and surface layer (restarted at 30 min) | 1 h |
+| Q1M | Q1 with the EDKF mass flux of the QNSE PBL (mfshconv 1; restarted at 30 min) | 1 h |
+| Q4M | Q4 with the EDKF mass flux of the QNSE PBL (mfshconv 1; restarted at 30 min) | 1 h |
+| U4 | P4 with the single-layer urban canopy model (sf_urban_physics 1, URBPARM.TBL) | 1 h |
+| U4L | U4 with use_wudapt_lcz 1 (URBPARM_LCZ.TBL) | 1 h |
+| MO4 | P4 with monotonic moist / scalar advection (moist_adv_opt 2, scalar_adv_opt 2) | 1 h |
+| MOK4 | P4 with diff_opt 2 / km_opt 2, monotonic moist and TKE advection (moist_adv_opt 2, tke_adv_opt 2) | 1 h |
+| MOMY | MYNN with monotonic moist / scalar advection (qni, qnr, qke_adv) | 1 h |
+| MON3 | two-way nest N3 with monotonic moist / scalar advection on both domains | 1 h |
+| WE4 | P4 with WENO moist / scalar advection (moist_adv_opt 3, scalar_adv_opt 3) | 1 h |
+| WP4 | P4 with positive-definite WENO moist / scalar advection (4, 4) | 1 h |
+| WM4 | P4 with WENO momentum advection (momentum_adv_opt 3) | 1 h |
+| WK4 | P4 with km_opt 2, WENO moist (3) and positive-definite WENO TKE (tke_adv_opt 4) advection | 1 h |
+| WMY | MYNN with positive-definite WENO moist (4) and WENO scalar (3) advection | 1 h |
+| WN3 | two-way nest N3 with positive-definite WENO moist / scalar and WENO momentum advection | 1 h |
 | T6 | P2 with Tiedtke (cu_physics 6) | 3 h |
 | G2 | P2 with gravity wave drag (gwd_opt 1; ELVMAX = HGT + 3 VAR, WPS 4.6 writes none) | 3 h |
 | F1 / F2 | V2 with fractional sea ice (real.exe with fractional_seaice 1), sfclayrev + YSU / Eta + MYJ | 3 h |
@@ -164,6 +189,8 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | HY1 | P1 with hypsometric_opt 1 (real.exe and wrf.exe) | 1 h |
 | SLAB1 / SLAB4 | P1 / P4 with the 5-layer thermal diffusion land surface (sf_surface_physics 1; inputs from real.exe) | 1 h |
 | NMP1 | P1 with Noah-MP | 1 h |
+| RUC4 | P4 with the RUC LSM (sf_surface_physics 3, 9 levels) instead of Noah; restarted at 30 min | 1 h |
+| RUC4J | RUC4 with MYJSFC + MYJ PBL and 6 soil levels; restarted at 30 min | 1 h |
 | N1 | one-way nest (both domains) | 3 parent steps |
 | N2 | two-way nest (both domains) | 1 h |
 | N2S1 / N2S2 | N2 with smooth_option 1 / 2 (smoothing of the fed-back fields, ht included) | 1 h |
@@ -325,8 +352,12 @@ on the 15 km test domain), `tke_adv_opt` 0, `moist_adv_opt` / `scalar_adv_opt` 0
 CPU and CUDA FP64 at tolerance 0. WRF's MYNN defaults (`bl_mynn_edmf` 1, `bl_mynn_edmf_mom` 1, `bl_mynn_mixlength` 1,
 `bl_mynn_cloudmix` 1, `bl_mynn_cloudpdf` 2, `bl_mynn_closure` 2.6) are what the MYNN, MYNNSF1 and MYNNSF2 cases run
 (their WRF namelists leave them at the Registry defaults); MYNNX1 / MYNNX2 run the other values with a port.
-`moist_adv_opt` / `scalar_adv_opt` / `tke_adv_opt` 2 (monotonic) and higher are not ported: CPPWRF rejects them at
-start-up.
+`moist_adv_opt` / `scalar_adv_opt` / `tke_adv_opt` 2 (monotonic, advect_scalar_mono), 3 (WENO) and 4 (positive-definite
+WENO), and `momentum_adv_opt` 3 (WENO, advect_weno_u / _v / _w) are verified at model level (tests/verify/cases/44_advection.py:
+MO4, MOK4, MOMY, MON3, WE4, WP4, WM4, WK4, WMY, WN3, 3 min and 1 h at tolerance 0) and column by column against WRF's
+advection routines (tests/dyn/advection). The WENO references come from WRF built with -r8 -double-8: in the plain -r8
+build the WENO routines' DOUBLE PRECISION locals are real*16. Monotonic advection needs h_sca_adv_order 5 and
+v_sca_adv_order 3 (WRF stops with other orders).
 
 Order and initialisation: every CPU FP64 suite configuration, including the 56 whose inputs the audit did not have,
 gives the same bytes over 3 steps in the normal OpenMP run, serially with every launch's points in reversed order,
@@ -374,7 +405,7 @@ serial compression). Wall times, GPU memory and the details are in docs/PERF.md.
 
 ## Not yet implemented
 
-Milbrandt-Yau (mp_physics 9), P3 with two ice categories (52) or three-moment ice (53), P3 with nests, ideal cases or do_radar_ref 1 (REFD_MAX), Morrison with aerosols (mp_physics 40), Morrison's prognostic droplet number (progn 1) and its 10 cm reflectivity (do_radar_ref 1 with mp_physics 10), the Dudhia shortwave with cu_rad_feedback and Grell-Freitas (wrf.exe writes NaN cloud fractions there), the PX land surface (sf_surface_physics 7, pxlsm_* options and PX soil nudging), the Pleim-Xiu surface layer without ACM2 or Noah or with fractional_seaice = 1, sf_sfclay_physics 91, km_opt 5, moist_adv_opt / scalar_adv_opt / tke_adv_opt 2 and higher (monotonic, WENO), the MYNN PBL with fractional_seaice = 1, the MYNN options bl_mynn_edmf 2, bl_mynn_edmf_dd, bl_mynn_mixnumcon, bl_mynn_mixaerosols 0, bl_mynn_output 2, other bl_mynn_closure values and the GFS surface-layer forms (sf_mynn_sfcflux_land 4, sf_mynn_sfcflux_water 5), Noah-MP options other than the defaults (and crop/irrigation/
+Milbrandt-Yau (mp_physics 9), P3 with two ice categories (52) or three-moment ice (53), P3 with nests, ideal cases or do_radar_ref 1 (REFD_MAX), Morrison with aerosols (mp_physics 40), Morrison's prognostic droplet number (progn 1) and its 10 cm reflectivity (do_radar_ref 1 with mp_physics 10), the Dudhia shortwave with cu_rad_feedback and Grell-Freitas (wrf.exe writes NaN cloud fractions there), the PX land surface (sf_surface_physics 7, pxlsm_* options and PX soil nudging), the Pleim-Xiu surface layer without ACM2 or Noah or with fractional_seaice = 1, sf_sfclay_physics 91, km_opt 5, the MYNN PBL with fractional_seaice = 1, the MYNN options bl_mynn_edmf 2, bl_mynn_edmf_dd, bl_mynn_mixnumcon, bl_mynn_mixaerosols 0, bl_mynn_output 2, other bl_mynn_closure values and the GFS surface-layer forms (sf_mynn_sfcflux_land 4, sf_mynn_sfcflux_water 5), Noah-MP options other than the defaults (and crop/irrigation/
 tile drainage), sst_skin and tmn_update with land surface models other than Noah, the adaptive time step with nests, sst_update, sst_skin, tmn_update, grid_fdda or ideal cases, spectral nudging (grid_fdda = 2),
 surface analysis nudging (grid_sfdda, needs OBSGRID's wrfsfdda_d0N), observation nudging (obs_nudge_opt), moving nests, ndown.exe (one-way nesting from a parent run's wrfout), I/O forms other than NetCDF
 (io_form 2) and auxiliary history / input streams other than sst_update's wrflowinp and grid_fdda's wrffdda (WRF writes none by default),

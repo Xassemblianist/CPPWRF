@@ -1,10 +1,15 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Monotonic scalar advection (moist_adv_opt / scalar_adv_opt / tke_adv_opt = 2: dyn_em/module_advect_em.F
+"""Monotonic and WENO advection. Monotonic scalar advection (moist_adv_opt / scalar_adv_opt / tke_adv_opt = 2: dyn_em/module_advect_em.F
 advect_scalar_mono on the last RK stage after rk_update_scalar_pd): MO4 = P4 (WSM6, Kain-Fritsch, RRTMG, YSU, Noah)
 with moist and scalar 2, MOK4 = P4 with diff_opt 2 / km_opt 2, moist and TKE 2, MOMY = the MYNN physics (Thompson,
 MYNN, qni / qnr / qke_adv scalars) with moist and scalar 2, MON3 = the two-way nest N3 with moist and scalar 2 on
 both domains (the 1 h WRF run writes no d02 history: d01, which the nest feeds back, is compared); each against
 its WRF v4.8.0 run (real*8; MOMY -r8 -double-8; wrfref workflow of Xassemblianist/cppwrf-data, tag b05-mono, inputs of run_P4_r8 / run_P6_r8 / run_N3h_r8).
+WENO (advect_scalar_weno / _wenopd for adv_opt 3 / 4, theta with advect_scalar_weno; advect_weno_u / _v / _w for
+momentum_adv_opt 3; all on the last RK stage): WE4 = P4 with moist and scalar 3, WP4 = 4 / 4, WM4 = P4 with
+momentum_adv_opt 3, WK4 = MOK4's TKE run with moist 3 and TKE 4, WMY = MYNN with moist 4 and scalar 3, WN3 = the
+nest N3 with moist / scalar 4 and momentum 3 on both domains; WRF -r8 -double-8 (the WENO routines' DOUBLE
+PRECISION locals are real*16 in the plain -r8 build), tag b05-weno, data port_b05w_data.tar.
 
 CASES: see tests/verify/cases/__init__.py."""
 from cases.common import WR  # noqa: F401
@@ -39,13 +44,42 @@ CASES += [
      f"{WR}/run_MO4_r8/wrfout_d01_{_D}", 3600, {"U": 1.9e-3, "W": 5.1e-2, "THM": 2.6e-5, "QV": 1.6e-3}),
 ]
 
+for _n, _s in (("WE4", "we4"), ("WP4", "wp4"), ("WM4", "wm4"), ("WK4", "wk4"), ("WMY", "wmy")):
+    _cfg, _run = f"configs/real_{_s}_r8.ini", f"{WR}/run_{_n}_r8"
+    CASES += [
+        (f"real_{_s}_r8_fp64_cpu", "cpu_dp", _cfg, [], f"{_run}/steps/wrfout_d01_{_D}", 180, _T),
+        (f"real_{_s}_r8_fp64_cpu_1h", "cpu_dp", _cfg, ["real.dir=" + _run] + _1H, f"{_run}/wrfout_d01_{_D}", 3600, _T),
+    ]
+CASES += [
+    ("real_wn3_r8_fp64_cpu", "cpu_dp", "configs/real_wn3_r8.ini", [f"real.dir={WR}/run_WN3_r8/steps",
+     f"phys.table_dir={WR}/run_WN3_r8/steps", "run.run_time=180", "output.out_interval=1",
+     "output.diag_interval=1", "d02.out_interval=3", "d02.diag_interval=3"],
+     {d: f"{WR}/run_WN3_r8/steps/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 180, _N3),
+    ("real_wn3_r8_fp64_cpu_1h", "cpu_dp", "configs/real_wn3_r8.ini", [],
+     {d: f"{WR}/run_WN3_r8/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 3600, _N3),
+    ("real_we4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_we4_r8.ini", [f"real.dir={WR}/run_WE4_r8"] + _1H,
+     f"{WR}/run_WE4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "QRAIN": 0.0}),
+    ("real_wm4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_wm4_r8.ini", [f"real.dir={WR}/run_WM4_r8"] + _1H,
+     f"{WR}/run_WM4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
+]
+
 STATUS = [
     ('MO4', 'P4 with monotonic moist / scalar advection (moist_adv_opt 2, scalar_adv_opt 2)', '1 h'),
     ('MOK4', 'P4 with diff_opt 2 / km_opt 2, monotonic moist and TKE advection (moist_adv_opt 2, tke_adv_opt 2)',
      '1 h'),
     ('MOMY', 'MYNN with monotonic moist / scalar advection (qni, qnr, qke_adv)', '1 h'),
     ('MON3', 'two-way nest N3 with monotonic moist / scalar advection on both domains', '1 h'),
+    ('WE4', 'P4 with WENO moist / scalar advection (moist_adv_opt 3, scalar_adv_opt 3)', '1 h'),
+    ('WP4', 'P4 with positive-definite WENO moist / scalar advection (4, 4)', '1 h'),
+    ('WM4', 'P4 with WENO momentum advection (momentum_adv_opt 3)', '1 h'),
+    ('WK4', 'P4 with km_opt 2, WENO moist (3) and positive-definite WENO TKE (tke_adv_opt 4) advection', '1 h'),
+    ('WMY', 'MYNN with positive-definite WENO moist (4) and WENO scalar (3) advection', '1 h'),
+    ('WN3', 'two-way nest N3 with positive-definite WENO moist / scalar and WENO momentum advection', '1 h'),
 ]
 
-DATA = {c[0]: ('suite_data.tar,n3_data.tar,port_b05_data.tar' if '_mon3_' in c[0] else
-               'suite_data.tar,port_b05_data.tar') for c in CASES}
+def _data(name):
+    tar = 'port_b05w_data.tar' if name.startswith('real_w') else 'port_b05_data.tar'
+    return f'suite_data.tar,n3_data.tar,{tar}' if '_mon3_' in name or '_wn3_' in name else f'suite_data.tar,{tar}'
+
+
+DATA = {c[0]: _data(c[0]) for c in CASES}

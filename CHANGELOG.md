@@ -20,6 +20,12 @@ a verified configuration, of a configuration key or of an output file is a new m
   RVCUTEN, staggered with add_a2c_u / add_a2c_v), cudt; aercu_opt = 0 and kf_edrates = 0 only. Column driver
   tests/phys/cu_mskf against WRF's MSKF_CPS; suite cases M4 (also restarted at 30 min), M4C5, M9 and the nest M3N
   against WRF real*8. KF-CuP (10) and the old Kain-Fritsch (99) are rejected by tools/wrf2cppwrf.py and the model.
+- Monotonic and WENO advection: `moist_adv_opt` / `scalar_adv_opt` / `tke_adv_opt` 2 (WRF's advect_scalar_mono, the
+  Smolarkiewicz flux limiter after rk_update_scalar_pd), 3 (advect_scalar_weno; theta also takes the WENO fluxes on
+  the last RK stage) and 4 (advect_scalar_wenopd), and `momentum_adv_opt` 3 (advect_weno_u / _v / _w), all on the
+  last RK stage as in module_em.F. Tier: verified (suite cases MO4, MOK4, MOMY, MON3, WE4, WP4, WM4, WK4, WMY, WN3
+  against WRF real*8 at tolerance 0, the WENO ones against WRF -r8 -double-8; column test tests/dyn/advection
+  bit-identical with WRF's advection routines). Monotonic advection with other orders than h 5 / v 3 is an error.
 - Grell-3D ensemble cumulus (cu_physics = 5, WRF's module_cu_g3.F): G3DRV with the 3 x 3 neighbours' vertical
   motion and advective forcing (ens4 = 9), CUP_enss_3d with its closure ensemble (maxens 3, maxens2 3, maxens3 16),
   the shallow convection (ishallow = 1), clos_choice, cugd_avedx 1 / 3 (`[phys] cugd_avedx`), APR_* /
