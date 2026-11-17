@@ -108,6 +108,11 @@ a verified configuration, of a configuration key or of an output file is a new m
   are unchanged.
 
 ### Performance
+- RRTMG LW / SW (and the radiation driver's RRTMG paths, Dudhia SW) compute in single precision in CUDA FP32 builds:
+  the scheme's type `rr` (src/phys/ra_rrtmg_common/rrtmg_real.hpp) is float there, double in CUDA FP64 and in every
+  CPU build, whose results are unchanged (CUDA FP64 at tolerance 0, CPU FP32 byte-identical). GPU FP32 output bytes
+  change; its distance from WRF real*8 stays at WRF real*4's (docs/RRTMG_FP32_EXPERIMENT.md: P4 72 h, N3 24 h). GPU
+  FP32 on the Colab G4: P4 72 h 2.0x, N3 24 h 1.65x faster; N3 1.6-2.3x on an RTX 4060 Laptop.
 - GPU memory: the column arrays of Tiedtke, New Tiedtke, Grell-Freitas-Li and GWDO (FP32 and FP64) and of
   Kain-Fritsch and MYJ (FP64) live in the column work buffer instead of the kernels' stack frames, which CUDA
   reserves for every thread the GPU can hold. The frames of 20-80 KB per thread are gone; the largest left is
