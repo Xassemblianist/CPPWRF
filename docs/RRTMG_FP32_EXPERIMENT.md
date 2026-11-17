@@ -144,10 +144,10 @@ reference data here) and the WRF differential tests (no WRF build).
 ## Merge proof and the WRF real*4 yardstick (Colab G4)
 
 Before the merge (main + this change), on GitHub's CPU runners and one Colab G4 runtime (RTX PRO 6000 Blackwell):
-- CPU suite (`tools/ci/ci_submit.sh`, the change on c9c95c5): 233 cases, 33 file checks, 14 ideal file checks, the
-  differential tests and ctest: all pass (CPU builds keep RRTMG in double: unchanged bytes).
-- CUDA FP64: every `cuda_dp` suite case identical to WRF real*8 (tolerance 0); the glibc math proof identical.
-- CUDA FP32: every FP32 suite case within its tolerance. 1 h relative L2 against WRF real*8 unchanged to two
+- CPU suite (`tools/ci/ci_submit.sh`, main b5d3383 + this change): 259 cases, 33 file checks, 14 ideal file checks,
+  the differential tests and ctest: all pass (CPU builds keep RRTMG in double: unchanged bytes).
+- CUDA FP64: all 122 `cuda_dp` suite runs identical to WRF real*8 (tolerance 0); the glibc math proof identical.
+- CUDA FP32: all 30 FP32 suite cases within their tolerances. 1 h relative L2 against WRF real*8 unchanged to two
   digits (P4: U 7.7e-4 -> 7.8e-4, QV 5.6e-4 -> 5.7e-4; P3: QV 5.1e-5 -> 4.3e-5).
 - The study's yardstick (`tools/bench/colab_fp32.sh --cases P4,N3,P4L,N3L`), c9c95c5 and this change in two
   sessions: R = rmse(GPU FP32 - WRF real*8) / rmse(WRF real*4 - WRF real*8), median over the variables and the
