@@ -80,7 +80,7 @@ std::vector<std::string> wrf_names(const std::string& n) {
   static const std::map<std::string, std::string> moist = {
       {"qv", "QVAPOR"}, {"qc", "QCLOUD"}, {"qr", "QRAIN"}, {"qi", "QICE"}, {"qs", "QSNOW"},
       {"qg", "QGRAUP"}, {"qni", "QNICE"}, {"qnr", "QNRAIN"}, {"qke_adv", "qke_adv"},
-      {"qnc", "QNCLOUD"}, {"qnwfa", "QNWFA"}, {"qnifa", "QNIFA"}, {"qnbca", "QNBCA"}, {"qns", "QNSNOW"},
+      {"qnc", "QNCLOUD"}, {"qnn", "QNCCN"}, {"qnwfa", "QNWFA"}, {"qnifa", "QNIFA"}, {"qnbca", "QNBCA"}, {"qns", "QNSNOW"},
       {"qng", "QNGRAUPEL"}, {"qir", "QIR"}, {"qib", "QIB"}};
   if (n.rfind("q1_", 0) == 0 || n.rfind("q2_", 0) == 0) {  // moist/scalar arrays have one time level (q_1 = q_2
     const std::string q = n.substr(3);                      // at the step start); tke_1 / tke_2

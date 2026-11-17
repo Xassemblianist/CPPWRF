@@ -24,7 +24,7 @@ Tendencies::Tendencies(const Grid& g)
       t_tendf(g, S::M, "t_tendf"), ph_tendf(g, S::W, "ph_tendf") {}
 
 int State::add_scalar(const Grid& g, const std::string& name, bool moist) {
-  if (name == "qni" || name == "qnr" || name == "qnc" || name == "qnwfa" || name == "qnifa" || name == "qnbca" ||
+  if (name == "qni" || name == "qnr" || name == "qnc" || name == "qnn" || name == "qnwfa" || name == "qnifa" || name == "qnbca" ||
       name == "qns" || name == "qng" || name == "qir" || name == "qib" || name == "tke" || name == "qke_adv")
     moist = false;  // number concentrations [#/kg], TKE and 2*TKE are not 'moist'
   for (auto& n : q_names)
@@ -54,6 +54,7 @@ int State::add_scalar(const Grid& g, const std::string& name, bool moist) {
   if (name == "qir") P_QIR = idx;
   if (name == "qib") P_QIB = idx;
   if (name == "qnc") P_QNC = idx;
+  if (name == "qnn") P_QNN = idx;
   if (name == "qnwfa") P_QNWFA = idx;
   if (name == "qnifa") P_QNIFA = idx;
   if (name == "qnbca") P_QNBCA = idx;

@@ -15,6 +15,7 @@
 #include "phys/mp_p3/p3.hpp"
 #include "phys/mp_radar/radar.hpp"
 #include "phys/mp_thompson/thompson_tables.hpp"
+#include "phys/mp_wdm6/wdm6.hpp"
 #include "phys/mp_wsm5/wsm5.hpp"
 #include "phys/mp_wsm6/wsm6.hpp"
 
@@ -22,9 +23,10 @@ namespace cppwrf::dyn {
 
 struct PhysicsParams {
   int mp_physics = 0;        // 0 = none, 1 = Kessler, 3 = WSM3, 4 = WSM5, 6 = WSM6, 8 = Thompson, 10 = Morrison,
-                             // 28 = aerosol-aware Thompson,
+                             // 16 = WDM6, 28 = aerosol-aware Thompson,
                              // 50 / 51 = P3 one ice category (specified / predicted droplet number)
-  int hail_opt = 0;          // WSM6 graupel (0) or hail (1) parameters, WRF namelist hail_opt
+  int hail_opt = 0;          // WSM6 / WDM6 graupel (0) or hail (1) parameters, WRF namelist hail_opt
+  double ccn_conc = 1.0e8;   // WDM: the CCN number NN at the first step and at inflow boundaries (namelist ccn_conc)
   int morr_rimed_ice = 1;    // Morrison: dense precipitating ice is hail (1, WRF's default) or graupel (0)
   real mp_tend_lim = 10;     // K/s, WRF namelist mp_tend_lim (limit on the mp heating rate)
   std::string table_dir;     // Thompson: WRF's qr_acr_qg_V4.dat, qr_acr_qsV2.dat, freezeH2O.dat if there
@@ -44,19 +46,23 @@ class PhysicsCoupling {
   void init_aerosols(State& s, const BaseState& b);
   const PhysicsParams& params() const { return p_; }
   bool thompson() const { return p_.mp_physics == 8 || p_.mp_physics == 28; }
+  bool wdm() const { return p_.mp_physics == 16; }
   bool p3() const { return p_.mp_physics == 50 || p_.mp_physics == 51; }
   // the schemes with snow and graupel accumulations (SNOWNC, GRAUPELNC) and SR: WSM3, WSM5, WSM6, Thompson, Morrison,
   // P3 (WSM3, WSM5, P3: no graupel, GRAUPELNC stays 0 as in WRF)
   bool ice_precip() const {
-    return p_.mp_physics == 3 || p_.mp_physics == 4 || p_.mp_physics == 6 || p_.mp_physics == 10 || thompson() || p3();
+    return p_.mp_physics == 3 || p_.mp_physics == 4 || p_.mp_physics == 6 || p_.mp_physics == 10 || thompson() ||
+           p3() || wdm();
   }
-  // P3's grid%itimestep (incremented per step; the restart's step after a restart)
+  // P3's and WDM's grid%itimestep (incremented per step; the restart's step after a restart)
   long itimestep = 0;
   // Morrison: the cumulus scheme's decoupled tendencies RQRCUTEN, RQSCUTEN, RQICUTEN (phy_prep_part2 has run when
   // the microphysics runs); without cumulus WRF passes its zero arrays
   void set_cumulus_tendencies(const Field3* qr, const Field3* qs, const Field3* qi) {
     cu_qr_ = qr; cu_qs_ = qs; cu_qi_ = qi;
   }
+  // WDM: the land mask XLAND (1 land, 2 water) of the column physics; the autoconversion threshold qc0 / qc1
+  void set_xland(const Field2* xland) { xland_ = xland; }
   // WRF grid fields moist_physics_prep/finish_em leave (rho, qv_diabatic, qc_diabatic), by WRF name
   std::vector<const Field3*> fields() const;
   Field2 rainnc, rainncv;  // accumulated / last-step grid-scale precipitation [mm]
@@ -79,6 +85,7 @@ class PhysicsCoupling {
   Field3 th_phy, rho, pii, z, dz8w, qv_diabatic, qc_diabatic, p_phy;
   phys::wsm6::Wsm6Params<real> wp_{};  // WSM6 constants (wsm6init), computed once
   phys::wsm5::Wsm5Params<real> w5_{};  // WSM5 / WSM3 constants (wsm5init = wsm3init), computed once
+  phys::wdm6::Wdm6Params<real> wd6_{};  // WDM6 constants (wdm6init), computed once
 #if defined(CPPWRF_DOUBLE)
   Buffer wsm6_work_;  // FP64 builds: the values WSM6's column stages carry between them (Wsm6Work)
 #endif
@@ -89,6 +96,7 @@ class PhysicsCoupling {
   phys::mp_p3::P3Params<real> p3c_{};  // p3_init's constants
   std::shared_ptr<const std::pair<Buffer, phys::mp_p3::P3Tables<real>>> p3t_;  // its tables on the device
   const Field3 *cu_qr_ = nullptr, *cu_qs_ = nullptr, *cu_qi_ = nullptr;  // Morrison: RQRCUTEN, RQSCUTEN, RQICUTEN
+  const Field2* xland_ = nullptr;  // WDM: XLAND
 };
 
 }  // namespace cppwrf::dyn

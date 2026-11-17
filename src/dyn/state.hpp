@@ -60,13 +60,15 @@ struct State {
   int P_QKE_ADV = -1;  // WRF scalar qke_adv (bl_pbl_physics = 5): advected, written by the MYNN PBL
   // Thompson aerosol aware (mp_physics = 28): cloud droplet, water- / ice-friendly and black-carbon aerosol numbers
   int P_QNC = -1, P_QNWFA = -1, P_QNIFA = -1, P_QNBCA = -1;
+  // WDM (mp_physics = 16): the CCN number (WRF scalar QNCCN; cloud and rain numbers are qnc, qnr)
+  int P_QNN = -1;
   // Morrison two-moment (mp_physics = 10): snow and graupel numbers (WRF scalars QNSNOW, QNGRAUPEL)
   int P_QNS = -1, P_QNG = -1;
   // P3 (mp_physics = 50, 51): rime ice mass and volume of the ice category (WRF scalars QIR, QIB)
   int P_QIR = -1, P_QIB = -1;
   // members of WRF's `scalar` array (scalar_adv_opt, scalar_mix*_off) rather than `moist` / `tracer`
   bool wrf_scalar(int n) const {
-    return n >= 0 && (n == P_QNI || n == P_QNR || n == P_QKE_ADV || n == P_QNC || n == P_QNWFA || n == P_QNIFA ||
+    return n >= 0 && (n == P_QNI || n == P_QNR || n == P_QKE_ADV || n == P_QNC || n == P_QNN || n == P_QNWFA || n == P_QNIFA ||
                       n == P_QNBCA || n == P_QNS || n == P_QNG || n == P_QIR || n == P_QIB);
   }
   Field3 qtot;  // M, sum of the moist species of the stage state; allocated if n_moist > 0

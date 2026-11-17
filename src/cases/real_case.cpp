@@ -336,6 +336,7 @@ void init_real_case(const io::Config& cfg, Model& m) {
     else if (nm == "qir") extra_q = io_netcdf::read_window_var(wi_path, "QIR", win);
     else if (nm == "qib") extra_q = io_netcdf::read_window_var(wi_path, "QIB", win);
     else if (nm == "qnc") extra_q = io_netcdf::read_window_var(wi_path, "QNCLOUD", win);
+    else if (nm == "qnn") extra_q = io_netcdf::read_window_var(wi_path, "QNCCN", win);
     else if (nm == "qnwfa") extra_q = io_netcdf::read_window_var(wi_path, "QNWFA", win);
     else if (nm == "qnifa") extra_q = io_netcdf::read_window_var(wi_path, "QNIFA", win);
     else if (nm == "qnbca") extra_q = io_netcdf::read_window_var(wi_path, "QNBCA", win);
@@ -345,7 +346,21 @@ void init_real_case(const io::Config& cfg, Model& m) {
                                      : nm == "qs" ? &d.qsnow : nm == "qg" ? &d.qgraup
                                      : (!extra_q.empty() ? &extra_q : nullptr);
     const bool have = src && src->size() == qv.size();
-    s.q_2[q].fill_host([&](int i, int j, int k) { return have ? (*src)[idx3(i, j, k, nx, ny)] : 0.0; });
+    // start_em (f_qnn): without CCN in the input (MAXVAL over the whole domain < 1) NN = ccn_conc everywhere
+    double nn_fill = -1.0;
+    if (q == s.P_QNN) {
+      const WArray whole = io_netcdf::read_window_var(wi_path, "QNCCN", io_netcdf::Window{});
+      double mx = 0.0;  // MAXVAL of an all-zero (or absent: 0 as WRF's unread field) array
+      if (whole.size() == qv.size()) {
+        mx = whole[0];
+        for (std::size_t n = 0; n < whole.size(); ++n) mx = std::max(mx, double(whole[n]));
+      }
+      if (mx < 1.0) nn_fill = cfg.get_double("phys.ccn_conc", 1.0e8);
+    }
+    s.q_2[q].fill_host([&](int i, int j, int k) {
+      if (nn_fill >= 0.0) return nn_fill;
+      return have ? (*src)[idx3(i, j, k, nx, ny)] : 0.0;
+    });
     fill_halo(s.q_2[q], g);
     s.q_1[q].copy_from(s.q_2[q]);
   }
@@ -401,6 +416,7 @@ void init_real_case(const io::Config& cfg, Model& m) {
       io_netcdf::read_wrfbdy(dir + "/" + cfg.get_string("real.wrfbdy", "wrfbdy_d01")));
   if (bd->bdy_width != 5) throw std::runtime_error("real: spec_bdy_width must be 5");
   m.bc = std::make_unique<dyn::LateralBC>(g, g.dt, bd->bdy_width);
+  if (s.P_QNN >= 0) m.bc->set_qnn(s.P_QNN, real(cfg.get_double("phys.ccn_conc", 1.0e8)));  // flow_dep_bdy_qnn
   double interval = cfg.get_double("real.bdy_interval", 0.0);
   if (interval <= 0 && !bd->this_bdy_times.empty() && !bd->next_bdy_times.empty())
     interval = seconds_between(bd->this_bdy_times[0], bd->next_bdy_times[0]);

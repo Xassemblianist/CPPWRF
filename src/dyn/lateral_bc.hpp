@@ -69,6 +69,8 @@ class LateralBC {
   // flow_dep_bdy on s.q_2[n] for the scalars ns without boundary data (have_bcs_moist = .false.): spec zone
   // = inner neighbour at outflow, 0 at inflow, by the sign of the averaged fluxes ru_m, rv_m.
   void flow_dep(const std::vector<int>& ns, State& s) const;
+  // WDM: solve_em's flow_dep_bdy_qnn for the CCN scalar n (always, with or without boundary data): ccn_conc at inflow
+  void set_qnn(int n, real ccn_conc) { qnn_ = n; qnn_inflow_ = ccn_conc; }
   void final(State& s, const BaseState& b) const;
 
  private:
@@ -77,6 +79,8 @@ class LateralBC {
     std::vector<std::size_t> off;  // 8 slabs; empty = no data for this scalar
   };
   Grid g_;
+  int qnn_ = -1;
+  real qnn_inflow_ = 0;
   int width_, spec_zone_, relax_zone_;
   bool nested_;
   std::vector<double> fcx_h_, gcx_h_;

@@ -350,6 +350,7 @@ Model Model::build(const io::Config& cfg) {
     pp.mp_physics = int(cfg.get_int("phys.mp_physics", 0));
     pp.mp_tend_lim = real(cfg.get_double("phys.mp_tend_lim", 10.0));
     pp.hail_opt = int(cfg.get_int("phys.hail_opt", 0));
+    pp.ccn_conc = cfg.get_double("phys.ccn_conc", 1.0e8);
     pp.morr_rimed_ice = int(cfg.get_int("phys.morr_rimed_ice", 1));
     pp.table_dir = cfg.get_string("phys.table_dir", cfg.get_string("real.dir", ""));
     pp.force_read_thompson = cfg.get_bool("phys.force_read_thompson", false);
@@ -360,7 +361,7 @@ Model Model::build(const io::Config& cfg) {
     pp.microp_re = cfg.get_int("phys.use_mp_re", 1) == 1 && cfg.get_int("phys.ra_lw_physics", 0) == 4 &&
                    cfg.get_int("phys.ra_sw_physics", 0) == 4 &&
                    (pp.mp_physics == 3 || pp.mp_physics == 4 || pp.mp_physics == 6 || pp.mp_physics == 8 ||
-                    pp.mp_physics == 28 || pp.mp_physics == 50 ||
+                    pp.mp_physics == 16 || pp.mp_physics == 28 || pp.mp_physics == 50 ||
                     pp.mp_physics == 51);
     if (pp.mp_physics == 28) {  // aerosol-aware Thompson: aer_init_opt = 0, wif_input_opt 0 / 1, qna_update = 0
       if (cname != "real") throw std::runtime_error("phys.mp_physics = 28: real-data runs only");
@@ -387,6 +388,18 @@ Model Model::build(const io::Config& cfg) {
     if (pp.mp_physics == 3 || pp.mp_physics == 4) {  // WSM3 / WSM5 (proven in column drivers: tests/phys/mp_wsm35)
       if (cname != "real") throw std::runtime_error("phys.mp_physics = 3 / 4 (WSM3 / WSM5): real-data runs only");
     }
+    if (pp.mp_physics == 16) {  // WDM6 (proven in column drivers: tests/phys/mp_wdm)
+      if (cname != "real") throw std::runtime_error("phys.mp_physics = 16 (WDM6): real-data runs only");
+      if (cfg.get_bool("real.nested", false))
+        throw std::runtime_error("phys.mp_physics = 16 (WDM6) on a nest is not ported (QNCCN / QNCLOUD / QNRAIN nest "
+                                 "interpolation and feedback)");
+      if (!wants_column_physics(cfg))
+        throw std::runtime_error("phys.mp_physics = 16 (WDM6) needs the column physics suite (its land mask XLAND)");
+    }
+    if (pp.mp_physics == 14 || pp.mp_physics == 26)
+      throw std::runtime_error("phys.mp_physics = " + std::to_string(pp.mp_physics) +
+                               (pp.mp_physics == 14 ? " (WDM5, module_mp_wdm5.F)" : " (WDM7, module_mp_wdm7.F)") +
+                               " is not ported");
     if (pp.mp_physics == 24 || pp.mp_physics == 106)
       throw std::runtime_error("phys.mp_physics = " + std::to_string(pp.mp_physics) +
                                (pp.mp_physics == 24 ? " (WSM7, module_mp_wsm7.F)" : " (WSM6R, module_mp_wsm6r.F)") +
@@ -405,6 +418,7 @@ Model Model::build(const io::Config& cfg) {
       // Morrison reads the cumulus scheme's RQRCUTEN, RQSCUTEN, RQICUTEN (zero without one), as WRF's driver passes
       if (pp.mp_physics == 10)
         m.rk->physics()->set_cumulus_tendencies(&m.suite->pt.rqrcuten, &m.suite->pt.rqscuten, &m.suite->pt.rqicuten);
+      if (pp.mp_physics == 16) m.rk->physics()->set_xland(&m.suite->xland);  // wdm6's slmsk
     } else if (cfg.get_int("phys.ra_lw_physics", 0) != 0 || cfg.get_int("phys.ra_sw_physics", 0) != 0) {
       // radiation is part of the column physics suite: without it ra_* would be silently ignored
       throw std::runtime_error("phys.ra_lw/ra_sw_physics without surface-layer, land-surface, PBL or cumulus physics "

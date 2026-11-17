@@ -849,6 +849,39 @@ class TestValidationAndWarnings(unittest.TestCase):
         t.translate()
         self.assertIn("mp_physics = 4 (WSM5) is supported for real-data runs only", " ".join(t.errors))
 
+    def test_wdm6(self):
+        # mp_physics = 16 (module_mp_wdm6.F): moist qv qc qr qi qs qg, scalars qnn qnc qnr (Registry package
+        # wdm6scheme); hail_opt and ccn_conc pass through; not ported: do_radar_ref = 1, nests, ideal cases, no column
+        # physics; WDM5 (14) and WDM7 (26) are named errors
+        def tr(extra="", mp=16, phys=", sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1",
+               doms="", case=real_case):
+            t = WrfTranslator(parse_namelist(case(f"""
+            &time_control /
+            &domains time_step = 60{doms} /
+            &physics mp_physics = {mp}{phys}{extra} /
+            &dynamics /
+            """)))
+            gen = t.translate()
+            return t, gen
+        t, g = tr(", hail_opt = 1, ccn_conc = 3.e8")
+        self.assertEqual(t.errors, [])
+        self.assertEqual(g["moist"]["species"], "qv,qc,qr,qi,qs,qg,qnn,qnc,qnr")
+        self.assertEqual(g["phys"]["mp_physics"], 16)
+        self.assertEqual(g["phys"]["hail_opt"], 1)
+        self.assertEqual(g["phys"]["ccn_conc"], 3.e8)
+        t, g = tr()
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("ccn_conc", g["phys"])
+        for kw, msg in (({"extra": ", do_radar_ref = 1"}, "do_radar_ref = 1 with mp_physics = 16"),
+                        ({"phys": ""}, "mp_physics = 16 (WDM6) needs the column physics"),
+                        ({"mp": 14}, "mp_physics = 14 (WDM5"), ({"mp": 26}, "mp_physics = 26 (WDM7")):
+            t, _ = tr(**kw)
+            self.assertIn(msg, " ".join(t.errors), kw)
+        t = WrfTranslator(parse_namelist(complete("&time_control /\n&domains time_step = 6 /\n"
+                                                   "&physics mp_physics = 16 /\n")), override_case="quarter_ss")
+        t.translate()
+        self.assertIn("mp_physics = 16 (WDM6) is supported for real-data runs only", " ".join(t.errors))
+
     def test_ruc_lsm(self):
         # sf_surface_physics = 3 (module_sf_ruclsm.F): 6 or 9 soil levels (check_a_mundo), sfclayrev or MYJSFC, a
         # microphysics with qc; column-verified (tier warning); MYNNSFC, mosaic_lu / mosaic_soil, sst_update, nests

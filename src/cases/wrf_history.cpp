@@ -684,7 +684,7 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
     static const std::map<std::string, std::string> wn = {{"qv", "QVAPOR"}, {"qc", "QCLOUD"}, {"qr", "QRAIN"},
                                                           {"qi", "QICE"},   {"qs", "QSNOW"},  {"qg", "QGRAUP"},
                                                           {"qni", "QNICE"}, {"qnr", "QNRAIN"}, {"tke", "TKE"},
-                                                          {"qke_adv", "qke_adv"}, {"qnc", "QNCLOUD"},
+                                                          {"qke_adv", "qke_adv"}, {"qnc", "QNCLOUD"}, {"qnn", "QNCCN"},
                                                           {"qnwfa", "QNWFA"}, {"qnifa", "QNIFA"}, {"qnbca", "QNBCA"},
                                                           {"qns", "QNSNOW"}, {"qng", "QNGRAUPEL"},
                                                           {"qir", "QIR"}, {"qib", "QIB"}};
