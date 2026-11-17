@@ -22,6 +22,7 @@ struct LargeStepParams {
   // moist_adv_opt or scalar_adv_opt 3 / 4 (WENO): theta's flux divergence of the last RK stage is advect_scalar_weno's
   // (module_em.F rk_tendency)
   bool weno_theta = false;
+  bool weno_mom = false;  // momentum_adv_opt 3: advect_weno_u/v/w on the last RK stage
 };
 
 // 1D vertical coefficients packed for kernels.

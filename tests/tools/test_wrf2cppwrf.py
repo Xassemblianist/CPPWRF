@@ -1254,6 +1254,19 @@ class TestValidationAndWarnings(unittest.TestCase):
             self.assertEqual(t.errors, [])
             self.assertEqual((d["moist_adv_opt"], d["scalar_adv_opt"], d["tke_adv_opt"]), (opt, opt, opt))
 
+    def test_weno_momentum_advection(self):
+        # momentum_adv_opt 3: advect_weno_u / _v / _w on the last RK stage; 1 is the default (not written)
+        base = "&time_control /\n&domains time_step = 60 /\n&physics sf_sfclay_physics = 1 /\n"
+        for opt, want, err in ((3, 3, None), (1, None, None), (2, None, "momentum_adv_opt = 2"),
+                               (4, None, "momentum_adv_opt = 4")):
+            t = WrfTranslator(parse_namelist(real_case(base + f"&dynamics momentum_adv_opt = {opt} /\n")))
+            d = t.translate()["dyn"]
+            if err:
+                self.assertIn(err, " ".join(t.errors), opt)
+            else:
+                self.assertEqual(t.errors, [], opt)
+                self.assertEqual(d.get("momentum_adv_opt"), want, opt)
+
     def test_unsupported_physics_and_dynamics_errors(self):
         cases = [
             # share/module_check_a_mundo.F: "bl_mynn_edmf > 0 requires both shcu_physics=0 & ishallow=0"

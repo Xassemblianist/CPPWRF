@@ -539,7 +539,6 @@ ADV_OPTS_TEXT = ("CPPWRF supports 0 (simple), 1 (positive-definite), 2 (monotoni
 
 # dynamics options whose value must stay at the WRF default (other values are not ported)
 DEFAULT_ONLY_OPTIONS = {
-    ("dynamics", "momentum_adv_opt"): (1, "WENO momentum advection"),
     ("dynamics", "phi_adv_z"): (1, "geopotential advection without double-staggered omega"),
     ("physics", "no_mp_heating"): (0, "microphysics without latent heating"),
     ("physics", "mp_zero_out"): (0, "microphysics zero-out of small moist values"),
@@ -1675,6 +1674,14 @@ class WrfTranslator:
             self.error(f"WRF moist_adv_opt = {moist_adv_opt} is not supported; {ADV_OPTS_TEXT}")
         elif moist_adv_opt is not None and case_name != "hill2d":
             sections["dyn"]["moist_adv_opt"] = moist_adv_opt
+
+        # momentum_adv_opt: 1 standard, 3 WENO (module_em.F rk_tendency: advect_weno_u/v/w on the last RK stage)
+        momentum_adv_opt = self.get_opt("dynamics", "momentum_adv_opt", 1)
+        if momentum_adv_opt not in (1, 3):
+            self.error(f"WRF momentum_adv_opt = {momentum_adv_opt} is not supported; CPPWRF supports 1 (standard) "
+                       "and 3 (WENO).")
+        elif momentum_adv_opt == 3:
+            sections["dyn"]["momentum_adv_opt"] = 3
 
         # scalar_adv_opt: included when physics suite is enabled, when explicitly 0, or when != 0 for non-dry ideal runs
         scalar_adv_opt = self.get_opt("dynamics", "scalar_adv_opt", 0)

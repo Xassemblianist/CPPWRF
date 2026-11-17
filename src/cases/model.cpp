@@ -338,6 +338,12 @@ Model Model::build(const io::Config& cfg) {
     throw std::runtime_error("dyn.legacy_diffusion was removed; use dyn.diff_opt = 1 (WRF horizontal/vertical_diffusion)");
   sp.h_adv_order = lp.h_adv_order; sp.v_adv_order = lp.v_adv_order;
   lp.weno_theta = sp.moist_adv_opt >= 3 || sp.scalar_adv_opt >= 3;
+  // momentum_adv_opt 3: advect_weno_u / _v / _w on the last RK stage (module_em.F rk_tendency); WRF runs the
+  // standard advection for any other value
+  const int mom_adv = int(cfg.get_int("dyn.momentum_adv_opt", 1));
+  if (mom_adv != 1 && mom_adv != 3)
+    throw std::runtime_error("dyn.momentum_adv_opt must be 1 (standard) or 3 (WENO)");
+  lp.weno_mom = mom_adv == 3;
   m.dt_clock = wrf_time::from_seconds(g.dt, cfg.get_int("time.dt_den", 1));
   if (cfg.get_bool("time.adaptive", false)) init_adaptive(cfg, m, cname);
   // the adaptive time step sets time_step_sound = 0 (start_em.F:979)
