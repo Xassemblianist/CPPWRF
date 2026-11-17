@@ -322,6 +322,16 @@ if(CPPWRF_DIFF_TESTS)
     set_tests_properties(${tname} PROPERTIES LABELS diff SKIP_RETURN_CODE 77  # 77: no WRF build / runs
                          ENVIRONMENT "DIFF_TEST_BUILD_DIR=${DIFF_WORK}")
   endforeach()
+  # scalar advection of the last RK stage (adv_opt 1, 2): ScalarTransport against WRF's module_advect_em /
+  # module_em, tolerance 0 (CPU FP64 builds)
+  if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA)
+    add_executable(driver_advection tests/dyn/advection/driver_advection.cpp)
+    target_link_libraries(driver_advection PRIVATE cppwrf_core)
+    add_test(NAME diff_dyn_advection COMMAND bash ${CMAKE_SOURCE_DIR}/tests/dyn/advection/run_test.sh
+             $<TARGET_FILE:driver_advection> WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    set_tests_properties(diff_dyn_advection PROPERTIES LABELS diff SKIP_RETURN_CODE 77
+                         ENVIRONMENT "DIFF_TEST_BUILD_DIR=${DIFF_WORK}")
+  endif()
   # column replays of the model's cumulus calls through WRF's objects (CPU FP64 cppwrf; need
   # CPPWRF_WRF_RUNS and WRF_R8D8_DIR)
   if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA)

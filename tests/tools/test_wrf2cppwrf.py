@@ -1234,6 +1234,15 @@ class TestValidationAndWarnings(unittest.TestCase):
             self.assertEqual(t.errors, [], sw)
             self.assertEqual((cfg["phys"]["ra_lw_physics"], cfg["phys"]["ra_sw_physics"]), (1, sw))
 
+    def test_monotonic_advection(self):
+        # moist_adv_opt / scalar_adv_opt / tke_adv_opt = 2: advect_scalar_mono on the last RK stage (module_em.F)
+        t = WrfTranslator(parse_namelist(real_case(
+            "&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, bl_pbl_physics = 1, sf_sfclay_physics = 1 /\n"
+            "&dynamics moist_adv_opt = 2, scalar_adv_opt = 2, diff_opt = 2, km_opt = 2, tke_adv_opt = 2 /\n")))
+        d = t.translate()["dyn"]
+        self.assertEqual(t.errors, [])
+        self.assertEqual((d["moist_adv_opt"], d["scalar_adv_opt"], d["tke_adv_opt"]), (2, 2, 2))
+
     def test_unsupported_physics_and_dynamics_errors(self):
         cases = [
             # share/module_check_a_mundo.F: "bl_mynn_edmf > 0 requires both shcu_physics=0 & ishallow=0"
@@ -1259,7 +1268,12 @@ class TestValidationAndWarnings(unittest.TestCase):
             ("&physics ra_lw_physics = 4, ra_sw_physics = 4, cldovrlp = -1 /", "cldovrlp = -1"),
             ("&physics shcu_physics = 2 /", "shcu_physics"),
             ("&physics topo_wind = 1 /", "topo_wind"),
-            ("&dynamics moist_adv_opt = 2 /", "moist_adv_opt = 2"),
+            ("&dynamics moist_adv_opt = 3 /", "moist_adv_opt = 3"),
+            ("&dynamics scalar_adv_opt = 4 /", "scalar_adv_opt = 4"),
+            ("&dynamics diff_opt = 2, km_opt = 2, tke_adv_opt = 3 /", "tke_adv_opt = 3"),
+            # module_advect_em.F advect_scalar_mono stops for h_sca_adv_order /= 5 and v_sca_adv_order /= 3, 5
+            ("&dynamics moist_adv_opt = 2, h_mom_adv_order = 6, h_sca_adv_order = 6 /", "needs h_sca_adv_order = 5"),
+            ("&dynamics tke_adv_opt = 2, v_mom_adv_order = 4, v_sca_adv_order = 4 /", "needs h_sca_adv_order = 5"),
             ("&dynamics diff_6th_opt = 3 /", "diff_6th_opt = 3"),
             ("&dynamics h_mom_adv_order = 5, h_sca_adv_order = 6 /", "h_sca_adv_order = 6"),
             ("&dynamics hybrid_opt = 9 /", "hybrid_opt = 9"),
@@ -1503,7 +1517,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, sec = self.translate(self.NEST + "&physics mp_physics = 8, 6 /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["mp_physics"], 6)
-        t, _ = self.translate(self.NEST + "&physics mp_physics = 6 /\n")  # domain 2 has the default -1
+        t, _ = self.translate(self.NEST + "&physics mp_physics = 6, bl_pbl_physics = 1, sf_sfclay_physics = 1 /\n")  # domain 2 has the default -1
         self.assertTrue(any("mp_physics = -1" in e for e in t.errors), t.errors)
 
     def test_cu_physics_on_a_nest(self):

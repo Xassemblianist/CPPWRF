@@ -5,16 +5,18 @@
 // Scalar transport (moist species and passive tracers), WRF solve_em scalar section:
 // rk_scalar_tend (advect_scalar / advect_scalar_pd with the acoustic-step-averaged mass fluxes
 // ru_m, rv_m, ww_m; stage-1 diffusion into *_tendf) followed by rk_update_scalar
-// (and rk_update_scalar_pd for moist_adv_opt = 1). TN section 3.1.3 / 4.1.
+// (and rk_update_scalar_pd for moist_adv_opt = 1 and 2; advect_scalar_mono for 2). TN section 3.1.3 / 4.1.
 #include "dyn/large_step.hpp"
 #include "dyn/state.hpp"
 
 namespace cppwrf::dyn {
 
 struct ScalarParams {
-  int moist_adv_opt = 1;     // WRF default 1. 0 = original (advect_scalar), 1 = positive definite (advect_scalar_pd)
+  int moist_adv_opt = 1;     // WRF default 1. 0 = original (advect_scalar), 1 = positive definite (advect_scalar_pd),
+                             // 2 = monotonic (advect_scalar_mono)
   int scalar_adv_opt = 1;    // same for passive tracers (WRF scalar_adv_opt / tracer_adv_opt)
   int tke_adv_opt = 1;       // WRF tke_adv_opt (default 1 = positive definite)
+  bool any(int opt) const { return moist_adv_opt == opt || scalar_adv_opt == opt || tke_adv_opt == opt; }
   int h_adv_order = 5, v_adv_order = 3;
 };
 
@@ -46,11 +48,13 @@ class ScalarTransport {
   std::unique_ptr<Field3> dbg_qvf_;  // debug (CPPWRF_VM_DUMP): qv advection tendency sink
   struct Work {  // one species of a batch
     Field3 q_new, scale;
-    Field3 dhx, lox, dhy, loy, dhz, loz;  // advect_scalar_pd face fluxes (high - low, low)
-    explicit Work(const Grid& g);
+    Field3 dhx, lox, dhy, loy, dhz, loz;  // advect_scalar_pd / _mono face fluxes (high - low, low)
+    std::unique_ptr<Field3> scale_in;     // advect_scalar_mono: scale_in (scale holds scale_out); only with option 2
+    Work(const Grid& g, bool mono);
   };
+  enum class Mode { Plain, PD, Mono };
   std::vector<std::unique_ptr<Work>> work_;  // min(n_scalars, kBatch)
-  void update(State& s, Tendencies& t, const BaseState& b, const std::vector<int>& ns, bool pd, int rk, real dt_rk);
+  void update(State& s, Tendencies& t, const BaseState& b, const std::vector<int>& ns, Mode mode, int rk, real dt_rk);
 };
 
 }  // namespace cppwrf::dyn

@@ -290,26 +290,186 @@ struct KUpdatePD {
   }
 };
 
+// ---------------------------------------------------------------------------------------------------------------
+// advect_scalar_mono (module_advect_em.F, adv_opt = 2 on the last RK stage; h_sca_adv_order 5, v_sca_adv_order 3):
+// the Smolarkiewicz (1989) flux limiter. Its own first-order flux is vel * flux_upwind(q_old(i-1), q_old(i), vel)
+// with flux_upwind = 0.5*(1+sign(1,cr))*q_im1 + 0.5*(1-sign(1,cr))*q_i (no Courant number), its high-order fluxes
+// are advect_scalar_pd's statement functions (flux5 / flux3 with the folded constants, 2nd order next to a degraded
+// boundary). WRF does not compute the boundary faces of a degraded direction (i = ids, ide; j = jds, jde; the
+// bottom and top w levels): both fluxes stay 0 there.
+
+// Fortran sign(1., cr) (gfortran: the sign bit, -0 negative)
+CPPWRF_HD inline real flux_upwind_mono(real qm1, real q0, real cr) {
+  const real s = std::signbit(cr) ? real(-1) : real(1);
+  return real(0.5) * (real(1) + s) * qm1 + real(0.5) * (real(1) - s) * q0;
+}
+
+// face fluxes: dh = high-order minus upwind, lo = upwind (fqx - fqxl and fqxl of WRF)
+struct KFaceMonoX {
+  Fluxes f; V3 dh, lo;
+  CPPWRF_HD void operator()(int i, int j, int k) const {
+    if (f.sp.x && (i == 0 || i == f.sp.nx)) { dh(i, j, k) = 0; lo(i, j, k) = 0; return; }
+    const real vel = f.ru(i, j, k);
+    const real l = vel * flux_upwind_mono(f.qo(i - 1, j, k), f.qo(i, j, k), vel);
+    dh(i, j, k) = f.fx(i, j, k) - l;
+    lo(i, j, k) = l;
+  }
+};
+struct KFaceMonoY {
+  Fluxes f; V3 dh, lo;
+  CPPWRF_HD void operator()(int i, int j, int k) const {
+    if (f.sp.y && (j == 0 || j == f.sp.ny)) { dh(i, j, k) = 0; lo(i, j, k) = 0; return; }
+    const real vel = f.rv(i, j, k);
+    const real l = vel * flux_upwind_mono(f.qo(i, j - 1, k), f.qo(i, j, k), vel);
+    dh(i, j, k) = f.fy(i, j, k) - l;
+    lo(i, j, k) = l;
+  }
+};
+struct KFaceMonoZ {
+  Fluxes f; V3 dh, lo;
+  CPPWRF_HD void operator()(int i, int j, int k) const {
+    if (k == 0 || k == f.nz) { dh(i, j, k) = 0; lo(i, j, k) = 0; return; }
+    const real vel = f.ww(i, j, k);
+    const real l = vel * flux_upwind_mono(f.qo(i, j, k - 1), f.qo(i, j, k), -vel);
+    dh(i, j, k) = f.fz(i, j, k) - l;
+    lo(i, j, k) = l;
+  }
+};
+
+CPPWRF_HD inline real max0(real a) { return a > real(0) ? a : real(0); }  // max(0., a)
+CPPWRF_HD inline real min0(real a) { return a < real(0) ? a : real(0); }  // min(0., a)
+
+// the limiter: scale_in, scale_out of each cell. WRF limits the cells i_start..i_end, j_start..j_end, which are all
+// cells but the outermost row of a degraded (specified, nested or open) direction; every other cell keeps 1. qmin /
+// qmax: q_old of the cell and of the upwind neighbour of each inflow face (cr > 0: the cell behind the face, else the
+// one ahead), over the faces WRF computes (not the bottom and top w levels). With zadvect_implicit = 0, romI = wwI = 0
+// and ieva_corr is c1*mut + c2 (mut is muts, as rk_scalar_tend passes it).
+struct KScaleMono {
+  Fluxes f; FacesPD a; C2 mu_old; B2 mub; V3 sout, sin;
+  CPPWRF_HD void operator()(int i, int j, int k) const {
+    if (f.edge_cell(i, j)) { sin(i, j, k) = 1; sout(i, j, k) = 1; return; }
+    const VCoef& c = f.c;
+    const real qo = f.qo(i, j, k);
+    real qmax = qo, qmin = qo;
+    auto take = [&](real v) {
+      qmax = v > qmax ? v : qmax;
+      qmin = v < qmin ? v : qmin;
+    };
+    if (f.ru(i, j, k) > 0) take(f.qo(i - 1, j, k));
+    if (!(f.ru(i + 1, j, k) > 0)) take(f.qo(i + 1, j, k));
+    if (f.do_y) {
+      if (f.rv(i, j, k) > 0) take(f.qo(i, j - 1, k));
+      if (!(f.rv(i, j + 1, k) > 0)) take(f.qo(i, j + 1, k));
+    }
+    if (k > 0 && -f.ww(i, j, k) > 0) take(f.qo(i, j, k - 1));
+    if (k + 1 < f.nz && !(-f.ww(i, j, k + 1) > 0)) take(f.qo(i, j, k + 1));
+    const real ieva_corr = c.c1h(k) * f.mut(i, j) + c.c2h(k);
+    const real mxy = f.msftx(i, j) * f.msfty(i, j);
+    real hlow = f.rdx * (a.lox(i + 1, j, k) - a.lox(i, j, k));
+    if (f.do_y) hlow += f.rdy * (a.loy(i, j + 1, k) - a.loy(i, j, k));
+    const real ph_upwind = ((c.c1h(k) * mub(i, j) + c.c2h(k)) + c.c1h(k) * mu_old(i, j)) * qo -
+                           f.dt * (mxy * hlow + f.msfty(i, j) * c.rdnw(k) * (a.loz(i, j, k + 1) - a.loz(i, j, k)));
+    const real fxp = a.dhx(i + 1, j, k), fxm = a.dhx(i, j, k), fzp = a.dhz(i, j, k + 1), fzm = a.dhz(i, j, k);
+    real hin = f.rdx * (min0(fxp) - max0(fxm));
+    real hout = f.rdx * (max0(fxp) - min0(fxm));
+    if (f.do_y) {
+      const real fyp = a.dhy(i, j + 1, k), fym = a.dhy(i, j, k);
+      hin += f.rdy * (min0(fyp) - max0(fym));
+      hout += f.rdy * (max0(fyp) - min0(fym));
+    }
+    const real flux_in = -f.dt * (mxy * hin + f.msfty(i, j) * c.rdnw(k) * (max0(fzp) - min0(fzm)));
+    const real ph_hi = ieva_corr * qmax - ph_upwind;
+    real s_in = 1, s_out = 1;
+    if (flux_in > ph_hi) s_in = max0(ph_hi / (flux_in + real(1e-20)));
+    const real flux_out = f.dt * (mxy * hout + f.msfty(i, j) * c.rdnw(k) * (min0(fzp) - max0(fzm)));
+    const real ph_low = ph_upwind - ieva_corr * qmin;
+    if (flux_out > ph_low) s_out = max0(ph_low / (flux_out + real(1e-20)));
+    sin(i, j, k) = s_in;
+    sout(i, j, k) = s_out;
+  }
+};
+
+// mono-limited flux divergence + rk_update_scalar (tendf already folded into q_1): advect_scalar_mono's tendency
+// (open terms, vertical, x but in the outer columns, y but in the outer rows), the same forms as KUpdatePD
+struct KUpdateMono {
+  Fluxes f; FacesPD a; C3 sout, sin, q1; C2 mu1, mu2; B2 mub; V3 qn; real dt_rk;
+  V3 ften; bool want_ften;  // set_tend: advect_tend * msfty
+  CPPWRF_HD static real mn(real x, real y) { return x < y ? x : y; }
+  CPPWRF_HD real dx(int i, int j, int k) const {
+    const real d = a.dhx(i, j, k);
+    return d > 0 ? mn(sin(i, j, k), sout(i - 1, j, k)) * d : mn(sout(i, j, k), sin(i - 1, j, k)) * d;
+  }
+  CPPWRF_HD real dy(int i, int j, int k) const {
+    const real d = a.dhy(i, j, k);
+    return d > 0 ? mn(sin(i, j, k), sout(i, j - 1, k)) * d : mn(sout(i, j, k), sin(i, j - 1, k)) * d;
+  }
+  CPPWRF_HD real dz(int i, int j, int k) const {
+    if (k == 0 || k == f.nz) return 0;
+    const real d = a.dhz(i, j, k);
+    return d < 0 ? mn(sin(i, j, k), sout(i, j, k - 1)) * d : mn(sout(i, j, k), sin(i, j, k - 1)) * d;
+  }
+  CPPWRF_HD real tz(int i, int j, int k) const {
+    return f.c.rdnw(k) * (dz(i, j, k + 1) - dz(i, j, k) + a.loz(i, j, k + 1) - a.loz(i, j, k));
+  }
+  CPPWRF_HD real tx(int i, int j, int k) const {
+    return f.msftx(i, j) * (f.rdx * (dx(i + 1, j, k) - dx(i, j, k) + a.lox(i + 1, j, k) - a.lox(i, j, k)));
+  }
+  CPPWRF_HD real ty(int i, int j, int k) const {
+    return f.msftx(i, j) * (f.rdy * (dy(i, j + 1, k) - dy(i, j, k) + a.loy(i, j + 1, k) - a.loy(i, j, k)));
+  }
+  CPPWRF_HD void operator()(int i, int j, int k) const {
+    if (f.spec_cell(i, j)) {
+      if (want_ften) {  // the tendency WRF forms there: x term off in outer columns, y off in outer rows
+        const bool ocol = f.sp.sx() && (i == 0 || i == f.sp.nx - 1), orow = f.sp.sy() && (j == 0 || j == f.sp.ny - 1);
+        real tend = -tz(i, j, k);
+        if (!ocol) tend -= tx(i, j, k);
+        if (f.do_y && !orow) tend -= ty(i, j, k);
+        ften(i, j, k) = tend * f.msfty(i, j);
+      }
+      qn(i, j, k) = m_full(f.c, k, mub(i, j), mu1(i, j)) * q1(i, j, k) / m_full(f.c, k, mub(i, j), mu2(i, j));
+      return;
+    }
+    real tend;
+    if (f.open_col(i) || f.open_row(j)) {
+      tend = f.open_terms(real(0), i, j, k, f.qo);
+      tend = tend - tz(i, j, k);
+      if (!f.open_col(i)) tend -= tx(i, j, k);
+      if (f.do_y && !f.open_row(j)) tend -= ty(i, j, k);
+    } else {
+      tend = -tz(i, j, k);
+      tend -= tx(i, j, k);
+      if (f.do_y) tend -= ty(i, j, k);
+    }
+    if (want_ften) ften(i, j, k) = tend * f.msfty(i, j);
+    qn(i, j, k) = (m_full(f.c, k, mub(i, j), mu1(i, j)) * q1(i, j, k) + dt_rk * (tend * f.msfty(i, j))) /
+                  m_full(f.c, k, mub(i, j), mu2(i, j));
+  }
+};
+
 }  // namespace
 
-ScalarTransport::Work::Work(const Grid& g)
+ScalarTransport::Work::Work(const Grid& g, bool mono)
     : q_new(g, Stagger::M, "q_new"), scale(g, Stagger::M, "pd_scale"), dhx(g, Stagger::U, "pd_dhx"),
       lox(g, Stagger::U, "pd_lox"), dhy(g, Stagger::V, "pd_dhy"), loy(g, Stagger::V, "pd_loy"),
-      dhz(g, Stagger::W, "pd_dhz"), loz(g, Stagger::W, "pd_loz") {}
+      dhz(g, Stagger::W, "pd_dhz"), loz(g, Stagger::W, "pd_loz") {
+  if (mono) scale_in = std::make_unique<Field3>(g, Stagger::M, "mono_scale_in");
+}
 
 ScalarTransport::ScalarTransport(const Grid& g, const ScalarParams& p) : g_(g), p_(p) {}
 
 void ScalarTransport::reserve(int n_scalars) {
   const int n = n_scalars < kBatch ? n_scalars : kBatch;
-  while (int(work_.size()) < n) work_.push_back(std::make_unique<Work>(g_));
+  while (int(work_.size()) < n) work_.push_back(std::make_unique<Work>(g_, p_.any(2)));
 }
 
-// rk_scalar_tend + rk_update_scalar (pd = false) or rk_update_scalar_pd (pd = true) of the species ns, kBatch at a
+// rk_scalar_tend + rk_update_scalar (Plain) or rk_update_scalar_pd with advect_scalar_pd (PD) / advect_scalar_mono
+// (Mono) of the species ns, kBatch at a
 // time: each kernel runs for all species of a batch in one launch. The species are independent (each reads its
 // own q_1, q_2, tendency and work fields and the common mass fluxes / masses, and writes only its own), so the
 // values are those of the species one after the other (WRF's loop over the species).
-void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const std::vector<int>& ns, bool pd, int rk,
-                             real dt_rk) {
+void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const std::vector<int>& ns, Mode mode,
+                             int rk, real dt_rk) {
+  const bool pd = mode != Mode::Plain;  // advect_scalar_pd's and advect_scalar_mono's flux statement functions
   const Grid& g = g_;
   const VCoef c = VCoef::from(b);
   const Range3D mr = g.mass_cells();
@@ -381,42 +541,81 @@ void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const 
       }
       pre.run();
       fill_halos(q1s, g);
-      {
-        const tile::Whole whole;  // the ranges xf, yf, zf of the tile's cells
-        LaunchBatch<KFacePDX, kBatch> fx;
-        LaunchBatch<KFacePDY, kBatch> fy;
-        LaunchBatch<KFacePDZ, kBatch> fz;
-        for (int m = 0; m < nb; ++m) {
-          Work& w = *work_[m];
-          const Fluxes fl = fluxes(species(m));
-          fx.add(xf, KFacePDX{fl, w.dhx.view(), w.lox.view()});
-          if (do_y) fy.add(yf, KFacePDY{fl, w.dhy.view(), w.loy.view()});
-          fz.add(zf, KFacePDZ{fl, w.dhz.view(), w.loz.view()});
-        }
-        fx.run();
-        fy.run();
-        fz.run();
-      }
       auto faces = [&](const Work& w) {
         return FacesPD{w.dhx.cview(), w.lox.cview(), w.dhy.cview(), w.loy.cview(), w.dhz.cview(), w.loz.cview()};
       };
-      LaunchBatch<KScalePD, kBatch> sc;
-      std::vector<Field3*> scales;
-      for (int m = 0; m < nb; ++m) {
-        Work& w = *work_[m];
-        sc.add(mr, KScalePD{fluxes(species(m)), faces(w), s.mu_1.cview(), b.mub.view(), w.scale.view()});
-        scales.push_back(&w.scale);
+      if (mode == Mode::Mono) {
+        {
+          const tile::Whole whole;  // the ranges xf, yf, zf of the tile's cells
+          LaunchBatch<KFaceMonoX, kBatch> fx;
+          LaunchBatch<KFaceMonoY, kBatch> fy;
+          LaunchBatch<KFaceMonoZ, kBatch> fz;
+          for (int m = 0; m < nb; ++m) {
+            Work& w = *work_[m];
+            const Fluxes fl = fluxes(species(m));
+            fx.add(xf, KFaceMonoX{fl, w.dhx.view(), w.lox.view()});
+            if (do_y) fy.add(yf, KFaceMonoY{fl, w.dhy.view(), w.loy.view()});
+            fz.add(zf, KFaceMonoZ{fl, w.dhz.view(), w.loz.view()});
+          }
+          fx.run();
+          fy.run();
+          fz.run();
+        }
+        LaunchBatch<KScaleMono, kBatch> sc;
+        std::vector<Field3*> scales;
+        for (int m = 0; m < nb; ++m) {
+          Work& w = *work_[m];
+          sc.add(mr, KScaleMono{fluxes(species(m)), faces(w), s.mu_1.cview(), b.mub.view(), w.scale.view(),
+                                w.scale_in->view()});
+          scales.push_back(&w.scale);
+          scales.push_back(w.scale_in.get());
+        }
+        sc.run();
+        fill_halos(scales, g);
+        LaunchBatch<KUpdateMono, kBatch> up;
+        for (int m = 0; m < nb; ++m) {
+          const int n = species(m);
+          const Work& w = *work_[m];
+          up.add(mr, KUpdateMono{fluxes(n), faces(w), w.scale.cview(), w.scale_in->cview(), s.q_1[n].cview(),
+                                 s.mu_1.cview(), s.mu_2.cview(), b.mub.view(), w.q_new.view(), dt_rk, ften(n),
+                                 ften(n).p != nullptr});
+        }
+        up.run();
+      } else {
+        {
+          const tile::Whole whole;  // the ranges xf, yf, zf of the tile's cells
+          LaunchBatch<KFacePDX, kBatch> fx;
+          LaunchBatch<KFacePDY, kBatch> fy;
+          LaunchBatch<KFacePDZ, kBatch> fz;
+          for (int m = 0; m < nb; ++m) {
+            Work& w = *work_[m];
+            const Fluxes fl = fluxes(species(m));
+            fx.add(xf, KFacePDX{fl, w.dhx.view(), w.lox.view()});
+            if (do_y) fy.add(yf, KFacePDY{fl, w.dhy.view(), w.loy.view()});
+            fz.add(zf, KFacePDZ{fl, w.dhz.view(), w.loz.view()});
+          }
+          fx.run();
+          fy.run();
+          fz.run();
+        }
+        LaunchBatch<KScalePD, kBatch> sc;
+        std::vector<Field3*> scales;
+        for (int m = 0; m < nb; ++m) {
+          Work& w = *work_[m];
+          sc.add(mr, KScalePD{fluxes(species(m)), faces(w), s.mu_1.cview(), b.mub.view(), w.scale.view()});
+          scales.push_back(&w.scale);
+        }
+        sc.run();
+        fill_halos(scales, g);
+        LaunchBatch<KUpdatePD, kBatch> up;
+        for (int m = 0; m < nb; ++m) {
+          const int n = species(m);
+          const Work& w = *work_[m];
+          up.add(mr, KUpdatePD{fluxes(n), faces(w), w.scale.cview(), s.q_1[n].cview(), s.mu_1.cview(), s.mu_2.cview(),
+                               b.mub.view(), w.q_new.view(), dt_rk, ften(n), ften(n).p != nullptr});
+        }
+        up.run();
       }
-      sc.run();
-      fill_halos(scales, g);
-      LaunchBatch<KUpdatePD, kBatch> up;
-      for (int m = 0; m < nb; ++m) {
-        const int n = species(m);
-        const Work& w = *work_[m];
-        up.add(mr, KUpdatePD{fluxes(n), faces(w), w.scale.cview(), s.q_1[n].cview(), s.mu_1.cview(), s.mu_2.cview(),
-                             b.mub.view(), w.q_new.view(), dt_rk, ften(n), ften(n).p != nullptr});
-      }
-      up.run();
     }
     std::vector<int> fd;  // species of this batch for flow_dep_bdy
     for (int m = 0; m < nb; ++m) {
@@ -438,13 +637,14 @@ void ScalarTransport::run_stage(State& s, Tendencies& t, const BaseState& b, int
   // WRF's species loop (rk_scalar_tend, then rk_update_scalar(_pd) of each species) as the same steps per kernel for
   // all species: every step of a species reads and writes only that species' fields (and the common masses and
   // fluxes), so each species gets the same values in the same order of its own operations
-  std::vector<int> all(ns), pd_n, plain_n;
+  // adv_opt 1 (2) on the last stage: rk_update_scalar_pd, then advect_scalar_pd (advect_scalar_mono)
+  std::vector<int> all(ns), pd_n, mono_n, plain_n;
   for (int n = 0; n < ns; ++n) {
     all[n] = n;
     const bool moist = n < s.n_moist;
     const bool is_tke = n == s.P_TKE;
-    const bool pd = rk == 3 && (is_tke ? p_.tke_adv_opt : (moist ? p_.moist_adv_opt : p_.scalar_adv_opt)) == 1;
-    (pd ? pd_n : plain_n).push_back(n);
+    const int opt = rk == 3 ? (is_tke ? p_.tke_adv_opt : (moist ? p_.moist_adv_opt : p_.scalar_adv_opt)) : 0;
+    (opt == 1 ? pd_n : opt == 2 ? mono_n : plain_n).push_back(n);
   }
   if (rk == 1) {  // rk_scalar_tend, rk_step == 1: diffusion into the held tendency (diff_opt = 1)
     // q_tendf was zeroed by zero_tendf and holds the physics tendencies (update_phy_ten)
@@ -453,8 +653,9 @@ void ScalarTransport::run_stage(State& s, Tendencies& t, const BaseState& b, int
     if (bc_) bc_->relax_scalars(all, t, s, b);  // relax_bdy_scalar (rk 1): scalars with boundary data
   }
   if (bc_) bc_->spec_scalars(all, t);  // spec_bdy_scalar (every stage)
-  if (!plain_n.empty()) update(s, t, b, plain_n, false, rk, dt_rk);
-  if (!pd_n.empty()) update(s, t, b, pd_n, true, rk, dt_rk);
+  if (!plain_n.empty()) update(s, t, b, plain_n, Mode::Plain, rk, dt_rk);
+  if (!pd_n.empty()) update(s, t, b, pd_n, Mode::PD, rk, dt_rk);
+  if (!mono_n.empty()) update(s, t, b, mono_n, Mode::Mono, rk, dt_rk);
   std::vector<Field3*> qs;  // halos of the new scalars, batched (one launch per 8 fields)
   for (int n = 0; n < ns; ++n) qs.push_back(&s.q_2[n]);
   fill_halos(qs, g);

@@ -531,6 +531,11 @@ UNSUPPORTED_DYNAMICS_SWITCHES = {
     "tracer_opt": "passive tracers",
 }
 
+# moist_adv_opt / scalar_adv_opt / tke_adv_opt values CPPWRF ports (WRF: 0 original, 1 positive definite,
+# 2 monotonic, 3 WENO, 4 positive-definite WENO; module_em.F rk_scalar_tend)
+ADV_OPTS = (0, 1, 2)
+ADV_OPTS_TEXT = "CPPWRF supports 0 (simple), 1 (positive-definite) and 2 (monotonic); WENO (3, 4) is not ported."
+
 # dynamics options whose value must stay at the WRF default (other values are not ported)
 DEFAULT_ONLY_OPTIONS = {
     ("dynamics", "momentum_adv_opt"): (1, "WENO momentum advection"),
@@ -1665,15 +1670,15 @@ class WrfTranslator:
             sections["dyn"]["diff_6th_factor"] = diff_6th_factor
 
         moist_adv_opt = self.get_opt("dynamics", "moist_adv_opt", 1)
-        if moist_adv_opt not in (0, 1):
-            self.error(f"WRF moist_adv_opt = {moist_adv_opt} is not supported; CPPWRF supports 0 (simple) and 1 (positive-definite).")
+        if moist_adv_opt not in ADV_OPTS:
+            self.error(f"WRF moist_adv_opt = {moist_adv_opt} is not supported; {ADV_OPTS_TEXT}")
         elif moist_adv_opt is not None and case_name != "hill2d":
             sections["dyn"]["moist_adv_opt"] = moist_adv_opt
 
         # scalar_adv_opt: included when physics suite is enabled, when explicitly 0, or when != 0 for non-dry ideal runs
         scalar_adv_opt = self.get_opt("dynamics", "scalar_adv_opt", 0)
-        if scalar_adv_opt not in (0, 1):
-            self.error(f"WRF scalar_adv_opt = {scalar_adv_opt} is not supported; CPPWRF supports 0 (simple) and 1 (positive-definite).")
+        if scalar_adv_opt not in ADV_OPTS:
+            self.error(f"WRF scalar_adv_opt = {scalar_adv_opt} is not supported; {ADV_OPTS_TEXT}")
         elif self.has_opt("dynamics", "scalar_adv_opt") and scalar_adv_opt == 0:
             sections["dyn"]["scalar_adv_opt"] = 0
         elif has_physics_suite or (scalar_adv_opt != 0 and case_name in ("quarter_ss",)):
@@ -1709,6 +1714,14 @@ class WrfTranslator:
         if v_sca != v_adv:
             self.error(f"WRF v_sca_adv_order = {v_sca} differs from v_mom_adv_order = {v_adv}; "
                        "CPPWRF uses a single vertical advection order (v_adv_order).")
+        # module_advect_em.F advect_scalar_mono: "h_order not known" / "v_order not known" (wrf_error_fatal) for other
+        # orders than h_sca_adv_order 5 and v_sca_adv_order 3 or 5 (CPPWRF has 3 and 4)
+        for d in range(max_dom):
+            mono = [k for k in ("moist_adv_opt", "scalar_adv_opt", "tke_adv_opt")
+                    if self.get_dom_opt("dynamics", k, d, 0 if k == "scalar_adv_opt" else 1) == 2]
+            if mono and (h_sca != 5 or v_sca != 3):
+                self.error(f"WRF {mono[0]} = 2 (monotonic) needs h_sca_adv_order = 5 and v_sca_adv_order = 3 "
+                           f"(domain {d + 1}; WRF's advect_scalar_mono stops with other orders).")
 
         for ac_key, def_v in (("epssm", 0.1), ("smdiv", 0.1), ("emdiv", 0.01)):
             if self.has_opt("dynamics", ac_key):
@@ -1781,8 +1794,8 @@ class WrfTranslator:
 
         tke_adv = self.get_opt("dynamics", "tke_adv_opt", None)
         if tke_adv is not None:
-            if tke_adv not in (0, 1):
-                self.error(f"WRF tke_adv_opt = {tke_adv} is not supported; CPPWRF supports 0 and 1.")
+            if tke_adv not in ADV_OPTS:
+                self.error(f"WRF tke_adv_opt = {tke_adv} is not supported; {ADV_OPTS_TEXT}")
             elif km_opt == 2 or tke_adv != 1:
                 sections["dyn"]["tke_adv_opt"] = tke_adv
 
@@ -2952,7 +2965,9 @@ class WrfTranslator:
                         v_0 = self.get_dom_opt("dynamics", nml_k, 0, None)
                         if ini_k in SUPPORTED_OPTIONS and v_d is not None and v_d not in SUPPORTED_OPTIONS[ini_k] and not (ini_k == "km_opt" and v_d == 0):
                             self.error(f"Domain {tag}: WRF {nml_k} = {v_d} is not supported.")
-                        elif ini_k in ("moist_adv_opt", "scalar_adv_opt", "tke_adv_opt", "mix_isotropic") and v_d not in (0, 1):
+                        elif ini_k in ("moist_adv_opt", "scalar_adv_opt", "tke_adv_opt") and v_d not in ADV_OPTS:
+                            self.error(f"Domain {tag}: WRF {nml_k} = {v_d} is not supported; {ADV_OPTS_TEXT}")
+                        elif ini_k == "mix_isotropic" and v_d not in (0, 1):
                             self.error(f"Domain {tag}: WRF {nml_k} = {v_d} is not supported (0 or 1 only).")
                         elif ini_k == "diff_6th_opt" and v_d not in (0, 1, 2):
                             self.error(f"Domain {tag}: WRF diff_6th_opt = {v_d} is not supported (0, 1, or 2 only).")

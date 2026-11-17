@@ -280,9 +280,15 @@ Model Model::build(const io::Config& cfg) {
   sp.moist_adv_opt = int(cfg.get_int("dyn.moist_adv_opt", 1));
   sp.scalar_adv_opt = int(cfg.get_int("dyn.scalar_adv_opt", 1));
   sp.tke_adv_opt = int(cfg.get_int("dyn.tke_adv_opt", 1));
-  if (sp.moist_adv_opt < 0 || sp.moist_adv_opt > 1 || sp.scalar_adv_opt < 0 || sp.scalar_adv_opt > 1 ||
-      sp.tke_adv_opt < 0 || sp.tke_adv_opt > 1)
-    throw std::runtime_error("dyn.moist_adv_opt, dyn.scalar_adv_opt and dyn.tke_adv_opt must be 0 or 1");
+  if (sp.moist_adv_opt < 0 || sp.moist_adv_opt > 2 || sp.scalar_adv_opt < 0 || sp.scalar_adv_opt > 2 ||
+      sp.tke_adv_opt < 0 || sp.tke_adv_opt > 2)
+    throw std::runtime_error("dyn.moist_adv_opt, dyn.scalar_adv_opt and dyn.tke_adv_opt must be 0, 1 or 2 "
+                             "(WENO advection, 3 and 4, is not ported)");
+  // monotonic advection (2): WRF's advect_scalar_mono has the 5th-order horizontal operators only (other
+  // h_sca_adv_order: "advect_scalar_mono, h_order not known", fatal) and, of CPPWRF's vertical orders, the 3rd
+  if (sp.any(2) && (lp.h_adv_order != 5 || lp.v_adv_order != 3))
+    throw std::runtime_error("monotonic advection (adv_opt 2) needs h_adv_order 5 and v_adv_order 3 "
+                             "(WRF's advect_scalar_mono stops with other orders)");
   // positive-definite advection with h_adv_order 6: WRF's order-6 branch of advect_scalar_pd is its
   // order-5 branch with flux6 / flux4 for flux5 / flux3, i.e. the PD fluxes with hup = 0 (scalars.cpp)
   // Diffusion: WRF diff_opt / km_opt / diff_6th_opt. diff_opt defaults to 1 when khdif or kvdif
