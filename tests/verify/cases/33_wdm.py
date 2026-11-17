@@ -28,11 +28,13 @@ for _n, _rst in (("d6", True), ("d6h", False), ("d5", False)):
         CASES += [(f"real_p4{_n}_r8_fp64_cpu_1h_rst", "cpu_dp", _cfg,
                    ["real.dir=" + _run] + _1H + ["suite.restart_at=1800"], f"{_run}/wrfout_d01_{_D}", 3600, _T6)]
     CASES += [
-        # CUDA FP64 (expected exact) and FP32 (P4-like placeholder tolerances, to be measured on the G4)
+        # CUDA FP64 (exact on the G4, 2026-11-17) and FP32 (measured on the G4 on top of the RRTMG float change:
+        # D6 U 1.5e-3, W 8.4e-2, THM 3.1e-5, QV 8.2e-4; D6H U 1.6e-3, W 9.2e-2, THM 3.2e-5, QV 8.5e-4; D5 about D6's;
+        # tolerances about 3x the largest)
         (f"real_p4{_n}_r8_fp64_cuda_1h", "cuda_dp", _cfg, ["real.dir=" + _run] + _1H, f"{_run}/wrfout_d01_{_D}",
          3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "QNCCN": 0.0, "QNCLOUD": 0.0, "QNRAIN": 0.0}),
         (f"real_p4{_n}_fp32_1h", "cuda", _cfg, ["real.dir=" + _run] + _1H, f"{_run}/wrfout_d01_{_D}", 3600,
-         {"U": 1.9e-3, "W": 5.1e-2, "THM": 2.6e-5, "QV": 1.6e-3}),
+         {"U": 4.8e-3, "W": 2.8e-1, "THM": 9.6e-5, "QV": 2.6e-3}),
     ]
 _cfg, _run = "configs/real_p4d6c_r8.ini", f"{WR}/run_D6C_r8"
 CASES += [
