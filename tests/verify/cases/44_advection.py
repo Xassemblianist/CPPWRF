@@ -35,13 +35,14 @@ CASES += [
      {d: f"{WR}/run_MON3_r8/steps/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 180, _N3),
     ("real_mon3_r8_fp64_cpu_1h", "cpu_dp", "configs/real_mon3_r8.ini", [],
      {"d01": f"{WR}/run_MON3_r8/wrfout_d01_{_D}"}, 3600, {k: v for k, v in _N3.items() if k.startswith("d01")}),
-    # CUDA FP64 (exact) and FP32 (tolerances to be measured on the G4: P4-like placeholders)
+    # CUDA FP64 (exact) and FP32 (about 3x the G4 measurement at 37213be: MO4 U 3.2e-4 W 9.4e-3 THM 6.5e-6 QV 3.2e-4;
+    # WM4 U 2.9e-4 W 7.8e-3 THM 8.7e-6 QV 2.6e-4)
     ("real_mo4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_mo4_r8.ini", [f"real.dir={WR}/run_MO4_r8"] + _1H,
      f"{WR}/run_MO4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "QRAIN": 0.0}),
     ("real_mok4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_mok4_r8.ini", [f"real.dir={WR}/run_MOK4_r8"] + _1H,
      f"{WR}/run_MOK4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_mo4_fp32_1h", "cuda", "configs/real_mo4_r8.ini", [f"real.dir={WR}/run_MO4_r8"] + _1H,
-     f"{WR}/run_MO4_r8/wrfout_d01_{_D}", 3600, {"U": 1.9e-3, "W": 5.1e-2, "THM": 2.6e-5, "QV": 1.6e-3}),
+     f"{WR}/run_MO4_r8/wrfout_d01_{_D}", 3600, {"U": 1.0e-3, "W": 2.8e-2, "THM": 2.0e-5, "QV": 1.0e-3}),
 ]
 
 for _n, _s in (("WE4", "we4"), ("WP4", "wp4"), ("WM4", "wm4"), ("WK4", "wk4"), ("WMY", "wmy")):
@@ -62,7 +63,7 @@ CASES += [
     ("real_wm4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_wm4_r8.ini", [f"real.dir={WR}/run_WM4_r8"] + _1H,
      f"{WR}/run_WM4_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_wm4_fp32_1h", "cuda", "configs/real_wm4_r8.ini", [f"real.dir={WR}/run_WM4_r8"] + _1H,
-     f"{WR}/run_WM4_r8/wrfout_d01_{_D}", 3600, {"U": 1.9e-3, "W": 5.1e-2, "THM": 2.6e-5, "QV": 1.6e-3}),
+     f"{WR}/run_WM4_r8/wrfout_d01_{_D}", 3600, {"U": 9.0e-4, "W": 2.4e-2, "THM": 2.6e-5, "QV": 8.0e-4}),
 ]
 
 STATUS = [
