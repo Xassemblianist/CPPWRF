@@ -95,7 +95,7 @@ class Checker(unittest.TestCase):
         r = run(CHECK, d, "namelist.input")
         self.assertEqual(r.returncode, 1)
         self.assertIn("NOT PORTED  &physics.mp_physics", r.stdout)
-        self.assertIn("suggestion: use one of 0, 1, 3, 4, 6, 8, 10, 28", r.stdout)
+        self.assertIn("suggestion: use one of 0, 1, 3, 4, 6, 8, 10, 14, 16, 28", r.stdout)
 
     def test_json_and_missing(self):
         d = make_dir("check_json")
