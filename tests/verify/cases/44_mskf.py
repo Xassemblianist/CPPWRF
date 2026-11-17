@@ -37,11 +37,12 @@ CASES = [
      _T9),
     ("real_m3n_r8_fp64_cuda_1h", "cuda_dp", "configs/real_m3n_r8.ini", [],
      {d: f"{WR}/run_M3N_r8/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 3600, _TN),
-    # FP32 against the real*8 runs (tolerances: about 3x the rel L2 measured on the Colab G4)
+    # FP32 against the real*8 runs (tolerances: about 3x the rel L2 measured on the Colab G4 at 37213be: M4 U 4.8e-4
+    # W 1.0e-2 THM 5.6e-6 QV 3.2e-4; M9 U 7.0e-4 W 9.4e-3 THM 9.7e-6 QV 1.6e-3)
     ("real_m4_fp32_1h", "cuda", "configs/real_m4_r8.ini", ["real.dir=" + _M4] + _1H, f"{_M4}/wrfout_d01_{_D}", 3600,
-     {"U": 3e-3, "W": 7e-2, "THM": 3e-5, "QV": 2e-3}),
+     {"U": 1.5e-3, "W": 3e-2, "THM": 1.7e-5, "QV": 1e-3}),
     ("real_m9_fp32_1h", "cuda", "configs/real_m9_r8.ini", [], f"{WR}/run_M9_r8/wrfout_d01_{_D}", 3600,
-     {"U": 3e-3, "W": 7e-2, "THM": 3e-5, "QV": 2e-3}),
+     {"U": 2.1e-3, "W": 2.8e-2, "THM": 2.9e-5, "QV": 4.8e-3}),
 ]
 
 STATUS = [
