@@ -141,6 +141,11 @@ void derive_config(WrfConfig& c, int max_dom, bool real_exe) {
     const int cu = c.integer("cu_physics");
     c.set("cu_diag", cu == 93 || cu == 3 || cu == 10 || cu == 5 ? "1" : "0");
   }
+  // check_a_mundo (real.exe and wrf.exe): MSKF sets cu_rad_feedback = .true. and icloud = 1
+  if (c.integer("cu_physics") == 11) {
+    c.set("icloud", "1");
+    c.set("cu_rad_feedback", ".true.");
+  }
   // phy_init (module_physics_init.F:1192-1206, wrf.exe only): icloud_cu = 2 for KF with cu_rad_feedback and for
   // MSKF (11), 1 for the Grell schemes with cu_rad_feedback, else 0 (the history attribute ICLOUD_CU)
   if (!real_exe) {

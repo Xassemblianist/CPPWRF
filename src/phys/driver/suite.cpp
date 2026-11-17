@@ -380,10 +380,10 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   if (o.sf_sfclay_physics == 5 && o.fractional_seaice == 1)
     throw std::runtime_error("PhysicsSuite: sf_sfclay_physics=5 with fractional_seaice=1 (MYNN_SEAICE_WRAPPER) is not ported");
   if (o.cu_physics != 0 && o.cu_physics != 1 && o.cu_physics != 2 && o.cu_physics != 3 && o.cu_physics != 5 &&
-      o.cu_physics != 6 && o.cu_physics != 16)
+      o.cu_physics != 6 && o.cu_physics != 11 && o.cu_physics != 16)
     throw std::runtime_error("PhysicsSuite: only cu_physics=0, 1 (Kain-Fritsch), 2 (Betts-Miller-Janjic), "
-                             "3 (Grell-Freitas-Li), 5 (Grell-3D), 6 (Tiedtke) or 16 (New Tiedtke); 93 (Grell-Devenyi) "
-                             "is not ported");
+                             "3 (Grell-Freitas-Li), 5 (Grell-3D), 6 (Tiedtke), 11 (multi-scale Kain-Fritsch) or 16 "
+                             "(New Tiedtke); 93 (Grell-Devenyi), 10 (KF-CuP) and 99 (old Kain-Fritsch) are not ported");
   if (o.cu_physics == 5 && g.nz > cu_g3::kMaxLevels)
     throw std::runtime_error("PhysicsSuite: nz exceeds the Grell-3D column limit");
   // G3DRV: cugd_avedx > 1 is the high-resolution branch with sub_spread = 1/(cugd_avedx**2 - 1); WRF documents 1
@@ -526,8 +526,12 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     throw std::runtime_error("PhysicsSuite: only gwd_opt=0 or 1 (GWDO)");
   if (o.gwd_opt == 1 && g.nz > bl_gwdo::kMaxLevels)
     throw std::runtime_error("PhysicsSuite: nz exceeds the GWDO column limit");
-  if (o.cu_physics == 1 && g.nz > cu_kf::kMaxLevels)
+  if ((o.cu_physics == 1 || o.cu_physics == 11) && g.nz > cu_kf::kMaxLevels)
     throw std::runtime_error("PhysicsSuite: nz exceeds the KF column limit");
+  // MSKF (module_cu_mskf.F): aercu_opt = 0 and kf_edrates = 0 only (no configuration keys; tools/wrf2cppwrf.py rejects other values); the
+  // trigger function does not enter MSKF_eta_PARA, 1 and 3 are accepted as for Kain-Fritsch
+  if (o.cu_physics == 11 && o.kfeta_trigger != 1 && o.kfeta_trigger != 3)
+    throw std::runtime_error("PhysicsSuite: kfeta_trigger=2 is not supported");
   gs_.nz = o.num_soil_layers;
   auto mk3 = [&](Field3& f, const Grid& gg, const char* n) { f = Field3(gg, Stagger::M, n); };
   mk3(tslb, gs_, "tslb"); mk3(smois, gs_, "smois"); mk3(sh2o, gs_, "sh2o"); mk3(smcrel, gs_, "smcrel");
@@ -716,8 +720,8 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     cldefi.fill_host([](int, int, int) { return double(cu_bmj::BmjC<real>::AVGEFI); });
     lowlyr.upload(std::vector<int>(lowlyr.layout().total, 1));
   }
-  if (o.cu_physics == 1) {
-    cu_kf::kf_reserve<real>(g.columns(), g.nz);  // CUDA FP64: its column arrays in the work buffer
+  if (o.cu_physics == 1 || o.cu_physics == 11) {  // kf_eta_init / mskf_init (MSKF_LUTAB: the same tables)
+    if (o.cu_physics == 1) cu_kf::kf_reserve<real>(g.columns(), g.nz);  // CUDA FP64: its column arrays in the work buffer
     using namespace wrfc;
     cu_kf::KFTables<real> h_kf{};
     cu_kf::init_kf_tables(h_kf, svp1, svp2, svp3, svpt0);

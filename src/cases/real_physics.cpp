@@ -387,6 +387,12 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     // schemes (GF 3, G3 5, GD 93) and 0 with the others (Tiedtke 6, New Tiedtke 16: no feedback)
     if (cfg.get_bool("phys.cu_rad_feedback", false))
       r.icloud_cu = o.cu_physics == 1 ? 2 : (o.cu_physics == 3 || o.cu_physics == 5 || o.cu_physics == 93) ? 1 : 0;
+    // MSKF: icloud_cu = 2 whatever cu_rad_feedback (module_physics_init.F:1205; check_a_mundo also sets
+    // cu_rad_feedback = .true. and icloud = 1)
+    if (o.cu_physics == 11) {
+      r.icloud_cu = 2;
+      r.icloud = 1;
+    }
     r.bmj_feedback = o.bmj_rad_feedback;  // module_radiation_driver.F:1578 (cu_physics == BMJSCHEME)
     r.swrad_scat = cfg.get_double("phys.swrad_scat", 1.0);
     r.warm_rain = o.warm_rain;

@@ -183,9 +183,10 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   Field3* th_forcing() override {
     return o_.cu_physics == 16 || o_.cu_physics == 3 || o_.cu_physics == 5 ? &pt.rthften : nullptr;
   }
-  // rk_scalar_tend sets RQVFTEN for Kain-Fritsch too (module_em.F), though KF does not use it
+  // rk_scalar_tend sets RQVFTEN for Kain-Fritsch and MSKF too (module_em.F), though they do not use it
   Field3* qv_forcing() override {
-    return o_.cu_physics == 16 || o_.cu_physics == 3 || o_.cu_physics == 5 || o_.cu_physics == 1 || o_.cu_physics == 6
+    return o_.cu_physics == 16 || o_.cu_physics == 3 || o_.cu_physics == 5 || o_.cu_physics == 1 || o_.cu_physics == 6 ||
+                   o_.cu_physics == 11
                ? &pt.rqvften
                : nullptr;
   }

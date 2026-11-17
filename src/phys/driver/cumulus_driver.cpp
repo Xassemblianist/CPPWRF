@@ -4,6 +4,7 @@
 #include "phys/driver/suite.hpp"
 #include "core/column_work.hpp"
 #include "core/tiles.hpp"
+#include "phys/cu_mskf/mskf.hpp"
 
 #include <cmath>
 #include <cstdio>
@@ -519,6 +520,7 @@ std::size_t cumulus_work_bytes(int cu_physics, int nz) {
   if (cu_physics == 5) return KG3::kWorkBytes > KG3Spread::kWorkBytes ? KG3::kWorkBytes : KG3Spread::kWorkBytes;
   if (cu_physics == 6) return KTiedtke::kWorkBytes;
   if (cu_physics == 16) return KNTiedtke::kWorkBytes;
+  if (cu_physics == 11) return cu_mskf::mskf_work_bytes<real>(nz);
   return 0;
 }
 }  // namespace suite_detail
@@ -793,6 +795,34 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
 #endif
     return;
   }
+  if (o_.cu_physics == 11) {  // MSKFSCHEME: MSKF_CPS as cumulus_driver calls it (trigger_kf, aercu_opt = 0)
+    cu_mskf::MSKFKernel<real> k{};
+    k.nx = g_.nx; k.ny = g_.ny; k.nz = g_.nz;
+    k.dt = real(g_.dt); k.dx = real(g_.dx); k.cudt = real(o_.cudt);
+    k.stepcu = stepcu; k.adapt_step_flag = adapt_step_flag; k.ktau = int(itimestep); k.trigger = o_.kfeta_trigger;
+    k.warm_rain = o_.warm_rain;
+    k.flag_qi = s.P_QI >= 0; k.flag_qs = s.P_QS >= 0; k.flag_qr = s.P_QR >= 0;
+    k.xlv0 = xlv0; k.xlv1 = xlv1; k.xls0 = xls0; k.xls1 = xls1;
+    k.cp = cp; k.r = r_d; k.g = g; k.ep1 = ep_1; k.ep2 = ep_2;
+    k.svp1 = svp1; k.svp2 = svp2; k.svp3 = svp3; k.svpt0 = svpt0;
+    k.tables = d_kf_tables_;
+    k.u = prep.u_phy.cview(); k.v = prep.v_phy.cview(); k.w = s.w_2.cview();
+    k.th = prep.th_phy.cview(); k.t = prep.t_phy.cview(); k.qv = s.q_2[s.P_QV].cview();
+    k.dz8w = prep.dz8w.cview(); k.pcps = prep.p_hyd.cview();
+    k.rho = prep.rho.cview(); k.pi = prep.pi_phy.cview();
+    k.w0avg = w0avg.view();
+    k.raincv = raincv.view(); k.pratec = pratec.view(); k.nca = nca.view();
+    k.cutop = cutop.view(); k.cubot = cubot.view();
+    k.rthcuten = pt.rthcuten.view(); k.rqvcuten = pt.rqvcuten.view();
+    k.rqccuten = pt.rqccuten.view(); k.rqrcuten = pt.rqrcuten.view();
+    k.rqicuten = pt.rqicuten.view(); k.rqscuten = pt.rqscuten.view();
+    k.rucuten = pt.rucuten.view(); k.rvcuten = pt.rvcuten.view();
+    k.cldfra_dp_kf = cldfra_dp.view(); k.cldfra_sh_kf = cldfra_sh.view();
+    k.qc_kf = qc_cu.view(); k.qi_kf = qi_cu.view();
+    k.zol = zol.cview(); k.hfx = hfx.cview(); k.ust = ust.cview(); k.pblh = pblh.cview();
+    cu_mskf::run_mskf(k, g_.columns());
+    return;
+  }
   cu_kf::KFKernel<real> kf{};
   kf.shall = shall.view();
   kf.nx = g_.nx; kf.ny = g_.ny; kf.nz = g_.nz;
@@ -867,7 +897,8 @@ void PhysicsSuite::advance_ppt(const dyn::State& s) {
                                        pt.rqicuten.view(), pt.rqscuten.view(), rainc.view(), rainsh.view(),
                                        pratec.view(), pratesh.view(), nca.view(), htop.view(), hbot.view(),
                                        cuppt.view(), cutop.cview(), cubot.cview(), real(g_.dt), g_.nz, g_.nz + 1,
-                                       s.P_QI >= 0, s.P_QS >= 0, o_.cu_physics == 1, o_.cu_physics == 2});
+                                       s.P_QI >= 0, s.P_QS >= 0, o_.cu_physics == 1 || o_.cu_physics == 11,
+                                       o_.cu_physics == 2});
 }
 
 }  // namespace cppwrf::phys::driver

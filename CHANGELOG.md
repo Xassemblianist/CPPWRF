@@ -14,6 +14,12 @@ a verified configuration, of a configuration key or of an output file is a new m
   D6, D6H, D6C, D5 against WRF real*8 at tolerance 0; column driver tests/phys/mp_wdm, bit for bit with the -r8
   build's wdm6 / wdm5). Not ported (errors): `do_radar_ref = 1` with them, nests, the ideal cases, WDM6 without the
   column physics, WDM7 (26).
+- Multi-scale Kain-Fritsch cumulus (cu_physics = 11, WRF's module_cu_mskf.F): MSKF_eta_PARA's scale-aware trigger
+  (DX < 25 km), entrainment, dynamic adjustment time and cloud fractions (CLDFRA_DP / CLDFRA_SH, QC_CU / QI_CU in
+  RRTMG: icloud_cu = 2 and icloud = 1 as check_a_mundo sets them), the momentum transport MSKF_CMT (RUCUTEN /
+  RVCUTEN, staggered with add_a2c_u / add_a2c_v), cudt; aercu_opt = 0 and kf_edrates = 0 only. Column driver
+  tests/phys/cu_mskf against WRF's MSKF_CPS; suite cases M4 (also restarted at 30 min), M4C5, M9 and the nest M3N
+  against WRF real*8. KF-CuP (10) and the old Kain-Fritsch (99) are rejected by tools/wrf2cppwrf.py and the model.
 - Grell-3D ensemble cumulus (cu_physics = 5, WRF's module_cu_g3.F): G3DRV with the 3 x 3 neighbours' vertical
   motion and advective forcing (ens4 = 9), CUP_enss_3d with its closure ensemble (maxens 3, maxens2 3, maxens3 16),
   the shallow convection (ishallow = 1), clos_choice, cugd_avedx 1 / 3 (`[phys] cugd_avedx`), APR_* /

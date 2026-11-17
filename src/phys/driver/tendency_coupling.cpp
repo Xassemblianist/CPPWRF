@@ -183,8 +183,10 @@ void update_phy_ten(dyn::Tendencies& t, PhysicsTendencies& pt, const dyn::State&
   // (tiles: the neighbours' points also with specified boundaries, as WRF's HALO_EM_PHYS_PBL / _CU)
   if (f.pbl && !g.specified()) fill_halos({&pt.rublten, &pt.rvblten}, g);
   else if (f.pbl) tile::exchange(pt.rublten, pt.rvblten);
-  if ((f.cu_physics == 16 || f.cu_physics == 6) && !g.specified()) fill_halos({&pt.rucuten, &pt.rvcuten}, g);
-  else if (f.cu_physics == 16 || f.cu_physics == 6) tile::exchange(pt.rucuten, pt.rvcuten);
+  // (HALO_EM_PHYS_CU: Tiedtke, New Tiedtke and MSKF)
+  const bool cu_uv = f.cu_physics == 16 || f.cu_physics == 6 || f.cu_physics == 11;
+  if (cu_uv && !g.specified()) fill_halos({&pt.rucuten, &pt.rvcuten}, g);
+  else if (cu_uv) tile::exchange(pt.rucuten, pt.rvcuten);
   AddLaunches add;
   if (f.radiation) add.add(ar, KAdd::A2A, t.t_tendf, pt.rthraten);  // phy_ra_ten
   if (f.pbl) {  // phy_bl_ten, YSUSCHEME
@@ -197,6 +199,16 @@ void update_phy_ten(dyn::Tendencies& t, PhysicsTendencies& pt, const dyn::State&
   }
   if (f.cu_physics == 1) {  // phy_cu_ten, KFETASCHEME
     add.add(ar, KAdd::A2A, t.t_tendf, pt.rthcuten);
+    if (s.P_QV >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QV], pt.rqvcuten);
+    if (s.P_QC >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QC], pt.rqccuten);
+    if (s.P_QR >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QR], pt.rqrcuten);
+    if (s.P_QI >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QI], pt.rqicuten);
+    if (s.P_QS >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QS], pt.rqscuten);
+  }
+  if (f.cu_physics == 11) {  // phy_cu_ten, MSKFSCHEME: th, u, v (add_a2c_u / add_a2c_v), qv, qc, qr, qi, qs
+    add.add(ar, KAdd::A2A, t.t_tendf, pt.rthcuten);
+    add.add(a2c_u_range(g), KAdd::A2CU, t.ru_tendf, pt.rucuten);
+    add.add(a2c_v_range(g), KAdd::A2CV, t.rv_tendf, pt.rvcuten);
     if (s.P_QV >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QV], pt.rqvcuten);
     if (s.P_QC >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QC], pt.rqccuten);
     if (s.P_QR >= 0) add.add(ar, KAdd::A2A, t.q_tendf[s.P_QR], pt.rqrcuten);
@@ -260,7 +272,8 @@ void phy_prep_part2(PhysicsTendencies& pt, const dyn::State& s, const dyn::BaseS
     if (s.P_QC >= 0) decouple(pt.rqcblten);
     if (s.P_QI >= 0) decouple(pt.rqiblten);
   }
-  if ((f.cu_physics == 1 || f.cu_physics == 6) && s.P_QV >= 0) decouple(pt.rqvften);  // KFETASCHEME, TIEDTKESCHEME: RQVFTEN only
+  if ((f.cu_physics == 1 || f.cu_physics == 6 || f.cu_physics == 11) && s.P_QV >= 0)
+    decouple(pt.rqvften);  // KFETASCHEME, TIEDTKESCHEME, MSKFSCHEME: RQVFTEN only
   if (f.cu_physics == 16 || f.cu_physics == 3 || f.cu_physics == 5) {  // advective forcing of the cumulus scheme
     if (s.P_QV >= 0) decouple(pt.rqvften);
     decouple(pt.rthften);

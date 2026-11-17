@@ -446,6 +446,7 @@ SUPPORTED_OPTIONS = {
         3: "Grell-Freitas cumulus parameterization",
         5: "Grell 3D ensemble cumulus parameterization",
         6: "Tiedtke cumulus parameterization",
+        11: "Multi-scale Kain-Fritsch cumulus parameterization",
         16: "New Tiedtke cumulus parameterization",
     },
     "ra_lw_physics": {
@@ -2394,6 +2395,12 @@ class WrfTranslator:
                     self.error(f"WRF {key} = {self.get_opt('physics', key, dflt)} is not supported with Grell-3D "
                                f"(cu_physics = 5); CPPWRF supports the default {dflt}.")
         for d in range(max(1, self._max_dom)):
+            if self.get_dom_opt("physics", "cu_physics", d, 0) == 10:
+                self.error(f"WRF cu_physics = 10 (KF-CuP, module_cu_kfcup.F) on domain {d + 1} is not ported; "
+                           "use cu_physics = 1 (Kain-Fritsch) or 11 (multi-scale Kain-Fritsch).")
+            if self.get_dom_opt("physics", "cu_physics", d, 0) == 99:
+                self.error(f"WRF cu_physics = 99 (old Kain-Fritsch, module_cu_kf.F) on domain {d + 1} is not ported; "
+                           "use cu_physics = 1 (Kain-Fritsch).")
             if self.get_dom_opt("physics", "cu_physics", d, 0) == 93:
                 self.error(f"WRF cu_physics = 93 (Grell-Devenyi, module_cu_gd.F) on domain {d + 1} is not ported; "
                            "use cu_physics = 5 (Grell-3D) or 3 (Grell-Freitas).")

@@ -115,6 +115,7 @@ list(APPEND CPPWRF_SOURCES
   ${CMAKE_SOURCE_DIR}/src/phys/lsm_ruc/ruc_tables.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/cu_kf/kf.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/cu_kf/kf_tables.cpp
+  ${CMAKE_SOURCE_DIR}/src/phys/cu_mskf/mskf.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/mp_thompson/thompson.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/mp_thompson/thompson_tables.cpp
   ${CMAKE_SOURCE_DIR}/src/phys/mp_morrison/morrison.cpp

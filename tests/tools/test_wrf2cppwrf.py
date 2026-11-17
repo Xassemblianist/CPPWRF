@@ -1472,6 +1472,23 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, _ = self.translate(self.NEST + "&physics cu_physics = 5, 5, ra_sw_physics = 2*1, cu_rad_feedback = .true. /\n")
         self.assertTrue(any("Dudhia shortwave" in e for e in t.errors), t.errors)
 
+    def test_mskf_and_unported_kf_variants(self):
+        # cu_physics = 11 (multi-scale Kain-Fritsch) is ported; 10 (KF-CuP) and 99 (old Kain-Fritsch) are not
+        t, sec = self.translate(self.NEST + "&physics cu_physics = 11, 11, kfeta_trigger = 3 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["cu_physics"], 11)
+        self.assertEqual(sec["phys"]["kfeta_trigger"], 3)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 11, 11, kfeta_trigger = 2 /\n")
+        self.assertTrue(any("kfeta_trigger = 2" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 11, 11, aercu_opt = 1 /\n")
+        self.assertTrue(any("aercu_opt" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 11, 11, kf_edrates = 1, 1 /\n")
+        self.assertTrue(any("kf_edrates" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 10, 10 /\n")
+        self.assertTrue(any("KF-CuP" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 99, 99 /\n")
+        self.assertTrue(any("old Kain-Fritsch" in e for e in t.errors), t.errors)
+
     def test_nest_entries_take_registry_defaults(self):
         # r32cudt1 / r32bldt1: a nest without a cudt / bldt entry calls the scheme every step (Registry default 0,
         # rconfig CUDT / BLDT in upper case)
