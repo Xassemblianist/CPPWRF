@@ -533,8 +533,9 @@ UNSUPPORTED_DYNAMICS_SWITCHES = {
 
 # moist_adv_opt / scalar_adv_opt / tke_adv_opt values CPPWRF ports (WRF: 0 original, 1 positive definite,
 # 2 monotonic, 3 WENO, 4 positive-definite WENO; module_em.F rk_scalar_tend)
-ADV_OPTS = (0, 1, 2)
-ADV_OPTS_TEXT = "CPPWRF supports 0 (simple), 1 (positive-definite) and 2 (monotonic); WENO (3, 4) is not ported."
+ADV_OPTS = (0, 1, 2, 3, 4)
+ADV_OPTS_TEXT = ("CPPWRF supports 0 (simple), 1 (positive-definite), 2 (monotonic), 3 (WENO) and 4 "
+                 "(positive-definite WENO).")
 
 # dynamics options whose value must stay at the WRF default (other values are not ported)
 DEFAULT_ONLY_OPTIONS = {

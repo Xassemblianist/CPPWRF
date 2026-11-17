@@ -1,13 +1,14 @@
 ! SPDX-License-Identifier: GPL-3.0-or-later
-! The last RK3 stage of the moist species as WRF v4.8.0's solve_em runs it for moist_adv_opt = 1 / 2 (the -r8 build's
-! own objects): rk_update_scalar_pd and set_physical_bc3d of moist_old, then per species rk_scalar_tend's
-! advection (advect_scalar_pd / advect_scalar_mono; set_tend of RQVFTEN for qv) and rk_update_scalar.
+! The last RK3 stage of the moist species as WRF v4.8.0's solve_em runs it for moist_adv_opt = 1 .. 4 (the WRF build's
+! own objects: -r8 for 1 / 2, -r8 -fdefault-double-8 for the WENO options 3 / 4): rk_update_scalar_pd and
+! set_physical_bc3d of moist_old (not for 3), then per species rk_scalar_tend's advection (advect_scalar_pd /
+! advect_scalar_mono / advect_scalar_weno / advect_scalar_wenopd; set_tend of RQVFTEN for qv) and rk_update_scalar.
 !   driver_advection_f90 IN OUT   (IN: generate_inputs.py; OUT: per species q_2 and q_1 of the mass points, then
 !   RQVFTEN, float64, x fastest, then y, then k)
 PROGRAM driver_advection
   USE module_configure, ONLY: grid_config_rec_type
   USE module_em, ONLY: rk_update_scalar, rk_update_scalar_pd
-  USE module_advect_em, ONLY: advect_scalar_pd, advect_scalar_mono
+  USE module_advect_em, ONLY: advect_scalar_pd, advect_scalar_mono, advect_scalar_weno, advect_scalar_wenopd
   USE module_big_step_utilities_em, ONLY: set_tend
   USE module_bc, ONLY: set_physical_bc3d
   IMPLICIT NONE
@@ -56,7 +57,9 @@ PROGRAM driver_advection
   cf%h_sca_adv_order = 5; cf%v_sca_adv_order = 3; cf%rk_ord = 3
   cf%moist_adv_opt = adv_opt; cf%zadvect_implicit = 0; cf%spec_zone = 1
 
-  ! solve_em: rk_update_scalar_pd of every species, then the halos of moist_old (set_physical_bc3d 'p')
+  ! solve_em: rk_update_scalar_pd of every species, then the halos of moist_old (set_physical_bc3d 'p'), but for
+  ! ORIGINAL and WENO_SCALAR
+  IF (adv_opt /= 3) THEN
   DO n = 1, nspec
     CALL rk_update_scalar_pd(n, n, q1(ims, kms, jms, n), qt(ims, kms, jms, n), c1h, c2h, mu_1, mu_1, mub, &
                              3, dt, 1, cf, ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
@@ -66,6 +69,7 @@ PROGRAM driver_advection
     CALL set_physical_bc3d(q1(:,:,:,n), 'p', cf, ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, &
                            ids, ide, jds, jde, kds, kde, its, ite, jts, jte, kts, kte)
   END DO
+  END IF
   ! moist_scalar_advance: rk_scalar_tend (advection, rk_step 3) and rk_update_scalar of each species
   DO n = 1, nspec
     adv = 0.; ht = 0.; zt = 0.
@@ -73,6 +77,14 @@ PROGRAM driver_advection
       CALL advect_scalar_pd(q2(:,:,:,n), q1(:,:,:,n), adv, ht, zt, ru, rv, ww, c1h, c2h, muts, mub, mu_1, &
                             1, cf, .FALSE., msftx, msftx, msftx, msftx, msftx, msfty, fnm, fnp, rdx, rdy, rdnw, dt, &
                             ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, its, ite, jts, jte, kts, kte)
+    ELSE IF (adv_opt == 3) THEN
+      CALL advect_scalar_weno(q2(:,:,:,n), q2(:,:,:,n), adv, ru, rv, ww, c1h, c2h, muts, 1, cf, &
+                              msftx, msftx, msftx, msftx, msftx, msfty, fnm, fnp, rdx, rdy, rdnw, &
+                              ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, its, ite, jts, jte, kts, kte)
+    ELSE IF (adv_opt == 4) THEN
+      CALL advect_scalar_wenopd(q2(:,:,:,n), q1(:,:,:,n), adv, ru, rv, ww, c1h, c2h, muts, mub, mu_1, 1, cf, &
+                                msftx, msftx, msftx, msftx, msftx, msfty, fnm, fnp, rdx, rdy, rdnw, dt, &
+                                ids, ide, jds, jde, kds, kde, ims, ime, jms, jme, kms, kme, its, ite, jts, jte, kts, kte)
     ELSE
       CALL advect_scalar_mono(q2(:,:,:,n), q1(:,:,:,n), adv, ht, zt, ru, rv, ww, wwi, c1h, c2h, muts, mub, mu_1, &
                               cf, .FALSE., msftx, msftx, msftx, msftx, msftx, msfty, fnm, fnp, rdx, rdy, rdnw, dt, &

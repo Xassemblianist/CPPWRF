@@ -38,8 +38,32 @@ constexpr real H = real(0.5);
 #define CPPWRF_FACE_STORED(F)
 #endif
 
-// High-order (advect_scalar) and first-order upwind (advect_scalar_pd) face fluxes.
-struct Fluxes {
+// WENO 5th-order face flux of advect_scalar_weno / advect_scalar_wenopd (module_advect_em.F, Jiang and Shu 1996):
+// q* are the upwind-ordered stencil values (qi upwind of the face), vel the face mass flux. WRF's DOUBLE PRECISION
+// locals (f0..f2, beta0..2, wi0..2, sumwk) are real*8 in the -r8 -fdefault-double-8 build the references come from.
+CPPWRF_HD inline real weno5(real vel, real qim2, real qim1, real qi, real qip1, real qip2) {
+  const real f0 = (real(1.) / real(3.)) * qim2 - (real(7.) / real(6.)) * qim1 + (real(11.) / real(6.)) * qi;
+  const real f1 = -((real(1.) / real(6.)) * qim1) + (real(5.) / real(6.)) * qi + (real(1.) / real(3.)) * qip1;
+  const real f2 = (real(1.) / real(3.)) * qi + (real(5.) / real(6.)) * qip1 - (real(1.) / real(6.)) * qip2;
+  const real a0 = qim2 - real(2.) * qim1 + qi, b0 = qim2 - real(4.) * qim1 + real(3.) * qi;
+  const real a1 = qim1 - real(2.) * qi + qip1, b1 = qim1 - qip1;
+  const real a2 = qi - real(2.) * qip1 + qip2, b2 = qip2 - real(4.) * qip1 + real(3.) * qi;
+  const real beta0 = (real(13.) / real(12.)) * (a0 * a0) + (real(1.) / real(4.)) * (b0 * b0);
+  const real beta1 = (real(13.) / real(12.)) * (a1 * a1) + (real(1.) / real(4.)) * (b1 * b1);
+  const real beta2 = (real(13.) / real(12.)) * (a2 * a2) + (real(1.) / real(4.)) * (b2 * b2);
+  const real eps = real(1.0e-40);  // (eps + beta)**pw, pw = 2: x*x
+  const real e0 = eps + beta0, e1 = eps + beta1, e2 = eps + beta2;
+  const real wi0 = (real(1.) / real(10.)) / (e0 * e0), wi1 = (real(6.) / real(10.)) / (e1 * e1),
+             wi2 = (real(3.) / real(10.)) / (e2 * e2);
+  const real sumwk = wi0 + wi1 + wi2;
+  return vel * (wi0 * f0 + wi1 * f1 + wi2 * f2) / sumwk;
+}
+// the face between q(m1) and q(0) along a direction: upw = the flow goes from m1 to 0 (vel >= 0, vertical -vel >= 0)
+#define CPPWRF_WENO_FACE(Q, VEL, UPW) \
+  ((UPW) ? weno5(VEL, Q(-3), Q(-2), Q(-1), Q(0), Q(1)) : weno5(VEL, Q(2), Q(1), Q(0), Q(-1), Q(-2)))
+
+// High-order (advect_scalar; W: advect_scalar_weno's) and first-order upwind (advect_scalar_pd) face fluxes.
+template <bool W> struct FluxesT {
   C3 q, qo, ru, rv, ww; C2 mut; VCoef c;
   real rdx, rdy, dt, hup, vup; int nz; bool do_y;
   B2 msftx, msfty; kern::Spec sp;
@@ -58,6 +82,12 @@ struct Fluxes {
     CPPWRF_FACE_STORED(fxs)
     const real vel = ru(i, j, k);
     const int o = kern::ord_face(i, sp.nx, sp.x);
+    if constexpr (W) {  // advect_scalar_weno(pd): WENO in place of flux5, its flux3 (folded constants)
+      if (o == 2) return H * vel * (q(i, j, k) + q(i - 1, j, k));
+      if (o == 3) return vel * kern::flux3_pd(q(i - 2, j, k), q(i - 1, j, k), q(i, j, k), q(i + 1, j, k), vel, real(1));
+      auto Q = [&](int d) { return q(i + d, j, k); };
+      return CPPWRF_WENO_FACE(Q, vel, vel >= real(0));
+    }
     if (o == 2) return H * vel * (q(i, j, k) + q(i - 1, j, k));
     if (o == 3) return vel * f3(q(i - 2, j, k), q(i - 1, j, k), q(i, j, k), q(i + 1, j, k), vel, hup);
     return vel * f5(q(i - 3, j, k), q(i - 2, j, k), q(i - 1, j, k), q(i, j, k), q(i + 1, j, k), q(i + 2, j, k), vel);
@@ -66,6 +96,12 @@ struct Fluxes {
     CPPWRF_FACE_STORED(fys)
     const real vel = rv(i, j, k);
     const int o = kern::ord_face(j, sp.ny, sp.y);
+    if constexpr (W) {
+      if (o == 2) return H * vel * (q(i, j, k) + q(i, j - 1, k));
+      if (o == 3) return vel * kern::flux3_pd(q(i, j - 2, k), q(i, j - 1, k), q(i, j, k), q(i, j + 1, k), vel, real(1));
+      auto Q = [&](int d) { return q(i, j + d, k); };
+      return CPPWRF_WENO_FACE(Q, vel, vel >= real(0));
+    }
     if (o == 2) return H * vel * (q(i, j, k) + q(i, j - 1, k));
     if (o == 3) return vel * f3(q(i, j - 2, k), q(i, j - 1, k), q(i, j, k), q(i, j + 1, k), vel, hup);
     return vel * f5(q(i, j - 3, k), q(i, j - 2, k), q(i, j - 1, k), q(i, j, k), q(i, j + 1, k), q(i, j + 2, k), vel);
@@ -75,6 +111,12 @@ struct Fluxes {
     if (k == 0 || k == nz) return 0;
     const real vel = ww(i, j, k);
     if (k == 1 || k == nz - 1) return vel * (c.fnm(k) * q(i, j, k) + c.fnp(k) * q(i, j, k - 1));
+    if constexpr (W) {  // WENO's vertical: flux3 on levels 2 and nz-2, WENO between (any v_sca_adv_order)
+      if (k == 2 || k == nz - 2)
+        return vel * kern::flux3_pd(q(i, j, k - 2), q(i, j, k - 1), q(i, j, k), q(i, j, k + 1), -vel, real(1));
+      auto Q = [&](int d) { return q(i, j, k + d); };
+      return CPPWRF_WENO_FACE(Q, vel, -vel >= real(0));
+    }
     return vel * f3(q(i, j, k - 2), q(i, j, k - 1), q(i, j, k), q(i, j, k + 1), -vel, vup);
   }
   CPPWRF_HD real mh(int i, int j, int k) const { return c.c1h(k) * mut(i, j) + c.c2h(k); }
@@ -138,12 +180,14 @@ struct Fluxes {
     return r - c.rdnw(k) * (fz(i, j, k + 1) - fz(i, j, k));
   }
 };
+using Fluxes = FluxesT<false>;
+using FluxesW = FluxesT<true>;
 
 CPPWRF_HD inline real m_full(const VCoef& c, int k, real mub, real mu) { return c.c1h(k) * (mub + mu) + c.c2h(k); }
 
 // rk_update_scalar (non-PD stages / options): q_new = (m_old q_1 + dt (adv + tendf)) / m_new
-struct KUpdate {
-  Fluxes f; C3 q1, tendf; C2 mu1, mu2; B2 mub; V3 qn; real dt_rk; bool add_tendf;
+template <class F> struct KUpdateT {
+  F f; C3 q1, tendf; C2 mu1, mu2; B2 mub; V3 qn; real dt_rk; bool add_tendf;
   V3 ften; bool want_ften;  // set_tend: advect_tend * msfty
   CPPWRF_HD void operator()(int i, int j, int k) const {
     real tend = f.adv(i, j, k) * f.msfty(i, j);  // rk_update_scalar: advect_tend * msfty + sc_tend
@@ -153,21 +197,25 @@ struct KUpdate {
                   m_full(f.c, k, mub(i, j), mu2(i, j));
   }
 };
+using KUpdate = KUpdateT<Fluxes>;
 
 #if defined(CPPWRF_DOUBLE)
 // advect_scalar's face fluxes, each once (FP64 builds): x faces 0..nx, y faces 0..ny, w levels 0..nz
-struct KFaceX {
-  Fluxes f; V3 out;
+template <class F> struct KFaceXT {
+  F f; V3 out;
   CPPWRF_HD void operator()(int i, int j, int k) const { out(i, j, k) = f.fx(i, j, k); }
 };
-struct KFaceY {
-  Fluxes f; V3 out;
+template <class F> struct KFaceYT {
+  F f; V3 out;
   CPPWRF_HD void operator()(int i, int j, int k) const { out(i, j, k) = f.fy(i, j, k); }
 };
-struct KFaceZ {
-  Fluxes f; V3 out;
+template <class F> struct KFaceZT {
+  F f; V3 out;
   CPPWRF_HD void operator()(int i, int j, int k) const { out(i, j, k) = f.fz(i, j, k); }
 };
+using KFaceX = KFaceXT<Fluxes>;
+using KFaceY = KFaceYT<Fluxes>;
+using KFaceZ = KFaceZT<Fluxes>;
 #endif
 
 // rk_update_scalar_pd (last stage, before advection): q_1 += dt tendf / m_old
@@ -182,30 +230,34 @@ struct KPreUpdatePD {
 // advect_scalar_pd, step 1: every face flux once. dh = high-order minus first-order upwind
 // flux, lo = upwind flux, on x (U points), y (V points) and eta (W levels) faces. The limiter and
 // the update read them (the same expressions as evaluating Fluxes per cell: bitwise identical).
-struct KFacePDX {
-  Fluxes f; V3 dh, lo;
+template <class F> struct KFacePDXT {
+  F f; V3 dh, lo;
   CPPWRF_HD void operator()(int i, int j, int k) const {
     const real l = f.fxl(i, j, k);
     dh(i, j, k) = f.fx(i, j, k) - l;
     lo(i, j, k) = l;
   }
 };
-struct KFacePDY {
-  Fluxes f; V3 dh, lo;
+template <class F> struct KFacePDYT {
+  F f; V3 dh, lo;
   CPPWRF_HD void operator()(int i, int j, int k) const {
     const real l = f.fyl(i, j, k);
     dh(i, j, k) = f.fy(i, j, k) - l;
     lo(i, j, k) = l;
   }
 };
-struct KFacePDZ {
-  Fluxes f; V3 dh, lo;
+template <class F> struct KFacePDZT {
+  F f; V3 dh, lo;
   CPPWRF_HD void operator()(int i, int j, int k) const {
     const real l = f.fzl(i, j, k);
     dh(i, j, k) = f.fz(i, j, k) - l;
     lo(i, j, k) = l;
   }
 };
+
+using KFacePDX = KFacePDXT<Fluxes>;
+using KFacePDY = KFacePDYT<Fluxes>;
+using KFacePDZ = KFacePDZT<Fluxes>;
 
 struct FacesPD {
   C3 dhx, lox, dhy, loy, dhz, loz;
@@ -469,7 +521,8 @@ void ScalarTransport::reserve(int n_scalars) {
 // values are those of the species one after the other (WRF's loop over the species).
 void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const std::vector<int>& ns, Mode mode,
                              int rk, real dt_rk) {
-  const bool pd = mode != Mode::Plain;  // advect_scalar_pd's and advect_scalar_mono's flux statement functions
+  // advect_scalar_pd's, _mono's and _weno(pd)'s flux statement functions (folded constants)
+  const bool pd = mode != Mode::Plain;
   const Grid& g = g_;
   const VCoef c = VCoef::from(b);
   const Range3D mr = g.mass_cells();
@@ -486,34 +539,35 @@ void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const 
   for (std::size_t n0 = 0; n0 < ns.size(); n0 += kBatch) {
     const int nb = int(std::min<std::size_t>(kBatch, ns.size() - n0));
     auto species = [&](int m) { return ns[n0 + m]; };
-    auto fluxes = [&](int n) {
-      Fluxes fl{s.q_2[n].cview(), s.q_1[n].cview(), s.ru_m.cview(), s.rv_m.cview(), s.ww_m.cview(), s.muts.cview(), c,
-                real(b.rdx), real(b.rdy), dt_rk, hup, vup, g.nz, do_y, b.msftx.view(), b.msfty.view(),
-                kern::Spec::of(g)};
+    auto fluxes_of = [&]<class F>(int n) {  // F = Fluxes, or FluxesW (WENO) for the face fluxes of options 3 / 4
+      F fl{s.q_2[n].cview(), s.q_1[n].cview(), s.ru_m.cview(), s.rv_m.cview(), s.ww_m.cview(), s.muts.cview(), c,
+           real(b.rdx), real(b.rdy), dt_rk, hup, vup, g.nz, do_y, b.msftx.view(), b.msfty.view(), kern::Spec::of(g)};
       fl.pd = pd;
       return fl;
     };
+    auto fluxes = [&](int n) { return fluxes_of.template operator()<Fluxes>(n); };
     auto ften = [&](int n) { return fsink != nullptr && n == s.P_QV ? fsink->view() : V3{}; };
-    if (!pd) {
+    // rk_update_scalar's advection: advect_scalar (Plain) or, option 3 on the last stage, advect_scalar_weno
+    auto plain = [&]<class F>() {
 #if defined(CPPWRF_DOUBLE)
       {  // the face fluxes once (into the PD work fields, unused here)
         const tile::Whole whole;  // the ranges xf, yf, zf of the tile's cells
-        LaunchBatch<KFaceX, kBatch> fx;
-        LaunchBatch<KFaceY, kBatch> fy;
-        LaunchBatch<KFaceZ, kBatch> fz;
+        LaunchBatch<KFaceXT<F>, kBatch> fx;
+        LaunchBatch<KFaceYT<F>, kBatch> fy;
+        LaunchBatch<KFaceZT<F>, kBatch> fz;
         for (int m = 0; m < nb; ++m) {
           Work& w = *work_[m];
-          const Fluxes fl = fluxes(species(m));
-          fx.add(xf, KFaceX{fl, w.dhx.view()});
-          if (do_y) fy.add(yf, KFaceY{fl, w.dhy.view()});
-          fz.add(zf, KFaceZ{fl, w.dhz.view()});
+          const F fl = fluxes_of.template operator()<F>(species(m));
+          fx.add(xf, KFaceXT<F>{fl, w.dhx.view()});
+          if (do_y) fy.add(yf, KFaceYT<F>{fl, w.dhy.view()});
+          fz.add(zf, KFaceZT<F>{fl, w.dhz.view()});
         }
         fx.run();
         fy.run();
         fz.run();
       }
       auto fluxes_stored = [&](int n, const Work& w) {
-        Fluxes fl = fluxes(n);
+        F fl = fluxes_of.template operator()<F>(n);
         fl.fxs = w.dhx.cview();
         fl.fys = w.dhy.cview();
         fl.fzs = w.dhz.cview();
@@ -521,16 +575,21 @@ void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const 
         return fl;
       };
 #else
-      auto fluxes_stored = [&](int n, const Work&) { return fluxes(n); };
+      auto fluxes_stored = [&](int n, const Work&) { return fluxes_of.template operator()<F>(n); };
 #endif
-      LaunchBatch<KUpdate, kBatch> up;
+      LaunchBatch<KUpdateT<F>, kBatch> up;
       for (int m = 0; m < nb; ++m) {
         const int n = species(m);
-        up.add(mr, KUpdate{fluxes_stored(n, *work_[m]), s.q_1[n].cview(), t.q_tendf[n].cview(), s.mu_1.cview(),
-                           s.mu_2.cview(), b.mub.view(), work_[m]->q_new.view(), dt_rk, true, ften(n),
-                           ften(n).p != nullptr});
+        up.add(mr, KUpdateT<F>{fluxes_stored(n, *work_[m]), s.q_1[n].cview(), t.q_tendf[n].cview(), s.mu_1.cview(),
+                               s.mu_2.cview(), b.mub.view(), work_[m]->q_new.view(), dt_rk, true, ften(n),
+                               ften(n).p != nullptr});
       }
       up.run();
+    };
+    if (mode == Mode::Plain) {
+      plain.template operator()<Fluxes>();
+    } else if (mode == Mode::Weno) {
+      plain.template operator()<FluxesW>();
     } else {
       LaunchBatch<KPreUpdatePD, kBatch> pre;
       std::vector<Field3*> q1s;
@@ -584,19 +643,24 @@ void ScalarTransport::update(State& s, Tendencies& t, const BaseState& b, const 
       } else {
         {
           const tile::Whole whole;  // the ranges xf, yf, zf of the tile's cells
-          LaunchBatch<KFacePDX, kBatch> fx;
-          LaunchBatch<KFacePDY, kBatch> fy;
-          LaunchBatch<KFacePDZ, kBatch> fz;
-          for (int m = 0; m < nb; ++m) {
-            Work& w = *work_[m];
-            const Fluxes fl = fluxes(species(m));
-            fx.add(xf, KFacePDX{fl, w.dhx.view(), w.lox.view()});
-            if (do_y) fy.add(yf, KFacePDY{fl, w.dhy.view(), w.loy.view()});
-            fz.add(zf, KFacePDZ{fl, w.dhz.view(), w.loz.view()});
-          }
-          fx.run();
-          fy.run();
-          fz.run();
+          // advect_scalar_pd's faces, or (option 4) advect_scalar_wenopd's: WENO for the high-order fluxes
+          auto pd_faces = [&]<class F>() {
+            LaunchBatch<KFacePDXT<F>, kBatch> fx;
+            LaunchBatch<KFacePDYT<F>, kBatch> fy;
+            LaunchBatch<KFacePDZT<F>, kBatch> fz;
+            for (int m = 0; m < nb; ++m) {
+              Work& w = *work_[m];
+              const F fl = fluxes_of.template operator()<F>(species(m));
+              fx.add(xf, KFacePDXT<F>{fl, w.dhx.view(), w.lox.view()});
+              if (do_y) fy.add(yf, KFacePDYT<F>{fl, w.dhy.view(), w.loy.view()});
+              fz.add(zf, KFacePDZT<F>{fl, w.dhz.view(), w.loz.view()});
+            }
+            fx.run();
+            fy.run();
+            fz.run();
+          };
+          if (mode == Mode::WenoPD) pd_faces.template operator()<FluxesW>();
+          else pd_faces.template operator()<Fluxes>();
         }
         LaunchBatch<KScalePD, kBatch> sc;
         std::vector<Field3*> scales;
@@ -637,14 +701,15 @@ void ScalarTransport::run_stage(State& s, Tendencies& t, const BaseState& b, int
   // WRF's species loop (rk_scalar_tend, then rk_update_scalar(_pd) of each species) as the same steps per kernel for
   // all species: every step of a species reads and writes only that species' fields (and the common masses and
   // fluxes), so each species gets the same values in the same order of its own operations
-  // adv_opt 1 (2) on the last stage: rk_update_scalar_pd, then advect_scalar_pd (advect_scalar_mono)
-  std::vector<int> all(ns), pd_n, mono_n, plain_n;
+  // the last stage: adv_opt 1 (2, 4) rk_update_scalar_pd, then advect_scalar_pd (advect_scalar_mono,
+  // advect_scalar_wenopd); 3: advect_scalar_weno and rk_update_scalar
+  std::vector<int> all(ns), pd_n, mono_n, weno_n, wenopd_n, plain_n;
   for (int n = 0; n < ns; ++n) {
     all[n] = n;
     const bool moist = n < s.n_moist;
     const bool is_tke = n == s.P_TKE;
     const int opt = rk == 3 ? (is_tke ? p_.tke_adv_opt : (moist ? p_.moist_adv_opt : p_.scalar_adv_opt)) : 0;
-    (opt == 1 ? pd_n : opt == 2 ? mono_n : plain_n).push_back(n);
+    (opt == 1 ? pd_n : opt == 2 ? mono_n : opt == 3 ? weno_n : opt == 4 ? wenopd_n : plain_n).push_back(n);
   }
   if (rk == 1) {  // rk_scalar_tend, rk_step == 1: diffusion into the held tendency (diff_opt = 1)
     // q_tendf was zeroed by zero_tendf and holds the physics tendencies (update_phy_ten)
@@ -656,6 +721,8 @@ void ScalarTransport::run_stage(State& s, Tendencies& t, const BaseState& b, int
   if (!plain_n.empty()) update(s, t, b, plain_n, Mode::Plain, rk, dt_rk);
   if (!pd_n.empty()) update(s, t, b, pd_n, Mode::PD, rk, dt_rk);
   if (!mono_n.empty()) update(s, t, b, mono_n, Mode::Mono, rk, dt_rk);
+  if (!weno_n.empty()) update(s, t, b, weno_n, Mode::Weno, rk, dt_rk);
+  if (!wenopd_n.empty()) update(s, t, b, wenopd_n, Mode::WenoPD, rk, dt_rk);
   std::vector<Field3*> qs;  // halos of the new scalars, batched (one launch per 8 fields)
   for (int n = 0; n < ns; ++n) qs.push_back(&s.q_2[n]);
   fill_halos(qs, g);

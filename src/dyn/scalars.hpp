@@ -13,7 +13,8 @@ namespace cppwrf::dyn {
 
 struct ScalarParams {
   int moist_adv_opt = 1;     // WRF default 1. 0 = original (advect_scalar), 1 = positive definite (advect_scalar_pd),
-                             // 2 = monotonic (advect_scalar_mono)
+                             // 2 = monotonic (advect_scalar_mono), 3 = WENO (advect_scalar_weno), 4 = positive-
+                             // definite WENO (advect_scalar_wenopd); 1..4 act on the last RK stage only
   int scalar_adv_opt = 1;    // same for passive tracers (WRF scalar_adv_opt / tracer_adv_opt)
   int tke_adv_opt = 1;       // WRF tke_adv_opt (default 1 = positive definite)
   bool any(int opt) const { return moist_adv_opt == opt || scalar_adv_opt == opt || tke_adv_opt == opt; }
@@ -52,7 +53,7 @@ class ScalarTransport {
     std::unique_ptr<Field3> scale_in;     // advect_scalar_mono: scale_in (scale holds scale_out); only with option 2
     Work(const Grid& g, bool mono);
   };
-  enum class Mode { Plain, PD, Mono };
+  enum class Mode { Plain, PD, Mono, Weno, WenoPD };
   std::vector<std::unique_ptr<Work>> work_;  // min(n_scalars, kBatch)
   void update(State& s, Tendencies& t, const BaseState& b, const std::vector<int>& ns, Mode mode, int rk, real dt_rk);
 };

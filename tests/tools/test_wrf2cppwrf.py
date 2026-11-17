@@ -1243,6 +1243,17 @@ class TestValidationAndWarnings(unittest.TestCase):
         self.assertEqual(t.errors, [])
         self.assertEqual((d["moist_adv_opt"], d["scalar_adv_opt"], d["tke_adv_opt"]), (2, 2, 2))
 
+    def test_weno_advection(self):
+        # 3 / 4: advect_scalar_weno / advect_scalar_wenopd on the last RK stage (any h/v_sca_adv_order)
+        for opt in (3, 4):
+            t = WrfTranslator(parse_namelist(real_case(
+                "&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, bl_pbl_physics = 1, "
+                f"sf_sfclay_physics = 1 /\n&dynamics moist_adv_opt = {opt}, scalar_adv_opt = {opt}, diff_opt = 2, "
+                f"km_opt = 2, tke_adv_opt = {opt} /\n")))
+            d = t.translate()["dyn"]
+            self.assertEqual(t.errors, [])
+            self.assertEqual((d["moist_adv_opt"], d["scalar_adv_opt"], d["tke_adv_opt"]), (opt, opt, opt))
+
     def test_unsupported_physics_and_dynamics_errors(self):
         cases = [
             # share/module_check_a_mundo.F: "bl_mynn_edmf > 0 requires both shcu_physics=0 & ishallow=0"
@@ -1268,9 +1279,9 @@ class TestValidationAndWarnings(unittest.TestCase):
             ("&physics ra_lw_physics = 4, ra_sw_physics = 4, cldovrlp = -1 /", "cldovrlp = -1"),
             ("&physics shcu_physics = 2 /", "shcu_physics"),
             ("&physics topo_wind = 1 /", "topo_wind"),
-            ("&dynamics moist_adv_opt = 3 /", "moist_adv_opt = 3"),
-            ("&dynamics scalar_adv_opt = 4 /", "scalar_adv_opt = 4"),
-            ("&dynamics diff_opt = 2, km_opt = 2, tke_adv_opt = 3 /", "tke_adv_opt = 3"),
+            ("&dynamics moist_adv_opt = 5 /", "moist_adv_opt = 5"),
+            ("&dynamics scalar_adv_opt = -1 /", "scalar_adv_opt = -1"),
+            ("&dynamics diff_opt = 2, km_opt = 2, tke_adv_opt = 5 /", "tke_adv_opt = 5"),
             # module_advect_em.F advect_scalar_mono stops for h_sca_adv_order /= 5 and v_sca_adv_order /= 3, 5
             ("&dynamics moist_adv_opt = 2, h_mom_adv_order = 6, h_sca_adv_order = 6 /", "needs h_sca_adv_order = 5"),
             ("&dynamics tke_adv_opt = 2, v_mom_adv_order = 4, v_sca_adv_order = 4 /", "needs h_sca_adv_order = 5"),

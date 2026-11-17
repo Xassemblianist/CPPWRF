@@ -280,10 +280,10 @@ Model Model::build(const io::Config& cfg) {
   sp.moist_adv_opt = int(cfg.get_int("dyn.moist_adv_opt", 1));
   sp.scalar_adv_opt = int(cfg.get_int("dyn.scalar_adv_opt", 1));
   sp.tke_adv_opt = int(cfg.get_int("dyn.tke_adv_opt", 1));
-  if (sp.moist_adv_opt < 0 || sp.moist_adv_opt > 2 || sp.scalar_adv_opt < 0 || sp.scalar_adv_opt > 2 ||
-      sp.tke_adv_opt < 0 || sp.tke_adv_opt > 2)
-    throw std::runtime_error("dyn.moist_adv_opt, dyn.scalar_adv_opt and dyn.tke_adv_opt must be 0, 1 or 2 "
-                             "(WENO advection, 3 and 4, is not ported)");
+  if (sp.moist_adv_opt < 0 || sp.moist_adv_opt > 4 || sp.scalar_adv_opt < 0 || sp.scalar_adv_opt > 4 ||
+      sp.tke_adv_opt < 0 || sp.tke_adv_opt > 4)
+    throw std::runtime_error("dyn.moist_adv_opt, dyn.scalar_adv_opt and dyn.tke_adv_opt must be 0 .. 4 "
+                             "(original, positive definite, monotonic, WENO, positive-definite WENO)");
   // monotonic advection (2): WRF's advect_scalar_mono has the 5th-order horizontal operators only (other
   // h_sca_adv_order: "advect_scalar_mono, h_order not known", fatal) and, of CPPWRF's vertical orders, the 3rd
   if (sp.any(2) && (lp.h_adv_order != 5 || lp.v_adv_order != 3))
@@ -337,6 +337,7 @@ Model Model::build(const io::Config& cfg) {
   if (cfg.has("dyn.legacy_diffusion"))
     throw std::runtime_error("dyn.legacy_diffusion was removed; use dyn.diff_opt = 1 (WRF horizontal/vertical_diffusion)");
   sp.h_adv_order = lp.h_adv_order; sp.v_adv_order = lp.v_adv_order;
+  lp.weno_theta = sp.moist_adv_opt >= 3 || sp.scalar_adv_opt >= 3;
   m.dt_clock = wrf_time::from_seconds(g.dt, cfg.get_int("time.dt_den", 1));
   if (cfg.get_bool("time.adaptive", false)) init_adaptive(cfg, m, cname);
   // the adaptive time step sets time_step_sound = 0 (start_em.F:979)

@@ -19,6 +19,9 @@ struct LargeStepParams {
   int v_adv_order = 3;        // 3 (default) or 4 (centred); WRF v_mom/v_sca_adv_order
   int w_damping = 0;          // WRF w_damping: 1 damps w where the vertical Courant number > 1
   real w_crit_cfl = 1;        // WRF w_crit_cfl (subtracted from the Courant number)
+  // moist_adv_opt or scalar_adv_opt 3 / 4 (WENO): theta's flux divergence of the last RK stage is advect_scalar_weno's
+  // (module_em.F rk_tendency)
+  bool weno_theta = false;
 };
 
 // 1D vertical coefficients packed for kernels.

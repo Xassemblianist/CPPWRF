@@ -498,8 +498,27 @@ struct KTendW {
   CPPWRF_FACES  // after the other members (aggregate initialisation)
 };
 
-// Theta: advect_scalar (+ t_tendf)
-struct KTendT {
+// WENO 5th-order face flux (advect_scalar_weno; WRF's DOUBLE PRECISION locals real*8 as in the -double-8 build)
+CPPWRF_HD inline real weno5(real vel, real qim2, real qim1, real qi, real qip1, real qip2) {
+  const real f0 = (real(1.) / real(3.)) * qim2 - (real(7.) / real(6.)) * qim1 + (real(11.) / real(6.)) * qi;
+  const real f1 = -((real(1.) / real(6.)) * qim1) + (real(5.) / real(6.)) * qi + (real(1.) / real(3.)) * qip1;
+  const real f2 = (real(1.) / real(3.)) * qi + (real(5.) / real(6.)) * qip1 - (real(1.) / real(6.)) * qip2;
+  const real a0 = qim2 - real(2.) * qim1 + qi, b0 = qim2 - real(4.) * qim1 + real(3.) * qi;
+  const real a1 = qim1 - real(2.) * qi + qip1, b1 = qim1 - qip1;
+  const real a2 = qi - real(2.) * qip1 + qip2, b2 = qip2 - real(4.) * qip1 + real(3.) * qi;
+  const real beta0 = (real(13.) / real(12.)) * (a0 * a0) + (real(1.) / real(4.)) * (b0 * b0);
+  const real beta1 = (real(13.) / real(12.)) * (a1 * a1) + (real(1.) / real(4.)) * (b1 * b1);
+  const real beta2 = (real(13.) / real(12.)) * (a2 * a2) + (real(1.) / real(4.)) * (b2 * b2);
+  const real eps = real(1.0e-40);
+  const real e0 = eps + beta0, e1 = eps + beta1, e2 = eps + beta2;
+  const real wi0 = (real(1.) / real(10.)) / (e0 * e0), wi1 = (real(6.) / real(10.)) / (e1 * e1),
+             wi2 = (real(3.) / real(10.)) / (e2 * e2);
+  const real sumwk = wi0 + wi1 + wi2;
+  return vel * (wi0 * f0 + wi1 * f1 + wi2 * f2) / sumwk;
+}
+
+// Theta: advect_scalar (+ t_tendf); W: advect_scalar_weno's fluxes (the last stage with WENO scalar options)
+template <bool W> struct KTendTT {
   C3 t, ru, rv, ww, tendf; VCoef c;
   V3 out; real rdx, rdy; int nz; bool do_y, use_tendf; real hup, vup;
   C3 hd; C2 mut; bool use_hd;  // rk_addtend_dry: + (c1h*mut + c2h) * h_diabatic
@@ -509,6 +528,12 @@ struct KTendT {
     CPPWRF_FACE_STORED(fxs)
     real vel = ru(i, j, k);
     const int o = kern::ord_face(i, sp.nx, sp.x);
+    if constexpr (W) {
+      if (o == 2) return H * vel * (t(i, j, k) + t(i - 1, j, k));
+      if (o == 3) return vel * kern::flux3_pd(t(i - 2, j, k), t(i - 1, j, k), t(i, j, k), t(i + 1, j, k), vel, real(1));
+      return vel >= real(0) ? weno5(vel, t(i - 3, j, k), t(i - 2, j, k), t(i - 1, j, k), t(i, j, k), t(i + 1, j, k))
+                            : weno5(vel, t(i + 2, j, k), t(i + 1, j, k), t(i, j, k), t(i - 1, j, k), t(i - 2, j, k));
+    }
     if (o == 2) return H * vel * (t(i, j, k) + t(i - 1, j, k));
     if (o == 3) return vel * flux3(t(i - 2, j, k), t(i - 1, j, k), t(i, j, k), t(i + 1, j, k), vel, hup);
     return vel * flux5(t(i - 3, j, k), t(i - 2, j, k), t(i - 1, j, k), t(i, j, k), t(i + 1, j, k), t(i + 2, j, k), vel, hup);
@@ -517,6 +542,12 @@ struct KTendT {
     CPPWRF_FACE_STORED(fys)
     real vel = rv(i, j, k);
     const int o = kern::ord_face(j, sp.ny, sp.y);
+    if constexpr (W) {
+      if (o == 2) return H * vel * (t(i, j, k) + t(i, j - 1, k));
+      if (o == 3) return vel * kern::flux3_pd(t(i, j - 2, k), t(i, j - 1, k), t(i, j, k), t(i, j + 1, k), vel, real(1));
+      return vel >= real(0) ? weno5(vel, t(i, j - 3, k), t(i, j - 2, k), t(i, j - 1, k), t(i, j, k), t(i, j + 1, k))
+                            : weno5(vel, t(i, j + 2, k), t(i, j + 1, k), t(i, j, k), t(i, j - 1, k), t(i, j - 2, k));
+    }
     if (o == 2) return H * vel * (t(i, j, k) + t(i, j - 1, k));
     if (o == 3) return vel * flux3(t(i, j - 2, k), t(i, j - 1, k), t(i, j, k), t(i, j + 1, k), vel, hup);
     return vel * flux5(t(i, j - 3, k), t(i, j - 2, k), t(i, j - 1, k), t(i, j, k), t(i, j + 1, k), t(i, j + 2, k), vel, hup);
@@ -526,6 +557,12 @@ struct KTendT {
     if (k == 0 || k == nz) return 0;
     real vel = ww(i, j, k);
     if (k == 1 || k == nz - 1) return vel * (c.fnm(k) * t(i, j, k) + c.fnp(k) * t(i, j, k - 1));
+    if constexpr (W) {  // flux3 on levels 2 and nz-2, WENO between
+      if (k == 2 || k == nz - 2)
+        return vel * kern::flux3_pd(t(i, j, k - 2), t(i, j, k - 1), t(i, j, k), t(i, j, k + 1), -vel, real(1));
+      return -vel >= real(0) ? weno5(vel, t(i, j, k - 3), t(i, j, k - 2), t(i, j, k - 1), t(i, j, k), t(i, j, k + 1))
+                             : weno5(vel, t(i, j, k + 2), t(i, j, k + 1), t(i, j, k), t(i, j, k - 1), t(i, j, k - 2));
+    }
     return vel * flux3(t(i, j, k - 2), t(i, j, k - 1), t(i, j, k), t(i, j, k + 1), -vel, vup);
   }
   CPPWRF_HD void operator()(int i, int j, int k) const {
@@ -563,6 +600,7 @@ struct KTendT {
   }
   CPPWRF_FACES  // after the other members (aggregate initialisation)
 };
+using KTendT = KTendTT<false>;
 
 // Geopotential (levels 1..nz): rhs_ph with phi_adv_z = 1 and the h_sca_adv_order 5/6 branch
 // (6th-order centred horizontal gradient of ph and phb, separately, as WRF), plus g*w/msfty.
@@ -849,9 +887,13 @@ void LargeStep::tendencies(const State& s, Tendencies& t, const BaseState& b, in
                           s.mu_2.cview(), b.mub.view(), c, moist_coef(s), t.rw_tend.view(), rdx, rdy, nz, do_y, tendf, hup, vup,
                           s.u_2.cview(), s.v_2.cview(), m, sp, s.mut.cview(),
                           p_.w_damping == 1 ? real(g_.dt) : real(0), p_.w_crit_cfl});
-  launch_tend(mr, Range3D{mr.i0, mr.i1, mr.j0, mr.j1, mr.k0, mr.k1 + 1}, do_y, KTendT{s.t_2.cview(), s.ru.cview(), s.rv.cview(), s.ww.cview(), t.t_tendf.cview(), c,
-                          t.t_tend.view(), rdx, rdy, nz, do_y, tendf, hup, vup, s.h_diabatic.cview(), s.mut.cview(),
-                          s.n_moist > 0, b.msftx.view(), b.msfty.view(), sp, thf, thf_on});
+  auto tend_t = [&]<bool W>() {
+    launch_tend(mr, Range3D{mr.i0, mr.i1, mr.j0, mr.j1, mr.k0, mr.k1 + 1}, do_y, KTendTT<W>{s.t_2.cview(), s.ru.cview(), s.rv.cview(), s.ww.cview(), t.t_tendf.cview(), c,
+                            t.t_tend.view(), rdx, rdy, nz, do_y, tendf, hup, vup, s.h_diabatic.cview(), s.mut.cview(),
+                            s.n_moist > 0, b.msftx.view(), b.msfty.view(), sp, thf, thf_on});
+  };
+  if (p_.weno_theta && rk_step == 3) tend_t.template operator()<true>();  // WENO scalar options, rk_step == rk_order
+  else tend_t.template operator()<false>();
   parallel_for(wr, KTendPh{s.u_2.cview(), s.v_2.cview(), s.w_2.cview(), s.ww.cview(), s.ph_2.cview(), s.mut.cview(),
                            s.muu.cview(), s.muv.cview(), b.phb.view(), c, t.ph_tend.view(), rdx, rdy, nz, do_y,
                            b.msfty.view(), b.msfux.view(), b.msfvy.view(), sp, t.ph_tendf.cview(), bc_ != nullptr,

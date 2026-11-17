@@ -17,9 +17,12 @@ import sys
 import numpy as np
 
 H = 5
-# name, nx, ny, nz, bc, adv_opt (moist_adv_opt of the stage), seed
+# name, nx, ny, nz, bc, adv_opt (moist_adv_opt of the stage; 3 / 4: the WENO cases, -r8 -double-8 WRF), seed
 CASES = [("spec", 14, 12, 10, 0, 2, 1), ("peri", 12, 11, 9, 1, 2, 2), ("open", 13, 12, 10, 2, 2, 3),
-         ("spec_b", 17, 15, 12, 0, 2, 4), ("spec_pd", 14, 12, 10, 0, 1, 5), ("peri_pd", 12, 11, 9, 1, 1, 6)]
+         ("spec_b", 17, 15, 12, 0, 2, 4), ("spec_pd", 14, 12, 10, 0, 1, 5), ("peri_pd", 12, 11, 9, 1, 1, 6),
+         ("spec_weno", 14, 12, 12, 0, 3, 7), ("peri_weno", 12, 11, 10, 1, 3, 8), ("open_weno", 13, 12, 11, 2, 3, 9),
+         ("spec_wenopd", 14, 12, 12, 0, 4, 10), ("peri_wenopd", 12, 11, 10, 1, 4, 11),
+         ("open_wenopd", 13, 12, 11, 2, 4, 12)]
 
 
 def padded(rng, nx, ny, nz, sx, sy, periodic, f):
