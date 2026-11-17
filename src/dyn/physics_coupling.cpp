@@ -147,7 +147,7 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
       p_phy(g, Stagger::M, "p_phy") {
   if (p_.mp_physics != 0 && p_.mp_physics != 1 && p_.mp_physics != 3 && p_.mp_physics != 4 && p_.mp_physics != 6 &&
       p_.mp_physics != 8 && p_.mp_physics != 10 && p_.mp_physics != 28 && !p3() && !wdm())
-    throw std::runtime_error("phys.mp_physics must be 0, 1, 3, 4, 6, 8, 10, 16, 28, 50 or 51");
+    throw std::runtime_error("phys.mp_physics must be 0, 1, 3, 4, 6, 8, 10, 14, 16, 28, 50 or 51");
   if (p_.mp_physics == 1) check_limit("Kessler", "nz", g.nz, phys::kessler::kMaxLevels);
   if (p_.do_radar_ref != 0 && p_.do_radar_ref != 1) throw std::runtime_error("phys.do_radar_ref must be 0 or 1");
   if (p_.microp_re || p3()) {  // phy_init: background values RE_QC_BG, RE_QI_BG, RE_QS_BG (has_reqc etc.)
@@ -202,18 +202,19 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     sr = Field2(g, Stagger::M, "sr");
     w5_ = phys::wsm5::wsm5_params<real>();
   }
-  if (wdm()) {  // WDM6: phy_init's wdm6init(..., ccn_conc, hail_opt), once
-    check_limit("WDM6", "nz", g.nz, phys::wdm6::kMaxLevels);
+  if (wdm()) {  // WDM6 / WDM5: phy_init's wdm6init(..., ccn_conc, hail_opt) / wdm5init(..., ccn_conc), once
+    const bool w5 = p_.mp_physics == 14;
+    check_limit(w5 ? "WDM5" : "WDM6", "nz", g.nz, phys::wdm6::kMaxLevels);
     if (p_.do_radar_ref != 0)
-      throw std::runtime_error("phys.do_radar_ref = 1 with mp_physics = 16 is not ported (refl10cm_wdm6 computes in "
-                               "DOUBLE PRECISION, REAL*16 in WRF's -r8 build)");
-    if (p_.hail_opt != 0 && p_.hail_opt != 1) throw std::runtime_error("phys.hail_opt must be 0 or 1");
+      throw std::runtime_error("phys.do_radar_ref = 1 with mp_physics = 14 / 16 is not ported (refl10cm_wdm5 / "
+                               "refl10cm_wdm6 compute in DOUBLE PRECISION, REAL*16 in WRF's -r8 build)");
+    if (!w5 && p_.hail_opt != 0 && p_.hail_opt != 1) throw std::runtime_error("phys.hail_opt must be 0 or 1");
     snownc = Field2(g, Stagger::M, "snownc");
     snowncv = Field2(g, Stagger::M, "snowncv");
     graupelnc = Field2(g, Stagger::M, "graupelnc");
     graupelncv = Field2(g, Stagger::M, "graupelncv");
     sr = Field2(g, Stagger::M, "sr");
-    wd6_ = phys::wdm6::wdm6_params<real>(p_.hail_opt, p_.ccn_conc);
+    wd6_ = w5 ? phys::wdm5::wdm5_params<real>(p_.ccn_conc) : phys::wdm6::wdm6_params<real>(p_.hail_opt, p_.ccn_conc);
   }
   if (p_.mp_physics == 10) {
     check_limit("Morrison", "nz", g.nz, phys::mp_morrison::kMaxLevels);
@@ -295,9 +296,11 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
     throw std::runtime_error("mp_physics = 50 / 51 (P3) needs qv, qc, qr, qi, qni, qnr, qir, qib (51: and qnc)");
   if (p_.mp_physics == 28 && (s.P_QNC < 0 || s.P_QNWFA < 0 || s.P_QNIFA < 0 || s.P_QNBCA < 0))
     throw std::runtime_error("mp_physics = 28 (Thompson aerosol aware) also needs qnc, qnwfa, qnifa, qnbca");
-  if (wdm() && (s.P_QI < 0 || s.P_QS < 0 || s.P_QG < 0 || s.P_QNN < 0 || s.P_QNC < 0 || s.P_QNR < 0))
+  if (p_.mp_physics == 14 && (s.P_QI < 0 || s.P_QS < 0 || s.P_QNN < 0 || s.P_QNC < 0 || s.P_QNR < 0))
+    throw std::runtime_error("mp_physics = 14 (WDM5) needs qv, qc, qr, qi, qs, qnn, qnc, qnr");
+  if (p_.mp_physics == 16 && (s.P_QI < 0 || s.P_QS < 0 || s.P_QG < 0 || s.P_QNN < 0 || s.P_QNC < 0 || s.P_QNR < 0))
     throw std::runtime_error("mp_physics = 16 (WDM6) needs qv, qc, qr, qi, qs, qg, qnn, qnc, qnr");
-  if (wdm() && xland_ == nullptr)
+  if (p_.mp_physics == 16 && xland_ == nullptr)
     throw std::runtime_error("mp_physics = 16 (WDM6) needs the land mask XLAND of the column physics");
   const Grid& g = g_;
   Field3& qv = s.q_2[s.P_QV];
@@ -430,11 +433,13 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
   } else if (wdm()) {
     ++itimestep;  // solve_em: grid%itimestep (1 at the first step of a cold start)
     Field3 &qnn = s.q_2[s.P_QNN], &qnc = s.q_2[s.P_QNC], &qnr = s.q_2[s.P_QNR];
-    // wdm6: nn = ccn0 on the whole memory range first (the mass points here; the halo exchange below fills the rest)
+    // wdm6 / wdm5: nn = ccn0 on the whole memory range first (the mass points here; the halo exchange below fills the rest)
     if (itimestep == 1) parallel_for(g.mass_cells(), KSetConst{qnn.view(), wd6_.ccn0});
-    // debug (CPPWRF_VM_DUMP): WDM6 inputs and outputs, for a replay through WRF's wdm6
+    // debug (CPPWRF_VM_DUMP): WDM6 / WDM5 inputs and outputs, for a replay through WRF's wdm6 / wdm5 (WDM5: qs in
+    // the qg slot)
+    Field3& qg_or_qs = p_.mp_physics == 14 ? s.q_2[s.P_QS] : s.q_2[s.P_QG];
     vmdump::dump("vm_mp_in", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS],
-                                 &s.q_2[s.P_QG], &qnn, &qnc, &qnr, &rho, &pii, &p_phy, &dz8w},
+                                 &qg_or_qs, &qnn, &qnc, &qnr, &rho, &pii, &p_phy, &dz8w},
                  {&rainnc, &rainncv, &snownc, &snowncv, &graupelnc, &graupelncv, &sr});
     // the lanes of WRF's vectorised i loop: its..ite = mp_cols.i0 .. mp_cols.i1 - 1 (as Kessler)
     auto wdm6 = [&](auto nl) {
@@ -445,10 +450,23 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
                               xland_->cview(), rainnc.view(), rainncv.view(), snownc.view(), snowncv.view(),
                               graupelnc.view(), graupelncv.view(), sr.view(), mp_cols.i0, mp_cols.i1 - mp_cols.i0});
     };
-    if (g.nz <= 48) wdm6(std::integral_constant<int, 48>{});
-    else if (g.nz <= 64) wdm6(std::integral_constant<int, 64>{});
-    else wdm6(std::integral_constant<int, phys::wdm6::kMaxLevels>{});
-    if (p_.microp_re)  // effectRad_wdm6 with wdm6's caps (RE_QC_BG, RE_QI_BG, RE_QS_BG and 50 / 125 / 999 microns)
+    auto wdm5 = [&](auto nl) {
+      column_for(mp_cols, phys::wdm5::Wdm5Kernel<real, decltype(nl)::value>{
+                              wd6_, dt, g.nz, th_phy.view(), qv.view(), s.q_2[s.P_QC].view(), s.q_2[s.P_QR].view(),
+                              s.q_2[s.P_QI].view(), s.q_2[s.P_QS].view(), qnn.view(), qnc.view(), qnr.view(),
+                              rho.cview(), pii.cview(), p_phy.cview(), dz8w.cview(), rainnc.view(), rainncv.view(),
+                              snownc.view(), snowncv.view(), sr.view(), mp_cols.i0, mp_cols.i1 - mp_cols.i0});
+    };
+    if (p_.mp_physics == 14) {
+      if (g.nz <= 48) wdm5(std::integral_constant<int, 48>{});
+      else if (g.nz <= 64) wdm5(std::integral_constant<int, 64>{});
+      else wdm5(std::integral_constant<int, phys::wdm6::kMaxLevels>{});
+    } else {
+      if (g.nz <= 48) wdm6(std::integral_constant<int, 48>{});
+      else if (g.nz <= 64) wdm6(std::integral_constant<int, 64>{});
+      else wdm6(std::integral_constant<int, phys::wdm6::kMaxLevels>{});
+    }
+    if (p_.microp_re)  // effectRad_wdm6 / _wdm5 (the same) with their caps (RE_QC_BG, RE_QI_BG, RE_QS_BG and 50 / 125 / 999 microns)
       parallel_for(Range3D{mp_cols.i0, mp_cols.i1, mp_cols.j0, mp_cols.j1, 0, g.nz},
                    phys::wdm6::WdmEffRadKernel<real>{
                        wd6_.pidnc, wd6_.pidn0s, real(wd6_.alpha), real(wd6_.n0s), real(wd6_.n0smax), wd6_.t0c,
@@ -457,7 +475,7 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
                        s.q_2[s.P_QI].cview(), s.q_2[s.P_QS].cview(), rho.cview(), re_cloud.view(), re_ice.view(),
                        re_snow.view()});
     vmdump::dump("vm_mp_out", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS],
-                                  &s.q_2[s.P_QG], &qnn, &qnc, &qnr},
+                                  &qg_or_qs, &qnn, &qnc, &qnr},
                  {&rainnc, &rainncv, &snownc, &snowncv, &graupelnc, &graupelncv, &sr});
   } else if (p_.mp_physics == 10) {
     // debug (CPPWRF_VM_DUMP): Morrison inputs and outputs, for a replay through WRF's mp_morr_two_moment

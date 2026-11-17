@@ -409,6 +409,7 @@ SUPPORTED_OPTIONS = {
         6: "WSM6 6-class single-moment",
         8: "Thompson",
         10: "Morrison two-moment (morr_rimed_ice 0 / 1, constant droplet number: progn = 0)",
+        14: "WDM5 5-class double-moment warm rain (ccn_conc)",
         16: "WDM6 6-class double-moment warm rain (hail_opt 0 / 1, ccn_conc)",
         28: "Thompson aerosol-aware (aer_init_opt = 0, wif_input_opt 0 / 1)",
         50: "P3, one ice category, constant droplet number",
@@ -1799,6 +1800,8 @@ class WrfTranslator:
                 sections["moist"]["species"] = "qv,qc,qr,qi,qnc,qni,qnr,qir,qib"
             elif mp_physics == 16:  # Registry package wdm6scheme: moist qv, qc, qr, qi, qs, qg; scalar qnn, qnc, qnr
                 sections["moist"]["species"] = "qv,qc,qr,qi,qs,qg,qnn,qnc,qnr"
+            elif mp_physics == 14:  # Registry package wdm5scheme: moist qv, qc, qr, qi, qs; scalar qnn, qnc, qnr
+                sections["moist"]["species"] = "qv,qc,qr,qi,qs,qnn,qnc,qnr"
             elif mp_physics == 6:
                 sections["moist"]["species"] = "qv, qc, qr, qi, qs, qg" if not has_physics_suite else "qv,qc,qr,qi,qs,qg"
             elif mp_physics == 4:  # Registry package wsm5scheme: moist qv, qc, qr, qi, qs
@@ -1819,8 +1822,9 @@ class WrfTranslator:
             if mp_physics in (3, 4):
                 self.error(f"WRF mp_physics = {mp_physics} (WSM{5 if mp_physics == 4 else 3}) is supported for "
                            f"real-data runs only.")
-            if mp_physics == 16:
-                self.error("WRF mp_physics = 16 (WDM6) is supported for real-data runs only.")
+            if mp_physics in (14, 16):
+                self.error(f"WRF mp_physics = {mp_physics} (WDM{5 if mp_physics == 14 else 6}) is supported for "
+                           f"real-data runs only.")
             sections["moist"] = {}
             if mp_physics == 8:
                 sections["moist"]["species"] = "qv,qc,qr,qi,qs,qg,qni,qnr"
@@ -1852,8 +1856,6 @@ class WrfTranslator:
                                "CPPWRF.")
                 elif mp_physics == 106:
                     self.error("WRF mp_physics = 106 (WSM6R, module_mp_wsm6r.F) is not supported by CPPWRF.")
-                elif mp_physics == 14:
-                    self.error("WRF mp_physics = 14 (WDM5, module_mp_wdm5.F) is not supported by CPPWRF.")
                 elif mp_physics == 26:
                     self.error("WRF mp_physics = 26 (WDM7, module_mp_wdm7.F: WDM6 with hail) is not supported by "
                                "CPPWRF.")
@@ -1908,23 +1910,24 @@ class WrfTranslator:
                     self.error(f"WRF mp_physics = {mp_physics} (P3) with nests is not supported by CPPWRF.")
             # WSM5's refl10cm_wsm5 computes in DOUBLE PRECISION (REAL*16 in a plain -r8 build): not ported; WSM3 has no
             # reflectivity (WRF leaves REFL_10CM 0)
-            # WDM6: refl10cm_wdm6 computes in DOUBLE PRECISION (REAL*16 in a plain -r8 build): not ported; the CCN
-            # number NN starts from ccn_conc (start_em, wdm6 at itimestep 1) and flows in at the boundaries
-            # (flow_dep_bdy_qnn); its land mask XLAND comes with the column physics
+            # WDM5 / WDM6: refl10cm_wdm5 / _wdm6 compute in DOUBLE PRECISION (REAL*16 in a plain -r8 build): not
+            # ported; the CCN number NN starts from ccn_conc (start_em, wdm5 / wdm6 at itimestep 1) and flows in at the
+            # boundaries (flow_dep_bdy_qnn); WDM6's land mask XLAND comes with the column physics
             ccn = self.get_opt("physics", "ccn_conc", 1.0e8)
-            if mp_physics == 16:
+            if mp_physics in (14, 16):
+                wdm = f"mp_physics = {mp_physics} (WDM{5 if mp_physics == 14 else 6}"
                 if self.get_opt("physics", "do_radar_ref", 0) == 1:
-                    self.error("WRF do_radar_ref = 1 with mp_physics = 16 (WDM6's refl10cm_wdm6) is not supported "
-                               "by CPPWRF.")
+                    self.error(f"WRF do_radar_ref = 1 with {wdm}'s refl10cm_wdm{5 if mp_physics == 14 else 6}) is "
+                               f"not supported by CPPWRF.")
                 if self._max_dom > 1:
-                    self.error("WRF mp_physics = 16 (WDM6) with nests is not supported by CPPWRF.")
-                if not has_physics_suite:
+                    self.error(f"WRF {wdm}) with nests is not supported by CPPWRF.")
+                if mp_physics == 16 and not has_physics_suite:
                     self.error("WRF mp_physics = 16 (WDM6) needs the column physics (surface layer, land surface, "
                                "PBL or cumulus) in CPPWRF.")
                 if ccn != 1.0e8:
                     sections["phys"]["ccn_conc"] = ccn
             elif ccn != 1.0e8:
-                self.notice(f"Option &physics.ccn_conc = {ccn}: no effect without WDM (mp_physics 16).")
+                self.notice(f"Option &physics.ccn_conc = {ccn}: no effect without WDM (mp_physics 14 / 16).")
             if mp_physics in (3, 4) and self.get_opt("physics", "do_radar_ref", 0) == 1:
                 self.error(f"WRF do_radar_ref = 1 with mp_physics = {mp_physics} (WSM{5 if mp_physics == 4 else 3}) "
                            f"is not supported by CPPWRF.")

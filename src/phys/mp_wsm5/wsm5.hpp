@@ -112,9 +112,10 @@ inline Wsm5Params<Real> wsm5_params() {
 
 // nislfv_rain_plm for one column (WRF's i_loop body; km levels): semi-Lagrangian sedimentation of rql = den*q with the
 // fall speed ww; id 1: rain (slope_rain), 2: snow (slope_snow), 3: WSM3's rain or snow (slope_wsm3) in the iter
-// fall-speed iterations; precip: the amount that leaves the column bottom
-template <typename Real, int NL>
-CPPWRF_HD inline void wsm5_nislfv(const Wsm5Params<Real>& c, int km, const Real* den, const Real* denfac,
+// fall-speed iterations; precip: the amount that leaves the column bottom. P: Wsm5Params (or WDM5's parameters, whose
+// snow and ice constants are WSM5's)
+template <typename Real, int NL, class P>
+CPPWRF_HD inline void wsm5_nislfv(const P& c, int km, const Real* den, const Real* denfac,
                                   const Real* tk, const Real* dz, const Real* wwl, Real* rql, Real& precip, Real dt,
                                   int id, int iter) {
   precip = Real(0.0);

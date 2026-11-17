@@ -1,5 +1,6 @@
 ! SPDX-License-Identifier: GPL-3.0-or-later
-! The WRF side of the WDM column test: wdm6init + wdm6 of the -r8 build's module_mp_wdm6.o on an ni x nj slab
+! The WRF side of the WDM column test: wdm6init + wdm6 (scheme 6) or wdm5init + wdm5 (scheme 5) of the -r8 build's
+! module_mp_wdm6.o / module_mp_wdm5.o on an ni x nj slab
 ! (its..ite = 1..ni: the lanes of the vectorised i loop), nsteps calls in a row (itimestep it0, it0 + 1, ...: 1 sets
 ! NN = ccn0 first), with the microphysics_driver's arguments (module_model_constants), the namelist's ccn_conc and
 ! hail_opt, and the effective radii (has_reqc = has_reqi = has_reqs = 1, as with RRTMG). Output: the init's module
@@ -11,6 +12,13 @@ program driver_wdm
       precg2, pidn0g, n0g, avtg, bvtg, deng, lamdagmax, rslopecmax, rslopec2max, rslopec3max, rslopermax, rslopesmax, &
       rslopegmax, rsloperbmax, rslopesbmax, rslopegbmax, rsloper2max, rslopes2max, rslopeg2max, rsloper3max, &
       rslopes3max, rslopeg3max
+  use module_mp_wdm5, only: wdm5, wdm5init, w5_pidnc => pidnc, w5_pi => pi, w5_pvtr => pvtr, w5_pvtrn => pvtrn, &
+      w5_pidnr => pidnr, w5_precr1 => precr1, w5_precr2 => precr2, w5_roqimax => roqimax, w5_pvts => pvts, &
+      w5_precs1 => precs1, w5_precs2 => precs2, w5_pidn0s => pidn0s, w5_xlv1 => xlv1, w5_pacrc => pacrc, &
+      w5_rslopecmax => rslopecmax, w5_rslopec2max => rslopec2max, w5_rslopec3max => rslopec3max, &
+      w5_rslopermax => rslopermax, w5_rslopesmax => rslopesmax, w5_rsloperbmax => rsloperbmax, &
+      w5_rslopesbmax => rslopesbmax, w5_rsloper2max => rsloper2max, w5_rslopes2max => rslopes2max, &
+      w5_rsloper3max => rsloper3max, w5_rslopes3max => rslopes3max
   use module_model_constants, only: g, cp, cpv, r_d, r_v, svpt0, ep_1, ep_2, epsilon, xls, xlv, xlf, rhoair0, &
       rhowater, rhosnow, cliq, cice, psat
   implicit none
@@ -45,6 +53,12 @@ program driver_wdm
            n0g, avtg, bvtg, deng, lamdagmax, rslopecmax, rslopec2max, rslopec3max, rslopermax, rslopesmax, &
            rslopegmax, rsloperbmax, rslopesbmax, rslopegbmax, rsloper2max, rslopes2max, rslopeg2max, rsloper3max, &
            rslopes3max, rslopeg3max /)
+  else if (scheme == 5) then  ! the wdm5init variables wdm52D reads
+    call wdm5init(rhoair0, rhowater, rhosnow, cliq, cpv, ccn, .true.)
+    c(1:25) = (/ w5_pidnc, w5_pi, w5_pvtr, w5_pvtrn, w5_pidnr, w5_precr1, w5_precr2, w5_roqimax, w5_pvts, &
+                 w5_precs1, w5_precs2, w5_pidn0s, w5_xlv1, w5_pacrc, w5_rslopecmax, w5_rslopec2max, w5_rslopec3max, &
+                 w5_rslopermax, w5_rslopesmax, w5_rsloperbmax, w5_rslopesbmax, w5_rsloper2max, w5_rslopes2max, &
+                 w5_rsloper3max, w5_rslopes3max /)
   end if
   open(20, file=trim(outfile), status='replace', access='stream', form='unformatted')
   write(20) c
@@ -57,6 +71,15 @@ program driver_wdm
                 REFL_10CM=refl, diagflag=.false., do_radar_ref=0, GRAUPEL=graupel, GRAUPELNCV=graupelncv, &
                 ITIMESTEP=it0 + s - 1, has_reqc=1, has_reqi=1, has_reqs=1, re_cloud=re_c, re_ice=re_i, &
                 re_snow=re_s, &
+                IDS=1, IDE=ni+1, JDS=1, JDE=nj+1, KDS=1, KDE=nz+1, IMS=1, IME=ni, JMS=1, JME=nj, KMS=1, KME=nz, &
+                ITS=1, ITE=ni, JTS=1, JTE=nj, KTS=1, KTE=nz)
+    else if (scheme == 5) then
+      call wdm5(TH=th, Q=q, QC=qc, QR=qr, QI=qi, QS=qs, NN=nn, NC=nc, NR=nr, DEN=den, PII=pii, P=p, DELZ=delz, &
+                DELT=dt, G=g, CPD=cp, CPV=cpv, CCN0=ccn, RD=r_d, RV=r_v, T0C=svpt0, EP1=ep_1, EP2=ep_2, &
+                QMIN=epsilon, XLS=xls, XLV0=xlv, XLF0=xlf, DEN0=rhoair0, DENR=rhowater, CLIQ=cliq, CICE=cice, &
+                PSAT=psat, RAIN=rain, RAINNCV=rainncv, SNOW=snow, SNOWNCV=snowncv, SR=sr, REFL_10CM=refl, &
+                diagflag=.false., do_radar_ref=0, has_reqc=1, has_reqi=1, has_reqs=1, re_cloud=re_c, re_ice=re_i, &
+                re_snow=re_s, ITIMESTEP=it0 + s - 1, &
                 IDS=1, IDE=ni+1, JDS=1, JDE=nj+1, KDS=1, KDE=nz+1, IMS=1, IME=ni, JMS=1, JME=nj, KMS=1, KME=nz, &
                 ITS=1, ITE=ni, JTS=1, JTE=nj, KTS=1, KTE=nz)
     end if

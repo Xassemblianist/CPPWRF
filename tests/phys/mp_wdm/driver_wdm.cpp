@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The C++ side of the WDM column test: wdm6_params (wdm6init) and Wdm6Kernel + WdmEffRadKernel on the slab of
+// The C++ side of the WDM column test: wdm6_params (wdm6init) and Wdm6Kernel (scheme 6) or Wdm5Kernel (5) +
+// WdmEffRadKernel on the slab of
 // generate_inputs.py with the lanes i0 = 0, ni as src/dyn/physics_coupling.cpp passes them (itimestep 1: NN = ccn0
 // first, as PhysicsCoupling::step); the output layout of driver_wdm.f90.
 #include <cstdint>
@@ -8,6 +9,7 @@
 
 #include "core/backend.hpp"
 #include "core/field.hpp"
+#include "phys/mp_wdm5/wdm5.hpp"
 #include "phys/mp_wdm6/wdm6.hpp"
 
 using namespace cppwrf;
@@ -39,7 +41,8 @@ int main(int argc, char** argv) {
   auto CV2 = [&](std::vector<double>& a) { return View2<const double>{a.data(), ni}; };
   FILE* o = std::fopen(argv[2], "wb");
   double cv[63] = {};
-  const wdm6::Wdm6Params<double> c6 = wdm6::wdm6_params<double>(hail, ccn);
+  const wdm6::Wdm6Params<double> c6 =
+      scheme == 5 ? wdm5::wdm5_params<double>(ccn) : wdm6::wdm6_params<double>(hail, ccn);
   if (scheme == 6) {
     const auto& c = c6;
     const double v[63] = {c.qc0, c.qc1, c.qck1, c.pidnc, c.g1pbr, c.g2pbr, c.g3pbr, c.g4pbr, c.g5pbr, c.g6pbr,
@@ -51,6 +54,13 @@ int main(int argc, char** argv) {
                           c.rslopegmax, c.rsloperbmax, c.rslopesbmax, c.rslopegbmax, c.rsloper2max, c.rslopes2max,
                           c.rslopeg2max, c.rsloper3max, c.rslopes3max, c.rslopeg3max};
     for (int n = 0; n < 63; ++n) cv[n] = v[n];
+  } else if (scheme == 5) {  // the wdm5init variables wdm52D reads (wdm5_params: wdm6init's)
+    const auto& c = c6;
+    const double v[25] = {c.pidnc, c.pi, c.pvtr, c.pvtrn, c.pidnr, c.precr1, c.precr2, c.roqimax, c.pvts,
+                          c.precs1, c.precs2, c.pidn0s, c.xlv1, c.pacrc, c.rslopecmax, c.rslopec2max,
+                          c.rslopec3max, c.rslopermax, c.rslopesmax, c.rsloperbmax, c.rslopesbmax, c.rsloper2max,
+                          c.rslopes2max, c.rsloper3max, c.rslopes3max};
+    for (int n = 0; n < 25; ++n) cv[n] = v[n];
   }
   std::fwrite(cv, 8, 63, o);
   const Range2D r{0, ni, 0, nj};
@@ -58,16 +68,20 @@ int main(int argc, char** argv) {
   for (int s = 0; s < nsteps; ++s) {
     if (it0 + s == 1)  // wdm6: itimestep == 1 sets NN = ccn0 on the whole memory range first
       for (auto& x : nn) x = ccn;
-    if (scheme == 6) {
+    if (scheme == 5)
+      column_for(r, wdm5::Wdm5Kernel<double, 128>{c6, dt, nz, V(th), V(q), V(qc), V(qr), V(qi), V(qs), V(nn), V(nc),
+                                                  V(nr), CV(den), CV(pii), CV(p), CV(delz), V2(rain), V2(rainncv),
+                                                  V2(snow), V2(snowncv), V2(sr), 0, ni});
+    if (scheme == 6)
       column_for(r, wdm6::Wdm6Kernel<double, 128>{c6, dt, nz, V(th), V(q), V(qc), V(qr), V(qi), V(qs), V(qg), V(nn),
                                                   V(nc), V(nr), CV(den), CV(pii), CV(p), CV(delz), CV2(xland),
                                                   V2(rain), V2(rainncv), V2(snow), V2(snowncv), V2(graupel),
                                                   V2(graupelncv), V2(sr), 0, ni});
+    if (scheme == 5 || scheme == 6)
       parallel_for(Range3D{0, ni, 0, nj, 0, nz},
                    wdm6::WdmEffRadKernel<double>{c6.pidnc, c6.pidn0s, c6.alpha, c6.n0s, c6.n0smax, c6.t0c, c6.qmin,
                                                  cdm2, 2.49E-6, 4.99E-6, 9.99E-6, CV(th), CV(pii), CV(qc), CV(nc),
                                                  CV(qi), CV(qs), CV(den), V(rec), V(rei), V(res)});
-    }
     for (auto* v : {&th, &q, &qc, &qr, &qi, &qs, &qg, &qh, &nn, &nc, &nr, &rec, &rei, &res}) std::fwrite(v->data(), 8, m, o);
     for (auto* v : {&rain, &rainncv, &snow, &snowncv, &graupel, &graupelncv, &hail2, &hailncv, &sr})
       std::fwrite(v->data(), 8, m2, o);

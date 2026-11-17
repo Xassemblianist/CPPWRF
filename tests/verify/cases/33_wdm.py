@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""WDM6 microphysics
-(mp_physics = 16, phys/module_mp_wdm6.F): D6 = P4 (Kain-Fritsch, RRTMG with WDM6's effective radii, YSU, Noah) with
-WDM6 instead of WSM6; D6H the same with hail_opt = 1; D6C with ccn_conc = 3e8 (10 min). Each against its WRF v4.8.0
+"""WDM6 and WDM5 microphysics
+(mp_physics = 16, phys/module_mp_wdm6.F; 14, module_mp_wdm5.F): D6 = P4 (Kain-Fritsch, RRTMG with WDM6's effective
+radii, YSU, Noah) with WDM6 instead of WSM6; D6H the same with hail_opt = 1; D6C with ccn_conc = 3e8 (10 min); D5 =
+P4 with WDM5 (no graupel: QGRAUP and GRAUPELNC stay 0, as in WRF). Each against its WRF v4.8.0
 real*8 run (wrfref workflow of Xassemblianist/cppwrf-data, tag c03-wdm: the inputs of run_P4_r8, which have no QNCCN /
 QNCLOUD / QNRAIN, so NN starts from ccn_conc and NC, NR from 0 as in WRF; wrfrst of D6 at 30 min).
 
@@ -15,7 +16,7 @@ _T6 = {"U": 0.0, "V": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0
 _1H = ["run.run_time=3600", "output.out_interval=10", "output.diag_interval=10"]
 
 CASES = []
-for _n, _rst in (("d6", True), ("d6h", False)):
+for _n, _rst in (("d6", True), ("d6h", False), ("d5", False)):
     _cfg, _run = f"configs/real_p4{_n}_r8.ini", f"{WR}/run_{_n.upper()}_r8"
     CASES += [
         # 3 steps (history every step), 1 h (D6: also restarted at 30 min, its wrfrst identical to WRF's)
@@ -45,6 +46,7 @@ STATUS = [
     ('D6', 'P4 with WDM6 (mp_physics 16) instead of WSM6; restarted at 30 min', '1 h'),
     ('D6H', 'D6 with hail_opt 1', '1 h'),
     ('D6C', 'D6 with ccn_conc 3e8', '10 min'),
+    ('D5', 'P4 with WDM5 (mp_physics 14) instead of WSM6', '1 h'),
 ]
 
 DATA = {c[0]: 'suite_data.tar,port_c03_data.tar' for c in CASES}

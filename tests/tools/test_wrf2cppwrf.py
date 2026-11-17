@@ -852,7 +852,8 @@ class TestValidationAndWarnings(unittest.TestCase):
     def test_wdm6(self):
         # mp_physics = 16 (module_mp_wdm6.F): moist qv qc qr qi qs qg, scalars qnn qnc qnr (Registry package
         # wdm6scheme); hail_opt and ccn_conc pass through; not ported: do_radar_ref = 1, nests, ideal cases, no column
-        # physics; WDM5 (14) and WDM7 (26) are named errors
+        # physics. mp_physics = 14 (WDM5, wdm5scheme): qv qc qr qi qs qnn qnc qnr, also without the column physics.
+        # WDM7 (26) is a named error
         def tr(extra="", mp=16, phys=", sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1",
                doms="", case=real_case):
             t = WrfTranslator(parse_namelist(case(f"""
@@ -872,9 +873,15 @@ class TestValidationAndWarnings(unittest.TestCase):
         t, g = tr()
         self.assertEqual(t.errors, [])
         self.assertNotIn("ccn_conc", g["phys"])
+        for phys in ("", ", sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1"):
+            t, g = tr(", ccn_conc = 2.e8", mp=14, phys=phys)
+            self.assertEqual(t.errors, [])
+            self.assertEqual(g["moist"]["species"], "qv,qc,qr,qi,qs,qnn,qnc,qnr")
+            self.assertEqual((g["phys"]["mp_physics"], g["phys"]["ccn_conc"]), (14, 2.e8))
         for kw, msg in (({"extra": ", do_radar_ref = 1"}, "do_radar_ref = 1 with mp_physics = 16"),
+                        ({"extra": ", do_radar_ref = 1", "mp": 14}, "do_radar_ref = 1 with mp_physics = 14"),
                         ({"phys": ""}, "mp_physics = 16 (WDM6) needs the column physics"),
-                        ({"mp": 14}, "mp_physics = 14 (WDM5"), ({"mp": 26}, "mp_physics = 26 (WDM7")):
+                        ({"mp": 26}, "mp_physics = 26 (WDM7")):
             t, _ = tr(**kw)
             self.assertIn(msg, " ".join(t.errors), kw)
         t = WrfTranslator(parse_namelist(complete("&time_control /\n&domains time_step = 6 /\n"

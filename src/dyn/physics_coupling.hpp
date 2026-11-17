@@ -15,6 +15,7 @@
 #include "phys/mp_p3/p3.hpp"
 #include "phys/mp_radar/radar.hpp"
 #include "phys/mp_thompson/thompson_tables.hpp"
+#include "phys/mp_wdm5/wdm5.hpp"
 #include "phys/mp_wdm6/wdm6.hpp"
 #include "phys/mp_wsm5/wsm5.hpp"
 #include "phys/mp_wsm6/wsm6.hpp"
@@ -46,7 +47,7 @@ class PhysicsCoupling {
   void init_aerosols(State& s, const BaseState& b);
   const PhysicsParams& params() const { return p_; }
   bool thompson() const { return p_.mp_physics == 8 || p_.mp_physics == 28; }
-  bool wdm() const { return p_.mp_physics == 16; }
+  bool wdm() const { return p_.mp_physics == 14 || p_.mp_physics == 16; }  // WDM5, WDM6
   bool p3() const { return p_.mp_physics == 50 || p_.mp_physics == 51; }
   // the schemes with snow and graupel accumulations (SNOWNC, GRAUPELNC) and SR: WSM3, WSM5, WSM6, Thompson, Morrison,
   // P3 (WSM3, WSM5, P3: no graupel, GRAUPELNC stays 0 as in WRF)
@@ -85,7 +86,7 @@ class PhysicsCoupling {
   Field3 th_phy, rho, pii, z, dz8w, qv_diabatic, qc_diabatic, p_phy;
   phys::wsm6::Wsm6Params<real> wp_{};  // WSM6 constants (wsm6init), computed once
   phys::wsm5::Wsm5Params<real> w5_{};  // WSM5 / WSM3 constants (wsm5init = wsm3init), computed once
-  phys::wdm6::Wdm6Params<real> wd6_{};  // WDM6 constants (wdm6init), computed once
+  phys::wdm6::Wdm6Params<real> wd6_{};  // WDM6 / WDM5 constants (wdm6init / wdm5init), computed once
 #if defined(CPPWRF_DOUBLE)
   Buffer wsm6_work_;  // FP64 builds: the values WSM6's column stages carry between them (Wsm6Work)
 #endif
