@@ -45,7 +45,7 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 | Microphysics | Kessler, WSM3, WSM5, WSM6, WDM5, WDM6, Thompson, aerosol-aware Thompson (mp 28), Morrison two-moment, P3 (one ice category), NSSL 2-moment with hail (mp 18 / 17); radar reflectivity |
 | Cumulus | Kain-Fritsch, multi-scale Kain-Fritsch, Betts-Miller-Janjic, Grell-Freitas-Li, Grell-3D ensemble, Tiedtke, New Tiedtke |
 | PBL and surface layer | YSU, MYJ, ACM2, MYNN-EDMF with most of its options, BouLac, QNSE with the EDKF mass flux; revised MM5, Eta, Pleim-Xiu, MYNN and QNSE surface layers; gravity wave drag |
-| Land surface | 5-layer slab, Noah, Noah-MP (default options), RUC; single-layer urban canopy model; fractional sea ice, SST update |
+| Land surface | 5-layer slab, Noah, Noah-MP (its options without extra input fields), RUC; single-layer urban canopy model; fractional sea ice, SST update |
 | Radiation | RRTMG LW and SW, RRTM LW, Dudhia SW, cumulus clouds in radiation, McICA |
 | Nesting and nudging | static one-way and two-way nests with feedback and smoothing; grid (analysis) nudging |
 | Pre-processing | `cppwrf_real` (real.exe from WPS met_em files) and WRF's ideal.exe cases |

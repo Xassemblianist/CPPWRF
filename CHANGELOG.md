@@ -42,6 +42,13 @@ resumes across versions from WRF's wrfrst files.
   WRF's tile i-range. Tier: verified (suite cases 48_nssl: N18, N17, N18V against WRF real*8 of the -r8
   -fdefault-double-8 build, CPU FP64 at tolerance 0; the CUDA cases await the G4 run). 19, 21, 22, non-default nssl_* options, nests, the ideal
   cases and a decomposition in x stay errors.
+- Noah-MP option values of WRF 4.8.0 (v5.1.2) beyond the defaults: dveg 1-9 (dveg 2 / 5 / 6 with the dynamic
+  vegetation carbon of BiochemNatureVegMain / CarbonFluxNatureVeg), opt_crs 2, opt_btr 2 / 3, opt_runsrf / opt_runsub
+  1, 2, 4, 6 (VIC), 7 (Xinanjiang), opt_sfc 2, opt_frz 2, opt_inf 2, opt_rad 1 / 2, opt_alb 1, opt_snf 2-5, opt_tbot
+  1, opt_stc 2 / 3, opt_gla 2, opt_rsf 2-4, opt_tksno 2-5, opt_compact 1, opt_scf 2, opt_wetland 1 (Zhang 2022, FSAT /
+  WSURF restart state), soiltstep; suite cases tests/verify/cases/57_noahmp_opts.py (NMP1, NMP4 = NMP1 with P4's
+  physics over 6 h, V3 Alps snow and glacier). opt_runsrf / opt_runsub 5 and 8, opt_infdv, opt_alb 3, opt_soil 2-4,
+  opt_crop, opt_irr, opt_tdrn, opt_wetland 2 and dveg 10 stay errors (the model accepted only the defaults before).
 - Grell-3D ensemble cumulus (cu_physics = 5, WRF's module_cu_g3.F): G3DRV with the 3 x 3 neighbours' vertical
   motion and advective forcing (ens4 = 9), CUP_enss_3d with its closure ensemble (maxens 3, maxens2 3, maxens3 16),
   the shallow convection (ishallow = 1), clos_choice, cugd_avedx 1 / 3 (`[phys] cugd_avedx`), APR_* /

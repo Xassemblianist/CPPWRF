@@ -156,17 +156,17 @@ Options a nest may set differently from its parent: `bldt`, `bmj_rad_feedback`, 
 
 | Option | Values CPPWRF runs |
 |---|---|
-| `dveg` | 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 |
+| `dveg` | 1, 2, 3, 4, 5, 6, 7, 8, 9 |
 | `opt_crs` | 1, 2 |
 | `opt_btr` | 1, 2, 3 |
-| `opt_runsrf` | 1, 2, 3, 4 |
-| `opt_runsub` | 1, 2, 3, 4 |
+| `opt_runsrf` | 1, 2, 3, 4, 6, 7 |
+| `opt_runsub` | 1, 2, 3, 4, 6, 7 |
 | `opt_sfc` | 1, 2 |
 | `opt_frz` | 1, 2 |
 | `opt_inf` | 1, 2 |
 | `opt_rad` | 1, 2, 3 |
 | `opt_alb` | 1, 2 |
-| `opt_snf` | 1, 2, 3, 4 |
+| `opt_snf` | 1, 2, 3, 4, 5 |
 | `opt_tbot` | 1, 2 |
 | `opt_stc` | 1, 2, 3 |
 | `opt_gla` | 1, 2 |
@@ -180,8 +180,8 @@ Options a nest may set differently from its parent: `bldt`, `bmj_rad_feedback`, 
 | `opt_tdrn` | 0 |
 | `opt_tksno` | 1, 2, 3, 4, 5 |
 | `opt_compact` | 1, 2 |
-| `opt_scf` | 1, 2, 3, 4, 5 |
-| `opt_wetland` | 0, 1, 2 |
+| `opt_scf` | 1, 2 |
+| `opt_wetland` | 0, 1 |
 
 ### Options that must keep WRF's default
 
