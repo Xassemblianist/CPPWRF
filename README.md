@@ -41,7 +41,7 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 |---|---|
 | Dynamics | RK3 split-explicit, adaptive time step, hybrid coordinate, map projections (Lambert, Mercator, polar), terrain; specified, open, periodic and symmetric boundaries; damping, 5th/6th-order advection, positive-definite moisture |
 | Diffusion | diff_opt 1 and 2; km_opt 1-4 (constant K, Smagorinsky, 1.5-order TKE); 6th-order diffusion |
-| Microphysics | Kessler, WSM3, WSM5, WSM6, WDM5, WDM6, Thompson, aerosol-aware Thompson (mp 28), Morrison two-moment, P3 (one ice category); radar reflectivity |
+| Microphysics | Kessler, WSM3, WSM5, WSM6, WDM5, WDM6, Thompson, aerosol-aware Thompson (mp 28), Morrison two-moment, P3 (one ice category), NSSL 2-moment with hail (mp 18 / 17); radar reflectivity |
 | Cumulus | Kain-Fritsch, multi-scale Kain-Fritsch, Betts-Miller-Janjic, Grell-Freitas-Li, Grell-3D ensemble, Tiedtke, New Tiedtke |
 | PBL and surface layer | YSU, MYJ, ACM2, MYNN-EDMF with most of its options, BouLac, QNSE with the EDKF mass flux; revised MM5, Eta, Pleim-Xiu, MYNN and QNSE surface layers; gravity wave drag |
 | Land surface | 5-layer slab, Noah, Noah-MP (default options), RUC; single-layer urban canopy model; fractional sea ice, SST update |

@@ -412,6 +412,8 @@ SUPPORTED_OPTIONS = {
         14: "WDM5 5-class double-moment warm rain (ccn_conc)",
         16: "WDM6 6-class double-moment warm rain (hail_opt 0 / 1, ccn_conc)",
         28: "Thompson aerosol-aware (aer_init_opt = 0, wif_input_opt 0 / 1)",
+        17: "NSSL 2-moment with hail (as mp_physics = 18 with its defaults)",
+        18: "NSSL 2-moment with hail, CCN and graupel / hail volume (WRF's defaults of the nssl_* options)",
         50: "P3, one ice category, constant droplet number",
         51: "P3, one ice category, predicted droplet number",
     },
@@ -717,7 +719,7 @@ NO_EFFECT_OPTIONS = {
         "snicar_aerosol_readtable", "snicar_bandnumber_opt", "snicar_dustoptics_opt", "snicar_rtsolver_opt",
         "snicar_snowbc_intmix", "snicar_snowdust_intmix", "snicar_snowoptics_opt", "snicar_snowshape_opt",
         "snicar_solarspec_opt", "snicar_use_aerosol", "snicar_use_oc")},
-    # check_a_mundo turns the NSSL options off without NSSL microphysics (mp_physics 18 is rejected)
+    # check_a_mundo turns the NSSL options off without NSSL microphysics (mp_physics 17 / 18 read them: nssl_options)
     **{k: "NSSL microphysics only (check_a_mundo resets it)" for k in (
         "nssl_2moment_on", "nssl_hail_on", "nssl_density_on", "nssl_3moment", "nssl_ccn_on")},
     "tc": "tc.exe (bogus vortex) only",
@@ -808,6 +810,38 @@ class WrfTranslator:
 
     def error(self, msg: str):
         self.errors.append(msg)
+
+    def nssl_options(self, mp_physics: int):
+        """NSSL microphysics (mp_physics 17 / 18): check_a_mundo's settings must be mp_physics 18's defaults
+        (2-moment, hail, CCN, graupel and hail volume); every nssl_2mom_init parameter its Registry default."""
+        if self._max_dom > 1:
+            self.error(f"WRF mp_physics = {mp_physics} (NSSL) with nests is not supported by CPPWRF.")
+        if "nssl_mp_params" in self.nml:
+            self.error("WRF namelist group &nssl_mp_params (nssl_2mom_init's module settings) is not supported by "
+                       "CPPWRF.")
+        # check_a_mundo: mp_physics 17 sets 2-moment, hail, CCN and density 2 whatever the namelist says
+        flags = {"nssl_2moment_on": (-1, 1), "nssl_hail_on": (-1, 1), "nssl_ccn_on": (-1, 1),
+                 "nssl_density_on": (-1, 2), "nssl_3moment": (0,)}
+        for k, ok in flags.items():
+            v = self.get_opt("physics", k, ok[0])
+            if mp_physics == 17 and k != "nssl_3moment":
+                continue
+            if v not in ok:
+                self.error(f"WRF {k} = {v} with mp_physics = {mp_physics} is not supported by CPPWRF (supported: "
+                           f"{' or '.join(str(x) for x in ok)}, mp_physics 18's default).")
+        params = {"nssl_cccn": 0.5e9, "nssl_alphah": 0.0, "nssl_alphahl": 1.0, "nssl_cnoh": 4.e5, "nssl_cnohl": 4.e4,
+                  "nssl_cnor": 8.e5, "nssl_cnos": 3.e6, "nssl_rho_qh": 500.0, "nssl_rho_qhl": 900.0,
+                  "nssl_rho_qs": 100.0, "nssl_icdx": 6, "nssl_icdxhl": 6, "nssl_ssat_output": 0}
+        for k, d in params.items():
+            v = self.get_opt("physics", k, d)
+            if float(v) != float(d):
+                self.error(f"WRF {k} = {v} is not supported by CPPWRF (only the default {d} is ported).")
+        # nssl_2mom_init sets ccn_is_ccna = 1 for 0; 1 runs alike
+        v = self.get_opt("physics", "nssl_ccn_is_ccna", 0)
+        if v not in (0, 1):
+            self.error(f"WRF nssl_ccn_is_ccna = {v} is not supported by CPPWRF (0 or 1).")
+        for k in ("nssl_ipelec", "nssl_isaund"):  # electrification only (elec_physics is rejected)
+            self.get_opt("physics", k, None)
 
     def check_supported(self, option: str, value: Any):
         """Error when a WRF option value has no CPPWRF implementation (SUPPORTED_OPTIONS)."""
@@ -1824,6 +1858,9 @@ class WrfTranslator:
                 sections["moist"]["species"] = "qv,qc,qr,qi,qs,qg,qnn,qnc,qnr"
             elif mp_physics == 14:  # Registry package wdm5scheme: moist qv, qc, qr, qi, qs; scalar qnn, qnc, qnr
                 sections["moist"]["species"] = "qv,qc,qr,qi,qs,qnn,qnc,qnr"
+            elif mp_physics in (17, 18):  # Registry packages nssl_2mom, nssl2mconc, nssl_hail, nssl_ccn_opt,
+                # nssl_hailvol: moist qh, scalars qndrop, qnr, qni, qns, qng, qnh, qnn, qvolg, qvolh
+                sections["moist"]["species"] = "qv,qc,qr,qi,qs,qg,qh,qndrop,qnr,qni,qns,qng,qnh,qnn,qvolg,qvolh"
             elif mp_physics == 6:
                 sections["moist"]["species"] = "qv, qc, qr, qi, qs, qg" if not has_physics_suite else "qv,qc,qr,qi,qs,qg"
             elif mp_physics == 4:  # Registry package wsm5scheme: moist qv, qc, qr, qi, qs
@@ -1841,6 +1878,8 @@ class WrfTranslator:
                 self.error("WRF mp_physics = 10 (Morrison two-moment) is supported for real-data runs only.")
             if mp_physics in (50, 51):
                 self.error(f"WRF mp_physics = {mp_physics} (P3) is supported for real-data runs only.")
+            if mp_physics in (17, 18):
+                self.error(f"WRF mp_physics = {mp_physics} (NSSL) is supported for real-data runs only.")
             if mp_physics in (3, 4):
                 self.error(f"WRF mp_physics = {mp_physics} (WSM{5 if mp_physics == 4 else 3}) is supported for "
                            f"real-data runs only.")
@@ -1930,6 +1969,9 @@ class WrfTranslator:
                     self.error(f"WRF do_radar_ref = 1 with mp_physics = {mp_physics} (P3) is not supported by CPPWRF.")
                 if self._max_dom > 1:
                     self.error(f"WRF mp_physics = {mp_physics} (P3) with nests is not supported by CPPWRF.")
+            if mp_physics in (17, 18):
+                self.nssl_options(mp_physics)
+                sections["phys"]["mp_physics"] = 18  # check_a_mundo: mp_physics 17 becomes 18
             # WSM5's refl10cm_wsm5 computes in DOUBLE PRECISION (REAL*16 in a plain -r8 build): not ported; WSM3 has no
             # reflectivity (WRF leaves REFL_10CM 0)
             # WDM5 / WDM6: refl10cm_wdm5 / _wdm6 compute in DOUBLE PRECISION (REAL*16 in a plain -r8 build): not

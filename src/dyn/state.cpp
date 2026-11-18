@@ -24,8 +24,9 @@ Tendencies::Tendencies(const Grid& g)
       t_tendf(g, S::M, "t_tendf"), ph_tendf(g, S::W, "ph_tendf") {}
 
 int State::add_scalar(const Grid& g, const std::string& name, bool moist) {
-  if (name == "qni" || name == "qnr" || name == "qnc" || name == "qnn" || name == "qnwfa" || name == "qnifa" || name == "qnbca" ||
-      name == "qns" || name == "qng" || name == "qir" || name == "qib" || name == "tke" || name == "qke_adv")
+  if (name == "qni" || name == "qnr" || name == "qnc" || name == "qnwfa" || name == "qnifa" || name == "qnbca" ||
+      name == "qns" || name == "qng" || name == "qir" || name == "qib" || name == "tke" || name == "qke_adv" ||
+      name == "qndrop" || name == "qnh" || name == "qnn" || name == "qvolg" || name == "qvolh")
     moist = false;  // number concentrations [#/kg], TKE and 2*TKE are not 'moist'
   for (auto& n : q_names)
     if (n == name) throw std::runtime_error("duplicate scalar '" + name + "'");
@@ -46,6 +47,7 @@ int State::add_scalar(const Grid& g, const std::string& name, bool moist) {
     if (name == "qi") P_QI = idx;
     if (name == "qs") P_QS = idx;
     if (name == "qg") P_QG = idx;
+    if (name == "qh") P_QH = idx;
   }
   if (name == "qni") P_QNI = idx;
   if (name == "qnr") P_QNR = idx;
@@ -53,6 +55,10 @@ int State::add_scalar(const Grid& g, const std::string& name, bool moist) {
   if (name == "qng") P_QNG = idx;
   if (name == "qir") P_QIR = idx;
   if (name == "qib") P_QIB = idx;
+  if (name == "qndrop") P_QNDROP = idx;
+  if (name == "qnh") P_QNH = idx;
+  if (name == "qvolg") P_QVOLG = idx;
+  if (name == "qvolh") P_QVOLH = idx;
   if (name == "qnc") P_QNC = idx;
   if (name == "qnn") P_QNN = idx;
   if (name == "qnwfa") P_QNWFA = idx;

@@ -820,6 +820,49 @@ class TestValidationAndWarnings(unittest.TestCase):
         t.translate()
         self.assertIn("mp_physics = 50 (P3) is supported for real-data runs only", " ".join(t.errors))
 
+    def test_nssl(self):
+        # mp_physics = 18 with its defaults (2-moment, hail, CCN, graupel / hail volume) and 17 (check_a_mundo makes
+        # it 18): moist qh and the scalars of the packages nssl2mconc, nssl_hail, nssl_ccn_opt, nssl_hailvol; every
+        # other NSSL setting, &nssl_mp_params, nests and the ideal cases are errors; 19, 21 and 22 stay unsupported
+        def tr(extra="", mp=18, case=real_case, group=""):
+            t = WrfTranslator(parse_namelist(case(f"""
+            &time_control /
+            &domains time_step = 60 /
+            &physics mp_physics = {mp}, sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1,
+                     cu_physics = 1{extra} /
+            &dynamics /
+            {group}""")))
+            gen = t.translate()
+            return t, gen
+        sp = "qv,qc,qr,qi,qs,qg,qh,qndrop,qnr,qni,qns,qng,qnh,qnn,qvolg,qvolh"
+        for mp, extra in ((18, ""), (17, ""), (18, ", nssl_2moment_on = 1, nssl_hail_on = 1, nssl_ccn_on = 1, "
+                                                   "nssl_density_on = 2, nssl_cccn = 0.5e9, nssl_ccn_is_ccna = 1"),
+                          (17, ", nssl_hail_on = 0, nssl_density_on = 1"), (18, ", do_radar_ref = 1")):
+            t, g = tr(extra, mp)
+            self.assertEqual(t.errors, [], (mp, extra))
+            self.assertEqual(g["moist"]["species"], sp)
+            self.assertEqual(g["phys"]["mp_physics"], 18)
+        for args, msg in (((", nssl_hail_on = 0",), "nssl_hail_on = 0"), ((", nssl_density_on = 1",), "nssl_density_on"),
+                          ((", nssl_2moment_on = 0",), "nssl_2moment_on"), ((", nssl_ccn_on = 0",), "nssl_ccn_on"),
+                          ((", nssl_3moment = 1",), "nssl_3moment"), ((", nssl_3moment = 1", 17), "nssl_3moment"),
+                          ((", nssl_cccn = 1.e9",), "nssl_cccn"), ((", nssl_alphah = 1.",), "nssl_alphah"),
+                          ((", nssl_cnoh = 1.e5",), "nssl_cnoh"), ((", nssl_icdx = 3",), "nssl_icdx"),
+                          ((", nssl_ssat_output = 1",), "nssl_ssat_output"), (("", 19), "mp_physics"),
+                          (("", 21), "mp_physics"), (("", 22), "mp_physics"),
+                          (("", 18, real_case, "&nssl_mp_params irenuc = 2 /"), "nssl_mp_params")):
+            t, _ = tr(*args)
+            self.assertIn(msg, " ".join(t.errors), args)
+        doms = ("&domains time_step = 60, max_dom = 2, e_we = 100, 61, e_sn = 100, 61, e_vert = 45, 45,"
+                " parent_id = 0, 1, i_parent_start = 1, 30, j_parent_start = 1, 30,"
+                " parent_grid_ratio = 1, 3, parent_time_step_ratio = 1, 3 /\n")
+        t = WrfTranslator(parse_namelist(real_case(f"&time_control /\n{doms}&physics mp_physics = 18, 18 /\n")))
+        t.translate()
+        self.assertIn("mp_physics = 18 (NSSL) with nests is not supported", " ".join(t.errors))
+        t = WrfTranslator(parse_namelist(complete("&time_control /\n&domains time_step = 6 /\n"
+                                                   "&physics mp_physics = 18 /\n")), override_case="quarter_ss")
+        t.translate()
+        self.assertIn("mp_physics = 18 (NSSL) is supported for real-data runs only", " ".join(t.errors))
+
     def test_wsm3_wsm5(self):
         # mp_physics = 3 / 4 (module_mp_wsm3.F / module_mp_wsm5.F; verified: no tier warning): moist qv qc qr (WSM3) or qv qc qr qi qs (WSM5, Registry packages wsm3scheme / wsm5scheme);
         # not ported: do_radar_ref = 1, the ideal cases; WSM7 (24) and WSM6R (106) are named errors

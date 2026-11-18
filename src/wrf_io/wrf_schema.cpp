@@ -160,6 +160,23 @@ void derive_config(WrfConfig& c, int max_dom, bool real_exe) {
   if (c.integer("mp_physics") == 28 || c.integer("mp_physics") == 29) c.set("grav_settling", "0");
   // mfshconv only with the QNSE PBL (bl_pbl_physics = 4)
   if (c.integer("bl_pbl_physics") != 4) c.set("mfshconv", "0");
+  // check_a_mundo (module_check_a_mundo.F:3429-3518): mp_physics 17 becomes 18 with 2-moment, hail, CCN and graupel
+  // + hail volume; with 18 the unset (-1) NSSL options take their defaults (the packages nssl2mconc, nssl_hail,
+  // nssl_ccn_opt, nssl_hailvol)
+  for (int id = 1; id <= max_dom; ++id) {
+    const int mp = c.integer("mp_physics", id);
+    if (mp == 17) {
+      c.set("mp_physics", "18");  // max_dom 1 (NSSL with nests is rejected)
+      c.set("nssl_2moment_on", "1"); c.set("nssl_hail_on", "1"); c.set("nssl_ccn_on", "1");
+      c.set("nssl_density_on", "2");
+    }
+    if (mp == 17 || mp == 18) {
+      if (c.integer("nssl_ccn_on") < 0) c.set("nssl_ccn_on", "1");
+      if (c.integer("nssl_2moment_on") < 0) c.set("nssl_2moment_on", "1");
+      if (c.integer("nssl_hail_on") < 0) c.set("nssl_hail_on", c.integer("nssl_2moment_on") == 0 ? "2" : "1");
+      if (c.integer("nssl_density_on") < 0) c.set("nssl_density_on", c.integer("nssl_hail_on") == 1 ? "2" : "1");
+    }
+  }
   // check_a_mundo: a domain without NSSL microphysics (mp_physics 18, or 17, 19, 21, 22 which become 18) turns the
   // NSSL options off (the scalar packages QNDROP, QZRAIN, ... depend on them)
   for (int id = 1; id <= max_dom; ++id) {

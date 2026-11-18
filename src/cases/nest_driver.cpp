@@ -727,6 +727,8 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     const long mp = sp.cfg.get_int("phys.mp_physics", 0);
     if (mp == 50 || mp == 51)
       throw std::runtime_error(sp.tag + ": phys.mp_physics = " + std::to_string(mp) + " (P3) with nests is not ported");
+    if (mp == 18)  // NSSL: the scalars' nest interpolation and feedback with the hail species are not proven
+      throw std::runtime_error(sp.tag + ": phys.mp_physics = 18 (NSSL) with nests is not ported");
   }
 
   struct DomInstance {

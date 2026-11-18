@@ -146,8 +146,8 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
       dz8w(g, Stagger::M, "dz8w"), qv_diabatic(g, Stagger::M, "qv_diabatic"), qc_diabatic(g, Stagger::M, "qc_diabatic"),
       p_phy(g, Stagger::M, "p_phy") {
   if (p_.mp_physics != 0 && p_.mp_physics != 1 && p_.mp_physics != 3 && p_.mp_physics != 4 && p_.mp_physics != 6 &&
-      p_.mp_physics != 8 && p_.mp_physics != 10 && p_.mp_physics != 28 && !p3() && !wdm())
-    throw std::runtime_error("phys.mp_physics must be 0, 1, 3, 4, 6, 8, 10, 14, 16, 28, 50 or 51");
+      p_.mp_physics != 8 && p_.mp_physics != 10 && p_.mp_physics != 28 && !p3() && !wdm() && !nssl())
+    throw std::runtime_error("phys.mp_physics must be 0, 1, 3, 4, 6, 8, 10, 14, 16, 18, 28, 50 or 51");
   if (p_.mp_physics == 1) check_limit("Kessler", "nz", g.nz, phys::kessler::kMaxLevels);
   if (p_.do_radar_ref != 0 && p_.do_radar_ref != 1) throw std::runtime_error("phys.do_radar_ref must be 0 or 1");
   if (p_.microp_re || p3()) {  // phy_init: background values RE_QC_BG, RE_QI_BG, RE_QS_BG (has_reqc etc.)
@@ -253,6 +253,20 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
     phys::mp_p3::p3_reserve<real>(Range2D{sx, g.nx - sx, sy, g.ny - sy}, g.nz);
   }
+  if (nssl()) {  // NSSL 2-moment (mp_physics 18 with its defaults; module_mp_nssl_2mom.F)
+    snownc = Field2(g, Stagger::M, "snownc");
+    snowncv = Field2(g, Stagger::M, "snowncv");
+    graupelnc = Field2(g, Stagger::M, "graupelnc");
+    graupelncv = Field2(g, Stagger::M, "graupelncv");
+    hailnc = Field2(g, Stagger::M, "hailnc");
+    hailncv = Field2(g, Stagger::M, "hailncv");
+    sr = Field2(g, Stagger::M, "sr");
+    refl_10cm = Field3(g, Stagger::M, "refl_10cm");  // compute_radar_ref: always with mp_physics 18
+    nssl_zero_ = Field3(g, Stagger::M, "nssl_zero");
+    const int sx = g.bc_x == BC::Specified ? 1 : 0;
+    // phy_init: nssl_2mom_init (mp_init's call for mp_physics 18), once per domain
+    nssl_ = std::make_shared<const phys::mp_nssl::NsslScheme<real>>(phys::mp_nssl::NsslConfig{}, g.nx - 2 * sx, g.nz);
+  }
   if (p_.do_radar_ref == 1 && (p_.mp_physics == 6 || thompson())) refl_10cm = Field3(g, Stagger::M, "refl_10cm");
   if (thompson()) {
     check_limit("Thompson", "nz", g.nz, phys::mp_thompson::kMaxLevels);
@@ -294,6 +308,11 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
   if (p3() && (s.P_QI < 0 || s.P_QNI < 0 || s.P_QNR < 0 || s.P_QIR < 0 || s.P_QIB < 0 ||
                 (p_.mp_physics == 51 && s.P_QNC < 0)))
     throw std::runtime_error("mp_physics = 50 / 51 (P3) needs qv, qc, qr, qi, qni, qnr, qir, qib (51: and qnc)");
+  if (nssl() && (s.P_QI < 0 || s.P_QS < 0 || s.P_QG < 0 || s.P_QH < 0 || s.P_QNDROP < 0 || s.P_QNR < 0 ||
+                 s.P_QNI < 0 || s.P_QNS < 0 || s.P_QNG < 0 || s.P_QNH < 0 || s.P_QNN < 0 || s.P_QVOLG < 0 ||
+                 s.P_QVOLH < 0))
+    throw std::runtime_error("mp_physics = 18 (NSSL) needs qv, qc, qr, qi, qs, qg, qh, qndrop, qnr, qni, qns, qng, "
+                             "qnh, qnn, qvolg, qvolh");
   if (p_.mp_physics == 28 && (s.P_QNC < 0 || s.P_QNWFA < 0 || s.P_QNIFA < 0 || s.P_QNBCA < 0))
     throw std::runtime_error("mp_physics = 28 (Thompson aerosol aware) also needs qnc, qnwfa, qnifa, qnbca");
   if (p_.mp_physics == 14 && (s.P_QI < 0 || s.P_QS < 0 || s.P_QNN < 0 || s.P_QNC < 0 || s.P_QNR < 0))
@@ -511,6 +530,55 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
     vmdump::dump("vm_mp_out", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QNI],
                                   &s.q_2[s.P_QNR], &s.q_2[s.P_QIR], &s.q_2[s.P_QIB]},
                  {&rainnc, &rainncv, &snownc, &snowncv, &sr});
+  } else if (nssl()) {
+    ++itimestep;  // solve_em: grid%itimestep (nssl_2mom_driver's itimestep; 1 at the first step of a cold start)
+    // one row of WRF's tile per call of the row kernel: the i-range is the tile's (the whole domain without the
+    // spec zone); a decomposition in x would change the gather batches (not ported)
+    if (mp_own.i0 != mp_cols.i0 || mp_own.i1 != mp_cols.i1)
+      throw std::runtime_error("mp_physics = 18 (NSSL) with a domain decomposition in x is not ported");
+    vmdump::dump("vm_mp_in", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS],
+                                 &s.q_2[s.P_QG], &s.q_2[s.P_QH], &s.q_2[s.P_QNDROP], &s.q_2[s.P_QNR],
+                                 &s.q_2[s.P_QNI], &s.q_2[s.P_QNS], &s.q_2[s.P_QNG], &s.q_2[s.P_QNH],
+                                 &s.q_2[s.P_QNN], &s.q_2[s.P_QVOLG], &s.q_2[s.P_QVOLH], &pii, &p_phy, &s.w_2,
+                                 &dz8w, &rho},
+                 {&rainnc, &rainncv, &snownc, &snowncv, &hailnc, &hailncv, &graupelnc, &graupelncv, &sr});
+    phys::mp_nssl::NsslRowArgs<real> A{};
+    A.its = mp_cols.i0;
+    A.ite = mp_cols.i1 - 1;
+    A.nz = g.nz;
+    A.itimestep = int(itimestep);
+    A.diagflag = diagflag;
+    A.ke_diag = diagflag ? g.nz : 1;  // solve_em: kms, or min(k_end, kde-1) at a history step
+    A.dtp = dt;
+    A.flag_ccn = true;  // F_QNN (nssl_ccn_on = 1)
+    A.cu_used = p_.cu_used;
+    A.has_reqc = A.has_reqi = A.has_reqs = p_.microp_re ? 1 : 0;
+    A.nssl_ssat_output = 0;
+    A.do_dbz = true;
+    A.th = th_phy.view(); A.qv = qv.view(); A.qc = s.q_2[s.P_QC].view(); A.qr = s.q_2[s.P_QR].view();
+    A.qi = s.q_2[s.P_QI].view(); A.qs = s.q_2[s.P_QS].view(); A.qh = s.q_2[s.P_QG].view();
+    A.qhl = s.q_2[s.P_QH].view();
+    A.ccw = s.q_2[s.P_QNDROP].view(); A.crw = s.q_2[s.P_QNR].view(); A.cci = s.q_2[s.P_QNI].view();
+    A.csw = s.q_2[s.P_QNS].view(); A.chw = s.q_2[s.P_QNG].view(); A.chl = s.q_2[s.P_QNH].view();
+    A.vhw = s.q_2[s.P_QVOLG].view(); A.vhl = s.q_2[s.P_QVOLH].view(); A.cn = s.q_2[s.P_QNN].view();
+    A.pii = pii.cview(); A.p = p_phy.cview(); A.w = s.w_2.cview(); A.dz = dz8w.cview(); A.dn = rho.cview();
+    A.qrcuten = cu_qr_ ? cu_qr_->cview() : nssl_zero_.cview();
+    A.qscuten = cu_qs_ ? cu_qs_->cview() : nssl_zero_.cview();
+    A.qicuten = cu_qi_ ? cu_qi_->cview() : nssl_zero_.cview();
+    A.qccuten = cu_qc_ ? cu_qc_->cview() : nssl_zero_.cview();
+    A.rainnc = rainnc.view(); A.rainncv = rainncv.view(); A.snownc = snownc.view(); A.snowncv = snowncv.view();
+    A.hailnc = hailnc.view(); A.hailncv = hailncv.view(); A.grplnc = graupelnc.view();
+    A.grplncv = graupelncv.view(); A.sr = sr.view();
+    A.dbz = refl_10cm.view();
+    if (p_.microp_re) {
+      A.re_cloud = re_cloud.view(); A.re_ice = re_ice.view(); A.re_snow = re_snow.view();
+    }
+    nssl_->run(A, mp_cols.j0, mp_cols.j1);
+    vmdump::dump("vm_mp_out", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS],
+                                  &s.q_2[s.P_QG], &s.q_2[s.P_QH], &s.q_2[s.P_QNDROP], &s.q_2[s.P_QNR],
+                                  &s.q_2[s.P_QNI], &s.q_2[s.P_QNS], &s.q_2[s.P_QNG], &s.q_2[s.P_QNH],
+                                  &s.q_2[s.P_QNN], &s.q_2[s.P_QVOLG], &s.q_2[s.P_QVOLH], &refl_10cm},
+                 {&rainnc, &rainncv, &snownc, &snowncv, &hailnc, &hailncv, &graupelnc, &graupelncv, &sr});
   } else {
     column_for(mp_cols,
                phys::kessler::KesslerKernel{th_phy.view(), qv.view(), s.q_2[s.P_QC].view(), s.q_2[s.P_QR].view(),
@@ -524,7 +592,8 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
                                        qc_diabatic.view(), dt, p_.mp_tend_lim, s.P_QC >= 0});
   std::vector<Field3*> fs{&s.t_2, &s.h_diabatic};
   for (int n = 0; n < s.n_moist; ++n) fs.push_back(&s.q_2[n]);
-  for (int n : {s.P_QNI, s.P_QNS, s.P_QNR, s.P_QNG, s.P_QNC, s.P_QNN, s.P_QNWFA, s.P_QNIFA, s.P_QNBCA, s.P_QIR, s.P_QIB})
+  for (int n : {s.P_QNI, s.P_QNS, s.P_QNR, s.P_QNG, s.P_QNC, s.P_QNWFA, s.P_QNIFA, s.P_QNBCA, s.P_QIR, s.P_QIB,
+                s.P_QNDROP, s.P_QNH, s.P_QNN, s.P_QVOLG, s.P_QVOLH})
     if (n >= 0) fs.push_back(&s.q_2[n]);
   fill_halos(fs, g);
 }

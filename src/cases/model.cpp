@@ -375,7 +375,8 @@ Model Model::build(const io::Config& cfg) {
                    cfg.get_int("phys.ra_sw_physics", 0) == 4 &&
                    (pp.mp_physics == 3 || pp.mp_physics == 4 || pp.mp_physics == 6 || pp.mp_physics == 8 ||
                     pp.mp_physics == 14 || pp.mp_physics == 16 || pp.mp_physics == 28 || pp.mp_physics == 50 ||
-                    pp.mp_physics == 51);
+                    pp.mp_physics == 51 || pp.mp_physics == 18);
+    pp.cu_used = cfg.get_int("phys.cu_physics", 0) != 0;  // check_a_mundo: cu_used
     if (pp.mp_physics == 28) {  // aerosol-aware Thompson: aer_init_opt = 0, wif_input_opt 0 / 1, qna_update = 0
       if (cname != "real") throw std::runtime_error("phys.mp_physics = 28: real-data runs only");
       const long wif = cfg.get_int("phys.wif_input_opt", 0);
@@ -395,6 +396,13 @@ Model Model::build(const io::Config& cfg) {
     if (pp.mp_physics == 50 || pp.mp_physics == 51) {  // P3, one ice category (module_mp_p3.F)
       if (cname != "real") throw std::runtime_error("phys.mp_physics = 50 / 51 (P3): real-data runs only");
     }
+    if (pp.mp_physics == 18) {  // NSSL 2-moment with hail, CCN and graupel / hail volume (WRF's defaults; mp 17)
+      if (cname != "real") throw std::runtime_error("phys.mp_physics = 18 (NSSL): real-data runs only");
+    }
+    if (pp.mp_physics == 17 || pp.mp_physics == 19 || pp.mp_physics == 21 || pp.mp_physics == 22)
+      throw std::runtime_error("phys.mp_physics = " + std::to_string(pp.mp_physics) +
+                               ": WRF runs it as mp_physics = 18 with NSSL options; CPPWRF takes mp_physics = 18 "
+                               "(17: the same, from the translator; 19 / 21 / 22 are not ported)");
     if (pp.mp_physics == 52 || pp.mp_physics == 53)
       throw std::runtime_error("phys.mp_physics = " + std::to_string(pp.mp_physics) +
                                " (P3 with two ice categories / three-moment ice) is not ported");
@@ -431,6 +439,10 @@ Model Model::build(const io::Config& cfg) {
       if (pp.mp_physics == 10)
         m.rk->physics()->set_cumulus_tendencies(&m.suite->pt.rqrcuten, &m.suite->pt.rqscuten, &m.suite->pt.rqicuten);
       if (pp.mp_physics == 16) m.rk->physics()->set_xland(&m.suite->xland);  // wdm6's slmsk
+      // NSSL reads RQRCUTEN, RQSCUTEN, RQICUTEN, RQCCUTEN with cu_used (calcnfromcuten)
+      if (pp.mp_physics == 18)
+        m.rk->physics()->set_cumulus_tendencies(&m.suite->pt.rqrcuten, &m.suite->pt.rqscuten, &m.suite->pt.rqicuten,
+                                                &m.suite->pt.rqccuten);
     } else if (cfg.get_int("phys.ra_lw_physics", 0) != 0 || cfg.get_int("phys.ra_sw_physics", 0) != 0) {
       // radiation is part of the column physics suite: without it ra_* would be silently ignored
       throw std::runtime_error("phys.ra_lw/ra_sw_physics without surface-layer, land-surface, PBL or cumulus physics "

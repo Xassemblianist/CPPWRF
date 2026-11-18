@@ -79,6 +79,8 @@ port_c14_data.tar
 port_b05_data.tar
 # the WENO advection references (WE4, WP4, WM4, WK4, WMY, WN3: adv_opt 3 / 4, momentum_adv_opt 3; WRF -r8 -double-8)
 port_b05w_data.tar
+# the NSSL 2-moment references (N18, N17, N18V: mp_physics 18 / 17, tests/verify/cases/48_nssl.py); links into run_P4_r8 / run_V3_r8
+port_c08_data.tar
 # whole references (every frame and variable) of the tolerance-0 cases and the ideal namelists
 # (tools/colab/stage_data.py --whole --refs-only --no-steps): after the tars above, whose files they replace
 v05_suite_refs.tar

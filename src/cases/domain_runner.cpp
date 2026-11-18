@@ -80,8 +80,10 @@ std::vector<std::string> wrf_names(const std::string& n) {
   static const std::map<std::string, std::string> moist = {
       {"qv", "QVAPOR"}, {"qc", "QCLOUD"}, {"qr", "QRAIN"}, {"qi", "QICE"}, {"qs", "QSNOW"},
       {"qg", "QGRAUP"}, {"qni", "QNICE"}, {"qnr", "QNRAIN"}, {"qke_adv", "qke_adv"},
-      {"qnc", "QNCLOUD"}, {"qnn", "QNCCN"}, {"qnwfa", "QNWFA"}, {"qnifa", "QNIFA"}, {"qnbca", "QNBCA"}, {"qns", "QNSNOW"},
-      {"qng", "QNGRAUPEL"}, {"qir", "QIR"}, {"qib", "QIB"}};
+      {"qnc", "QNCLOUD"}, {"qnwfa", "QNWFA"}, {"qnifa", "QNIFA"}, {"qnbca", "QNBCA"}, {"qns", "QNSNOW"},
+      {"qng", "QNGRAUPEL"}, {"qir", "QIR"}, {"qib", "QIB"},
+      {"qh", "QHAIL"}, {"qndrop", "QNDROP"}, {"qnh", "QNHAIL"}, {"qnn", "QNCCN"}, {"qvolg", "QVGRAUPEL"},
+      {"qvolh", "QVHAIL"}};
   if (n.rfind("q1_", 0) == 0 || n.rfind("q2_", 0) == 0) {  // moist/scalar arrays have one time level (q_1 = q_2
     const std::string q = n.substr(3);                      // at the step start); tke_1 / tke_2
     auto it = moist.find(q);
@@ -322,6 +324,10 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
       add_field2("graupelncv", rk->physics()->graupelncv);
       add_field2("sr", rk->physics()->sr);
     }
+    if (rk->physics()->nssl()) {  // Registry HAILNC (rhdu), HAILNCV (r)
+      add_field2("hailnc", rk->physics()->hailnc);
+      add_field2("hailncv", rk->physics()->hailncv);
+    }
     if (rk->physics()->params().mp_physics == 28) {  // Registry i01rhdu: in the restart stream
       add_field2("qnwfa2d", rk->physics()->qnwfa2d);
       add_field2("qnifa2d", rk->physics()->qnifa2d);
@@ -439,6 +445,10 @@ void DomainRunner::load_restart_file(const std::string& path) {
       reg_field2("graupelnc", rk->physics()->graupelnc);
       reg_field2("graupelncv", rk->physics()->graupelncv);
       reg_field2("sr", rk->physics()->sr);
+    }
+    if (rk->physics()->nssl()) {
+      reg_field2("hailnc", rk->physics()->hailnc);
+      reg_field2("hailncv", rk->physics()->hailncv);
     }
     if (rk->physics()->p3()) {
       reg_field3("th_old", rk->physics()->th_old);
@@ -620,6 +630,8 @@ void DomainRunner::prepare_output() {
       extra_2d_.push_back(&m_.rk->physics()->graupelncv);
       extra_2d_.push_back(&m_.rk->physics()->sr);
     }
+    if (m_.rk->physics()->nssl())
+      for (const Field2* f : {&m_.rk->physics()->hailnc, &m_.rk->physics()->hailncv}) extra_2d_.push_back(f);
     if (m_.rk->physics()->params().mp_physics == 28)
       for (const Field2* f : {&m_.rk->physics()->qnwfa2d, &m_.rk->physics()->qnifa2d}) extra_2d_.push_back(f);
     if (m_.rk->physics()->refl_10cm.layout().total > 0) extra_3d_.push_back(&m_.rk->physics()->refl_10cm);

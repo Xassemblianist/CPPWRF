@@ -335,6 +335,11 @@ void init_real_case(const io::Config& cfg, Model& m) {
     else if (nm == "qng") extra_q = io_netcdf::read_window_var(wi_path, "QNGRAUPEL", win);
     else if (nm == "qir") extra_q = io_netcdf::read_window_var(wi_path, "QIR", win);
     else if (nm == "qib") extra_q = io_netcdf::read_window_var(wi_path, "QIB", win);
+    else if (nm == "qh") extra_q = io_netcdf::read_window_var(wi_path, "QHAIL", win);
+    else if (nm == "qndrop") extra_q = io_netcdf::read_window_var(wi_path, "QNDROP", win);
+    else if (nm == "qnh") extra_q = io_netcdf::read_window_var(wi_path, "QNHAIL", win);
+    else if (nm == "qvolg") extra_q = io_netcdf::read_window_var(wi_path, "QVGRAUPEL", win);
+    else if (nm == "qvolh") extra_q = io_netcdf::read_window_var(wi_path, "QVHAIL", win);
     else if (nm == "qnc") extra_q = io_netcdf::read_window_var(wi_path, "QNCLOUD", win);
     else if (nm == "qnn") extra_q = io_netcdf::read_window_var(wi_path, "QNCCN", win);
     else if (nm == "qnwfa") extra_q = io_netcdf::read_window_var(wi_path, "QNWFA", win);
@@ -355,7 +360,8 @@ void init_real_case(const io::Config& cfg, Model& m) {
         mx = whole[0];
         for (std::size_t n = 0; n < whole.size(); ++n) mx = std::max(mx, double(whole[n]));
       }
-      if (mx < 1.0) nn_fill = cfg.get_double("phys.ccn_conc", 1.0e8);
+      // NSSL (mp_physics 18): nssl_2mom_init's ccn_is_ccna = 1 and start_em's ccn_conc = 0 for it
+      if (mx < 1.0) nn_fill = cfg.get_int("phys.mp_physics", 0) == 18 ? 0.0 : cfg.get_double("phys.ccn_conc", 1.0e8);
     }
     s.q_2[q].fill_host([&](int i, int j, int k) {
       if (nn_fill >= 0.0) return nn_fill;
@@ -416,7 +422,9 @@ void init_real_case(const io::Config& cfg, Model& m) {
       io_netcdf::read_wrfbdy(dir + "/" + cfg.get_string("real.wrfbdy", "wrfbdy_d01")));
   if (bd->bdy_width != 5) throw std::runtime_error("real: spec_bdy_width must be 5");
   m.bc = std::make_unique<dyn::LateralBC>(g, g.dt, bd->bdy_width);
-  if (s.P_QNN >= 0) m.bc->set_qnn(s.P_QNN, real(cfg.get_double("phys.ccn_conc", 1.0e8)));  // flow_dep_bdy_qnn
+  // flow_dep_bdy_qnn (NSSL: start_em's ccn_conc = 0, the inflow of flow_dep_bdy)
+  if (s.P_QNN >= 0)
+    m.bc->set_qnn(s.P_QNN, cfg.get_int("phys.mp_physics", 0) == 18 ? real(0) : real(cfg.get_double("phys.ccn_conc", 1.0e8)));
   double interval = cfg.get_double("real.bdy_interval", 0.0);
   if (interval <= 0 && !bd->this_bdy_times.empty() && !bd->next_bdy_times.empty())
     interval = seconds_between(bd->this_bdy_times[0], bd->next_bdy_times[0]);

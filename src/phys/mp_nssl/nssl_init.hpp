@@ -5,22 +5,18 @@
 // (mp_physics = 17, and 18 with its defaults): the module variables and the lookup tables, statement by statement in
 // WRF's order. The &nssl_mp_params namelist group is not read (the model rejects it).
 #include <vector>
+#include "phys/mp_nssl/nssl_args.hpp"
 #include "phys/mp_nssl/nssl_kernel.hpp"
 
 namespace cppwrf::phys::mp_nssl {
 
-// the arguments of mp_init's call (nssl_params(1:10) and the integer options)
-struct NsslConfig {
-  double cccn = 0.5e9, alphah = 0.0, alphahl = 1.0, cnoh = 4.e5, cnohl = 4.e4, cnor = 8.e5, cnos = 3.e6;
-  double rho_qh = 500., rho_qhl = 900., rho_qs = 100.;
-  int icdx = 6, icdxhl = 6;
-};
 
 // the module's allocated tables (host copies; a GPU build copies them to the device and points NsslParams there)
+template <class Real>
 struct NsslTables {
-  std::vector<double> tabqvs, tabqis, dtabqvs, dtabqis;   // (nqsat)
+  std::vector<Real> tabqvs, tabqis, dtabqvs, dtabqis;     // (nqsat)
   std::vector<double> gamxinflu;                          // (0:nqiacrratio, ialpstart:nqiacralpha, 12, 2)
-  std::vector<double> ciacrratio, qiacrratio, ziacrratio; // (0:nqiacrratio, ialpstart:nqiacralpha)
+  std::vector<Real> ciacrratio, qiacrratio, ziacrratio;   // (0:nqiacrratio, ialpstart:nqiacralpha)
 };
 
 // SUBROUTINE GAMMADP (the beta function's gamma)
@@ -72,8 +68,9 @@ inline double nssl_beta(double p, double q) {
 inline constexpr std::uint64_t nssl_c1sw_pow_bits = 0x3FFB5C0FBCFEC4D4ull;
 
 // nssl_2mom_init; returns ccn_is_ccna as the call leaves it (config_flags%nssl_ccn_is_ccna)
-inline int nssl_init(NsslParams<double>& P, NsslTables& T, const NsslConfig& C) {
-  using R = double;
+template <class Real>
+inline int nssl_init(NsslParams<Real>& P, NsslTables<Real>& T, const NsslConfig& C) {
+  using R = Real;
   // nssl_hail_on, nssl_density_on present (true): hail_on = 1, density_on = 1; icecrystals_on stays 1
   bool turn_on_ccna = false;
   const bool turn_on_cina = false;

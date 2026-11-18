@@ -389,11 +389,13 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // grid-scale precipitation of the last step (PhysicsCoupling): WRF's grid%rainncv and grid%sr, read by
   // surface_driver (RAINBL) and the Noah LSM (FFROZP = SR); sr = nullptr for schemes without it (WRF: 0)
   void set_microphysics_precip(const Field2* rainncv_mp, const Field2* sr_mp,
-                               const Field2* snowncv_mp = nullptr, const Field2* graupelncv_mp = nullptr) {
+                               const Field2* snowncv_mp = nullptr, const Field2* graupelncv_mp = nullptr,
+                               const Field2* hailncv_mp = nullptr) {
     rainncv_mp_ = rainncv_mp; sr_mp_ = sr_mp;
-    snowncv_mp_ = snowncv_mp; graupelncv_mp_ = graupelncv_mp;
+    snowncv_mp_ = snowncv_mp; graupelncv_mp_ = graupelncv_mp; hailncv_mp_ = hailncv_mp;
   }
   const Field2 *rainncv_mp_ = nullptr, *sr_mp_ = nullptr, *snowncv_mp_ = nullptr, *graupelncv_mp_ = nullptr;
+  const Field2* hailncv_mp_ = nullptr;  // NSSL's HAILNCV (Noah-MP's MP_HAIL; WRF passes zeros otherwise)
   // the microphysics' grid%rainnc (PhysicsCoupling), changed by bucket_mm; nullptr without microphysics (WRF: 0)
   void set_microphysics_accum(Field2* rainnc_mp) { rainnc_mp_ = rainnc_mp; }
   Field2* rainnc_mp_ = nullptr;

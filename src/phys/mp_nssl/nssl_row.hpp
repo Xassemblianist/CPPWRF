@@ -8,30 +8,11 @@
 // vzf, compdbz, pcc2, axtra, rainncw2 / rainnci2, has_reqr / has_reqg / has_reqh, ipelectmp (ipelec 0), isedonly_in.
 // The row's arrays are copies in the work space laid out as WRF's an(its:ite, 1, kts:kte, na), t0 ... (Fortran ix =
 // i - its + 1, kz = k + 1).
-#include "core/field.hpp"
+#include "phys/mp_nssl/nssl_args.hpp"
 #include "phys/mp_nssl/nssl_kernel.hpp"
 
 namespace cppwrf::phys::mp_nssl {
 
-template <class Real>
-struct NsslRowArgs {
-  int its, ite, nz;  // the row's i range (WRF its:ite of the tile) and levels
-  int itimestep;
-  bool diagflag;      // solve_em diag_flag (history alarm, or nwp_diagnostics)
-  int ke_diag;        // solve_em ke_diag (Fortran level: kms = 1, or the domain top at a history step)
-  Real dtp;
-  bool flag_ccn;      // F_QNN (qnn present: nssl_ccn_on)
-  bool cu_used;       // config_flags%cu_used
-  int has_reqc, has_reqi, has_reqs;
-  int nssl_ssat_output;
-  bool do_dbz;        // REFL_10CM allocated (compute_radar_ref)
-  View3<Real> th, qv, qc, qr, qi, qs, qh, qhl;               // qh = WRF qg (graupel), qhl = WRF qh (hail)
-  View3<Real> ccw, crw, cci, csw, chw, chl, vhw, vhl, cn;    // qndrop qnr qni qns qng qnh qvolg qvolh qnn
-  View3<const Real> pii, p, w, dz, dn;
-  View3<const Real> qrcuten, qscuten, qicuten, qccuten;
-  View2<Real> rainnc, rainncv, snownc, snowncv, hailnc, hailncv, grplnc, grplncv, sr;
-  View3<Real> dbz, re_cloud, re_ice, re_snow, ssat3d, ssati;
-};
 
 template <class Real>
 CPPWRF_HD inline void nssl_row(const NsslParams<Real>& P, Work W, const NsslRowArgs<Real>& A, int jy) {

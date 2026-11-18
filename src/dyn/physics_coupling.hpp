@@ -12,6 +12,7 @@
 #include "core/field.hpp"
 #include "dyn/state.hpp"
 #include "phys/mp_morrison/morrison.hpp"
+#include "phys/mp_nssl/nssl_args.hpp"
 #include "phys/mp_p3/p3.hpp"
 #include "phys/mp_radar/radar.hpp"
 #include "phys/mp_thompson/thompson_tables.hpp"
@@ -25,7 +26,8 @@ namespace cppwrf::dyn {
 struct PhysicsParams {
   int mp_physics = 0;        // 0 = none, 1 = Kessler, 3 = WSM3, 4 = WSM5, 6 = WSM6, 8 = Thompson, 10 = Morrison,
                              // 16 = WDM6, 28 = aerosol-aware Thompson,
-                             // 50 / 51 = P3 one ice category (specified / predicted droplet number)
+                             // 50 / 51 = P3 one ice category (specified / predicted droplet number),
+                             // 18 = NSSL 2-moment with hail, CCN and graupel / hail volume (17 becomes 18)
   int hail_opt = 0;          // WSM6 / WDM6 graupel (0) or hail (1) parameters, WRF namelist hail_opt
   double ccn_conc = 1.0e8;   // WDM: the CCN number NN at the first step and at inflow boundaries (namelist ccn_conc)
   int morr_rimed_ice = 1;    // Morrison: dense precipitating ice is hail (1, WRF's default) or graupel (0)
@@ -35,6 +37,7 @@ struct PhysicsParams {
   bool microp_re = false;    // WSM3 / WSM5 / WSM6 / Thompson effective radii for RRTMG (WRF has_reqc = has_reqi = has_reqs = 1:
                              // use_mp_re = 1 with RRTMG LW and SW); P3: has_reqc = has_reqi = 1, has_reqs = 0
   int do_radar_ref = 0;      // WRF namelist do_radar_ref: REFL_10CM from WSM6 / Thompson at history steps
+  bool cu_used = false;      // WRF cu_used (cu_physics /= 0): NSSL adds the cumulus scheme's RQ*CUTEN as numbers
 };
 
 class PhysicsCoupling {
@@ -49,18 +52,19 @@ class PhysicsCoupling {
   bool thompson() const { return p_.mp_physics == 8 || p_.mp_physics == 28; }
   bool wdm() const { return p_.mp_physics == 14 || p_.mp_physics == 16; }  // WDM5, WDM6
   bool p3() const { return p_.mp_physics == 50 || p_.mp_physics == 51; }
+  bool nssl() const { return p_.mp_physics == 18; }
   // the schemes with snow and graupel accumulations (SNOWNC, GRAUPELNC) and SR: WSM3, WSM5, WSM6, Thompson, Morrison,
   // P3 (WSM3, WSM5, P3: no graupel, GRAUPELNC stays 0 as in WRF)
   bool ice_precip() const {
     return p_.mp_physics == 3 || p_.mp_physics == 4 || p_.mp_physics == 6 || p_.mp_physics == 10 || thompson() ||
-           p3() || wdm();
+           p3() || wdm() || nssl();
   }
   // P3's and WDM's grid%itimestep (incremented per step; the restart's step after a restart)
   long itimestep = 0;
   // Morrison: the cumulus scheme's decoupled tendencies RQRCUTEN, RQSCUTEN, RQICUTEN (phy_prep_part2 has run when
   // the microphysics runs); without cumulus WRF passes its zero arrays
-  void set_cumulus_tendencies(const Field3* qr, const Field3* qs, const Field3* qi) {
-    cu_qr_ = qr; cu_qs_ = qs; cu_qi_ = qi;
+  void set_cumulus_tendencies(const Field3* qr, const Field3* qs, const Field3* qi, const Field3* qc = nullptr) {
+    cu_qr_ = qr; cu_qs_ = qs; cu_qi_ = qi; cu_qc_ = qc;
   }
   // WDM: the land mask XLAND (1 land, 2 water) of the column physics; the autoconversion threshold qc0 / qc1
   void set_xland(const Field2* xland) { xland_ = xland; }
@@ -68,6 +72,7 @@ class PhysicsCoupling {
   std::vector<const Field3*> fields() const;
   Field2 rainnc, rainncv;  // accumulated / last-step grid-scale precipitation [mm]
   Field2 snownc, snowncv, graupelnc, graupelncv, sr;  // ice_precip(): snow, graupel [mm]; sr = frozen fraction
+  Field2 hailnc, hailncv;  // NSSL: hail [mm] (WRF HAILNC / HAILNCV; GRAUPELNC is graupel only)
   Field3 re_cloud, re_ice, re_snow;  // microp_re: effective radii [m] (RE_QC_BG ... before the first call)
   Field2 qnwfa2d, qnifa2d;  // mp_physics = 28: surface emission of water- / ice-friendly aerosols [#/kg/s]
   // do_radar_ref = 1 with WSM6 / Thompson: 10-cm radar reflectivity [dBZ], 0 until the first history step and
@@ -98,6 +103,9 @@ class PhysicsCoupling {
   std::shared_ptr<const std::pair<Buffer, phys::mp_p3::P3Tables<real>>> p3t_;  // its tables on the device
   const Field3 *cu_qr_ = nullptr, *cu_qs_ = nullptr, *cu_qi_ = nullptr;  // Morrison: RQRCUTEN, RQSCUTEN, RQICUTEN
   const Field2* xland_ = nullptr;  // WDM: XLAND
+  const Field3* cu_qc_ = nullptr;                                          // NSSL also RQCCUTEN
+  std::shared_ptr<const phys::mp_nssl::NsslScheme<real>> nssl_;  // nssl_2mom_init's values and tables
+  Field3 nssl_zero_;  // NSSL without cumulus: the zero RQ*CUTEN WRF passes
 };
 
 }  // namespace cppwrf::dyn

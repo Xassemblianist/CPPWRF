@@ -1883,6 +1883,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       nmp.rainshv = rainshv.cview();
       nmp.snowncv = snowncv_mp_ ? snowncv_mp_->cview() : C2{};
       nmp.graupelncv = graupelncv_mp_ ? graupelncv_mp_->cview() : C2{};
+      nmp.hailncv = hailncv_mp_ ? hailncv_mp_->cview() : C2{};
       nmp.tsk = tsk.view();
       nmp.hfx = hfx.view();
       nmp.qfx = qfx.view();

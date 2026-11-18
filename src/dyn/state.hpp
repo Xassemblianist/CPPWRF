@@ -66,10 +66,14 @@ struct State {
   int P_QNS = -1, P_QNG = -1;
   // P3 (mp_physics = 50, 51): rime ice mass and volume of the ice category (WRF scalars QIR, QIB)
   int P_QIR = -1, P_QIB = -1;
+  // NSSL 2-moment (mp_physics = 18): hail mass (WRF moist QHAIL), droplet, hail and activated-CCN numbers, graupel
+  // and hail volumes (WRF scalars QNDROP, QNHAIL, QNCCN, QVGRAUPEL, QVHAIL)
+  int P_QH = -1, P_QNDROP = -1, P_QNH = -1, P_QVOLG = -1, P_QVOLH = -1;
   // members of WRF's `scalar` array (scalar_adv_opt, scalar_mix*_off) rather than `moist` / `tracer`
   bool wrf_scalar(int n) const {
-    return n >= 0 && (n == P_QNI || n == P_QNR || n == P_QKE_ADV || n == P_QNC || n == P_QNN || n == P_QNWFA || n == P_QNIFA ||
-                      n == P_QNBCA || n == P_QNS || n == P_QNG || n == P_QIR || n == P_QIB);
+    return n >= 0 && (n == P_QNI || n == P_QNR || n == P_QKE_ADV || n == P_QNC || n == P_QNWFA || n == P_QNIFA ||
+                      n == P_QNBCA || n == P_QNS || n == P_QNG || n == P_QIR || n == P_QIB || n == P_QNDROP ||
+                      n == P_QNH || n == P_QNN || n == P_QVOLG || n == P_QVOLH);
   }
   Field3 qtot;  // M, sum of the moist species of the stage state; allocated if n_moist > 0
   Field3 cqu, cqv, cqw;  // WRF calc_cq moisture coefficients (U, V, W points), with qtot

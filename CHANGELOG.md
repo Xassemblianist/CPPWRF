@@ -32,8 +32,12 @@ a verified configuration, of a configuration key or of an output file is a new m
   calcnfromq / calcnfromcuten, the adaptive two-moment sedimentation, nssl_2mom_gs, NUCOND, smallvalues, ssat,
   radardd02, calc_eff_radius; the loops gfortran vectorises with libmvec's pow take the vm:: lanes of WRF's 64-point
   gather batches). Column test tests/phys/mp_nssl (ctest test_phys_nssl) against WRF's nssl_2mom_init /
-  nssl_2mom_driver of the -r8 -fdefault-double-8 build: every output bit-identical over several calls. Not wired into
-  the model yet: mp_physics 17 / 18 / 19 / 21 / 22 stay errors in the translator and the model.
+  nssl_2mom_driver of the -r8 -fdefault-double-8 build: every output bit-identical over several calls. Wired into the
+  real-data model as `[phys] mp_physics = 18` (the translator maps WRF's 17 and 18 with the default nssl_* options to
+  it): QHAIL, QNDROP, QNHAIL, QNCCN, QVGRAUPEL, QVHAIL, HAILNC / HAILNCV (also Noah-MP's MP_HAIL), REFL_10CM, the
+  effective radii to RRTMG, the cumulus tendencies of the rain / snow / ice / cloud water, one row per thread over
+  WRF's tile i-range. Suite cases 48_nssl (N18, N17, N18V). 19, 21, 22, non-default nssl_* options, nests, the ideal
+  cases and a decomposition in x stay errors.
 - Grell-3D ensemble cumulus (cu_physics = 5, WRF's module_cu_g3.F): G3DRV with the 3 x 3 neighbours' vertical
   motion and advective forcing (ens4 = 9), CUP_enss_3d with its closure ensemble (maxens 3, maxens2 3, maxens3 16),
   the shallow convection (ishallow = 1), clos_choice, cugd_avedx 1 / 3 (`[phys] cugd_avedx`), APR_* /

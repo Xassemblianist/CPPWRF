@@ -38,7 +38,7 @@ int main(int argc, char** argv) {
   auto V2 = [&](int q) { return View2<double>{a2[q].data() + pad2 - 1 - nx, nx}; };
 
   static NsslParams<double> P;
-  static NsslTables T;
+  static NsslTables<double> T;
   nssl_init(P, T, NsslConfig{});
 
   NsslRowArgs<double> A{};
