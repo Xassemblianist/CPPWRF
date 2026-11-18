@@ -251,7 +251,8 @@ class PhysicsSuite : public dyn::ColumnPhysics {
       tradxy, neexy, gppxy, nppxy, fvegxy, runsfxy, runsbxy, ecanxy, edirxy, etranxy, fsaxy, firaxy, aparxy, psnxy,
       savxy, sagxy, rssunxy, rsshaxy, bgapxy, wgapxy, tgvxy, tgbxy, chvxy, chbxy, shgxy, shcxy, shbxy, evgxy, evbxy,
       ghvxy, ghbxy, irgxy, ircxy, irbxy, trxy, evcxy, chleafxy, chucxy, chv2xy, chb2xy, chstarxy, acc_ssoilxy,
-      acc_qinsurxy, acc_qsevaxy, eflxbxy, acc_dwaterxy, acc_prcpxy, acc_ecanxy, acc_etranxy, acc_edirxy, acc_glaflwxy;
+      acc_qinsurxy, acc_qsevaxy, eflxbxy, acc_dwaterxy, acc_prcpxy, acc_ecanxy, acc_etranxy, acc_edirxy, acc_glaflwxy,
+      fsatxy, wsurfxy;  // FSAT / WSURF: the wetland model's state (opt_wetland > 0)
   IntField2 isnowxy, cropcat, pgsxy;
   IntField2 noahmp_ranland;  // not in the restart file (NoahmpIO is initialised again)
   Field2 thc, capg;           // slab (sf_surface_physics == 1): thermal inertia (landuse_init), heat capacity

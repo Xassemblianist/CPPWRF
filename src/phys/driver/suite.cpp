@@ -623,6 +623,7 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     mk2(eflxbxy, "eflxbxy");
     mk2(acc_dwaterxy, "acc_dwaterxy"); mk2(acc_prcpxy, "acc_prcpxy"); mk2(acc_ecanxy, "acc_ecanxy");
     mk2(acc_etranxy, "acc_etranxy"); mk2(acc_edirxy, "acc_edirxy"); mk2(acc_glaflwxy, "acc_glaflwxy");
+    mk2(fsatxy, "fsatxy"); mk2(wsurfxy, "wsurfxy");
     isnowxy = IntField2(g, "isnowxy"); cropcat = IntField2(g, "cropcat"); pgsxy = IntField2(g, "pgsxy");
     isnowxy.upload(std::vector<int>(isnowxy.layout().total, 0));
     cropcat.upload(std::vector<int>(cropcat.layout().total, 0));
@@ -968,6 +969,9 @@ void PhysicsSuite::init_noahmp(bool fndsnowh) {
   k.restart = false;
   k.iopt_runsub = o_.noahmp.opt_runsub;
   k.iopt_crop = o_.noahmp.opt_crop;
+  k.iopt_wetland = o_.noahmp.opt_wetland;
+  k.fsatxy = fsatxy.view();
+  k.wsurfxy = wsurfxy.view();
   k.sf_urban_physics = o_.noahmp.sf_urban_physics;
   noahmp::run_noahmp_init(k, g_.columns());
 }
@@ -1075,7 +1079,7 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
                       &aparxy, &psnxy, &savxy, &sagxy, &rssunxy, &rsshaxy, &bgapxy, &wgapxy, &tgvxy, &tgbxy, &chvxy,
                       &chbxy, &shgxy, &shcxy, &shbxy, &evgxy, &evbxy, &ghvxy, &ghbxy, &irgxy, &ircxy, &irbxy, &trxy,
                       &evcxy, &chleafxy, &chucxy, &chv2xy, &chb2xy, &chstarxy, &rs, &acc_ssoilxy, &acc_qinsurxy,
-                      &acc_qsevaxy, &eflxbxy, &acc_dwaterxy, &acc_prcpxy, &acc_ecanxy, &acc_etranxy, &acc_edirxy, &acc_glaflwxy})
+                      &acc_qsevaxy, &eflxbxy, &acc_dwaterxy, &acc_prcpxy, &acc_ecanxy, &acc_etranxy, &acc_edirxy, &acc_glaflwxy, &fsatxy, &wsurfxy})
       v.emplace_back("sfc_" + f->name(), f);
   }
   return v;
@@ -1345,7 +1349,7 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
                        &aparxy, &psnxy, &savxy, &sagxy, &rssunxy, &rsshaxy, &bgapxy, &wgapxy, &tgvxy, &tgbxy, &chvxy,
                        &chbxy, &shgxy, &shcxy, &shbxy, &evgxy, &evbxy, &ghvxy, &ghbxy, &irgxy, &ircxy, &irbxy, &trxy,
                        &evcxy, &chleafxy, &chucxy, &chv2xy, &chb2xy, &chstarxy, &acc_ssoilxy, &acc_qinsurxy,
-                       &acc_qsevaxy, &eflxbxy, &acc_dwaterxy, &acc_prcpxy, &acc_ecanxy, &acc_etranxy, &acc_edirxy, &acc_glaflwxy});
+                       &acc_qsevaxy, &eflxbxy, &acc_dwaterxy, &acc_prcpxy, &acc_ecanxy, &acc_etranxy, &acc_edirxy, &acc_glaflwxy, &fsatxy, &wsurfxy});
   }
   if (o_.gwd_opt == 1) v.insert(v.end(), {&dusfcg, &dvsfcg});
   if (o_.sf_sfclay_physics == 5) v.push_back(&cqs);

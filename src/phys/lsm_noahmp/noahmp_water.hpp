@@ -1606,6 +1606,149 @@ CPPWRF_HD inline void RunoffSurfaceBATS(NoahmpType& noahmp) {
 }
 
 // ============================================================================
+// RunoffSurfaceVicMod.F90 (OptRunoffSurface == 6)
+// ============================================================================
+CPPWRF_HD inline void RunoffSurfaceVIC(NoahmpType& noahmp, real TimeStep) {
+  const int&  NumSoilLayer      = noahmp.config.domain.NumSoilLayer;
+  const auto& DepthSoilLayer    = noahmp.config.domain.DepthSoilLayer;
+  const auto& SoilMoisture      = noahmp.water.state.SoilMoisture;
+  const real& SoilSfcInflowMean = noahmp.water.flux.SoilSfcInflowMean;
+  const auto& SoilMoistureSat   = noahmp.water.param.SoilMoistureSat;
+  const real& InfilFacVic       = noahmp.water.param.InfilFacVic;
+  real&       RunoffSurface     = noahmp.water.flux.RunoffSurface;
+  real&       InfilRateSfc      = noahmp.water.flux.InfilRateSfc;
+  real&       SoilSaturateFrac  = noahmp.water.state.SoilSaturateFrac;
+
+  real InfilExpFac     = real(0.0);
+  SoilSaturateFrac     = real(0.0);
+  real WaterDepthMax   = real(0.0);
+  real WaterDepthInit  = real(0.0);
+  real InfilVarTmp     = real(0.0);
+  real SoilMoistTop    = real(0.0);
+  real SoilMoistTopMax = real(0.0);
+  RunoffSurface        = real(0.0);
+  InfilRateSfc         = real(0.0);
+
+  for (int LoopInd = 1; LoopInd <= NumSoilLayer - 2; ++LoopInd) {
+    SoilMoistTop    = SoilMoistTop + SoilMoisture(LoopInd) * (real(-1.0)) * DepthSoilLayer(LoopInd);
+    SoilMoistTopMax = SoilMoistTopMax + SoilMoistureSat(LoopInd) * (real(-1.0)) * DepthSoilLayer(LoopInd);
+  }
+
+  InfilExpFac      = InfilFacVic / (real(1.0) + InfilFacVic);
+  SoilSaturateFrac = real(1.0) - rpow(std::max(real(0.0), (real(1.0) - (SoilMoistTop / SoilMoistTopMax))), InfilExpFac);
+  SoilSaturateFrac = std::max(real(0.0), SoilSaturateFrac);
+  SoilSaturateFrac = std::min(real(1.0), SoilSaturateFrac);
+
+  WaterDepthMax  = (real(1.0) + InfilFacVic) * SoilMoistTopMax;
+  WaterDepthInit = WaterDepthMax * (real(1.0) - rpow(real(1.0) - SoilSaturateFrac, real(1.0) / InfilFacVic));
+
+  if (SoilSfcInflowMean == real(0.0)) {
+    RunoffSurface = real(0.0);
+  } else if (WaterDepthMax == real(0.0)) {
+    RunoffSurface = SoilSfcInflowMean * TimeStep;
+  } else if ((WaterDepthInit + (SoilSfcInflowMean * TimeStep)) > WaterDepthMax) {
+    RunoffSurface = SoilSfcInflowMean * TimeStep - SoilMoistTopMax + SoilMoistTop;
+  } else {
+    InfilVarTmp   = real(1.0) - ((WaterDepthInit + (SoilSfcInflowMean * TimeStep)) / WaterDepthMax);
+    RunoffSurface = SoilSfcInflowMean * TimeStep - SoilMoistTopMax + SoilMoistTop +
+                    SoilMoistTopMax * rpow(InfilVarTmp, real(1.0) + InfilFacVic);
+  }
+
+  RunoffSurface = RunoffSurface / TimeStep;
+  if (RunoffSurface < real(0.0)) RunoffSurface = real(0.0);
+  if (RunoffSurface > SoilSfcInflowMean) RunoffSurface = SoilSfcInflowMean;
+
+  InfilRateSfc = SoilSfcInflowMean - RunoffSurface;
+}
+
+// ============================================================================
+// RunoffSurfaceXinAnJiangMod.F90 (OptRunoffSurface == 7)
+// ============================================================================
+CPPWRF_HD inline void RunoffSurfaceXinAnJiang(NoahmpType& noahmp, real TimeStep) {
+  const int&  NumSoilLayer         = noahmp.config.domain.NumSoilLayer;
+  const auto& DepthSoilLayer       = noahmp.config.domain.DepthSoilLayer;
+  const auto& SoilMoisture         = noahmp.water.state.SoilMoisture;
+  const auto& SoilImpervFrac       = noahmp.water.state.SoilImpervFrac;
+  const real& SoilSfcInflowMean    = noahmp.water.flux.SoilSfcInflowMean;
+  const auto& SoilMoistureSat      = noahmp.water.param.SoilMoistureSat;
+  const auto& SoilMoistureFieldCap = noahmp.water.param.SoilMoistureFieldCap;
+  const real& TensionWatDistrInfl  = noahmp.water.param.TensionWatDistrInfl;
+  const real& TensionWatDistrShp   = noahmp.water.param.TensionWatDistrShp;
+  const real& FreeWatDistrShp      = noahmp.water.param.FreeWatDistrShp;
+  real&       RunoffSurface        = noahmp.water.flux.RunoffSurface;
+  real&       InfilRateSfc         = noahmp.water.flux.InfilRateSfc;
+
+  real SoilWaterTmp     = real(0.0);
+  real SoilWaterMax     = real(0.0);
+  real SoilWaterFree    = real(0.0);
+  real SoilWaterFreeMax = real(0.0);
+  real RunoffSfcImp     = real(0.0);
+  real RunoffSfcPerv    = real(0.0);
+  RunoffSurface         = real(0.0);
+  InfilRateSfc          = real(0.0);
+
+  for (int LoopInd = 1; LoopInd <= NumSoilLayer - 2; ++LoopInd) {
+    if ((SoilMoisture(LoopInd) - SoilMoistureFieldCap(LoopInd)) > real(0.0)) {
+      SoilWaterFree = SoilWaterFree +
+                      (SoilMoisture(LoopInd) - SoilMoistureFieldCap(LoopInd)) * (real(-1.0)) * DepthSoilLayer(LoopInd);
+      SoilWaterTmp  = SoilWaterTmp + SoilMoistureFieldCap(LoopInd) * (real(-1.0)) * DepthSoilLayer(LoopInd);
+    } else {
+      SoilWaterTmp  = SoilWaterTmp + SoilMoisture(LoopInd) * (real(-1.0)) * DepthSoilLayer(LoopInd);
+    }
+    SoilWaterMax     = SoilWaterMax + SoilMoistureFieldCap(LoopInd) * (real(-1.0)) * DepthSoilLayer(LoopInd);
+    SoilWaterFreeMax = SoilWaterFreeMax +
+                       (SoilMoistureSat(LoopInd) - SoilMoistureFieldCap(LoopInd)) * (real(-1.0)) * DepthSoilLayer(LoopInd);
+  }
+  SoilWaterTmp  = std::min(SoilWaterTmp, SoilWaterMax);
+  SoilWaterFree = std::min(SoilWaterFree, SoilWaterFreeMax);
+
+  RunoffSfcImp = SoilImpervFrac(1) * SoilSfcInflowMean * TimeStep;
+
+  if ((SoilWaterTmp / SoilWaterMax) <= (real(0.5) - TensionWatDistrInfl)) {
+    RunoffSfcPerv = (real(1.0) - SoilImpervFrac(1)) * SoilSfcInflowMean * TimeStep *
+                    (rpow(real(0.5) - TensionWatDistrInfl, real(1.0) - TensionWatDistrShp)) *
+                    (rpow(SoilWaterTmp / SoilWaterMax, TensionWatDistrShp));
+  } else {
+    RunoffSfcPerv = (real(1.0) - SoilImpervFrac(1)) * SoilSfcInflowMean * TimeStep *
+                    (real(1.0) - ((rpow(real(0.5) + TensionWatDistrInfl, real(1.0) - TensionWatDistrShp)) *
+                                  (rpow(real(1.0) - (SoilWaterTmp / SoilWaterMax), TensionWatDistrShp))));
+  }
+
+  if (SoilSfcInflowMean == real(0.0)) {
+    RunoffSurface = real(0.0);
+  } else {
+    RunoffSurface = RunoffSfcPerv * (real(1.0) - (rpow(real(1.0) - (SoilWaterFree / SoilWaterFreeMax), FreeWatDistrShp))) +
+                    RunoffSfcImp;
+  }
+
+  RunoffSurface = RunoffSurface / TimeStep;
+  RunoffSurface = std::max(real(0.0), RunoffSurface);
+  RunoffSurface = std::min(SoilSfcInflowMean, RunoffSurface);
+  InfilRateSfc  = SoilSfcInflowMean - RunoffSurface;
+}
+
+// ============================================================================
+// RunoffSurfaceWetlandMod.F90 (OptWetlandModel > 0)
+// ============================================================================
+CPPWRF_HD inline void RunoffSurfaceWetland(NoahmpType& noahmp) {
+  const real& SoilSfcInflowMean = noahmp.water.flux.SoilSfcInflowMean;
+  const real& SoilSfcSatFracMax = noahmp.water.param.SoilSfcSatFracMax;
+  const auto& SoilImpervFrac    = noahmp.water.state.SoilImpervFrac;
+  const auto& SoilLiqWater      = noahmp.water.state.SoilLiqWater;
+  const auto& SoilMoistureSat   = noahmp.water.param.SoilMoistureSat;
+  real&       SoilSaturateFrac  = noahmp.water.state.SoilSaturateFrac;
+  real&       RunoffSurface     = noahmp.water.flux.RunoffSurface;
+  real&       InfilRateSfc      = noahmp.water.flux.InfilRateSfc;
+
+  SoilSaturateFrac = SoilSfcSatFracMax * (SoilLiqWater(1) / SoilMoistureSat(1));
+
+  if (SoilSfcInflowMean > real(0.0)) {
+    RunoffSurface = SoilSfcInflowMean * ((real(1.0) - SoilImpervFrac(1)) * SoilSaturateFrac + SoilImpervFrac(1));
+    InfilRateSfc  = SoilSfcInflowMean - RunoffSurface;
+  }
+}
+
+// ============================================================================
 // WaterTableEquilibriumMod.F90 (OptRunoffSubsurface == 2)
 // ============================================================================
 CPPWRF_HD inline void WaterTableEquilibrium(NoahmpType& noahmp) {
@@ -2096,6 +2239,7 @@ CPPWRF_HD inline void SoilWaterMain(NoahmpType& noahmp) {
   const bool& FlagUrban              = noahmp.config.domain.FlagUrban;
   const int&  OptRunoffSurface       = noahmp.config.nmlist.OptRunoffSurface;
   const int&  OptRunoffSubsurface    = noahmp.config.nmlist.OptRunoffSubsurface;
+  const int&  OptWetlandModel        = noahmp.config.nmlist.OptWetlandModel;
   const auto& SoilIce                = noahmp.water.state.SoilIce;
   const real& SoilSfcInflowMean      = noahmp.water.flux.SoilSfcInflowMean;
   const auto& SoilMoistureSat        = noahmp.water.param.SoilMoistureSat;
@@ -2159,6 +2303,12 @@ CPPWRF_HD inline void SoilWaterMain(NoahmpType& noahmp) {
   if (OptRunoffSurface == 2) RunoffSurfaceTopModelEqui(noahmp);
   if (OptRunoffSurface == 3) RunoffSurfaceFreeDrain(noahmp, SoilTimeStep);
   if (OptRunoffSurface == 4) RunoffSurfaceBATS(noahmp);
+  if (OptRunoffSurface == 6) RunoffSurfaceVIC(noahmp, SoilTimeStep);
+  if (OptRunoffSurface == 7) RunoffSurfaceXinAnJiang(noahmp, SoilTimeStep);
+  // OptRunoffSurface 5 (MMF) and 8 (dynamic VIC) are rejected (validate_noahmp_options)
+
+  // special treatment for wetland points (WRF: no flag control, every point)
+  if (OptWetlandModel > 0) RunoffSurfaceWetland(noahmp);
 
   NumIterSoilWat = 3;
   if ((InfilRateSfc * SoilTimeStep) > (ThicknessSnowSoilLayer(1) * SoilMoistureSat(1))) {
@@ -2172,6 +2322,8 @@ CPPWRF_HD inline void SoilWaterMain(NoahmpType& noahmp) {
   for (int IndIter = 1; IndIter <= NumIterSoilWat; ++IndIter) {
     if (SoilSfcInflowMean > real(0.0)) {
       if (OptRunoffSurface == 3) RunoffSurfaceFreeDrain(noahmp, TimeStepFine);
+      if (OptRunoffSurface == 6) RunoffSurfaceVIC(noahmp, TimeStepFine);
+      if (OptRunoffSurface == 7) RunoffSurfaceXinAnJiang(noahmp, TimeStepFine);
     }
     SoilWaterDiffusionRichards(noahmp, MatLeft1, MatLeft2, MatLeft3, MatRight);
     SoilMoistureSolver(noahmp, TimeStepFine, MatLeft1, MatLeft2, MatLeft3, MatRight);
@@ -2242,6 +2394,66 @@ CPPWRF_HD inline void SoilWaterMain(NoahmpType& noahmp) {
   RunoffSurface    = RunoffSurface * SoilTimeStep;
   RunoffSubsurface = RunoffSubsurface * SoilTimeStep;
   TileDrain        = TileDrain * SoilTimeStep;
+}
+
+// ============================================================================
+// WetlandWaterZhang22Mod.F90 (OptWetlandModel > 0)
+// ============================================================================
+CPPWRF_HD inline void WetlandWaterZhang22(NoahmpType& noahmp, real TimeStep) {
+  const real& TemperatureSfc      = noahmp.energy.state.TemperatureSfc;
+  const real& RadSwAbsSfc         = noahmp.energy.flux.RadSwAbsSfc;
+  const real& RadLwNetSfc         = noahmp.energy.flux.RadLwNetSfc;
+  const real& HeatGroundTot       = noahmp.energy.flux.HeatGroundTot;
+  real&       HeatSensibleSfc     = noahmp.energy.flux.HeatSensibleSfc;
+  const real& SoilSaturateFrac    = noahmp.water.state.SoilSaturateFrac;
+  const real& WetlandCapMax       = noahmp.water.param.WetlandCapMax;
+  real&       WaterStorageWetland = noahmp.water.state.WaterStorageWetland;
+  real&       RunoffSurface       = noahmp.water.flux.RunoffSurface;
+  real&       EvapGroundNet       = noahmp.water.flux.EvapGroundNet;
+  real&       HeatLatentGrd       = noahmp.energy.flux.HeatLatentGrd;
+
+  real LatHeatSpec, VapPresSlope, LatHeatPot, PsychroConst;
+  real EvapWaterFlux  = real(0.0);
+  real EvapLatentHeat = real(0.0);
+
+  if (TemperatureSfc > ConstFreezePoint) {
+    LatHeatSpec = ConstLatHeatEvap;
+  } else {
+    LatHeatSpec = ConstLatHeatSublim;
+  }
+
+  if (TemperatureSfc < (real(273.15) + real(26.85))) {
+    PsychroConst = real(0.00040);
+  } else {
+    PsychroConst = real(0.00041);
+  }
+
+  if (TemperatureSfc < (real(273.15) + real(6.85))) {
+    VapPresSlope = real(0.00022);
+  } else if (TemperatureSfc < (real(273.15) + real(16.85))) {
+    VapPresSlope = real(0.00042);
+  } else if (TemperatureSfc < (real(273.15) + real(26.85))) {
+    VapPresSlope = real(0.00078);
+  } else {
+    VapPresSlope = real(0.00132);
+  }
+
+  LatHeatPot = real(1.26) * VapPresSlope * (RadSwAbsSfc - RadLwNetSfc - HeatGroundTot) / (VapPresSlope + PsychroConst);
+
+  WaterStorageWetland = WaterStorageWetland + RunoffSurface;
+  if (WaterStorageWetland > (LatHeatPot * TimeStep / LatHeatSpec * SoilSaturateFrac)) {
+    EvapWaterFlux = std::max(LatHeatPot / LatHeatSpec * SoilSaturateFrac, real(0.0));
+  } else {
+    EvapWaterFlux = std::max(WaterStorageWetland / TimeStep, real(0.0));
+  }
+
+  WaterStorageWetland = std::max(WaterStorageWetland - EvapWaterFlux * TimeStep, real(0.0));
+  EvapLatentHeat      = EvapWaterFlux * LatHeatSpec;
+  HeatSensibleSfc     = HeatSensibleSfc - EvapLatentHeat;
+  HeatLatentGrd       = HeatLatentGrd + EvapLatentHeat;
+  RunoffSurface       = std::max(WaterStorageWetland - WetlandCapMax * real(1000.0), real(0.0));
+  EvapGroundNet       = EvapGroundNet + EvapWaterFlux;
+  WaterStorageWetland = std::min(WetlandCapMax * real(1000.0), WaterStorageWetland);
 }
 
 // ============================================================================
@@ -2390,6 +2602,9 @@ CPPWRF_HD inline void WaterMain(NoahmpType& noahmp) {
     SpecHumiditySfc    = WaterToAtmosTotal / (DensityAirRefHeight * ExchCoeffShSfc) + SpecHumidityRefHeight;
     SpecHumidity2mBare = SpecHumiditySfc;
   }
+
+  // surface wetland scheme (WRF: no flag control, every point)
+  if (noahmp.config.nmlist.OptWetlandModel > 0) WetlandWaterZhang22(noahmp, MainTimeStep);
 }
 
 // ============================================================================
@@ -2504,6 +2719,261 @@ CPPWRF_HD inline void BalanceEnergyCheck(NoahmpType& noahmp) {
 }
 
 // ============================================================================
+// CarbonFluxNatureVegMod.F90 (dveg 2 / 5 / 6)
+// ============================================================================
+CPPWRF_HD inline void CarbonFluxNatureVeg(NoahmpType& noahmp) {
+  const int&  VegType                = noahmp.config.domain.VegType;
+  const real& MainTimeStep           = noahmp.config.domain.MainTimeStep;
+  const int&  IndexEBLForest         = noahmp.config.domain.IndexEBLForest;
+  const auto& bp                     = noahmp.biochem.param;
+  const real& WoodToRootRatio        = bp.WoodToRootRatio;
+  const real& TurnoverCoeffLeafVeg   = bp.TurnoverCoeffLeafVeg;
+  const real& TemperaureLeafFreeze   = bp.TemperaureLeafFreeze;
+  const real& LeafDeathWaterCoeffVeg = bp.LeafDeathWaterCoeffVeg;
+  const real& LeafDeathTempCoeffVeg  = bp.LeafDeathTempCoeffVeg;
+  const real& GrowthRespFrac         = bp.GrowthRespFrac;
+  const real& TemperatureMinPhotosyn = bp.TemperatureMinPhotosyn;
+  const real& MicroRespCoeff         = bp.MicroRespCoeff;
+  const real& NitrogenConcFoliageMax = bp.NitrogenConcFoliageMax;
+  const real& RespMaintQ10           = bp.RespMaintQ10;
+  const real& RespMaintLeaf25C       = bp.RespMaintLeaf25C;
+  const real& RespMaintRoot25C       = bp.RespMaintRoot25C;
+  const real& RespMaintStem25C       = bp.RespMaintStem25C;
+  const real& WoodPoolIndex          = bp.WoodPoolIndex;
+  const real& TurnoverCoeffRootVeg   = bp.TurnoverCoeffRootVeg;
+  const real& WoodRespCoeff          = bp.WoodRespCoeff;
+  const real& WoodAllocFac           = bp.WoodAllocFac;
+  const real& WaterStressCoeff       = bp.WaterStressCoeff;
+  const real& LeafAreaIndexMin       = bp.LeafAreaIndexMin;
+  const real& StemAreaIndexMin       = bp.StemAreaIndexMin;
+  auto&       bs                     = noahmp.biochem.state;
+  auto&       bf                     = noahmp.biochem.flux;
+  const real& IndexGrowSeason        = bs.IndexGrowSeason;
+  const real& NitrogenConcFoliage    = bs.NitrogenConcFoliage;
+  const real& LeafAreaPerMass        = bs.LeafAreaPerMass;
+  const real& PhotosynTotal          = bf.PhotosynTotal;
+  const real& SoilWaterRootZone      = noahmp.water.state.SoilWaterRootZone;
+  const real& SoilWaterStress        = noahmp.water.state.SoilWaterStress;
+  const auto& TemperatureSoilSnow    = noahmp.energy.state.TemperatureSoilSnow;
+  const real& TemperatureCanopy      = noahmp.energy.state.TemperatureCanopy;
+  real&       LeafAreaIndex          = noahmp.energy.state.LeafAreaIndex;
+  real&       StemAreaIndex          = noahmp.energy.state.StemAreaIndex;
+  real&       LeafMass               = bs.LeafMass;
+  real&       RootMass               = bs.RootMass;
+  real&       StemMass               = bs.StemMass;
+  real&       WoodMass               = bs.WoodMass;
+  real&       CarbonMassDeepSoil     = bs.CarbonMassDeepSoil;
+  real&       CarbonMassShallowSoil  = bs.CarbonMassShallowSoil;
+  real&       CarbonMassSoilTot      = bs.CarbonMassSoilTot;
+  real&       CarbonMassLiveTot      = bs.CarbonMassLiveTot;
+  real&       LeafMassMin            = bs.LeafMassMin;
+  real&       CarbonFracToLeaf       = bs.CarbonFracToLeaf;
+  real&       WoodCarbonFrac         = bs.WoodCarbonFrac;
+  real&       CarbonFracToWoodRoot   = bs.CarbonFracToWoodRoot;
+  real&       CarbonFracToRoot       = bs.CarbonFracToRoot;
+  real&       CarbonFracToWood       = bs.CarbonFracToWood;
+  real&       CarbonFracToStem       = bs.CarbonFracToStem;
+  real&       MicroRespFactorSoilWater = bs.MicroRespFactorSoilWater;
+  real&       MicroRespFactorSoilTemp  = bs.MicroRespFactorSoilTemp;
+  real&       RespFacNitrogenFoliage = bs.RespFacNitrogenFoliage;
+  real&       RespFacTemperature     = bs.RespFacTemperature;
+  real&       RespReductionFac       = bs.RespReductionFac;
+  real&       StemMassMin            = bs.StemMassMin;
+  real&       StemAreaPerMass        = bs.StemAreaPerMass;
+  real&       CarbonAssim            = bf.CarbonAssim;
+  real&       GrossPriProduction     = bf.GrossPriProduction;
+  real&       NetPriProductionTot    = bf.NetPriProductionTot;
+  real&       NetEcoExchange         = bf.NetEcoExchange;
+  real&       RespirationPlantTot    = bf.RespirationPlantTot;
+  real&       RespirationSoilOrg     = bf.RespirationSoilOrg;
+  real&       CarbonToAtmos          = bf.CarbonToAtmos;
+  real&       NetPriProductionLeaf   = bf.NetPriProductionLeaf;
+  real&       NetPriProductionRoot   = bf.NetPriProductionRoot;
+  real&       NetPriProductionWood   = bf.NetPriProductionWood;
+  real&       NetPriProductionStem   = bf.NetPriProductionStem;
+  real&       GrowthRespLeaf         = bf.GrowthRespLeaf;
+  real&       GrowthRespRoot         = bf.GrowthRespRoot;
+  real&       GrowthRespWood         = bf.GrowthRespWood;
+  real&       GrowthRespStem         = bf.GrowthRespStem;
+  real&       LeafMassMaxChg         = bf.LeafMassMaxChg;
+  real&       CarbonDecayToStable    = bf.CarbonDecayToStable;
+  real&       RespirationLeaf        = bf.RespirationLeaf;
+  real&       RespirationStem        = bf.RespirationStem;
+  real&       RespirationWood        = bf.RespirationWood;
+  real&       RespirationLeafMaint   = bf.RespirationLeafMaint;
+  real&       RespirationRoot        = bf.RespirationRoot;
+  real&       RespirationSoil        = bf.RespirationSoil;
+  real&       DeathLeaf              = bf.DeathLeaf;
+  real&       DeathStem              = bf.DeathStem;
+  real&       TurnoverLeaf           = bf.TurnoverLeaf;
+  real&       TurnoverStem           = bf.TurnoverStem;
+  real&       TurnoverWood           = bf.TurnoverWood;
+  real&       TurnoverRoot           = bf.TurnoverRoot;
+  real&       StemMassMaxChg         = bf.StemMassMaxChg;
+
+  // RespTmp(Temp0) = exp(0.08 * (Temp0 - 298.16)): the respiration's temperature function
+  auto RespTmp = [](real Temp0) { return rexp(real(0.08) * (Temp0 - real(298.16))); };
+
+  StemAreaPerMass = real(3.0) * real(0.001);
+  LeafMassMin     = LeafAreaIndexMin / LeafAreaPerMass;
+  StemMassMin     = StemAreaIndexMin / StemAreaPerMass;
+
+  if (IndexGrowSeason == real(0.0)) {
+    RespReductionFac = real(0.5);
+  } else {
+    RespReductionFac = real(1.0);
+  }
+
+  RespFacNitrogenFoliage = std::min(NitrogenConcFoliage / std::max(real(1.0e-06), NitrogenConcFoliageMax), real(1.0));
+  RespFacTemperature     = rpow(RespMaintQ10, (TemperatureCanopy - real(298.16)) / real(10.0));
+  RespirationLeaf        = RespMaintLeaf25C * RespFacTemperature * RespFacNitrogenFoliage * LeafAreaIndex *
+                           RespReductionFac * (real(1.0) - SoilWaterStress);
+  RespirationLeafMaint   = std::min((LeafMass - LeafMassMin) / MainTimeStep, RespirationLeaf * real(12.0e-6));
+  RespirationRoot        = RespMaintRoot25C * (RootMass * real(1.0e-3)) * RespFacTemperature * RespReductionFac *
+                           real(12.0e-6);
+  RespirationStem        = RespMaintStem25C * ((StemMass - StemMassMin) * real(1.0e-3)) * RespFacTemperature *
+                           RespReductionFac * real(12.0e-6);
+  RespirationWood        = WoodRespCoeff * RespTmp(TemperatureCanopy) * WoodMass * WoodPoolIndex;
+
+  CarbonAssim = PhotosynTotal * real(12.0e-6);
+
+  CarbonFracToLeaf = rexp(real(0.01) * (real(1.0) - rexp(real(0.75) * LeafAreaIndex)) * LeafAreaIndex);
+  if (VegType == IndexEBLForest)
+    CarbonFracToLeaf = rexp(real(0.01) * (real(1.0) - rexp(real(0.50) * LeafAreaIndex)) * LeafAreaIndex);
+  CarbonFracToWoodRoot = real(1.0) - CarbonFracToLeaf;
+  CarbonFracToStem     = LeafAreaIndex / real(10.0) * CarbonFracToLeaf;
+  CarbonFracToLeaf     = CarbonFracToLeaf - CarbonFracToStem;
+
+  if (WoodMass > real(1.0e-6)) {
+    WoodCarbonFrac = (real(1.0) - rexp(-WoodAllocFac * (WoodToRootRatio * RootMass / WoodMass)) / WoodAllocFac) *
+                     WoodPoolIndex;
+  } else {
+    WoodCarbonFrac = WoodPoolIndex;
+  }
+  CarbonFracToRoot = CarbonFracToWoodRoot * (real(1.0) - WoodCarbonFrac);
+  CarbonFracToWood = CarbonFracToWoodRoot * WoodCarbonFrac;
+
+  TurnoverLeaf = TurnoverCoeffLeafVeg * real(5.0e-7) * LeafMass;
+  TurnoverStem = TurnoverCoeffLeafVeg * real(5.0e-7) * StemMass;
+  TurnoverRoot = TurnoverCoeffRootVeg * RootMass;
+  TurnoverWood = real(9.5e-10) * WoodMass;
+
+  const real DeathCoeffTemp  = rexp(real(-0.3) * std::max(real(0.0), TemperatureCanopy - TemperaureLeafFreeze)) *
+                               (LeafMass / real(120.0));
+  const real DeathCoeffWater = rexp((SoilWaterStress - real(1.0)) * WaterStressCoeff);
+  DeathLeaf = LeafMass * real(1.0e-6) * (LeafDeathWaterCoeffVeg * DeathCoeffWater + LeafDeathTempCoeffVeg * DeathCoeffTemp);
+  DeathStem = StemMass * real(1.0e-6) * (LeafDeathWaterCoeffVeg * DeathCoeffWater + LeafDeathTempCoeffVeg * DeathCoeffTemp);
+
+  GrowthRespLeaf = std::max(real(0.0), GrowthRespFrac * (CarbonFracToLeaf * CarbonAssim - RespirationLeafMaint));
+  GrowthRespStem = std::max(real(0.0), GrowthRespFrac * (CarbonFracToStem * CarbonAssim - RespirationStem));
+  GrowthRespRoot = std::max(real(0.0), GrowthRespFrac * (CarbonFracToRoot * CarbonAssim - RespirationRoot));
+  GrowthRespWood = std::max(real(0.0), GrowthRespFrac * (CarbonFracToWood * CarbonAssim - RespirationWood));
+
+  real NetPriProdLeafAdd = std::max(real(0.0), CarbonFracToLeaf * CarbonAssim - GrowthRespLeaf - RespirationLeafMaint);
+  real NetPriProdStemAdd = std::max(real(0.0), CarbonFracToStem * CarbonAssim - GrowthRespStem - RespirationStem);
+  if (TemperatureCanopy < TemperatureMinPhotosyn) NetPriProdLeafAdd = real(0.0);
+  if (TemperatureCanopy < TemperatureMinPhotosyn) NetPriProdStemAdd = real(0.0);
+
+  LeafMassMaxChg = (LeafMass - LeafMassMin) / MainTimeStep;
+  StemMassMaxChg = (StemMass - StemMassMin) / MainTimeStep;
+  DeathLeaf      = std::min(DeathLeaf, LeafMassMaxChg + NetPriProdLeafAdd - TurnoverLeaf);
+  DeathStem      = std::min(DeathStem, StemMassMaxChg + NetPriProdStemAdd - TurnoverStem);
+
+  NetPriProductionLeaf = std::max(NetPriProdLeafAdd, -LeafMassMaxChg);
+  NetPriProductionStem = std::max(NetPriProdStemAdd, -StemMassMaxChg);
+  NetPriProductionRoot = CarbonFracToRoot * CarbonAssim - RespirationRoot - GrowthRespRoot;
+  NetPriProductionWood = CarbonFracToWood * CarbonAssim - RespirationWood - GrowthRespWood;
+
+  LeafMass = LeafMass + (NetPriProductionLeaf - TurnoverLeaf - DeathLeaf) * MainTimeStep;
+  StemMass = StemMass + (NetPriProductionStem - TurnoverStem - DeathStem) * MainTimeStep;
+  RootMass = RootMass + (NetPriProductionRoot - TurnoverRoot) * MainTimeStep;
+  if (RootMass < real(0.0)) {
+    TurnoverRoot = NetPriProductionRoot;
+    RootMass     = real(0.0);
+  }
+  WoodMass = (WoodMass + (NetPriProductionWood - TurnoverWood) * MainTimeStep) * WoodPoolIndex;
+
+  CarbonMassShallowSoil    = CarbonMassShallowSoil +
+                             (TurnoverRoot + TurnoverLeaf + TurnoverStem + TurnoverWood + DeathLeaf + DeathStem) * MainTimeStep;
+  MicroRespFactorSoilTemp  = rpow(real(2.0), (TemperatureSoilSnow(1) - real(283.16)) / real(10.0));
+  MicroRespFactorSoilWater = SoilWaterRootZone / (real(0.20) + SoilWaterRootZone) * real(0.23) / (real(0.23) + SoilWaterRootZone);
+  RespirationSoil          = MicroRespFactorSoilWater * MicroRespFactorSoilTemp * MicroRespCoeff *
+                             std::max(real(0.0), CarbonMassShallowSoil * real(1.0e-3)) * real(12.0e-6);
+  CarbonDecayToStable      = real(0.1) * RespirationSoil;
+  CarbonMassShallowSoil    = CarbonMassShallowSoil - (RespirationSoil + CarbonDecayToStable) * MainTimeStep;
+  CarbonMassDeepSoil       = CarbonMassDeepSoil + CarbonDecayToStable * MainTimeStep;
+
+  CarbonToAtmos       = -CarbonAssim + RespirationLeafMaint + RespirationRoot + RespirationWood + RespirationStem +
+                        real(0.9) * RespirationSoil + GrowthRespLeaf + GrowthRespRoot + GrowthRespWood + GrowthRespStem;
+  GrossPriProduction  = CarbonAssim;
+  NetPriProductionTot = NetPriProductionLeaf + NetPriProductionWood + NetPriProductionRoot + NetPriProductionStem;
+  RespirationPlantTot = RespirationRoot + RespirationWood + RespirationLeafMaint + RespirationStem +
+                        GrowthRespLeaf + GrowthRespRoot + GrowthRespWood + GrowthRespStem;
+  RespirationSoilOrg  = real(0.9) * RespirationSoil;
+  NetEcoExchange      = (RespirationPlantTot + RespirationSoilOrg - GrossPriProduction) * real(44.0) / real(12.0);
+  CarbonMassSoilTot   = CarbonMassShallowSoil + CarbonMassDeepSoil;
+  CarbonMassLiveTot   = LeafMass + RootMass + StemMass + WoodMass;
+  LeafAreaIndex       = std::max(LeafMass * LeafAreaPerMass, LeafAreaIndexMin);
+  StemAreaIndex       = std::max(StemMass * StemAreaPerMass, StemAreaIndexMin);
+}
+
+// ============================================================================
+// BiochemNatureVegMainMod.F90 (dveg 2 / 5 / 6: FlagDynamicVeg)
+// ============================================================================
+CPPWRF_HD inline void BiochemNatureVegMain(NoahmpType& noahmp) {
+  const int&  VegType                = noahmp.config.domain.VegType;
+  const auto& DepthSoilLayer         = noahmp.config.domain.DepthSoilLayer;
+  const auto& ThicknessSnowSoilLayer = noahmp.config.domain.ThicknessSnowSoilLayer;
+  const int&  IndexWaterPoint        = noahmp.config.domain.IndexWaterPoint;
+  const int&  IndexIcePoint          = noahmp.config.domain.IndexIcePoint;
+  const int&  IndexBarrenPoint       = noahmp.config.domain.IndexBarrenPoint;
+  const bool& FlagUrban              = noahmp.config.domain.FlagUrban;
+  const int&  NumSoilLayerRoot       = noahmp.water.param.NumSoilLayerRoot;
+  const auto& SoilMoistureSat        = noahmp.water.param.SoilMoistureSat;
+  const auto& SoilMoisture           = noahmp.water.state.SoilMoisture;
+  const real& SoilTranspFacAcc       = noahmp.water.state.SoilTranspFacAcc;
+  const real& LeafAreaPerMass1side   = noahmp.biochem.param.LeafAreaPerMass1side;
+  auto&       bs                     = noahmp.biochem.state;
+  auto&       bf                     = noahmp.biochem.flux;
+  real&       SoilWaterRootZone      = noahmp.water.state.SoilWaterRootZone;
+  real&       SoilWaterStress        = noahmp.water.state.SoilWaterStress;
+
+  bf.NetEcoExchange      = real(0.0);
+  bf.NetPriProductionTot = real(0.0);
+  bf.GrossPriProduction  = real(0.0);
+
+  if ((VegType == IndexWaterPoint) || (VegType == IndexBarrenPoint) || (VegType == IndexIcePoint) || FlagUrban) {
+    noahmp.energy.state.LeafAreaIndex = real(0.0);
+    noahmp.energy.state.StemAreaIndex = real(0.0);
+    bf.GrossPriProduction    = real(0.0);
+    bf.NetPriProductionTot   = real(0.0);
+    bf.NetEcoExchange        = real(0.0);
+    bf.RespirationPlantTot   = real(0.0);
+    bf.RespirationSoilOrg    = real(0.0);
+    bs.CarbonMassSoilTot     = real(0.0);
+    bs.CarbonMassLiveTot     = real(0.0);
+    bs.LeafMass              = real(0.0);
+    bs.RootMass              = real(0.0);
+    bs.StemMass              = real(0.0);
+    bs.WoodMass              = real(0.0);
+    bs.CarbonMassDeepSoil    = real(0.0);
+    bs.CarbonMassShallowSoil = real(0.0);
+    return;
+  }
+
+  bs.LeafAreaPerMass = LeafAreaPerMass1side / real(1000.0);
+
+  SoilWaterStress   = real(1.0) - SoilTranspFacAcc;
+  SoilWaterRootZone = real(0.0);
+  for (int LoopInd = 1; LoopInd <= NumSoilLayerRoot; ++LoopInd) {
+    SoilWaterRootZone = SoilWaterRootZone + SoilMoisture(LoopInd) / SoilMoistureSat(LoopInd) *
+                                            ThicknessSnowSoilLayer(LoopInd) / (-DepthSoilLayer(NumSoilLayerRoot));
+  }
+
+  CarbonFluxNatureVeg(noahmp);
+}
+
+// ============================================================================
 // NoahmpMainMod.F90
 // ============================================================================
 CPPWRF_HD inline void NoahmpMain(NoahmpType& noahmp) {
@@ -2516,6 +2986,7 @@ CPPWRF_HD inline void NoahmpMain(NoahmpType& noahmp) {
   PrecipitationHeatAdvect(noahmp);
   EnergyMain(noahmp);
   WaterMain(noahmp);
+  if (noahmp.config.domain.FlagDynamicVeg) BiochemNatureVegMain(noahmp);
   BalanceWaterCheck(noahmp);
   BalanceEnergyCheck(noahmp);
 }

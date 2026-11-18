@@ -490,18 +490,22 @@ PHYSICS_SUITES = {
                  "bl_pbl_physics": 1, "sf_sfclay_physics": 1, "sf_surface_physics": 2},
 }
 
+# WRF 4.8.0 Noah-MP v5.1.2 option values ported (the others are errors, as in the model's validate_noahmp_options):
+# opt_runsrf / opt_runsub 5 (MMF groundwater input) and 8 (dynamic VIC: WRF reads an uninitialised local), opt_infdv
+# (dynamic VIC only), opt_alb 3 (SNICAR), opt_soil 2-4 / opt_pedo, opt_crop, opt_irr / opt_irrm, opt_tdrn and
+# opt_wetland 2 (input fields) are not ported
 SUPPORTED_NOAHMP_OPTIONS = {
-    "dveg": (1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+    "dveg": (1, 2, 3, 4, 5, 6, 7, 8, 9),
     "opt_crs": (1, 2),
     "opt_btr": (1, 2, 3),
-    "opt_runsrf": (1, 2, 3, 4),
-    "opt_runsub": (1, 2, 3, 4),
+    "opt_runsrf": (1, 2, 3, 4, 6, 7),
+    "opt_runsub": (1, 2, 3, 4, 6, 7),
     "opt_sfc": (1, 2),
     "opt_frz": (1, 2),
     "opt_inf": (1, 2),
     "opt_rad": (1, 2, 3),
     "opt_alb": (1, 2),
-    "opt_snf": (1, 2, 3, 4),
+    "opt_snf": (1, 2, 3, 4, 5),
     "opt_tbot": (1, 2),
     "opt_stc": (1, 2, 3),
     "opt_gla": (1, 2),
@@ -515,8 +519,8 @@ SUPPORTED_NOAHMP_OPTIONS = {
     "opt_tdrn": (0,),
     "opt_tksno": (1, 2, 3, 4, 5),
     "opt_compact": (1, 2),
-    "opt_scf": (1, 2, 3, 4, 5),
-    "opt_wetland": (0, 1, 2),
+    "opt_scf": (1, 2),
+    "opt_wetland": (0, 1),
 }
 
 # &dynamics options that WRF applies but CPPWRF does not port: any non-default value is an error

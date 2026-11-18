@@ -83,6 +83,8 @@ struct NoahmpInitKernel {
   View2<real> t2mbxy;
   View2<real> chstarxy;
   View2<real> qtdrain;
+  View2<real> fsatxy;
+  View2<real> wsurfxy;
   View3<real> tsnoxy;
   View3<real> snicexy;
   View3<real> snliqxy;
@@ -98,6 +100,7 @@ struct NoahmpInitKernel {
   bool restart = false;
   int iopt_runsub = 3;
   int iopt_crop = 0;
+  int iopt_wetland = 0;
   int sf_urban_physics = 0;
 
   CPPWRF_HD void operator()(int i, int j) const {
@@ -197,6 +200,10 @@ struct NoahmpInitKernel {
     qsnowxy(i, j) = real(0.0);
     qrainxy(i, j) = real(0.0);
     wslakexy(i, j) = real(0.0);
+    if (iopt_wetland > 0) {
+      fsatxy(i, j) = real(0.0);
+      wsurfxy(i, j) = real(0.0);
+    }
 
     if (iopt_runsub != 5) {
       waxy(i, j) = real(4900.0);
@@ -409,6 +416,8 @@ struct NoahmpKernel {
   View2<real> qsnowxy;
   View2<real> qrainxy;
   View2<real> wslakexy;
+  View2<real> fsatxy;
+  View2<real> wsurfxy;
   View2<real> zwtxy;
   View2<real> waxy;
   View2<real> wtxy;
@@ -999,6 +1008,10 @@ struct NoahmpKernel {
     }
     ws.RechargeGwDeepWT = real(0.0);
     ws.RechargeGwShallowWT = real(0.0);
+    if (opts.opt_wetland > 0) {  // WaterVarInTransferMod.F90:80
+      ws.SoilSaturateFrac = fsatxy(i, j);
+      ws.WaterStorageWetland = wsurfxy(i, j);
+    }
 
     wf.EvapSoilSfcLiqAcc = acc_qsevaxy.p ? acc_qsevaxy(i, j) : real(0.0);
     wf.SoilSfcInflowAcc = acc_qinsurxy.p ? acc_qinsurxy(i, j) : real(0.0);
@@ -1370,6 +1383,10 @@ struct NoahmpKernel {
     zwtxy(i, j) = ws.WaterTableDepth;
     waxy(i, j) = ws.WaterStorageAquifer;
     wtxy(i, j) = ws.WaterStorageSoilAqf;
+    if (opts.opt_wetland > 0) {  // WaterVarOutTransferMod.F90:168
+      wsurfxy(i, j) = ws.WaterStorageWetland;
+      fsatxy(i, j) = ws.SoilSaturateFrac;
+    }
     if (runsfxy.p) runsfxy(i, j) = wf.RunoffSurface;
     if (runsbxy.p) runsbxy(i, j) = wf.RunoffSubsurface;
     if (ecanxy.p) ecanxy(i, j) = wf.EvapCanopyNet;

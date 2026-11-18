@@ -529,6 +529,31 @@ class TestValidationAndWarnings(unittest.TestCase):
         self.assertEqual(gen["phys"]["opt_runsrf"], 3)
         self.assertEqual(gen["phys"]["opt_runsub"], 3)
 
+    def test_noahmp_option_values(self):
+        # the Noah-MP option values of WRF 4.8.0 that are ported pass through; the others are errors
+        def run(nmp):
+            text = f"""
+            &time_control /
+            &domains time_step = 60 /
+            &physics sf_sfclay_physics = 1, sf_surface_physics = 4, bl_pbl_physics = 1 /
+            &noah_mp {nmp} /
+            &dynamics /
+            """
+            t = WrfTranslator(parse_namelist(real_case(text)))
+            return t, t.translate()
+        ok = ("dveg = 2, opt_crs = 2, opt_btr = 3, opt_runsrf = 7, opt_runsub = 7, opt_sfc = 2, opt_frz = 2, "
+              "opt_inf = 2, opt_rad = 1, opt_alb = 1, opt_snf = 5, opt_tbot = 1, opt_stc = 3, opt_gla = 2, "
+              "opt_rsf = 4, opt_tksno = 5, opt_compact = 1, opt_scf = 2, opt_wetland = 1, soiltstep = 180.")
+        t, gen = run(ok)
+        self.assertEqual(t.errors, [])
+        for k, v in (("dveg", 2), ("opt_runsrf", 7), ("opt_snf", 5), ("opt_scf", 2), ("opt_wetland", 1)):
+            self.assertEqual(gen["phys"][k], v)
+        for bad in ("dveg = 10", "opt_runsrf = 8, opt_runsub = 8", "opt_runsrf = 5, opt_runsub = 5",
+                    "opt_infdv = 1", "opt_alb = 3", "opt_soil = 2", "opt_crop = 1", "opt_irr = 1",
+                    "opt_tdrn = 1", "opt_wetland = 2", "opt_scf = 3"):
+            t, _ = run(bad)
+            self.assertTrue(any("Noah-MP" in e and bad.split()[0] in e for e in t.errors), (bad, t.errors))
+
     def test_extended_physics_options_mapping(self):
         text = """
         &time_control /

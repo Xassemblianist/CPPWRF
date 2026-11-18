@@ -1920,6 +1920,8 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       nmp.qsnowxy = qsnowxy.view();
       nmp.qrainxy = qrainxy.view();
       nmp.wslakexy = wslakexy.view();
+      nmp.fsatxy = fsatxy.view();
+      nmp.wsurfxy = wsurfxy.view();
       nmp.zwtxy = zwtxy.view();
       nmp.waxy = waxy.view();
       nmp.wtxy = wtxy.view();

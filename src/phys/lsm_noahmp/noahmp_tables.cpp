@@ -6,6 +6,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <initializer_list>
 #include <map>
 #include <sstream>
 #include <stdexcept>
@@ -15,43 +16,49 @@
 namespace cppwrf::phys::noahmp {
 
 void validate_noahmp_options(const NoahmpOptions& opt) {
-  auto check = [](const char* name, int got, int expected) {
-    if (got != expected) {
-      throw std::runtime_error(std::string("Noah-MP: unsupported ") + name + "=" +
-                               std::to_string(got) + " (only " + std::to_string(expected) +
-                               " is ported)");
-    }
+  // the option values ported from WRF 4.8.0's Noah-MP v5.1.2 (phys/noahmp/src); the others are errors:
+  //   dveg 10 and higher (no WRF branch), opt_runsrf / opt_runsub 5 (MMF groundwater:
+  //   wrfinput's FDEPTH, RIVERBED, EQZWT, RECHCLIM) and 8 (dynamic VIC: RunoffSurfaceDynamicVicMod.F90 reads the
+  //   uninitialised local DepthYTmp when the infiltration capacity is below the water input), opt_infdv (dynamic VIC
+  //   only), opt_alb 3 (SNICAR), opt_soil 2 / 3 / 4 and opt_pedo (soil texture / composition input), opt_crop,
+  //   opt_irr / opt_irrm, opt_tdrn and opt_wetland 2 (their input fields)
+  auto check = [](const char* name, int got, std::initializer_list<int> ok) {
+    for (int v : ok)
+      if (got == v) return;
+    std::string list;
+    for (int v : ok) list += (list.empty() ? "" : ", ") + std::to_string(v);
+    throw std::runtime_error(std::string("Noah-MP: unsupported ") + name + "=" + std::to_string(got) +
+                             " (ported: " + list + ")");
   };
-  check("dveg", opt.dveg, 4);
-  check("opt_crs", opt.opt_crs, 1);
-  check("opt_btr", opt.opt_btr, 1);
-  check("opt_runsrf", opt.opt_runsrf, 3);
-  check("opt_runsub", opt.opt_runsub, 3);
-  check("opt_sfc", opt.opt_sfc, 1);
-  check("opt_frz", opt.opt_frz, 1);
-  check("opt_inf", opt.opt_inf, 1);
-  check("opt_rad", opt.opt_rad, 3);
-  check("opt_alb", opt.opt_alb, 2);
-  check("opt_snf", opt.opt_snf, 1);
-  check("opt_tbot", opt.opt_tbot, 2);
-  check("opt_stc", opt.opt_stc, 1);
-  check("opt_gla", opt.opt_gla, 1);
-  check("opt_rsf", opt.opt_rsf, 1);
-  check("opt_soil", opt.opt_soil, 1);
-  check("opt_pedo", opt.opt_pedo, 1);
-  check("opt_crop", opt.opt_crop, 0);
-  check("opt_irr", opt.opt_irr, 0);
-  check("opt_irrm", opt.opt_irrm, 0);
-  check("opt_infdv", opt.opt_infdv, 0);
-  check("opt_tdrn", opt.opt_tdrn, 0);
-  check("opt_tksno", opt.opt_tksno, 1);
-  check("opt_compact", opt.opt_compact, 2);
-  check("opt_scf", opt.opt_scf, 1);
-  check("opt_wetland", opt.opt_wetland, 0);
-  check("sf_urban_physics", opt.sf_urban_physics, 0);
-  if (opt.soiltstep != 0.0) {
-    throw std::runtime_error("Noah-MP: unsupported soiltstep=" + std::to_string(opt.soiltstep) +
-                             " (only 0.0 is ported)");
+  check("dveg", opt.dveg, {1, 2, 3, 4, 5, 6, 7, 8, 9});
+  check("opt_crs", opt.opt_crs, {1, 2});
+  check("opt_btr", opt.opt_btr, {1, 2, 3});
+  check("opt_runsrf", opt.opt_runsrf, {1, 2, 3, 4, 6, 7});
+  check("opt_runsub", opt.opt_runsub, {1, 2, 3, 4, 6, 7});
+  check("opt_sfc", opt.opt_sfc, {1, 2});
+  check("opt_frz", opt.opt_frz, {1, 2});
+  check("opt_inf", opt.opt_inf, {1, 2});
+  check("opt_rad", opt.opt_rad, {1, 2, 3});
+  check("opt_alb", opt.opt_alb, {1, 2});
+  check("opt_snf", opt.opt_snf, {1, 2, 3, 4, 5});
+  check("opt_tbot", opt.opt_tbot, {1, 2});
+  check("opt_stc", opt.opt_stc, {1, 2, 3});
+  check("opt_gla", opt.opt_gla, {1, 2});
+  check("opt_rsf", opt.opt_rsf, {1, 2, 3, 4});
+  check("opt_soil", opt.opt_soil, {1});
+  check("opt_pedo", opt.opt_pedo, {1});
+  check("opt_crop", opt.opt_crop, {0});
+  check("opt_irr", opt.opt_irr, {0});
+  check("opt_irrm", opt.opt_irrm, {0});
+  check("opt_infdv", opt.opt_infdv, {0});
+  check("opt_tdrn", opt.opt_tdrn, {0});
+  check("opt_tksno", opt.opt_tksno, {1, 2, 3, 4, 5});
+  check("opt_compact", opt.opt_compact, {1, 2});
+  check("opt_scf", opt.opt_scf, {1, 2});
+  check("opt_wetland", opt.opt_wetland, {0, 1});
+  check("sf_urban_physics", opt.sf_urban_physics, {0});
+  if (opt.soiltstep < 0.0) {
+    throw std::runtime_error("Noah-MP: soiltstep=" + std::to_string(opt.soiltstep) + " must be >= 0");
   }
 }
 

@@ -667,7 +667,7 @@ void DomainRunner::prepare_output() {
                               &su.rssunxy, &su.rsshaxy, &su.bgapxy, &su.wgapxy, &su.tgvxy, &su.tgbxy, &su.chvxy,
                               &su.chbxy, &su.shgxy, &su.shcxy, &su.shbxy, &su.evgxy, &su.evbxy, &su.ghvxy, &su.ghbxy,
                               &su.irgxy, &su.ircxy, &su.irbxy, &su.trxy, &su.evcxy, &su.chleafxy, &su.chucxy,
-                              &su.chv2xy, &su.chb2xy, &su.rs, &su.sfcrunoff, &su.udrunoff, &su.acsnow, &su.acsnom})
+                              &su.chv2xy, &su.chb2xy, &su.fsatxy, &su.wsurfxy, &su.rs, &su.sfcrunoff, &su.udrunoff, &su.acsnow, &su.acsnom})
         extra_2d_.push_back(f);
     }
     if (su.radiation_on()) {
