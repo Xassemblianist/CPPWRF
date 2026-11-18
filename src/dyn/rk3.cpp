@@ -67,8 +67,9 @@ void RK3::set_lateral_bc(LateralBC* bc) {
 }
 
 int RK3::auto_sound_steps(double dt, double dx, double dy) {
-  const double spacing = std::min(dx, dy);  // solve_em: also in 2-D (dy of the namelist)
-  return std::max(2 * (int(300.0 * dt / spacing - 0.01) + 1), 4);
+  // solve_em: also in 2-D (dy of the namelist); REAL arithmetic as in WRF (real*4 in the FP32 build)
+  const real spacing = std::min(real(dx), real(dy));
+  return std::max(2 * (int(real(300.) * real(dt) / spacing - real(0.01)) + 1), 4);
 }
 
 int RK3::adaptive_sound_steps(real dt, real dx, real dy, real max_msft) {
