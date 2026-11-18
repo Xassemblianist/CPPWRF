@@ -36,6 +36,8 @@ _X = {"X4L": {}}
 _X.update({f"X4DV{v}": {"dveg": v} for v in (1, 2, 3, 5, 6, 7, 8, 9)})
 _X.update({"X4CRS2": {"opt_crs": 2}, "X4BTR2": {"opt_btr": 2}, "X4BTR3": {"opt_btr": 3}, "X4RAD1": {"opt_rad": 1},
            "X4RAD2": {"opt_rad": 2}, "X4RSF2": {"opt_rsf": 2}, "X4RSF3": {"opt_rsf": 3}, "X4SFC2": {"opt_sfc": 2}})
+_X.update({f"X4RUN{v}": {"opt_runsrf": v, "opt_runsub": v} for v in (1, 2, 4, 6, 7)})
+_X["X4WET1"] = {"opt_wetland": 1}
 _XS = {f"X4SNF{v}": {"opt_snf": v} for v in (2, 3, 4, 5)}
 
 _V = {f"VTKS{v}": {"opt_tksno": v} for v in (2, 3, 4, 5)}
@@ -117,7 +119,8 @@ STATUS = [
      'and 1/2, opt_sfc 2, opt_frz 2, opt_inf 2, opt_rad 1/2, opt_alb 1, opt_tbot 1, opt_stc 2/3, opt_rsf 2-4, '
      'opt_tksno 2-5, opt_compact 1, opt_scf 2, opt_wetland 1, soiltstep 180; 5 restarted at 30 min)', '1 h'),
     ('X4', 'NMP1 inputs with P4 physics (WSM6, KF, RRTMG radt 10) and Noah-MP; restarted at 30 min', '1 h'),
-    ('X4L, X4* (17 runs)', 'X4 with dveg 1-3/5-9, opt_crs 2, opt_btr 2/3, opt_rad 1/2, opt_rsf 2/3, opt_sfc 2', '6 h'),
+    ('X4L, X4* (23 runs)', 'X4 with dveg 1-3/5-9, opt_crs 2, opt_btr 2/3, opt_rad 1/2, opt_rsf 2/3, opt_sfc 2, '
+     'opt_runsrf/sub 1/2/4/6/7, opt_wetland 1', '6 h'),
     ('X4SNF* (4 runs)', 'X4 with opt_snf 2-5', '1 h'),
     ('VB, V* (16 runs)', 'V3 (Alps snow and glacier) with opt_tksno 2-5, opt_compact 1, opt_scf 2, opt_gla 2, opt_alb 1, '
      'opt_stc 2/3, opt_frz 2, opt_inf 2, opt_tbot 1, opt_rsf 4, dveg 2, opt_snf 2-5; VB restarted at 15 min', '30 min'),
@@ -136,6 +139,8 @@ def _data(c):
     run = c[4].split("/run_")[1].split("_r8/")[0]
     if run.startswith("V"):
         return "suite_data.tar,port_a14v_data.tar,v05_files_links.tar"
+    if run.startswith(("X4RUN", "X4WET")):
+        return "suite_data.tar,port_a14x2_data.tar"
     return "suite_data.tar," + _TAR.get(run, "port_a14x_data.tar")
 
 
