@@ -26,6 +26,14 @@ a verified configuration, of a configuration key or of an output file is a new m
   last RK stage as in module_em.F. Tier: verified (suite cases MO4, MOK4, MOMY, MON3, WE4, WP4, WM4, WK4, WMY, WN3
   against WRF real*8 at tolerance 0, the WENO ones against WRF -r8 -double-8; column test tests/dyn/advection
   bit-identical with WRF's advection routines). Monotonic advection with other orders than h 5 / v 3 is an error.
+- NSSL 2-moment microphysics kernel (WRF's module_mp_nssl_2mom.F, mp_physics = 18 with its defaults and 17: 2-moment
+  cloud water, rain, ice, snow, graupel and hail with predicted graupel / hail volume and activated CCN):
+  src/phys/mp_nssl (nssl_2mom_init's tables and module values; nssl_2mom_driver for one j row: ice nucleation,
+  calcnfromq / calcnfromcuten, the adaptive two-moment sedimentation, nssl_2mom_gs, NUCOND, smallvalues, ssat,
+  radardd02, calc_eff_radius; the loops gfortran vectorises with libmvec's pow take the vm:: lanes of WRF's 64-point
+  gather batches). Column test tests/phys/mp_nssl (ctest test_phys_nssl) against WRF's nssl_2mom_init /
+  nssl_2mom_driver of the -r8 -fdefault-double-8 build: every output bit-identical over several calls. Not wired into
+  the model yet: mp_physics 17 / 18 / 19 / 21 / 22 stay errors in the translator and the model.
 - Grell-3D ensemble cumulus (cu_physics = 5, WRF's module_cu_g3.F): G3DRV with the 3 x 3 neighbours' vertical
   motion and advective forcing (ens4 = 9), CUP_enss_3d with its closure ensemble (maxens 3, maxens2 3, maxens3 16),
   the shallow convection (ishallow = 1), clos_choice, cugd_avedx 1 / 3 (`[phys] cugd_avedx`), APR_* /

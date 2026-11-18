@@ -64,6 +64,13 @@ target_include_directories(driver_wdm_cpu PRIVATE ${CPPWRF_ROOT}/src ${CMAKE_CUR
 target_compile_definitions(driver_wdm_cpu PRIVATE CPPWRF_DOUBLE)
 target_compile_options(driver_wdm_cpu PRIVATE -O3 ${CPPWRF_TEST_MARCH} -ffp-contract=off)
 target_link_libraries(driver_wdm_cpu PRIVATE OpenMP::OpenMP_CXX mvec m)
+# NSSL 2-moment (header-only row kernel; libmvec: WRF's vectorised pow in ziegfall1d / nucond / nssl_2mom_gs)
+add_executable(driver_nssl_cpu mp_nssl/driver_nssl.cpp ${CPPWRF_ROOT}/src/phys/mp_nssl/nssl.cpp
+               ${CPPWRF_ROOT}/src/core/backend.cpp)
+target_include_directories(driver_nssl_cpu PRIVATE ${CPPWRF_ROOT}/src ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(driver_nssl_cpu PRIVATE CPPWRF_DOUBLE)
+target_compile_options(driver_nssl_cpu PRIVATE -O3 ${CPPWRF_TEST_MARCH} -ffp-contract=off)
+target_link_libraries(driver_nssl_cpu PRIVATE OpenMP::OpenMP_CXX mvec m)
 
 # Kain-Fritsch, Noah LSM, Thompson (own CMake files: tables and column drivers)
 foreach(scheme cu_kf lsm_noah mp_thompson)
@@ -81,6 +88,7 @@ foreach(t "kessler;mp_kessler;${PHYS_BIN}"
           "p3;mp_p3;${PHYS_BIN}"
           "wsm35;mp_wsm35;${PHYS_BIN}"
           "wdm;mp_wdm;${PHYS_BIN}"
+          "nssl;mp_nssl;${PHYS_BIN}"
           "bl_myj;bl_myj;${PHYS_BIN}/bl_myj_test"
           "cu_bmj;cu_bmj;${PHYS_BIN}/cu_bmj_test"
           "cu_mskf;cu_mskf;${PHYS_BIN}/cu_mskf_test"
