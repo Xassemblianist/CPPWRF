@@ -123,5 +123,20 @@ STATUS = [
      'opt_stc 2/3, opt_frz 2, opt_inf 2, opt_tbot 1, opt_rsf 4, dveg 2, opt_snf 2-5; VB restarted at 15 min', '30 min'),
 ]
 
-DATA = {c[0]: 'suite_data.tar,port_a14_data.tar' for c in CASES}
-DATA.update({c[0]: 'suite_data.tar,v05_files_links.tar,port_a14v_data.tar' for c in CASES if c[0].startswith("real_v")})
+# the reference runs' data tars (staged from the wrfref assets of each tag)
+_TAR = {n: "port_a14n1_data.tar" for n in ("NDV1", "NDV2", "NDV3", "NDV5", "NDV6", "NDV7", "NDV8", "NDV9", "NCRS2",
+                                           "NBTR2", "NBTR3", "NRUN1", "NRUN2", "NRUN4")}
+_TAR.update({n: "port_a14n2_data.tar" for n in ("NRUN6", "NRUN7", "NRUNX", "NSFC2", "NFRZ2", "NINF2", "NRAD1", "NRAD2",
+                                                "NALB1", "NTBOT1")})
+_TAR.update({n: "port_a14n3_data.tar" for n in ("NSTC2", "NSTC3", "NRSF2", "NRSF3", "NRSF4", "NTKS2", "NTKS3", "NTKS4",
+                                                "NTKS5", "NCMP1", "NSCF2", "NWET1", "NSTS")})
+
+
+def _data(c):
+    run = c[4].split("/run_")[1].split("_r8/")[0]
+    if run.startswith("V"):
+        return "suite_data.tar,port_a14v_data.tar,v05_files_links.tar"
+    return "suite_data.tar," + _TAR.get(run, "port_a14x_data.tar")
+
+
+DATA = {c[0]: _data(c) for c in CASES}
