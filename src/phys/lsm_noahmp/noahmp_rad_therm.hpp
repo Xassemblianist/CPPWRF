@@ -305,12 +305,17 @@ CPPWRF_HD inline void CanopyRadiationTwoStream(NoahmpType& noahmp, int IndSwBnd,
           (ConstPI * (energy.param.TreeCrownRadius * energy.param.TreeCrownRadius));
       real CrownDepth = energy.param.HeightCanopyTop - energy.param.HeightCanopyBot;
       real CrownRadiusVert = real(0.5) * CrownDepth;
-      real SolarAngleTmp =
-          libm::atan(CrownRadiusVert / energy.param.TreeCrownRadius *
-                    libm::tan(libm::acos(std::max(real(0.01), domain.CosSolarZenithAngle))));
+      // WRF: cos(SolarAngleTmp) with SolarAngleTmp = atan(x). gfortran folds cos(atan(x)) (GCC match.pd,
+      // threshold from build_sinatan_real = 0x1.fffffffffffffp+511) into the form below; WRF's object
+      // calls neither atan nor cos here.
+      real TanArg = CrownRadiusVert / energy.param.TreeCrownRadius *
+                    libm::tan(libm::acos(std::max(real(0.01), domain.CosSolarZenithAngle)));
+      real CosSolarAngle = (std::abs(TanArg) < real(0x1.fffffffffffffp+511))
+                               ? real(1.0) / std::sqrt(TanArg * TanArg + real(1.0))
+                               : std::copysign(real(0.0), TanArg);
       energy.state.GapBtwCanopy =
           rexp(-VegDensity * ConstPI * (energy.param.TreeCrownRadius * energy.param.TreeCrownRadius) /
-               libm::cos(SolarAngleTmp));
+               CosSolarAngle);
       real FoliageDensity =
           energy.state.VegAreaIndEff /
           (real(1.33) * ConstPI * rpow(energy.param.TreeCrownRadius, real(3.0)) *
