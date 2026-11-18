@@ -632,9 +632,12 @@ CPPWRF_HD inline void turbulence_level(int k, real closure, real ckmod, A_dz dz,
   const real dzk = p5 * (dz[k] + dz[k - 1]);
   const real afk = dz[k] / (dz[k] + dz[k - 1]);
   const real abk = one - afk;
-  const real elsq = el[k] * el[k];
-  real q3sq = qkw[k] * qkw[k];
-  const real q2sq = b1 * elsq * (sm[k] * gm[k] + sh[k] * gh[k]);
+  // WRF declares q2sq, t2sq, r2sq, c2sq, elsq, gmel, ghel, q3sq, t3sq, r3sq, c3sq, dlsq, qdiv, e1 .. e4, enum, eden
+  // and wden DOUBLE PRECISION, in its single-precision build too (they are differences of near-equal terms); they are
+  // double here in every build, with WRF's literal kinds (1.0d-20, 0.0d0). In FP64 builds this is the same code.
+  const double elsq = el[k] * el[k];
+  double q3sq = qkw[k] * qkw[k];
+  const double q2sq = b1 * elsq * (sm[k] * gm[k] + sh[k] * gh[k]);
   sh[k] = c_max(sh[k], real(1e-5));
   real duz = (u[k] - u[k - 1]) * (u[k] - u[k - 1]) + (v[k] - v[k - 1]) * (v[k] - v[k - 1]);
   duz = duz / (dzk * dzk);
@@ -646,11 +649,11 @@ CPPWRF_HD inline void turbulence_level(int k, real closure, real ckmod, A_dz dz,
   else Prlim = Prlimit_fre;
   const real wt = c_min(one, zw[k] / c_max(pblh, real(200.)));
   Prlim = wt * Prlim + (one - wt) * c_min(Prlimit_sfc, Prlim);
-  const real gmel = gm[k] * elsq;
-  const real ghel = gh[k] * elsq;
-  real dlsq = elsq;
+  const double gmel = gm[k] * elsq;
+  const double ghel = gh[k] * elsq;
+  double dlsq = elsq;
   if (q3sq / dlsq < -gh[k]) q3sq = -dlsq * gh[k];
-  real qdiv, e1, e2, e3, e4, eden;
+  double qdiv, e1, e2, e3, e4, eden;
   if (q3sq < q2sq) {
     qdiv = std::sqrt(q3sq / q2sq);
     sh[k] = sh[k] * qdiv;
@@ -660,14 +663,14 @@ CPPWRF_HD inline void turbulence_level(int k, real closure, real ckmod, A_dz dz,
     e3 = e1 + e3c * ghel * (a2fac * a2fac) * (qdiv * qdiv);
     e4 = e1 - e4c * ghel * a2fac * (qdiv * qdiv);
     eden = e2 * e4 + e3 * e5c * gmel * (qdiv * qdiv);
-    eden = c_max(eden, real(1.0e-20));
+    eden = c_max(eden, 1.0e-20);
   } else {
     e1 = q3sq - e1c * ghel * a2fac;
     e2 = q3sq - e2c * ghel * a2fac;
     e3 = e1 + e3c * ghel * (a2fac * a2fac);
     e4 = e1 - e4c * ghel * a2fac;
     eden = e2 * e4 + e3 * e5c * gmel;
-    eden = c_max(eden, real(1.0e-20));
+    eden = c_max(eden, 1.0e-20);
     qdiv = one;
     sm[k] = q3sq * a1 * (e3 - three * c1 * e4) / eden;
     sh[k] = q3sq * (a2 * a2fac) * (e2 + three * c1 * e5c * gmel) / eden;
@@ -679,21 +682,21 @@ CPPWRF_HD inline void turbulence_level(int k, real closure, real ckmod, A_dz dz,
   sm[k] = c_min(sm[k], Prlim * shb);
   real gamt, gamq, gamv;
   if (closure >= real(3.0)) {  // level 3: the countergradient terms (Nakanishi and Niino 2009)
-    real t2sq = qdiv * b2 * elsq * sh[k] * (dtl[k] * dtl[k]);
-    real r2sq = qdiv * b2 * elsq * sh[k] * (dqw[k] * dqw[k]);
-    real c2sq = qdiv * b2 * elsq * sh[k] * dtl[k] * dqw[k];
-    real t3sq = c_max(tsq[k] * abk + tsq[k - 1] * afk, zero);
-    real r3sq = c_max(qsq[k] * abk + qsq[k - 1] * afk, zero);
-    real c3sq = cov[k] * abk + cov[k - 1] * afk;
+    double t2sq = qdiv * b2 * elsq * sh[k] * (dtl[k] * dtl[k]);
+    double r2sq = qdiv * b2 * elsq * sh[k] * (dqw[k] * dqw[k]);
+    double c2sq = qdiv * b2 * elsq * sh[k] * dtl[k] * dqw[k];
+    double t3sq = c_max(tsq[k] * abk + tsq[k - 1] * afk, zero);
+    double r3sq = c_max(qsq[k] * abk + qsq[k - 1] * afk, zero);
+    double c3sq = cov[k] * abk + cov[k - 1] * afk;
     c3sq = std::copysign(c_min(std::fabs(c3sq), std::sqrt(t3sq * r3sq)), c3sq);
     const real vtt = one + vt[k] * abk + vt[k - 1] * afk;
     const real vqq = tv0 + vq[k] * abk + vq[k - 1] * afk;
     t2sq = vtt * t2sq + vqq * c2sq;
     r2sq = vtt * c2sq + vqq * r2sq;
-    c2sq = c_max(vtt * t2sq + vqq * r2sq, real(0.0));
+    c2sq = c_max(vtt * t2sq + vqq * r2sq, 0.0);
     t3sq = vtt * t3sq + vqq * c3sq;
     r3sq = vtt * c3sq + vqq * r3sq;
-    c3sq = c_max(vtt * t3sq + vqq * r3sq, real(0.0));
+    c3sq = c_max(vtt * t3sq + vqq * r3sq, 0.0);
     const real cw25 = e1 * (e2 + three * c1 * e5c * gmel * (qdiv * qdiv)) / (three * eden);
     dlsq = elsq;
     if (q3sq / dlsq < -gh[k]) q3sq = -dlsq * gh[k];
@@ -702,7 +705,7 @@ CPPWRF_HD inline void turbulence_level(int k, real closure, real ckmod, A_dz dz,
     e3 = q3sq + e3c * ghel * (a2fac * a2fac) * (qdiv * qdiv);
     e4 = q3sq - e4c * ghel * a2fac * (qdiv * qdiv);
     eden = e2 * e4 + e3 * e5c * gmel * (qdiv * qdiv);
-    const real wden = cc3 * (gtr * gtr) * (dlsq * dlsq) / elsq * (qdiv * qdiv) *
+    const double wden = cc3 * (gtr * gtr) * (dlsq * dlsq) / elsq * (qdiv * qdiv) *
                       (e2 * e4c * a2fac - e3c * e5c * gmel * (a2fac * a2fac) * (qdiv * qdiv));
     if (wden != zero) {
       const real clow = q3sq * (real(0.12) - cw25) * eden / wden;
@@ -711,16 +714,16 @@ CPPWRF_HD inline void turbulence_level(int k, real closure, real ckmod, A_dz dz,
       else c3sq = c_max(c_min(c3sq, c2sq + clow), c2sq + cupp);
     }
     e1 = e2 + e5c * gmel * (qdiv * qdiv);
-    eden = c_max(eden, real(1.0e-20));
+    eden = c_max(eden, 1.0e-20);
     const real e6c = real(3.0) * (a2 * a2fac) * cc3 * gtr * dlsq / elsq;
-    real enum_;
-    if (t2sq >= zero) enum_ = c_max(qdiv * e6c * (t3sq - t2sq), real(0.0));
-    else enum_ = c_min(qdiv * e6c * (t3sq - t2sq), real(0.0));
+    double enum_;
+    if (t2sq >= zero) enum_ = c_max(qdiv * e6c * (t3sq - t2sq), 0.0);
+    else enum_ = c_min(qdiv * e6c * (t3sq - t2sq), 0.0);
     gamt = -e1 * enum_ / eden;
-    if (r2sq >= zero) enum_ = c_max(qdiv * e6c * (r3sq - r2sq), real(0.0));
-    else enum_ = c_min(qdiv * e6c * (r3sq - r2sq), real(0.0));
+    if (r2sq >= zero) enum_ = c_max(qdiv * e6c * (r3sq - r2sq), 0.0);
+    else enum_ = c_min(qdiv * e6c * (r3sq - r2sq), 0.0);
     gamq = -e1 * enum_ / eden;
-    enum_ = c_max(qdiv * e6c * (c3sq - c2sq), real(0.0));
+    enum_ = c_max(qdiv * e6c * (c3sq - c2sq), 0.0);
     const real smd =
         dlsq * enum_ * gtr / eden * (qdiv * qdiv) * (e3c * (a2fac * a2fac) + e4c * a2fac) * a1 / (a2 * a2fac);
     gamv = e1 * enum_ * gtr / eden;
@@ -1001,12 +1004,13 @@ CPPWRF_HD inline void condensation_level(int k, int k_tropo, A_dz dz, A_zw zw, r
     alp = one / (one + dqsl * xlvcp);
     bet = dqsl * exner[k];
     if (cloudpdf == 0) {
-      const real t3sq = c_max(tsq[k], zero);
-      real r3sq = c_max(qsq[k], zero);
-      real c3sq = cov[k];
+      // t3sq, r3sq, c3sq: DOUBLE PRECISION in WRF's mym_condensation (as in mym_turbulence above)
+      const double t3sq = c_max(tsq[k], zero);
+      double r3sq = c_max(qsq[k], zero);
+      double c3sq = cov[k];
       c3sq = std::copysign(c_min(std::fabs(c3sq), std::sqrt(t3sq * r3sq)), c3sq);
       r3sq = r3sq + (bet * bet) * t3sq - real(2.0) * bet * c3sq;
-      sgm[k] = std::sqrt(c_max(r3sq, real(1.0e-10)));
+      sgm[k] = std::sqrt(c_max(r3sq, 1.0e-10));
     } else {
       const real dzk = (k == kts) ? real(0.5) * dz[k] : dz[k];
       const int km1 = (k - 1 > kts) ? k - 1 : kts;
@@ -1049,14 +1053,14 @@ CPPWRF_HD inline void condensation_level(int k, int k_tropo, A_dz dz, A_zw zw, r
     b = a * rsl;
     const real qw_pert = qw[k] + qw[k] * p5 * zero * real(0);  // spp_pbl = 0
     const real qmq = qw_pert - qsat_tk;
-    real r3sq = c_max(qsq[k], zero);
-    const real t3sq = c_max(tsq[k], zero);
-    real c3sq = cov[k];
+    double r3sq = c_max(qsq[k], zero);
+    const double t3sq = c_max(tsq[k], zero);
+    double c3sq = cov[k];
     c3sq = std::copysign(c_min(std::fabs(c3sq), std::sqrt(t3sq * r3sq)), c3sq);
     if (closure < real(2.7)) r3sq = r3sq;
     else if (closure < real(3.0)) r3sq = r3sq + (bet * bet) * t3sq;
     else r3sq = r3sq + (bet * bet) * t3sq - two * bet * c3sq;
-    sgm[k] = c_max(real(1e-13), std::sqrt(r3sq));
+    sgm[k] = c_max(real(1e-13), std::sqrt(static_cast<real>(r3sq)));  // WRF: sqrt(real(r3sq, kind_phys))
     sgm[k] = c_min(sgm[k], qw[k] * p5);
     real wt = c_min(one, c_max(zero, dz[k] - real(100.)) / real(500.));
     sgm[k] = sgm[k] + sgm[k] * p2 * wt;

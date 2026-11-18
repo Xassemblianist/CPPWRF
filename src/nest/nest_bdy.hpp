@@ -424,19 +424,21 @@ struct KBdySlabView3D {
     int ip = (ni_raw - 1) % nri;
     int jp = (nj_raw - 1) % nrj;
 
-    double ax, ay;
+    nreal ax, ay;
     compute_sint_subgrid_offsets(nri, xstag, ystag, ip, jp, ax, ay);
 
-    double patch[5][5];
+    nreal patch[5][5];
     for (int dj = -2; dj <= 2; ++dj) {
       for (int di = -2; di <= 2; ++di) {
-        patch[dj + 2][di + 2] = static_cast<double>(cfld(ci0 + di, cj0 + dj, k));
+        patch[dj + 2][di + 2] = static_cast<nreal>(cfld(ci0 + di, cj0 + dj, k));
       }
     }
-    double interp_val = sint_point_2d(patch, ax, ay);
-    double cur_val = static_cast<double>(nfld(ni - 1, nj - 1, k));
+    nreal interp_val = sint_point_2d(patch, ax, ay);
+    nreal cur_val = static_cast<nreal>(nfld(ni - 1, nj - 1, k));
+    // WRF (share/interp_fcn.F): REAL*8 rdt = 1.D0/cdt, also in its single-precision build; the difference is taken
+    // in the model's precision and multiplied in double
     const double rdt = (cdt > 0.0) ? (1.0 / cdt) : 0.0;
-    double tend_val = rdt * (interp_val - cur_val);
+    nreal tend_val = static_cast<nreal>(rdt * (interp_val - cur_val));
 
     std::size_t s_idx = static_cast<std::size_t>(pos) + static_cast<std::size_t>(k) * npos +
                         static_cast<std::size_t>(b) * npos * nk;
@@ -482,19 +484,21 @@ struct KBdySlabView2D {
     int ip = (ni - 1) % nri;
     int jp = (nj - 1) % nrj;
 
-    double ax, ay;
+    nreal ax, ay;
     compute_sint_subgrid_offsets(nri, false, false, ip, jp, ax, ay);
 
-    double patch[5][5];
+    nreal patch[5][5];
     for (int dj = -2; dj <= 2; ++dj) {
       for (int di = -2; di <= 2; ++di) {
-        patch[dj + 2][di + 2] = static_cast<double>(cfld(ci0 + di, cj0 + dj));
+        patch[dj + 2][di + 2] = static_cast<nreal>(cfld(ci0 + di, cj0 + dj));
       }
     }
-    double interp_val = sint_point_2d(patch, ax, ay);
-    double cur_val = static_cast<double>(nfld(ni - 1, nj - 1));
+    nreal interp_val = sint_point_2d(patch, ax, ay);
+    nreal cur_val = static_cast<nreal>(nfld(ni - 1, nj - 1));
+    // WRF (share/interp_fcn.F): REAL*8 rdt = 1.D0/cdt, also in its single-precision build; the difference is taken
+    // in the model's precision and multiplied in double
     const double rdt = (cdt > 0.0) ? (1.0 / cdt) : 0.0;
-    double tend_val = rdt * (interp_val - cur_val);
+    nreal tend_val = static_cast<nreal>(rdt * (interp_val - cur_val));
 
     std::size_t s_idx = static_cast<std::size_t>(pos) + static_cast<std::size_t>(b) * npos;
     val_slab[s_idx] = static_cast<real>(cur_val);

@@ -16,57 +16,77 @@
 
 namespace cppwrf::nest {
 
+// The arithmetic type of the device-side SINT interpolation (the View kernels below and nest_bdy.hpp's slab
+// kernels): the model's real in CUDA builds (float in FP32, as WRF real*4's REAL in share/sint.F; double would run at
+// 1/32 to 1/64 of the FP32 rate), double in CPU builds (the code as before). In FP64 builds both are double.
+#if defined(CPPWRF_USE_CUDA)
+using nreal = ::cppwrf::real;
+#else
+using nreal = double;
+#endif
+
+CPPWRF_HD inline double sint_max(double a, double b) { return fmax(a, b); }
+CPPWRF_HD inline double sint_min(double a, double b) { return fmin(a, b); }
+CPPWRF_HD inline float sint_max(float a, float b) { return fmaxf(a, b); }
+CPPWRF_HD inline float sint_min(float a, float b) { return fminf(a, b); }
+
 // 1D Donor-cell advection flux
-CPPWRF_HD inline double donor(double y1, double y2, double a) {
-  return (a >= 0.0) ? (y1 * a) : (y2 * a);
+template <class T>
+CPPWRF_HD inline T donor(T y1, T y2, T a) {
+  return (a >= T(0.0)) ? (y1 * a) : (y2 * a);
 }
 
 // 4th-order Crowley / Smolarkiewicz polynomial advective flux
-CPPWRF_HD inline double tr4(double ym1, double y0, double yp1, double yp2, double a) {
-  constexpr double one12 = 1.0 / 12.0;
-  constexpr double one24 = 1.0 / 24.0;
-  const double a2 = a * a;
-  const double a3 = a2 * a;
-  const double a4 = a3 * a;
-  return a * one12 * (7.0 * (yp1 + y0) - (yp2 + ym1))
-       - a2 * one24 * (15.0 * (yp1 - y0) - (yp2 - ym1))
+template <class T>
+CPPWRF_HD inline T tr4(T ym1, T y0, T yp1, T yp2, T a) {
+  const T one12 = T(1.0) / T(12.0);
+  const T one24 = T(1.0) / T(24.0);
+  const T a2 = a * a;
+  const T a3 = a2 * a;
+  const T a4 = a3 * a;
+  return a * one12 * (T(7.0) * (yp1 + y0) - (yp2 + ym1))
+       - a2 * one24 * (T(15.0) * (yp1 - y0) - (yp2 - ym1))
        - a3 * one12 * ((yp1 + y0) - (yp2 + ym1))
-       + a4 * one24 * (3.0 * (yp1 - y0) - (yp2 - ym1));
+       + a4 * one24 * (T(3.0) * (yp1 - y0) - (yp2 - ym1));
 }
 
-CPPWRF_HD inline double pp(double x) { return x > 0.0 ? x : 0.0; }
-CPPWRF_HD inline double pn(double x) { return x < 0.0 ? x : 0.0; }
+template <class T>
+CPPWRF_HD inline T pp(T x) { return x > T(0.0) ? x : T(0.0); }
+template <class T>
+CPPWRF_HD inline T pn(T x) { return x < T(0.0) ? x : T(0.0); }
 
 // 1D non-oscillatory MPDATA/FCT limiting step
-CPPWRF_HD inline double smolarkiewicz_1d(double ym2, double ym1, double y0, double yp1, double yp2, double a) {
-  constexpr double ep = 1.0e-10;
-  const double fl0 = donor(ym1, y0, a);
-  const double fl1 = donor(y0, yp1, a);
-  const double w = y0 - (fl1 - fl0);
-  const double mxm = fmax(fmax(ym1, y0), fmax(yp1, w));
-  const double mn  = fmin(fmin(ym1, y0), fmin(yp1, w));
+template <class T>
+CPPWRF_HD inline T smolarkiewicz_1d(T ym2, T ym1, T y0, T yp1, T yp2, T a) {
+  const T ep = T(1.0e-10);
+  const T fl0 = donor(ym1, y0, a);
+  const T fl1 = donor(y0, yp1, a);
+  const T w = y0 - (fl1 - fl0);
+  const T mxm = sint_max(sint_max(ym1, y0), sint_max(yp1, w));
+  const T mn  = sint_min(sint_min(ym1, y0), sint_min(yp1, w));
 
-  double f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;
-  double f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
+  T f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;
+  T f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
 
-  const double pp_f0 = pp(f0);
-  const double pn_f0 = pn(f0);
-  const double pp_f1 = pp(f1);
-  const double pn_f1 = pn(f1);
+  const T pp_f0 = pp(f0);
+  const T pn_f0 = pn(f0);
+  const T pp_f1 = pp(f1);
+  const T pn_f1 = pn(f1);
 
-  const double ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);
-  const double un = (w - mn) / (pp_f1 - pn_f0 + ep);
+  const T ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);
+  const T un = (w - mn) / (pp_f1 - pn_f0 + ep);
 
-  f0 = pp_f0 * fmin(1.0, ov) + pn_f0 * fmin(1.0, un);
-  f1 = pp_f1 * fmin(1.0, un) + pn_f1 * fmin(1.0, ov);
+  f0 = pp_f0 * sint_min(T(1.0), ov) + pn_f0 * sint_min(T(1.0), un);
+  f1 = pp_f1 * sint_min(T(1.0), un) + pn_f1 * sint_min(T(1.0), ov);
 
   return w - (f1 - f0);
 }
 
 // 2D SINT point evaluation given a 5x5 stencil of coarse values around (ci, cj):
 // c_patch[j_idx][i_idx] where j_idx in 0..4 (j-2..j+2) and i_idx in 0..4 (i-2..i+2)
-CPPWRF_HD inline double sint_point_2d(const double c_patch[5][5], double ax, double ay) {
-  double z[5];
+template <class T>
+CPPWRF_HD inline T sint_point_2d(const T c_patch[5][5], T ax, T ay) {
+  T z[5];
   for (int j = 0; j < 5; ++j) {
     z[j] = smolarkiewicz_1d(c_patch[j][0], c_patch[j][1], c_patch[j][2], c_patch[j][3], c_patch[j][4], ax);
   }
@@ -76,20 +96,21 @@ CPPWRF_HD inline double sint_point_2d(const double c_patch[5][5], double ax, dou
 // Compute subgrid offset coordinates XIG and XJG for a given ratio and subgrid index
 // rr: refinement ratio (e.g. 3 or 5)
 // ip, jp: 0-based subgrid position within the coarse cell (0 <= ip < rr, 0 <= jp < rr)
+template <class T>
 CPPWRF_HD inline void compute_sint_subgrid_offsets(
-    int rr, bool xstag, bool ystag, int ip, int jp, double& ax, double& ay) {
-  double rioff = 0.0;
-  double rjoff = 0.0;
-  if (xstag && (rr % 2 == 0)) rioff = 1.0;
-  if (ystag && (rr % 2 == 0)) rjoff = 1.0;
+    int rr, bool xstag, bool ystag, int ip, int jp, T& ax, T& ay) {
+  T rioff = T(0.0);
+  T rjoff = T(0.0);
+  if (xstag && (rr % 2 == 0)) rioff = T(1.0);
+  if (ystag && (rr % 2 == 0)) rjoff = T(1.0);
 
   // In WRF sint.F:
   // J is x-coordinate subgrid index (1-based: 1..rr), I is y-coordinate subgrid index (1-based: 1..rr)
   // XIG = (rr - 1 - rioff)/(2*rr) - (J - 1)/rr
   // XJG = (rr - 1 - rjoff)/(2*rr) - (I - 1)/rr
   // Here 0-based: J - 1 = ip, I - 1 = jp
-  ax = (static_cast<double>(rr) - 1.0 - rioff) / (2.0 * rr) - static_cast<double>(ip) / rr;
-  ay = (static_cast<double>(rr) - 1.0 - rjoff) / (2.0 * rr) - static_cast<double>(jp) / rr;
+  ax = (static_cast<T>(rr) - T(1.0) - rioff) / (T(2.0) * rr) - static_cast<T>(ip) / rr;
+  ay = (static_cast<T>(rr) - T(1.0) - rjoff) / (T(2.0) * rr) - static_cast<T>(jp) / rr;
 }
 
 // ============================================================================
@@ -469,13 +490,13 @@ struct KSintView3D {
     const int ip = (ni_raw - 1) % nri;
     const int jp = (nj_raw - 1) % nrj;
 
-    double ax, ay;
+    nreal ax, ay;
     compute_sint_subgrid_offsets(nri, xstag, ystag, ip, jp, ax, ay);
 
-    double c_patch[5][5];
+    nreal c_patch[5][5];
     for (int dj = -2; dj <= 2; ++dj) {
       for (int di = -2; di <= 2; ++di) {
-        c_patch[dj + 2][di + 2] = static_cast<double>(cfld(ci0 + di, cj0 + dj, k));
+        c_patch[dj + 2][di + 2] = static_cast<nreal>(cfld(ci0 + di, cj0 + dj, k));
       }
     }
     nfld(ni0, nj0, k) = static_cast<real>(sint_point_2d(c_patch, ax, ay));
@@ -500,13 +521,13 @@ struct KSintView2D {
     const int ip = (ni_raw - 1) % nri;
     const int jp = (nj_raw - 1) % nrj;
 
-    double ax, ay;
+    nreal ax, ay;
     compute_sint_subgrid_offsets(nri, xstag, ystag, ip, jp, ax, ay);
 
-    double c_patch[5][5];
+    nreal c_patch[5][5];
     for (int dj = -2; dj <= 2; ++dj) {
       for (int di = -2; di <= 2; ++di) {
-        c_patch[dj + 2][di + 2] = static_cast<double>(cfld(ci0 + di, cj0 + dj));
+        c_patch[dj + 2][di + 2] = static_cast<nreal>(cfld(ci0 + di, cj0 + dj));
       }
     }
     nfld(ni0, nj0) = static_cast<real>(sint_point_2d(c_patch, ax, ay));
