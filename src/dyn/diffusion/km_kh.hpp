@@ -7,6 +7,7 @@
 #include "core/backend.hpp"
 #include "core/constants.hpp"
 #include "core/field.hpp"
+#include "core/limits.hpp"
 #include "dyn/diffusion/diffusion_params.hpp"
 
 namespace cppwrf::dyn::diffusion {
@@ -20,6 +21,9 @@ namespace cppwrf::dyn::diffusion {
 //   smag2d_km       (lines 1934-2044, km_opt = 4)
 //   tke_km          (lines 2049-2336, km_opt = 2)
 //   calc_l_scale    (lines 2341-2406)
+
+// levels of calc_l_scale's column array in KTkeKm and KTkeRhs (tke_km / tke_rhs check nz against it)
+inline constexpr int kLScaleLevels = 128;
 
 CPPWRF_HD inline real vcos_diff(real x, int lane_i, int ni) {
 #if defined(CPPWRF_HAVE_LIBMVEC) || defined(CPPWRF_GLIBC_MATH)
@@ -326,7 +330,7 @@ struct KTkeKm {
         xkhv(i, j, k) = kmv * pr_inv_v;
       }
     } else {
-      real l_scale[128];
+      real l_scale[kLScaleLevels];
       calc_l_scale_col(i, j, nz, dx, dy, msftx, msfty, tke, bn2, rdzw, l_scale);
       for (int k = 0; k < nz; ++k) {
         real tke_val = tke(i, j, k) > tke_seed ? tke(i, j, k) : tke_seed;
@@ -372,6 +376,7 @@ inline void tke_km(const DiffusionParams& p,
                    View3<real> xkhh,
                    View3<real> xkhv,
                    int nx, int ny, int nz) {
+  check_limit("tke_km", "nz", nz, kLScaleLevels);
   int i_start = (p.open_xs || p.specified || p.nested) ? 1 : 0;
   int i_end   = (p.open_xe || p.specified || p.nested) ? nx - 1 : nx;
   int j_start = (p.open_ys || p.specified || p.nested) ? 1 : 0;

@@ -151,7 +151,7 @@ struct KTkeRhs {
     // -------------------------------------------------------------------------
     real ce1 = (c_k / real(0.10)) * real(0.19);
     real ce2 = (real(0.93) - ce1) > real(0.0) ? (real(0.93) - ce1) : real(0.0);
-    real l_scale[128];
+    real l_scale[kLScaleLevels];
     calc_l_scale_col(i, j, nz, dx, dy, msftx, msfty, tke, bn2, rdzw, l_scale);
 
     for (int k = 0; k < nz; ++k) {
@@ -201,6 +201,7 @@ inline void tke_rhs(const DiffusionParams& p,
                     View2<const real> hfx, bool has_hfx,
                     View3<real> tendency,
                     int nx, int ny, int nz) {
+  check_limit("tke_rhs", "nz", nz, kLScaleLevels);
   int i_start = (p.open_xs || p.specified || p.nested) ? 1 : 0;
   int i_end   = (p.open_xe || p.specified || p.nested) ? nx - 1 : nx;
   int j_start = (p.open_ys || p.specified || p.nested) ? 1 : 0;
