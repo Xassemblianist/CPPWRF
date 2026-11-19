@@ -68,6 +68,11 @@ class WrfHistory {
   // start_domain of a domain whose nest opened during the run (med_nest_initial: start_domain(nest), then
   // start_domain(parent)): start_em's slope arrays and laplacian again from the blended / fed-back terrain
   void restart_slopes();
+  // med_nest_initial's start_domain(parent) after the feedback at the parent's first step (itimestep = 0:
+  // start_em runs phy_init again, mediation_integrate.F:856, start_em.F:246-247, 1033): landuse_init's fields of
+  // the history (THC; without column physics also ALBBCK, ALBEDO, ZNT, Z0, EMISS, EMBCK, MAVAIL) from the fed-back
+  // LU_INDEX, SEAICE and SNOWC (the column physics' fields: phy_init_after_feedback in real_physics.cpp)
+  void phy_init_after_feedback();
   // a run resumed from a restart file at time_sec: START_DATE is the restart time
   void set_restart_time(double time_sec) { restart_sec_ = time_sec; }
   // the clock's exact time since the simulation start of the next write (Times = its whole seconds, XTIME =
@@ -90,6 +95,9 @@ class WrfHistory {
              std::vector<double>& out);
   wrf_io::DomainAtts domain_atts();
   void start_em_slopes();
+  // phy_init's landuse_init (module_physics_init.F) of the history's phy_init_ fields
+  void landuse_phy_init(const std::vector<double>& lu, const std::vector<double>& xice, const std::vector<double>& snowc,
+                        const std::vector<double>& albbck_in, const std::vector<double>& snoalb_in);
   bool from_wrfinput(const std::string& name, std::size_t n, std::vector<double>& out);
 
   // nest feedback: the Registry fields with a u= function (history and restart streams) and, per nest, the
@@ -125,6 +133,12 @@ class WrfHistory {
   bool model_only_ = false;
   std::map<std::string, std::vector<double>> fed_;  // nest-feedback values of such fields
   std::map<std::string, std::vector<double>> phy_init_;  // phy_init fields of runs without column physics
+  struct LanduseInputs {  // landuse_init's table and wrfinput attributes (tables empty: no LANDUSE.TBL)
+    std::string tables, mminlu;
+    int julday = 0, iswater = 17, isice = 15, fractional_seaice = 0;
+    double cen_lat = 0;
+    bool usemonalb = false;
+  } lu_;
   long step_ = 0;
   long prep_step_ = -1;
   double restart_sec_ = 0;

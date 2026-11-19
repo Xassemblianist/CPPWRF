@@ -2988,6 +2988,18 @@ class WrfTranslator:
                             self.error(f"Domain {tag}: per-domain physics override &physics.{pk} = {v_d} "
                                        f"(domain 1 has {v_0}) is not supported; only "
                                        f"{', '.join(sorted(PER_DOMAIN_PHYS))} may differ between domains.")
+                # a domain runs CPPWRF's column physics with a surface layer, LSM, PBL or cumulus scheme (one of the
+                # first three: every domain); cu_physics on one of parent and nest only, without the others: WRF
+                # feeds the nest's state arrays (RAINC, TSK, XLAND, ...) back, which a nest without column physics
+                # does not carry in CPPWRF
+                if not any(self.get_dom_opt("physics", k, 0, 0) for k in ("sf_sfclay_physics", "sf_surface_physics",
+                                                                         "bl_pbl_physics")):
+                    cu_d = self.get_dom_opt("physics", "cu_physics", d, 0) or 0
+                    cu_p = self.get_dom_opt("physics", "cu_physics", p_idx, 0) or 0
+                    if (cu_d != 0) != (cu_p != 0):
+                        self.error(f"Domain {tag}: cu_physics = {cu_d} under a parent with cu_physics = {cu_p} and no "
+                                   "surface layer, LSM or PBL scheme is not supported (the nest feedback of the "
+                                   "state arrays of a domain without column physics is not ported).")
 
                 if dom_id == 2:
                     sections["domains"]["i_parent_start"] = i_start
