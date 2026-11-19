@@ -3,3 +3,5 @@
 # tar's WRF runs adds the tar here.
 # real_vs_wrf_runs (CMakeLists.txt): WRF real.exe runs run_G10REAL_r8, run_G10LAG1_r8, run_G10DST_r8, run_G10SSO_r8
 port_gem10_data.tar
+# real_vs_wrf_runs: run_G13ICE_r8 ... run_G13SW_r8 (wrfref gem13-refs)
+port_gem13_data.tar
