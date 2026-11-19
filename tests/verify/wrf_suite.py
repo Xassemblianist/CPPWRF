@@ -374,8 +374,43 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out):
                 nfr, nrst = (nfr + n, nrst) if kind == "wrfout" else (nfr, nrst + n)
                 # NOAHMP_INIT on a restart: CROPCAT (an output) restarts at undefined_int (PhysicsSuite::restarted)
                 bad += [f"{what}: {dom}.{kind}.{k}: {v}" for k, v in dif.items() if k != "CROPCAT"]
+    if bad:  # where it starts: CPPWRF's own restart files one step after mid, straight and resumed (every variable)
+        diag = chain_first_step(b, cfg, common, resumed, mid, out)
+        print("\n".join(f"  [{cfg}] {x}" for x in diag), flush=True)
+        bad = diag + bad
     return bad, (f"resumed at {mid:g}s ({', '.join(w for w, _, _ in resumed)}) = straight: {nfr} wrfout frames, "
                  f"{nrst} wrfrst files")
+
+
+def chain_first_step(b, cfg, common, resumed, mid, out):
+    """restart_chain's diagnosis of a difference: the runs to one step past `mid` (the straight one, and each resumed
+    one from its file) write CPPWRF's restart file there (the last step); their variables that differ."""
+    import netCDF4
+    import numpy as np
+    ini_dt = [x.split("=", 1)[1] for x in common if x.startswith("time.dt=")]
+    import configparser
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.read(os.path.join(REPO, cfg))
+    dt = float(ini_dt[0] if ini_dt else ini.get("time", "dt"))
+    one = [x for x in common if not x.startswith(("run.run_time=", "restart.interval="))] + \
+        [f"run.run_time={mid + dt:g}", f"restart.interval={mid:g}", "output.out_interval=100000"]
+    name = f"restart_{round(mid / dt) + 1:06d}.nc"
+    ref = os.path.join(out, "x_straight1")
+    rc, log = run(b, cfg, one, ref)
+    if rc != 0 or not os.path.exists(os.path.join(ref, name)):
+        return [f"first step: straight run failed: {log[-200:]}"]
+    res = []
+    for what, _, f in resumed:
+        d = os.path.join(out, f"x_{what}1")
+        rc, log = run(b, cfg, one + [f"run.restart_file={f}"], d)
+        if rc != 0 or not os.path.exists(os.path.join(d, name)):
+            res.append(f"first step: {what} run failed: {log[-200:]}")
+            continue
+        with _NC, netCDF4.Dataset(os.path.join(ref, name)) as A, netCDF4.Dataset(os.path.join(d, name)) as B:
+            dif = [v for v in A.variables if v in B.variables and
+                   not np.array_equal(np.asarray(A[v][:]), np.asarray(B[v][:]), equal_nan=True)]
+        res.append(f"first step after {mid:g}s ({what}): {' '.join(dif) if dif else 'identical'}")
+    return res
 
 
 def compare(wrfout, out, t):
