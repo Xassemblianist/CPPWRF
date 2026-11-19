@@ -385,7 +385,7 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `num_land_cat` | Land-use category count (real case: checked against wrfinput as input_wrf does) |
 | `num_metgrid_levels` | Metgrid vertical levels used by real.exe |
 | `num_metgrid_soil_levels` | Metgrid soil levels used by real.exe |
-| `num_soil_layers` | 4 soil layers (Noah, Noah-MP), 5 (slab) |
+| `num_soil_layers` | Set from sf_surface_physics as check_a_mundo does: 4 (Noah, Noah-MP), 5 (slab), 6 or 9 (RUC) |
 | `override_restart_timers` | restart runs only |
 | `p_top_requested` | Real case p_top read directly from wrfinput_d01 |
 | `parent_grid_ratio` | Nesting grid refinement ratio |

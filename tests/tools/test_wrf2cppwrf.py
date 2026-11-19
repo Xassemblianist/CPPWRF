@@ -674,20 +674,58 @@ class TestValidationAndWarnings(unittest.TestCase):
         err, p = phys(", num_soil_layers = 5, ifsnow = 0")
         self.assertEqual(err, [])
         self.assertEqual(p["ifsnow"], 0)
-        for extra, msg in ((", num_soil_layers = 4", "num_soil_layers = 4"), (", ifsnow = 2", "ifsnow = 2"),
+        for extra, msg in ((", ifsnow = 2", "ifsnow = 2"),
                            (", fractional_seaice = 1", "fractional_seaice = 1"),
                            (", sst_update = 1", "sst_update = 1 with sf_surface_physics = 1")):
             err, _ = phys(extra)
             self.assertIn(msg, " ".join(err), extra)
-        # no land surface model: check_a_mundo's 5 layers; another namelist value is not proven
-        t = WrfTranslator(parse_namelist(real_case("""
+
+    def test_num_soil_layers_as_check_a_mundo(self):
+        # share/module_check_a_mundo.F set_physics_rconfigs sets num_soil_layers from sf_surface_physics before
+        # wrf.exe allocates the domains (WRF 4.8.0 real*8 P1 with num_soil_layers = 5: wrfout identical to 4); the
+        # translator writes WRF's value and notes the namelist value it replaces
+        def phys(lsm, extra):
+            t = WrfTranslator(parse_namelist(real_case(f"""
             &time_control /
             &domains time_step = 60 /
-            &physics sf_sfclay_physics = 1, sf_surface_physics = 0, bl_pbl_physics = 1, num_soil_layers = 4 /
+            &physics mp_physics = 6, sf_sfclay_physics = 1, sf_surface_physics = {lsm}, bl_pbl_physics = 1{extra} /
             &dynamics /
             """)))
-        t.translate()
-        self.assertIn("num_soil_layers = 4 is not supported with sf_surface_physics = 0", " ".join(t.errors))
+            gen = t.translate()
+            return t.errors, t.notices, gen.get("phys", {})
+        for lsm, nl, want in ((2, 5, 4), (2, 3, 4), (4, 5, 4), (1, 4, 5), (3, 4, 6), (3, 9, 9), (3, 6, 6),
+                              (2, None, 4), (1, None, 5), (3, None, 6)):
+            err, notes, p = phys(lsm, "" if nl is None else f", num_soil_layers = {nl}")
+            self.assertEqual(err, [], (lsm, nl))
+            self.assertEqual(p["num_soil_layers"], want, (lsm, nl))
+            replaced = f"num_soil_layers = {nl} is replaced by {want}"
+            if nl is not None and nl != want:
+                self.assertIn(replaced, " ".join(notes), (lsm, nl))
+            else:
+                self.assertNotIn("num_soil_layers", " ".join(notes), (lsm, nl))
+
+    def test_surface_layer_and_land_surface_together(self):
+        # CPPWRF's column physics runs a surface layer over a land surface model (the model stops at its start
+        # otherwise: "PhysicsSuite: only sf_sfclay_physics=1|2|4|5|7, sf_surface_physics=1|2|3|4"); wrf.exe runs
+        # either alone
+        def errors(phys):
+            t = WrfTranslator(parse_namelist(real_case(f"""
+            &time_control /
+            &domains time_step = 60 /
+            &physics mp_physics = 6, {phys} /
+            &dynamics /
+            """)))
+            t.translate()
+            return " ".join(t.errors)
+        for phys, msg in (("sf_sfclay_physics = 1, sf_surface_physics = 0, bl_pbl_physics = 1",
+                           "sf_surface_physics = 0 (no land surface model) with sf_sfclay_physics = 1, bl_pbl_physics = 1"),
+                          ("sf_sfclay_physics = 1",
+                           "sf_surface_physics = 0 (no land surface model) with sf_sfclay_physics = 1 is not"),
+                          ("sf_sfclay_physics = 2, sf_surface_physics = 0, bl_pbl_physics = 2, num_soil_layers = 5",
+                           "sf_surface_physics = 0 (no land surface model)"),
+                          ("sf_surface_physics = 2", "sf_sfclay_physics = 0 (no surface layer) with sf_surface_physics = 2")):
+            self.assertIn(msg, errors(phys), phys)
+        self.assertEqual(errors("sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1"), "")
 
     def test_boulac(self):
         # bl_pbl_physics = 8 (module_bl_boulac.F) over sf_sfclay_physics = 1 or 2 (module_physics_init: 'use sfclay or
@@ -987,7 +1025,7 @@ class TestValidationAndWarnings(unittest.TestCase):
             self.assertNotIn("verification tier", " ".join(warn))
         err, _, p = phys(", rdlai2d = .true.")
         self.assertEqual((err, p["rdlai2d"]), ([], True))
-        for kw, msg in (({"nl": 4}, "num_soil_layers = 4"), ({"sfc": 5, "pbl": 5}, "MYNN surface layer"),
+        for kw, msg in (({"sfc": 5, "pbl": 5}, "MYNN surface layer"),
                         ({"mp": 0}, "cloud water"), ({"extra": ", mosaic_lu = 1"}, "mosaic_lu"),
                         ({"extra": ", mosaic_soil = 1"}, "mosaic_soil"),
                         ({"extra": ", fractional_seaice = 1"}, "fractional_seaice = 1"),
@@ -1290,13 +1328,13 @@ class TestValidationAndWarnings(unittest.TestCase):
     def test_dudhia_shortwave(self):
         # RRTMG LW with Dudhia SW (module_ra_sw.F); swrad_scat (swinit) only with Dudhia
         for extra, scat in (("", None), (", swrad_scat = 0.5", 0.5)):
-            phys = f"&physics ra_lw_physics = 4, ra_sw_physics = 1, radt = 15, sf_sfclay_physics = 1{extra} /"
+            phys = f"&physics ra_lw_physics = 4, ra_sw_physics = 1, radt = 15, sf_sfclay_physics = 1, sf_surface_physics = 2{extra} /"
             t = WrfTranslator(parse_namelist(real_case(f"&time_control /\n&domains time_step = 60 /\n{phys}\n")))
             cfg = t.translate()
             self.assertEqual(t.errors, [], extra)
             self.assertEqual((cfg["phys"]["ra_lw_physics"], cfg["phys"]["ra_sw_physics"]), (4, 1))
             self.assertEqual(cfg["phys"].get("swrad_scat"), scat)
-        phys = "&physics ra_lw_physics = 4, ra_sw_physics = 4, sf_sfclay_physics = 1, swrad_scat = 0.5 /"
+        phys = "&physics ra_lw_physics = 4, ra_sw_physics = 4, sf_sfclay_physics = 1, sf_surface_physics = 2, swrad_scat = 0.5 /"
         t = WrfTranslator(parse_namelist(real_case(f"&time_control /\n&domains time_step = 60 /\n{phys}\n")))
         cfg = t.translate()
         self.assertEqual(t.errors, [])
@@ -1305,7 +1343,7 @@ class TestValidationAndWarnings(unittest.TestCase):
     def test_rrtm_longwave(self):
         # RRTM LW (module_ra_rrtm.F) with RRTMG or Dudhia SW
         for sw in (4, 1):
-            phys = f"&physics ra_lw_physics = 1, ra_sw_physics = {sw}, radt = 15, sf_sfclay_physics = 1 /"
+            phys = f"&physics ra_lw_physics = 1, ra_sw_physics = {sw}, radt = 15, sf_sfclay_physics = 1, sf_surface_physics = 2 /"
             t = WrfTranslator(parse_namelist(real_case(f"&time_control /\n&domains time_step = 60 /\n{phys}\n")))
             cfg = t.translate()
             self.assertEqual(t.errors, [], sw)
@@ -1314,7 +1352,7 @@ class TestValidationAndWarnings(unittest.TestCase):
     def test_monotonic_advection(self):
         # moist_adv_opt / scalar_adv_opt / tke_adv_opt = 2: advect_scalar_mono on the last RK stage (module_em.F)
         t = WrfTranslator(parse_namelist(real_case(
-            "&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, bl_pbl_physics = 1, sf_sfclay_physics = 1 /\n"
+            "&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, bl_pbl_physics = 1, sf_sfclay_physics = 1, sf_surface_physics = 2 /\n"
             "&dynamics moist_adv_opt = 2, scalar_adv_opt = 2, diff_opt = 2, km_opt = 2, tke_adv_opt = 2 /\n")))
         d = t.translate()["dyn"]
         self.assertEqual(t.errors, [])
@@ -1325,7 +1363,7 @@ class TestValidationAndWarnings(unittest.TestCase):
         for opt in (3, 4):
             t = WrfTranslator(parse_namelist(real_case(
                 "&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, bl_pbl_physics = 1, "
-                f"sf_sfclay_physics = 1 /\n&dynamics moist_adv_opt = {opt}, scalar_adv_opt = {opt}, diff_opt = 2, "
+                f"sf_sfclay_physics = 1, sf_surface_physics = 2 /\n&dynamics moist_adv_opt = {opt}, scalar_adv_opt = {opt}, diff_opt = 2, "
                 f"km_opt = 2, tke_adv_opt = {opt} /\n")))
             d = t.translate()["dyn"]
             self.assertEqual(t.errors, [])
@@ -1333,7 +1371,7 @@ class TestValidationAndWarnings(unittest.TestCase):
 
     def test_weno_momentum_advection(self):
         # momentum_adv_opt 3: advect_weno_u / _v / _w on the last RK stage; 1 is the default (not written)
-        base = "&time_control /\n&domains time_step = 60 /\n&physics sf_sfclay_physics = 1 /\n"
+        base = "&time_control /\n&domains time_step = 60 /\n&physics sf_sfclay_physics = 1, sf_surface_physics = 2 /\n"
         for opt, want, err in ((3, 3, None), (1, None, None), (2, None, "momentum_adv_opt = 2"),
                                (4, None, "momentum_adv_opt = 4")):
             t = WrfTranslator(parse_namelist(real_case(base + f"&dynamics momentum_adv_opt = {opt} /\n")))
@@ -1351,7 +1389,6 @@ class TestValidationAndWarnings(unittest.TestCase):
              "requires shcu_physics = 0 and ishallow = 0"),
             ("&physics cu_physics = 3, clos_choice = 99 /", "clos_choice = 99"),
             ("&physics cu_physics = 1, kfeta_trigger = 2 /", "kfeta_trigger = 2"),
-            ("&physics sf_surface_physics = 2, num_soil_layers = 5 /", "num_soil_layers = 5"),
             ("&physics sf_surface_physics = 4, opt_crop = 1 /", "opt_crop = 1"),
             ("&physics ra_lw_physics = 4, ra_sw_physics = 0 /", "a longwave scheme needs a shortwave scheme"),
             ("&physics ra_lw_physics = 0, ra_sw_physics = 1 /", "a longwave scheme needs a shortwave scheme"),
@@ -1704,12 +1741,12 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, sec = self.translate(self.NEST + "&physics mp_physics = 8, 6 /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["mp_physics"], 6)
-        t, _ = self.translate(self.NEST + "&physics mp_physics = 6, bl_pbl_physics = 1, sf_sfclay_physics = 1 /\n")  # domain 2 has the default -1
+        t, _ = self.translate(self.NEST + "&physics mp_physics = 6, bl_pbl_physics = 1, sf_sfclay_physics = 1, sf_surface_physics = 2 /\n")  # domain 2 has the default -1
         self.assertTrue(any("mp_physics = -1" in e for e in t.errors), t.errors)
 
     def test_cu_physics_on_a_nest(self):
         # check_a_mundo: a nest's cu_physics is domain 1's or 0
-        sfc = "sf_sfclay_physics = 1, 1, bl_pbl_physics = 1, 1, "
+        sfc = "sf_sfclay_physics = 1, 1, sf_surface_physics = 2, 2, bl_pbl_physics = 1, 1, "
         t, _ = self.translate(self.NEST + f"&physics {sfc}cu_physics = 1, 0 /\n")
         self.assertEqual(t.errors, [])
         t, _ = self.translate(self.NEST + f"&physics {sfc}cu_physics = 0, 1 /\n")
@@ -1941,16 +1978,16 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertTrue(any("nwp_diagnostics = 1" in e and "do_radar_ref" in e for e in t.errors), t.errors)
 
     def test_mynn_options_of_every_domain(self):
-        text = self.NEST + ("&physics mp_physics = 2*8, sf_sfclay_physics = 2*5, bl_pbl_physics = 2*5,"
+        text = self.NEST + ("&physics mp_physics = 2*8, sf_sfclay_physics = 2*5, sf_surface_physics = 2*2, bl_pbl_physics = 2*5,"
                             " bl_mynn_edmf_dd = 0, 1 /\n")
         t, _ = self.translate(text)
         self.assertTrue(any("bl_mynn_edmf_dd = 1" in e for e in t.errors), t.errors)
         # a ported option must be the same on all domains
-        text = self.NEST + ("&physics mp_physics = 2*8, sf_sfclay_physics = 2*5, bl_pbl_physics = 2*5,"
+        text = self.NEST + ("&physics mp_physics = 2*8, sf_sfclay_physics = 2*5, sf_surface_physics = 2*2, bl_pbl_physics = 2*5,"
                             " bl_mynn_edmf = 1, 0 /\n")
         t, _ = self.translate(text)
         self.assertTrue(any("bl_mynn_edmf with different values per domain" in e for e in t.errors), t.errors)
-        text = self.NEST + ("&physics mp_physics = 2*8, sf_sfclay_physics = 2*5, bl_pbl_physics = 2*5,"
+        text = self.NEST + ("&physics mp_physics = 2*8, sf_sfclay_physics = 2*5, sf_surface_physics = 2*2, bl_pbl_physics = 2*5,"
                             " bl_mynn_edmf = 2*0, bl_mynn_mixlength = 2 /\n")
         t, sec = self.translate(text)
         self.assertEqual(t.errors, [])

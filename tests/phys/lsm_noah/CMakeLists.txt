@@ -43,7 +43,8 @@ if(CMAKE_CUDA_COMPILER AND (NOT DEFINED CPPWRF_ENABLE_CUDA OR CPPWRF_ENABLE_CUDA
     ${CMAKE_CURRENT_SOURCE_DIR}
   )
   target_compile_definitions(driver_noah_cuda_dp PRIVATE CPPWRF_USE_CUDA CPPWRF_DOUBLE)
-  target_compile_options(driver_noah_cuda_dp PRIVATE --expt-relaxed-constexpr)
+  # FP64: WRF real*8's arithmetic, no fused multiply-add (the build's CUDA flags have it only when CPPWRF_DOUBLE)
+  target_compile_options(driver_noah_cuda_dp PRIVATE --expt-relaxed-constexpr --fmad=false)
 
   add_executable(driver_noah_cuda_sp
     driver_noah.cpp

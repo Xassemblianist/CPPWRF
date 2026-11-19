@@ -662,7 +662,7 @@ IGNORED_WRF_OPTIONS = {
     "dy": "Grid spacing (real case: the namelist value, checked against wrfinput as input_wrf does)",
     # &physics
     "ifsnow": "Snow effects flag (used by the slab LSM only)",
-    "num_soil_layers": "4 soil layers (Noah, Noah-MP), 5 (slab)",
+    "num_soil_layers": "Set from sf_surface_physics as check_a_mundo does: 4 (Noah, Noah-MP), 5 (slab), 6 or 9 (RUC)",
     # &dynamics
     "base_temp": "Base potential temperature (read from sounding or wrfinput)",
     "hybrid_opt": "Real case hybrid coordinate flag read directly from wrfinput_d01 global attribute",
@@ -2016,6 +2016,19 @@ class WrfTranslator:
                 sections["phys"]["cu_physics"] = cu_physics
                 sections["phys"]["ra_lw_physics"] = ra_lw
                 sections["phys"]["ra_sw_physics"] = ra_sw
+                # CPPWRF's column physics (src/phys/driver/suite.cpp) runs a surface layer over a land surface model:
+                # wrf.exe runs one without the other, the model stops at its start ("PhysicsSuite: only
+                # sf_sfclay_physics=1|2|4|5|7, sf_surface_physics=1|2|3|4")
+                if sf_surface == 0 and (sf_sfclay != 0 or bl_pbl != 0):
+                    active = ", ".join(f"{k} = {v}" for k, v in (("sf_sfclay_physics", sf_sfclay),
+                                                                ("bl_pbl_physics", bl_pbl)) if v)
+                    self.error(f"WRF sf_surface_physics = 0 (no land surface model) with {active} is not supported "
+                               "by CPPWRF: its surface layer and PBL run with a land surface model "
+                               "(sf_surface_physics = 1 slab, 2 Noah, 3 RUC or 4 Noah-MP).")
+                elif sf_sfclay == 0 and sf_surface != 0:
+                    self.error(f"WRF sf_sfclay_physics = 0 (no surface layer) with sf_surface_physics = {sf_surface} "
+                               "is not supported by CPPWRF: its land surface models run with a surface layer scheme "
+                               "(sf_sfclay_physics = 1, 2, 4, 5 or 7).")
 
                 # radiation_driver: a LW scheme needs a SW scheme and the reverse (wrf_error_fatal); CPPWRF ports
                 # RRTMG or RRTM LW with RRTMG or Dudhia SW
@@ -2058,15 +2071,22 @@ class WrfTranslator:
                 if any(v > 0 for v in prec_acc):  # check_a_mundo: prec_acc_opt = 1, the fields on every domain
                     sections["phys"]["prec_acc_opt"] = 1
 
+                # num_soil_layers: share/module_check_a_mundo.F set_physics_rconfigs sets it from sf_surface_physics
+                # of domain 1 before wrf.exe allocates the domains (5 slab, 4 Noah and Noah-MP, 6 or 9 RUC: other RUC
+                # values become 6), whatever the namelist says; the history then has that soil dimension and the
+                # same values (WRF 4.8.0 real*8, P1 with num_soil_layers = 5: wrfout identical to 4). The translator
+                # writes WRF's value and notes a namelist value it replaces
+                ruc_nl = self.get_opt("physics", "num_soil_layers", 6)
+                wrf_nl = {1: 5, 2: 4, 4: 4, 3: ruc_nl if ruc_nl in (6, 9) else 6}.get(sf_surface)
+                if wrf_nl is not None:
+                    num_soil = self.get_opt("physics", "num_soil_layers", wrf_nl)
+                    if num_soil != wrf_nl:
+                        self.notice(f"Option &physics.num_soil_layers = {num_soil} is replaced by {wrf_nl} with "
+                                    f"sf_surface_physics = {sf_surface}, as wrf.exe does (check_a_mundo).")
+                    sections["phys"]["num_soil_layers"] = wrf_nl
                 if sf_surface == 1:
-                    # module_sf_slab.F: 5 layers (check_a_mundo, init_soil_depth_1); ifsnow 1 limits TSK and the top
-                    # soil layer under snow to 273.16 K, 0 neither (other values: TSK only, not verified)
-                    num_soil = self.get_opt("physics", "num_soil_layers", 5)
-                    if num_soil != 5:
-                        self.error(f"WRF num_soil_layers = {num_soil} is not supported with sf_surface_physics = 1; "
-                                   "CPPWRF requires the slab's 5 soil layers.")
-                    else:
-                        sections["phys"]["num_soil_layers"] = 5
+                    # module_sf_slab.F: ifsnow 1 limits TSK and the top soil layer under snow to 273.16 K, 0 neither
+                    # (other values: TSK only, not verified)
                     ifsnow = self.get_opt("physics", "ifsnow", 1)
                     if ifsnow not in (0, 1):
                         self.error(f"WRF ifsnow = {ifsnow} is not supported with sf_surface_physics = 1; "
@@ -2074,34 +2094,12 @@ class WrfTranslator:
                     elif ifsnow != 1:
                         sections["phys"]["ifsnow"] = ifsnow
                 elif sf_surface == 3:
-                    # check_a_mundo: RUC keeps 6 or 9 levels (other values become 6: rejected here)
-                    num_soil = self.get_opt("physics", "num_soil_layers", 6)
-                    if num_soil not in (6, 9):
-                        self.error(f"WRF num_soil_layers = {num_soil} is not supported with sf_surface_physics = 3; "
-                                   "CPPWRF requires the RUC LSM's 6 or 9 soil levels.")
-                    else:
-                        sections["phys"]["num_soil_layers"] = num_soil
                     if sf_sfclay not in (1, 2):
                         self.error("WRF sf_surface_physics = 3 (RUC) is supported with sf_sfclay_physics = 1 or 2 only "
                                    "(the MYNN surface layer's RUC branches are not ported).")
                     if mp_physics == 0:
                         self.error("WRF sf_surface_physics = 3 (RUC) needs a microphysics with cloud water (qc_curr).")
-                elif sf_surface == 0:
-                    # check_a_mundo sets 5 layers without a land surface model; whether wrf.exe's history then keeps
-                    # the namelist's soil dimension (as found for Noah) is not proven: only 5 is accepted
-                    num_soil = self.get_opt("physics", "num_soil_layers", 5)
-                    if num_soil != 5:
-                        self.error(f"WRF num_soil_layers = {num_soil} is not supported with sf_surface_physics = 0; "
-                                   "CPPWRF requires 5 soil layers.")
                 elif sf_surface != 0:
-                    # check_a_mundo uses 4 layers for Noah and Noah-MP, but the history output keeps the
-                    # namelist's soil dimension (P1 with num_soil_layers = 5: same values, ZS/TSLB/SMOIS shapes differ)
-                    num_soil = self.get_opt("physics", "num_soil_layers", 4)
-                    if num_soil != 4:
-                        self.error(f"WRF num_soil_layers = {num_soil} is not supported with "
-                                   f"sf_surface_physics = {sf_surface}; CPPWRF requires 4 soil layers.")
-                    else:
-                        sections["phys"]["num_soil_layers"] = 4
                     opt_thcnd = self.get_opt("physics", "opt_thcnd", 1)
                     if opt_thcnd not in (1, 2):
                         self.error(f"WRF opt_thcnd = {opt_thcnd} is not supported; CPPWRF supports 1 and 2.")
