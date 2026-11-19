@@ -11,7 +11,7 @@ PROGRAM dump_tables
   INTEGER :: uout, ios
 
   ! Initialize tables by reading RRTMG_LW_DATA
-  CALL rrtmg_lwinit(5000.0_8, .TRUE., 1, 1, 1, 1, 1, 50, 1, 1, 1, 1, 1, 50, 1, 1, 1, 1, 1, 50)
+  CALL rrtmg_lwinit(5000.0, .TRUE., 1, 1, 1, 1, 1, 50, 1, 1, 1, 1, 1, 50, 1, 1, 1, 1, 1, 50)
 
   OPEN(NEWUNIT=uout, FILE="rrtmg_lw_tables.bin", ACCESS='STREAM', FORM='UNFORMATTED', CONVERT='LITTLE_ENDIAN', STATUS='REPLACE', IOSTAT=ios)
   IF (ios /= 0) THEN

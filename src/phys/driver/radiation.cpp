@@ -317,6 +317,10 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
   const bool rrtmg_sw = o.ra_sw_physics == 4;
   if (rrtmg_sw) p_->sw = std::make_unique<RrtmgSwTables>();
   // RRTMG tables: phys.table_dir, then CPPWRF's copy (data/rrtmg of the data directory, core/data_dir.hpp)
+  // WRF real*4 builds RRTMG's tables in single precision (rb = REAL): the FP32 builds read the dump of that build
+  auto rrtmg_table_name = [](const char* band) {
+    return std::string("rrtmg_") + band + (sizeof(rr) == 4 ? "_tables_r4.bin" : "_tables.bin");
+  };
   auto table_file = [&](const std::string& name) {
     const std::string a = o.table_dir + "/" + name;
     if (std::ifstream(a).good()) return a;
@@ -324,7 +328,7 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
     if (std::ifstream(b).good()) return b;
     throw std::runtime_error("radiation: cannot find " + name + " in " + o.table_dir + " or the data directory");
   };
-  if (rrtmg_lw && !load_rrtmg_lw_tables(table_file("rrtmg_lw_tables.bin"), *p_->lw))
+  if (rrtmg_lw && !load_rrtmg_lw_tables(table_file(rrtmg_table_name("lw")), *p_->lw))
     throw std::runtime_error("radiation: cannot read rrtmg_lw_tables.bin");
   if (!rrtmg_lw) {  // rrtminit (phy_init): rrtm_lookuptable reads RRTM_DATA of the run directory
     p_->rrtm = std::make_unique<RrtmLwTables>();
@@ -332,7 +336,7 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
     if (!load_rrtm_lw_tables(o.table_dir + "/RRTM_DATA", *p_->rrtm, err)) throw std::runtime_error("radiation: " + err);
     p_->rrtm_nlayers = rrtm_lw_nlayers(g.nz, o.p_top);
   }
-  if (rrtmg_sw && !load_rrtmg_sw_tables(table_file("rrtmg_sw_tables.bin"), *p_->sw))
+  if (rrtmg_sw && !load_rrtmg_sw_tables(table_file(rrtmg_table_name("sw")), *p_->sw))
     throw std::runtime_error("radiation: cannot read rrtmg_sw_tables.bin");
   // the SW column arrays (CPU and GPU) hold RRTMG_SW_COL_MAX layers: the model's and the one above the top (WRF:
   // mxlay = 203)
