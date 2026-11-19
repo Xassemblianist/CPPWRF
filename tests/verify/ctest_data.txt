@@ -1,0 +1,5 @@
+# Data tars (of tests/verify/vm_data.txt) that the ctest tests read besides the differential tests' run directories:
+# the CI diff job (cppwrf-data's ci/plan.py, which reads this file) fetches them too. A ctest that reads another
+# tar's WRF runs adds the tar here.
+# real_vs_wrf_runs (CMakeLists.txt): WRF real.exe runs run_G10REAL_r8, run_G10LAG1_r8, run_G10DST_r8, run_G10SSO_r8
+port_gem10_data.tar

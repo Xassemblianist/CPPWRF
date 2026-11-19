@@ -231,7 +231,8 @@ if(TARGET netCDF::netcdf OR NETCDF_FOUND OR NETCDF_INCDIR)
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(real_vs_wrf PROPERTIES SKIP_RETURN_CODE 77)
   # WRF real.exe runs of the wrfref workflow (port_gem10_data.tar): lagrange_order 1, default_soiltype 14, met_em
-  # files with VAR_SSO / FLAG_VAR_SSO, and the plain P1 met_em (skipped, exit 77, without them)
+  # files with VAR_SSO / FLAG_VAR_SSO, and the plain P1 met_em (skipped, exit 77, without them; the tar is in
+  # tests/verify/ctest_data.txt, the data of the CI diff job that runs the ctest tests)
   add_test(NAME real_vs_wrf_runs COMMAND bash ${CMAKE_SOURCE_DIR}/tests/init_real/run_real_test.sh ${CMAKE_BINARY_DIR}
            runs:run_G10REAL_r8 runs:run_G10LAG1_r8 runs:run_G10DST_r8 runs:run_G10SSO_r8
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
