@@ -66,7 +66,7 @@ STATUS = [
     ('TW1', 'P1 with YSU topo_wind = 1 (VAR_SSO = VAR**2); restarted at 30 min', '1 h'),
     ('TW2', 'P1 with YSU topo_wind = 2; restarted at 30 min', '1 h'),
     ('TW4', 'P4 with YSU topo_wind = 1 (VAR_SSO = VAR**2)', '1 h'),
-    ('SR1', 'P4 with slope_rad = 1 and topo_shading = 1 (radt 10, through sunrise); restarted at 150 min', '5 h'),
+    ('SR1', 'P4 with slope_rad = 1 and topo_shading = 1 (radt 10, through sunrise); restarted at 150 min, and at 245 min (between two radiation calls) from its own restart file', '5 h'),
     ('SR2', 'SR1 with shadlen = 100 km', '5 h'),
     ('SR3', 'P4 with slope_rad = 1 alone (radt 1)', '5 h'),
     ('SR4', 'SR1 with the Dudhia shortwave (ra_sw_physics 1)', '5 h'),

@@ -766,13 +766,20 @@ run_time = 7200
 restart_file = out/real/restart_000060.nc   # or .../wrfrst_d01_2026-10-12_01:00:00
 ```
 
-CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 3: the scalars NSTEPS,
-DECLIN and SOLCON as `SCALAR_<name>` attributes), the commit of the sources
+CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 4: the scalars NSTEPS,
+DECLIN and SOLCON as `SCALAR_<name>` attributes; WW, WW_M, PHP, ALT; in a run of one patch the halo points of every
+field as `HALO_<name>`, so that a run resumed from the file continues the uninterrupted one bit for bit, also between
+two radiation, PBL or cumulus calls), the commit of the sources
 (`CPPWRF_COMMIT`) and the run's options (`CPPWRF_OPTIONS`: every configuration key except `[run]`, `[restart]`,
 `[output]`, `[real]`, `time.history_interval_s`, `phys.auxhist3_interval` and `phys.table_dir`). A resumed run
 refuses a file of another format version, of another commit (unless `run.restart_any_commit = true`) or of a run with
 other options, and names the differing options. WRF's `wrfrst` files are the restart across versions and changed
 options.
+
+A run resumed from a `wrfrst` file between two radiation calls equals WRF's resumed run, which is not always the
+uninterrupted one: with `topo_shading = 1` WRF keeps SHADOWMASK in no restart stream and sets it only at the first
+step and the radiation steps, so after the restart no shadow is cast until the next radiation call (the slope-dependent
+shortwave of `slope_rad` changes); CPPWRF's own `restart_<step>.nc` keeps it and resumes exactly.
 
 The restart alarm of a resumed run is WRF's: input_wrf sets its first ring to the restart time plus the file's
 `WRF_ALARM_SECS_TIL_NEXT_RING_51`, it rings at the first step at or past that time and counts the interval from that

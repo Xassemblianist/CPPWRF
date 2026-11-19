@@ -199,7 +199,9 @@ resumes across versions from WRF's wrfrst files.
   the dycore fills them at fixed points of the step, so after the step's last updates they are not a copy of the
   domain's values, and a run resumed off a radiation step read them (SR1 at 245 min: one boundary column). Suite: restart chains (tests/verify/cases/66_restart_chain.py:
   D0, P4, G2, P8, NMP1, SLAB1, SR1, N3 resumed from both files against the straight run, every later wrfout frame
-  and wrfrst file at tolerance 0) and SR1 resumed from its own restart file at 245 min.
+  and wrfrst file at tolerance 0) and SR1 resumed from its own restart file at 245 min (`real_sr1_r8_fp64_cpu_5h_nrst`). From a wrfrst file SR1 resumes
+  as WRF's resumed run does: WRF's SHADOWMASK (topo_shading) is in no restart stream, so its resumed run casts no
+  shadow until the next radiation call; the SR1 chain therefore checks the native resume only.
 - CPPWRF's own restart file (`restart_<step>.nc`, format version 3; files of version 2 are refused, the run's
   wrfrst files still resume): it now holds the scalars of WRF's restart stream, NSTEPS (output_diagnostics' means)
   and DECLIN / SOLCON of the last radiation call (read by slope_rad's TOPO_RAD_ADJ and the urban canopy model until

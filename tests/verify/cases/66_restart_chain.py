@@ -60,7 +60,7 @@ CASES = [
 ]
 
 STATUS = [
-    ('D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains', 'resumed from CPPWRF\'s wrfrst (and native) restart files between the radiation, '
+    ('D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains', 'resumed from CPPWRF\'s wrfrst and native restart files (SR1: native only) between the radiation, '
      'PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run\'s',
      '15-20 min'),
 ]
