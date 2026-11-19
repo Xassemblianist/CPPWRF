@@ -239,8 +239,8 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
   }
   wrf_io::derive_config(*wc_, std::max(1, wc_->integer("max_dom")), false);
   // iofields_filename (input_wrf / output_wrf: modify_io_masks) for the variables in use in this run; the model
-  // reads wrfinput (i:0) and wrflowinp (i:4) whole
-  wrf_io::apply_iofields_option(*schema_, *wc_, std::filesystem::path(nl_path).parent_path().string(), {25, 29});
+  // reads wrfinput (i:0), wrflowinp (i:4) and wrffdda (i:10, auxinput10: bit 35) whole
+  wrf_io::apply_iofields_option(*schema_, *wc_, std::filesystem::path(nl_path).parent_path().string(), {25, 29, 35});
   frames_per_outfile_ = std::max(1, wc_->integer("frames_per_outfile"));
   if (cfg.get_int("phys.sst_update", 0) == 1)
     auxinput4_interval_s_ = cfg.get_double("phys.auxinput4_interval", 360.0) * 60.0;

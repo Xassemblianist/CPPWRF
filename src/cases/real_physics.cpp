@@ -284,7 +284,9 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   // check_a_mundo: mp_physics = 28 has its own fog settling, grav_settling is reset to 0
   if (cfg.get_int("phys.mp_physics", 0) == 28) o.grav_settling = 0;
   o.cu_physics = int(cfg.get_int("phys.cu_physics", 0));
-  o.num_soil_layers = int(cfg.get_int("phys.num_soil_layers", 4));
+  // set_physics_rconfigs (module_check_a_mundo.F:3588-3589): 5 layers without a land surface model (the translator
+  // accepts only 5 then; real.exe writes 5-layer TSLB / SMOIS); Noah / Noah-MP: 4
+  o.num_soil_layers = int(cfg.get_int("phys.num_soil_layers", o.sf_surface_physics == 0 ? 5 : 4));
   o.bldt = cfg.get_double("phys.bldt", 0.0);
   o.cudt = cfg.get_double("phys.cudt", 0.0);
   // check_a_mundo (module_check_a_mundo.F:2156-2174): the adaptive time step runs BMJ, the SAS schemes and Tiedtke

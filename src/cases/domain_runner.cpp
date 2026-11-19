@@ -1333,7 +1333,10 @@ void DomainRunner::do_restart(long n, bool ring) {
   const auto t_rst = std::chrono::steady_clock::now();
   if (write_native_restart_) save_restart_file(rst_path, n, time_s(n));
   // wrfrst only when WRF's restart alarm rings, not at an off-interval last step; output_wrf writes the seconds
-  // to the next ring as interval - (time - PrevRingTime) in whole seconds (share/output_wrf.F:413-435)
+  // to the next ring as interval - (time - PrevRingTime) in whole seconds (share/output_wrf.F:413-435). Only with
+  // WRF output: a nest's feedback also builds the history writer with output.format = native, but then its
+  // before_step / after_solve snapshots (T before the feedback, P_HYD, ...) are not taken
+  if (!write_wrfout_) ring = false;
   if (wrfout_ && ring && m_.adapt) {
     // output_wrf.F:413-435: interval - (current time - PrevRingTime) in whole seconds; the history alarm rang at this
     // step only when it is the last one (med_restart_out of a later step runs after med_hist_out turned it off)
