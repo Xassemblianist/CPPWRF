@@ -100,7 +100,7 @@ class RealDomain {
       water_depth, pdhs, toposoil, sct_dom_gc, scb_dom_gc, frc_urb2d;
   F2<int> ivgtyp, isltyp;
   // ---- metgrid fields (i, 1..nlev, j)
-  F3<T> p_gc, t_gc, rh_gc, u_gc, v_gc, ght_gc, qv_gc, pd_gc;
+  F3<T> p_gc, t_gc, rh_gc, u_gc, v_gc, ght_gc, qv_gc, sh_gc, pd_gc;
   F2<T> psfc_gc, pslv_gc, ht_gc, intq_gc, tsk_gc, tmn_gc, xlat_gc, xlong_gc;
   F3<T> greenfrac, albedo12m, lai12m, landusef, soilctop, soilcbot;  // (i, month/category, j)
   // ---- soil

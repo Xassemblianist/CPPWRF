@@ -90,6 +90,8 @@ static int run(const RealOptions& o, const Namelist& nl, const WrfSchema& sc, co
       cppwrf::wrf_io::julgmt(date, jy, jd, gm);
     }
     const MetEm m = MetEm::read(met_dir + "/met_em." + dn + "." + date + ".nc");
+    if (m.time != date)  // the data of the file are those of its Times, which must be the date it is read for
+      throw std::runtime_error("real: " + m.path + " holds the time " + m.time + ", not " + date);
     dom.read_input(m);
     {  // input_wrf.F:635-731 (auxinput1): the namelist must match the metgrid file's dimensions (count_fatal_error)
       int nlc = m.att_int("NUM_LAND_CAT", -1);

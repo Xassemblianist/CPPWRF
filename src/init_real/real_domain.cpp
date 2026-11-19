@@ -72,6 +72,7 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
   o.smooth_cg_topo = c.logical("smooth_cg_topo");
   o.rebalance = c.integer("rebalance");
   o.hypsometric_opt = c.integer("hypsometric_opt");
+  if (o.hypsometric_opt == 2) o.adjust_heights = false;  // module_check_a_mundo.F:1356-1361
   o.rh2qv_wrt_liquid = c.logical("rh2qv_wrt_liquid");
   o.rh2qv_method = c.integer("rh2qv_method");
   o.use_sh_qv = c.logical("use_sh_qv");
@@ -103,6 +104,9 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
                                 " is not supported (WRF: unknown or not ported land surface scheme)");
   if (o.mp_physics < 0) throw std::runtime_error("real: mp_physics = -1 needs a physics_suite (CONUS or tropical)");
   o.surface_input_source = c.integer("surface_input_source");
+  if (o.surface_input_source != 3)  // module_initialize_real.F:3036-3088 (process_percent_cat_new, aggregate_lu)
+    throw std::runtime_error("real: surface_input_source = " + std::to_string(o.surface_input_source) +
+                             " is not ported (only 3: the dominant categories of metgrid)");
   // check_a_mundo (module_check_a_mundo.F:1062-1076): every allowed domain takes the innermost domain's value
   o.sf_urban_physics = c.integer("sf_urban_physics", c.logical("grid_allowed") ? std::max(1, o.max_dom) : dom);
   o.fractional_seaice = c.integer("fractional_seaice");
@@ -251,7 +255,8 @@ RealDomain<T>::RealDomain(const RealOptions& opt) : o(opt) {
     *a = F2<T>(1, ide, 1, jde);
   ivgtyp = F2<int>(1, ide, 1, jde);
   isltyp = F2<int>(1, ide, 1, jde);
-  for (F3<T>* a : {&p_gc, &t_gc, &rh_gc, &u_gc, &v_gc, &ght_gc, &qv_gc, &pd_gc}) *a = F3<T>(1, ide, 1, nlev, 1, jde);
+  for (F3<T>* a : {&p_gc, &t_gc, &rh_gc, &u_gc, &v_gc, &ght_gc, &qv_gc, &sh_gc, &pd_gc})
+    *a = F3<T>(1, ide, 1, nlev, 1, jde);
   const int ns = std::max(1, o.num_soil_layers);
   tslb = F3<T>(1, ide, 1, ns, 1, jde);
   smois = F3<T>(1, ide, 1, ns, 1, jde);
@@ -267,6 +272,8 @@ void put2(const MetEm& m, const char* name, F2<T>& f) {
   const MetVar& v = m.var(name);
   if (v.shape.size() != 2) throw std::runtime_error(std::string("met_em: ") + name + " is not 2-D");
   const std::size_t ny = v.shape[0], nx = v.shape[1];
+  if (nx > std::size_t(f.ihi() - f.ilo() + 1) || ny > std::size_t(f.jhi() - f.jlo() + 1))
+    throw std::runtime_error(std::string("met_em: ") + name + " is larger than the domain (e_we / e_sn)");
   for (std::size_t j = 0; j < ny; ++j)
     for (std::size_t i = 0; i < nx; ++i) f(int(i) + 1, int(j) + 1) = T(v.v[j * nx + i]);
 }
@@ -275,6 +282,11 @@ void put3(const MetEm& m, const char* name, F3<T>& f, int k0 = 1) {
   const MetVar& v = m.var(name);
   if (v.shape.size() != 3) throw std::runtime_error(std::string("met_em: ") + name + " is not 3-D");
   const std::size_t nk = v.shape[0], ny = v.shape[1], nx = v.shape[2];
+  if (nx > std::size_t(f.ihi() - f.ilo() + 1) || ny > std::size_t(f.jhi() - f.jlo() + 1))
+    throw std::runtime_error(std::string("met_em: ") + name + " is larger than the domain (e_we / e_sn)");
+  if (int(nk) != f.khi() - k0 + 1)
+    throw std::runtime_error(std::string("met_em: ") + name + " has " + std::to_string(nk) + " levels, the namelist " +
+                             std::to_string(f.khi() - k0 + 1) + " (num_metgrid_levels / num_metgrid_soil_levels)");
   for (std::size_t k = 0; k < nk; ++k)
     for (std::size_t j = 0; j < ny; ++j)
       for (std::size_t i = 0; i < nx; ++i) f(int(i) + 1, int(k) + k0, int(j) + 1) = T(v.v[(k * ny + j) * nx + i]);
@@ -287,23 +299,50 @@ void RealDomain<T>::read_input(const MetEm& m) {
   flags.clear();
   for (const auto& [name, v] : m.int_atts())
     if (name.rfind("FLAG_", 0) == 0 && !v.empty()) flags[name.substr(5)] = v[0];
-  if (m.att_int("NUM_METGRID_LEVELS", nlev) != nlev)
-    throw std::runtime_error("real: num_metgrid_levels in the namelist does not match " + m.path);
-  if (m.att_int("WEST-EAST_GRID_DIMENSION", ide) != ide || m.att_int("SOUTH-NORTH_GRID_DIMENSION", jde) != jde)
+  // input_wrf.F:423-432 / :946-970 (metgrid writes BOTTOM-TOP_GRID_DIMENSION = its number of levels)
+  if (m.att_int("BOTTOM-TOP_GRID_DIMENSION", -1) != nlev)
+    throw std::runtime_error("real: num_metgrid_levels in the namelist does not match BOTTOM-TOP_GRID_DIMENSION of " +
+                             m.path);
+  if (m.att_int("WEST-EAST_GRID_DIMENSION", -1) != ide || m.att_int("SOUTH-NORTH_GRID_DIMENSION", -1) != jde)
     throw std::runtime_error("real: e_we / e_sn do not match " + m.path);
-  iswater = m.att_int("ISWATER", 16);
-  islake = m.att_int("ISLAKE", -1);
-  isice = m.att_int("ISICE", 24);
-  isurban = m.att_int("ISURBAN", 1);
-  isoilwater = m.att_int("ISOILWATER", 14);
+  {  // input_wrf.F:440-455 (polar is refused)
+    const double dxc = m.att_real("DX", o.dx), dyc = m.att_real("DY", o.dy);
+    if (std::abs(dxc - o.dx) > 1.E-5 * dxc || std::abs(dyc - o.dy) > 1.E-5 * dyc)
+      throw std::runtime_error("real: DX and DY do not match comparing namelist to the input file " + m.path);
+  }
+  // input_wrf.F:596-597 (a missing MMINLU is " " there: refused, metgrid has written it since WPS v3), :825-884
+  // (ISWATER / ISICE / ISURBAN defaults by MMINLU)
+  if (m.att_str("MMINLU", "\x01") == "\x01") throw std::runtime_error("real: met_em without MMINLU: " + m.path);
   mminlu = m.att_str("MMINLU", "USGS");
   while (!mminlu.empty() && (mminlu.back() == ' ' || mminlu.back() == '\0')) mminlu.pop_back();
+  const bool umd = mminlu == "UMD", modis = mminlu == "MODIFIED_IGBP_MODIS_NOAH";
+  iswater = m.att_int("ISWATER", umd ? 14 : modis ? 17 : 16);
+  islake = m.att_int("ISLAKE", -1);
+  isice = m.att_int("ISICE", umd ? 14 : modis ? 15 : 24);
+  isurban = m.att_int("ISURBAN", umd || modis ? 13 : 1);
+  isoilwater = m.att_int("ISOILWATER", 14);
   // 3-D metgrid fields
-  put3(m, "PRES", p_gc); put3(m, "TT", t_gc); put3(m, "RH", rh_gc); put3(m, "UU", u_gc); put3(m, "VV", v_gc);
-  put3(m, "GHT", ght_gc);
+  put3(m, "PRES", p_gc); put3(m, "TT", t_gc); put3(m, "UU", u_gc); put3(m, "VV", v_gc);
+  // GHT: a met_em set without it (ERA5 model levels) leaves ght_gc as it was (zero at the first time, as WRF's
+  // grid array), and module_initialize_real.F:1202-1213 rebuilds it hypsometrically where it is below 1 m
+  if (m.has("GHT")) put3(m, "GHT", ght_gc);
+  // moisture: RH, or SPECHUMD with FLAG_SH = 1 / QV with FLAG_QV = 1 (module_initialize_real.F:1113-1197 derives
+  // RH from them); without any of them WRF would run on RH = 0
+  const bool fl_sh = flags.count("SH") && flags["SH"] == 1, fl_qv = flags.count("QV") && flags["QV"] == 1;
+  if (m.has("RH")) put3(m, "RH", rh_gc);
+  else if (!fl_sh && !fl_qv)
+    throw std::runtime_error("real: met_em has no RH (nor SPECHUMD with FLAG_SH = 1 or QV with FLAG_QV = 1): " + m.path);
   if (m.has("QV")) put3(m, "QV", qv_gc);
+  else if (fl_qv && !fl_sh) throw std::runtime_error("real: FLAG_QV = 1 but met_em has no QV: " + m.path);
+  if (m.has("SPECHUMD")) put3(m, "SPECHUMD", sh_gc);
+  else if (fl_sh) throw std::runtime_error("real: FLAG_SH = 1 but met_em has no SPECHUMD: " + m.path);
   // 2-D fields (Registry i1 names)
-  put2(m, "PSFC", psfc); put2(m, "PMSL", pslv_gc); put2(m, "HGT_M", ht_gc); put2(m, "SKINTEMP", tsk_gc);
+  if (m.has("PSFC")) put2(m, "PSFC", psfc);
+  if (m.has("PMSL")) put2(m, "PMSL", pslv_gc);
+  for (auto [fl, n] : {std::pair<const char*, const char*>{"PSFC", "PSFC"}, {"SLP", "PMSL"}, {"SOILHGT", "SOILHGT"}})
+    if (flags.count(fl) && flags[fl] == 1 && !m.has(n))
+      throw std::runtime_error(std::string("real: FLAG_") + fl + " = 1 but met_em has no " + n + ": " + m.path);
+  put2(m, "HGT_M", ht_gc); put2(m, "SKINTEMP", tsk_gc);
   put2(m, "SOILTEMP", tmn_gc); put2(m, "XLAT_M", xlat_gc); put2(m, "XLONG_M", xlong_gc);
   put2(m, "XLAT_U", xlat_u); put2(m, "XLONG_U", xlong_u); put2(m, "XLAT_V", xlat_v); put2(m, "XLONG_V", xlong_v);
   put2(m, "CLAT", clat); put2(m, "CLONG", clong);
@@ -320,9 +359,11 @@ void RealDomain<T>::read_input(const MetEm& m) {
   // optional input-stream fields WRF passes from met_em to wrfinput, not carried by cppwrf_real
   // (Registry DataNames are upper case in the I/O: allocs_*.F DataName = 'O3_GFS_DU'; write_wrfinput refuses any
   // other auxinput1 field of wrfinput that the met_em file has and cppwrf_real does not read)
-  for (const char* n : {"UOCE", "VOCE", "TOPOSLPX", "TOPOSLPY", "EROD", "ICEDEPTH", "ALBSI", "SNOWSI", "LANDUSEF2",
-                        "SOILT1", "O3_GFS_DU", "CANWAT"})
+  for (const char* n : {"ICEDEPTH", "ALBSI", "SNOWSI", "LANDUSEF2", "SOILT1", "O3_GFS_DU"})
     if (m.has(n)) throw std::runtime_error(std::string("real: met_em field ") + n + " is not ported");
+  // CANWAT: met_em -> wrfinput unchanged (no grid%canwat statement in module_initialize_real.F / real_em.F); the
+  // other pure pass-through fields: real_output.hpp kPassThrough
+  if (m.has("CANWAT")) put2(m, "CANWAT", canwat);
   if (m.has("SNOALB")) put2(m, "SNOALB", snoalb);
   if (m.has("SCT_DOM")) put2(m, "SCT_DOM", sct_dom_gc);
   if (m.has("SCB_DOM")) put2(m, "SCB_DOM", scb_dom_gc);
@@ -342,7 +383,6 @@ void RealDomain<T>::read_input(const MetEm& m) {
   if (flags.count("SOIL_LEVELS") && flags["SOIL_LEVELS"] == 1)
     throw std::runtime_error("real: soil-level (RUC) met_em input is not ported");
   if (flag("UM_SOIL") == 1) throw std::runtime_error("real: UM soil input (FLAG_UM_SOIL) is not ported");
-  if (m.has("SW")) throw std::runtime_error("real: met_em soil water (SW) input is not ported");
   if (o.sf_surface_physics == 4 && mminlu == "NLCD40")  // module_initialize_real: fatal with Noah-MP
     throw std::runtime_error("real: Noah-MP does not support the NLCD40 land use");
   if (flag("SOIL_LAYERS") == 1)
@@ -357,10 +397,16 @@ void RealDomain<T>::read_input(const MetEm& m) {
     }
     if (flag("SOIL_LAYERS") != 1) throw std::runtime_error("real: legacy soil input (no FLAG_SOIL_LAYERS) is not ported");
     const int n = num_st_levels_input;
+    // module_optional_input.F:1929-1934 checks n against the allocation after filling it; init_soil_2_real then
+    // also writes level n + 2 (bottom): refused before either would write past the 3 * num_soil_layers levels
+    if (n + 2 > nalloc)
+      throw std::runtime_error("real: soil_levels_too_few (num_metgrid_soil_levels + 2 > 3 * num_soil_layers)");
     F3<T> sl(1, ide, 1, n, 1, jde), st(1, ide, 1, n, 1, jde), sm(1, ide, 1, n, 1, jde);
     put3(m, "SOIL_LAYERS", sl);
     put3(m, "ST", st);
     put3(m, "SM", sm);
+    F3<T> sw(1, ide, 1, n, 1, jde);  // grid%sw: zero unless met_em has SW (liquid soil water: NAM, CFSR, ...)
+    if (m.has("SW")) put3(m, "SW", sw);
     st_levels_input.assign(std::size_t(n), -1);
     sm_levels_input.assign(std::size_t(n), -1);
     sw_levels_input.assign(std::size_t(n), -1);
@@ -376,9 +422,8 @@ void RealDomain<T>::read_input(const MetEm& m) {
         for (int i = 1; i <= ide - 1; ++i) {
           st_input(i, k + 1, j) = st(i, n + 1 - k, j);
           sm_input(i, k + 1, j) = sm(i, n + 1 - k, j);
-          sw_input(i, k + 1, j) = T(0);  // grid%sw: not in the metgrid output
+          sw_input(i, k + 1, j) = sw(i, n + 1 - k, j);  // module_optional_input.F:1368
         }
-    if (n > nalloc) throw std::runtime_error("real: soil_levels_too_few");
   }
   // monthly and category fields
   auto put_cat = [&](const char* name, F3<T>& fld, int& ncat) {
@@ -394,6 +439,11 @@ void RealDomain<T>::read_input(const MetEm& m) {
   put_cat("LANDUSEF", landusef, num_veg_cat);
   put_cat("SOILCTOP", soilctop, num_soil_top_cat);
   put_cat("SOILCBOT", soilcbot, num_soil_bot_cat);
+  // categories indexed by real.exe (landusef(:,iswater|islake|isice|isurban,:), soilctop / soilcbot (:,14|16,:)):
+  // without them (or with fewer categories) WRF reads outside its arrays; refused
+  if (num_veg_cat < std::max({iswater, islake, isice, isurban}) || num_soil_top_cat < 16 || num_soil_bot_cat < 16)
+    throw std::runtime_error("real: met_em LANDUSEF / SOILCTOP / SOILCBOT missing or with fewer categories than "
+                             "ISWATER / ISLAKE / ISICE / ISURBAN or soil category 16: " + m.path);
 }
 
 // ---------------------------------------------------------------- init_domain_rk
@@ -471,14 +521,14 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   if (flag("METGRID") != 1) throw std::runtime_error("real: input must come from metgrid (FLAG_METGRID = 1)");
 
   // ================================ vertical interpolation part
-  if (flag("PINTERP") == 1) throw std::runtime_error("real: P_INTERP input is not ported");
+  if (flag("P_INTERP") == 1) throw std::runtime_error("real: P_INTERP input (FLAG_P_INTERP = 1) is not ported");  // module_optional_input.F:524
   for (int j = jts; j <= std::min(jte, jde - 1); ++j)
     for (int i = its; i <= std::min(ite, ide - 1); ++i) {
       if (skip(i, j)) continue;
       tsk(i, j) = tsk_gc(i, j); tmn(i, j) = tmn_gc(i, j); xlat(i, j) = xlat_gc(i, j); xlong(i, j) = xlong_gc(i, j);
       ht(i, j) = ht_gc(i, j);
     }
-  if (o.smooth_cg_topo) throw std::runtime_error("real: smooth_cg_topo is not ported");
+  if (o.smooth_cg_topo && o.dom == 1) throw std::runtime_error("real: smooth_cg_topo is not ported");
   if (flag("PSFC") == 1)
     for (int j = jts; j <= j1; ++j)
       for (int i = its; i <= i1; ++i) {
@@ -503,15 +553,51 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     if (t_gc(i_valid, 1, j_valid) == T(-1.E30) || rh_gc(i_valid, 1, j_valid) == T(-1.E30) ||
         u_gc(i_valid, 1, j_valid) == T(-1.E30) || v_gc(i_valid, 1, j_valid) == T(-1.E30))
       throw std::runtime_error("real: missing surface fields (use_surface fallback) are not ported");
-    (void)k;
+    auto rh_from_qv = [&](int i, int kk, int j) {
+      const T sat_vap_pres_mb =
+          T(0.6112) * T(10.) * std::exp(T(17.67) * (t_gc(i, kk, j) - T(273.15)) / (t_gc(i, kk, j) - T(29.65)));
+      const T vap_pres_mb = qv_gc(i, kk, j) * p_gc(i, kk, j) / T(100.) / (qv_gc(i, kk, j) + T(0.622));
+      rh_gc(i, kk, j) = sat_vap_pres_mb > T(0) ? (vap_pres_mb / sat_vap_pres_mb) * T(100.) : T(0.);
+    };
     if (flag("QV") != 1 && flag("SH") != 1) {
       use_sh_qv = false;
       Dims dm{ids, ide, jds, jde, 1, nlev};
       rh_to_mxrat1(rh_gc, t_gc, p_gc, qv_gc, ql, nlev, dm, sk);
-    } else {
-      throw std::runtime_error("real: QV / SH metgrid input is not ported");
+    } else if (flag("SH") == 1) {  // module_initialize_real.F:1144-1173
+      if (sh_gc(i_valid, 1, j_valid) < T(1.e-6))
+        for (int j = jts; j <= j1; ++j)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            sh_gc(i, 1, j) = sh_gc(i, k, j);
+          }
+      for (int j = jts; j <= j1; ++j)
+        for (int kk = 1; kk <= nlev; ++kk)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            qv_gc(i, kk, j) = sh_gc(i, kk, j) / (T(1.) - sh_gc(i, kk, j));
+            rh_from_qv(i, kk, j);
+          }
+    } else {  // flag_qv = 1: module_initialize_real.F:1175-1195
+      for (int j = jts; j <= j1; ++j)
+        for (int kk = 1; kk <= nlev; ++kk)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            rh_from_qv(i, kk, j);
+          }
     }
-    if (ght_gc(i_valid, nlev / 2, j_valid) < T(1)) throw std::runtime_error("real: GHT reconstruction is not ported");
+    if (ght_gc(i_valid, nlev / 2, j_valid) < T(1)) {  // module_initialize_real.F:1202-1213
+      const T R_d = Const<T>::r_d, g = Const<T>::g;
+      for (int j = jts; j <= j1; ++j)
+        for (int kk = 2; kk <= nlev; ++kk)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            ght_gc(i, kk, j) = ght_gc(i, kk - 1, j) -
+                               R_d / g * T(0.5) *
+                                   (t_gc(i, kk, j) * (T(1) + T(0.608) * qv_gc(i, kk, j)) +
+                                    t_gc(i, kk - 1, j) * (T(1) + T(0.608) * qv_gc(i, kk - 1, j))) *
+                                   std::log(p_gc(i, kk, j) / p_gc(i, kk - 1, j));
+          }
+    }
     if (p_gc(i_valid, nlev / 2, j_valid) < p_gc(i_valid, nlev / 2 + 1, j_valid)) sfcp_to_sfcp = true;
   }
   for (int j = jts; j <= std::min(jde - 1, jte); ++j)
@@ -529,6 +615,12 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
       if (skip(i, j)) continue;
       t2(i, j) = t_gc(i, 1, j);
     }
+  if (flag("QV") == 1 || flag("SH") == 1)  // module_initialize_real.F:1250-1266
+    for (int j = jts; j <= j1; ++j)
+      for (int i = its; i <= i1; ++i) {
+        if (skip(i, j)) continue;
+        q2(i, j) = qv_gc(i, 1, j);
+      }
   {
     Dims dm{ids, ide, jds, jde, 1, nlev};
     T pt = find_p_top(p_gc, nlev, dm, sk);
@@ -605,10 +697,19 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     }
   {
     Dims dm{ids, ide, jds, jde, 1, nlev};
+    // module_initialize_real.F:1398-1434
     if (flag("PSFC") == 1 && flag("SOILHGT") == 1 && flag("SLP") == 1 && !sfcp_to_sfcp) {
       sfcprs3(ght_gc, p_gc, ht, pslv_gc, psfc, nlev, dm, sk);
+    } else if (flag("PSFC") == 1 && flag("SOILHGT") == 1 && sfcp_to_sfcp) {
+      sfcprs2(t_gc, qv_gc, ght_gc, psfc_gc, ht, psfc, dm, sk);
+    } else if (flag("SLP") == 1) {
+      throw std::runtime_error("real: met_em without surface pressure (FLAG_PSFC = " + std::to_string(flag("PSFC")) +
+                               ") or soil height (FLAG_SOILHGT = " + std::to_string(flag("SOILHGT")) +
+                               "): WRF's sfcprs path (from PMSL) is not ported");
     } else {
-      throw std::runtime_error("real: only the sfcprs3 surface pressure path is ported");
+      throw std::runtime_error("real: not enough info for a p sfc computation (FLAG_PSFC = " +
+                               std::to_string(flag("PSFC")) + ", FLAG_SOILHGT = " + std::to_string(flag("SOILHGT")) +
+                               ", FLAG_SLP = 0)");
     }
     integ_moist(qv_gc, p_gc, pd_gc, t_gc, ght_gc, intq_gc, nlev, dm, sk);
   }
@@ -623,6 +724,23 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     compute_eta(znw, eo, p_top, kde);
   }
   compute_vcoord_1d_coeffs(T(o.etac), znw, o.hybrid_opt, p_top, kde, znu, c1f, c2f, c3f, c4f, c1h, c2h, c3h, c4h);
+  {  // nest_init_utils.F:1158-1182: the reference pressure must decrease monotonically in every column
+    const T R_d = Const<T>::r_d, g = Const<T>::g;
+    for (int j = jts; j <= j1; ++j)
+      for (int i = its; i <= i1; ++i) {
+        const T p_surf = p00 * std::exp(-t00 / a + std::sqrt((t00 / a) * (t00 / a) - T(2.) * g * ht(i, j) / a / R_d));
+        for (int k = 1; k <= kde - 1; ++k) {
+          const T press_above = c3f(k + 1) * (p_surf - p_top) + c4f(k + 1) + p_top;
+          const T press_below = c3f(k) * (p_surf - p_top) + c4f(k) + p_top;
+          if (press_below - press_above <= T(0.0))
+            throw std::runtime_error("real: the reference pressure is not monotonically decreasing (very high "
+                                     "topography: (i,j) = (" + std::to_string(i) + "," + std::to_string(j) +
+                                     "), " + std::to_string(double(ht(i, j))) + " m, k = " + std::to_string(k) +
+                                     "); in the dynamics namelist record, reduce etac from " +
+                                     std::to_string(o.etac));
+        }
+      }
+  }
   if (o.interp_theta) throw std::runtime_error("real: interp_theta is not ported");
   if (flag("SLP") == 1) {
     p_dry(mu0, znw, p_top, pb, true, c3f, c3h, c4f, c4h, d, sk);
@@ -652,7 +770,8 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   vo.zap_close_levels = o.zap_close_levels; vo.force_sfc_in_vinterp = o.force_sfc_in_vinterp;
   vo.extrap_type = o.extrap_type;
   vert_interp(rh_gc, pd_gc, u_1, pb, nlev, 'Q', vo, d, sk);
-  if (use_sh_qv) throw std::runtime_error("real: use_sh_qv is not ported");
+  // module_initialize_real.F:1744-1757: with use_sh_qv, Qv itself is interpolated (and not diagnosed from RH)
+  if (use_sh_qv && (flag("SH") == 1 || flag("QV") == 1)) vert_interp(qv_gc, pd_gc, qv, pb, nlev, 'Q', vo, d, sk);
   {
     VInterpOpts vt = vo;
     vt.interp_type = 2;
@@ -662,7 +781,7 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     vert_interp(p_gc, pd_gc, p, pb, nlev, 'T', vt, d, sk);
   }
   v_1 = t_2;
-  rh_to_mxrat1(u_1, v_1, p, qv, ql, kte - 1, d, sk);
+  if (!use_sh_qv) rh_to_mxrat1(u_1, v_1, p, qv, ql, kte - 1, d, sk);
   t_to_theta(t_2, p, p00, kte - 1, d, sk);
   for (const char* q : {"QR", "QC", "QI", "QS", "QG", "QH", "QNI", "QNC", "QNR", "QNS", "QNG", "QNH", "SPECCLDL",
                         "SPECCLDF"})
@@ -671,21 +790,35 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   vert_interp(v_gc, pd_gc, v_2, pb, nlev, 'V', vo, d, sk);
   // ================================ end of the vertical interpolation part
 
-  if (islake < 0) throw std::runtime_error("real: input without inland lake information is not ported");
-  lakeflag = 1;
-  if (we_have_tavgsfc) throw std::runtime_error("real: TAVGSFC with inland lakes is not ported");
-  for (int j = jts; j <= j1; ++j)
-    for (int i = its; i <= i1; ++i) {
-      if (skip(i, j)) continue;
-      landusef(i, iswater, j) = landusef(i, iswater, j) + landusef(i, islake, j);
-      landusef(i, islake, j) = T(0.);
-    }
-  if (o.surface_input_source == 3)
+  // module_initialize_real.F:2822-2884
+  if (islake < 0) {  // land use without an inland-lake category (USGS 24, MODIS 20, NLCD40: ISLAKE = -1)
+    lakeflag = 0;
+    if (we_have_tavgsfc) throw std::runtime_error("real: TAVGSFC (FLAG_TAVGSFC = 1) is not ported");
     for (int j = jts; j <= j1; ++j)
       for (int i = its; i <= i1; ++i) {
         if (skip(i, j)) continue;
-        if (lu_index(i, j) == T(islake)) lu_index(i, j) = T(iswater);
+        if ((landusef(i, iswater, j) >= T(0.5) || lu_index(i, j) == T(iswater)) &&
+            (sst(i, j) < T(150) || sst(i, j) > T(400))) {
+          if (sst(i, j) < T(150) || sst(i, j) > T(400)) sst(i, j) = tsk(i, j);
+          if (sst(i, j) < T(150) || sst(i, j) > T(400)) sst(i, j) = t2(i, j);
+        }
       }
+  } else {
+    lakeflag = 1;
+    if (we_have_tavgsfc) throw std::runtime_error("real: TAVGSFC with inland lakes is not ported");
+    for (int j = jts; j <= j1; ++j)
+      for (int i = its; i <= i1; ++i) {
+        if (skip(i, j)) continue;
+        landusef(i, iswater, j) = landusef(i, iswater, j) + landusef(i, islake, j);
+        landusef(i, islake, j) = T(0.);
+      }
+    if (o.surface_input_source == 3)
+      for (int j = jts; j <= j1; ++j)
+        for (int i = its; i <= i1; ++i) {
+          if (skip(i, j)) continue;
+          if (lu_index(i, j) == T(islake)) lu_index(i, j) = T(iswater);
+        }
+  }
   for (int j = jts; j <= j1; ++j)
     for (int i = its; i <= i1; ++i) {
       if (skip(i, j)) continue;
@@ -1036,18 +1169,20 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     for (int j = jts; j <= j1; ++j)
       for (int i = its; i <= i1; ++i) {
         if (skip(i, j)) continue;
-        if ((tsk(i, j) < T(170) || tsk(i, j) > T(400)) && tsk_save(i, j) > T(170) && tsk_save(i, j) < T(400))
-          tsk(i, j) = tsk_save(i, j);
-        if ((tsk(i, j) < T(170) || tsk(i, j) > T(400)) && (tsk_save(i, j) < T(170) || tsk_save(i, j) > T(400))) {
+        // module_initialize_real.F:3610 passes (grid%tsk, grid%tsk_save) as the dummies (tsk_old, tsk) of
+        // module_soil_pre.F:170: the routine's "tsk" is tsk_save here (SKINTEMP before SST replaced it over water)
+        if ((tsk_save(i, j) < T(170) || tsk_save(i, j) > T(400)) && tsk(i, j) > T(170) && tsk(i, j) < T(400))
+          tsk_save(i, j) = tsk(i, j);
+        if ((tsk_save(i, j) < T(170) || tsk_save(i, j) > T(400)) && (tsk(i, j) < T(170) || tsk(i, j) > T(400))) {
           throw std::runtime_error("real: TSK is unrealistic, problems for seaice post");
-        } else if (xice(i, j) >= xice_threshold || (landmask(i, j) < T(0.5) && tsk(i, j) < seaice_threshold)) {
+        } else if (xice(i, j) >= xice_threshold || (landmask(i, j) < T(0.5) && tsk_save(i, j) < seaice_threshold)) {
           if (o.fractional_seaice == 0) xice(i, j) = T(1.0);
           if (landmask(i, j) < T(0.5)) tmn(i, j) = T(271.4);
           vegcat(i, j) = T(isice); ivgtyp(i, j) = isice; lu_index(i, j) = T(isice);
           landmask(i, j) = T(1.); xland(i, j) = T(1.); vegfra(i, j) = T(0.);
           for (int l = 1; l <= num_veg_cat; ++l) landusef(i, l, j) = T(0.);
           landusef(i, ivgtyp(i, j), j) = T(1.);
-          tsk_save(i, j) = tsk(i, j);
+          tsk(i, j) = tsk_save(i, j);
           isltyp(i, j) = 16;
           soilcat(i, j) = T(isltyp(i, j));
           for (int l = 1; l <= num_soil_top_cat; ++l) soilctop(i, l, j) = T(0);
@@ -1057,7 +1192,7 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
           const T total_depth = T(3.);
           for (int l = 1; l <= o.num_soil_layers; ++l) {
             T mid = (total_depth / T(o.num_soil_layers)) / T(2.) + T(l - 1) * (total_depth / T(o.num_soil_layers));
-            tslb(i, l, j) = ((total_depth - mid) * tsk(i, j) + mid * tmn(i, j)) / total_depth;
+            tslb(i, l, j) = ((total_depth - mid) * tsk_save(i, j) + mid * tmn(i, j)) / total_depth;
           }
           for (int l = 1; l <= o.num_soil_layers; ++l) { smois(i, l, j) = T(1.0); sh2o(i, l, j) = T(0.0); }
         } else if (xice(i, j) < xice_threshold) {

@@ -108,6 +108,10 @@ port_gem9_data.tar
 # wrfref gem9-refs2: run_G9F2_r8 (P4 with QVAPOR / QCLOUD added to auxhist3, base_G9F2's myoutfields.txt) for
 # real_g9f2_r8_fp64_cpu
 port_gem9b_data.tar
+# WRF real.exe runs of the cppwrf_real input variants (wrfref gem13-refs: run_G13ICE_r8 ... run_G13SW_r8 on base_G13*
+# met_em files; run_G13NOLAKE's wrf.exe stops, WRF's own 'too many input landuse types'): ctest real_vs_wrf_runs
+# (also in tests/verify/ctest_data.txt)
+port_gem13_data.tar
 # wrfref gem7-p4bmjfi0 / gem8-n3f1-n3m / gem8-n3f1d: run_P4BMJFI0_r8 (P4BMJF with icloud 0), run_N3F1_r8 with
 # base_N3F1 (N3s inputs, d02 land use changed at fed-back points), run_N3M_r8 (N3s with MYNN, km_opt 4 / 2)
 port_gem78_data.tar

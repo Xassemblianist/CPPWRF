@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 
 #include "init_real/met_em.hpp"
@@ -42,6 +43,28 @@ wrf_io::DomainAtts domain_atts(const WrfConfig& c, const MetEm& m, const RealDom
   return d;
 }
 
+// auxinput1 fields that real.exe copies from met_em into wrfinput (and UOCE / VOCE into wrflowinp) unchanged: no
+// grid%<name> statement in module_initialize_real.F or real_em.F (LAKE_DEPTH: only with sf_lake_physics = 1,
+// FRC_URB2D: only with sf_urban_physics > 0, both refused). Registry DataNames (Registry.EM_COMMON,
+// registry.noahmp).
+inline bool pass_through(const MetEm& m, const OutVar& v, std::vector<double>& out) {
+  static const std::set<std::string> kPassThrough = {
+      "LAKE_DEPTH", "FRC_URB2D", "ELVMAX", "EROD", "TOPOSLPX", "TOPOSLPY", "UOCE", "VOCE", "H0ML", "TMOML",
+      "VARLS", "CONLS", "OA1LS", "OA2LS", "OA3LS", "OA4LS", "OL1LS", "OL2LS", "OL3LS", "OL4LS",
+      "VARSS", "CONSS", "OA1SS", "OA2SS", "OA3SS", "OA4SS", "OL1SS", "OL2SS", "OL3SS", "OL4SS",
+      "FDEPTH", "EQZWT", "RECHCLIM", "RIVERBED", "SOILCOMP", "SOILCL1", "SOILCL2", "SOILCL3", "SOILCL4",
+      "CROPTYPE", "PLANTING", "HARVEST", "SEASON_GDD", "TD_FRACTION", "IRFRACT", "SIFRACT", "MIFRACT", "FIFRACT",
+      "IRRIGATION", "PCT_PFT", "IMPERV", "CANFRA", "Z0_URB2D", "LF_URB2D_S", "AHE"};
+  if (!kPassThrough.count(v.name) || !m.has(v.name)) return false;
+  const MetVar& mv = m.var(v.name);
+  std::size_t n = 1;
+  for (std::size_t l : v.dimlens) n *= l;
+  if (mv.v.size() != n)
+    throw std::runtime_error("real: met_em field " + v.name + " does not have the shape of its wrfinput variable");
+  out = mv.v;
+  return true;
+}
+
 // Global attributes of WRF's output_wrf (switch input_only / boundary_only), in WRF's order.
 template <typename T>
 void write_global_atts(NcOut& nc, const WrfConfig& c, const MetEm& m, const RealDomain<T>& dm,
@@ -71,6 +94,7 @@ void write_wrfinput(const RealDomain<T>& dm, const MetEm& m, const WrfSchema& sc
     if (it != values.end()) {
       data = it->second(v);
       if (data.size() != n) throw std::runtime_error("wrfinput: size mismatch for " + v.name);
+    } else if (pass_through(m, v, data)) {
     } else if (m.has(v.name) && ((v.var ? v.var->s1 : v.member ? v.member->s1 : 0u) >> 26 & 1u)) {
       // an auxinput1 (i1) field of wrfinput: real.exe reads it from met_em and writes it (input_wrf / output_wrf);
       // cppwrf_real would write zeros (ELVMAX, the GSL drag fields, Noah-MP's FDEPTH ... SOILCOMP, H0ML, ...)
@@ -94,7 +118,7 @@ class WrfLowinpWriter {
     const auto values = wrfinput_values(dm, m);
     f_.write(date, [&](const OutVar& v, std::vector<double>& out) {
       auto it = values.find(v.name);
-      if (it == values.end()) return false;
+      if (it == values.end()) return pass_through(m, v, out);
       out = it->second(v);
       return true;
     });

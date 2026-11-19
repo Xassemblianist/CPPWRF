@@ -231,10 +231,13 @@ if(TARGET netCDF::netcdf OR NETCDF_FOUND OR NETCDF_INCDIR)
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(real_vs_wrf PROPERTIES SKIP_RETURN_CODE 77)
   # WRF real.exe runs of the wrfref workflow (port_gem10_data.tar): lagrange_order 1, default_soiltype 14, met_em
-  # files with VAR_SSO / FLAG_VAR_SSO, and the plain P1 met_em (skipped, exit 77, without them; the tar is in
+  # files with VAR_SSO / FLAG_VAR_SSO, and the plain P1 met_em; port_gem13_data.tar: sea ice with SST, ISLAKE -1,
+  # SPECHUMD (use_sh_qv), no GHT, top-down levels, sfcprs2, pass-through fields, soil water (skipped, exit 77, without them; the tar is in
   # tests/verify/ctest_data.txt, the data of the CI diff job that runs the ctest tests)
   add_test(NAME real_vs_wrf_runs COMMAND bash ${CMAKE_SOURCE_DIR}/tests/init_real/run_real_test.sh ${CMAKE_BINARY_DIR}
            runs:run_G10REAL_r8 runs:run_G10LAG1_r8 runs:run_G10DST_r8 runs:run_G10SSO_r8
+           runs:run_G13ICE_r8 runs:run_G13ICEF_r8 runs:run_G13NOLAKE_r8 runs:run_G13SH_r8 runs:run_G13SHQ_r8
+           runs:run_G13NOGHT_r8 runs:run_G13FLIP_r8 runs:run_G13S2P_r8 runs:run_G13PT_r8 runs:run_G13SW_r8
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(real_vs_wrf_runs PROPERTIES SKIP_RETURN_CODE 77)
   # wrfout/wrfrst files identical to WRF v4.8.0's (CPU FP64 builds; skipped, exit 77, without ${CPPWRF_WRF_RUNS})
