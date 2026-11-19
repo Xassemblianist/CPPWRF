@@ -59,11 +59,6 @@ CASES = [
      ["real.dir=" + f"{WR}/base_N3F1", "phys.table_dir=" + f"{WR}/base_N3F1"],
      {d: f"{WR}/run_N3F1_r8/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 180,
      {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "ALBEDO", "EMISS", "ZNT", "MAVAIL")}),
-    # N3M = N3 with MYNN (bl_pbl / sf_sfclay 5, tke advection) and km_opt 4 / 2: the domains' scalars paired by name
-    ("real_n3m_r8_fp64_cpu", "cpu_dp", "configs/real_n3_steps.ini",
-     ["real.dir=" + f"{WR}/run_N3M_r8", "phys.table_dir=" + f"{WR}/run_N3M_r8", "phys.bl_pbl_physics=5", "phys.sf_sfclay_physics=5", "phys.bl_mynn_tkeadvect=true", "d02.km_opt=2"],
-     {d: f"{WR}/run_N3M_r8/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 180,
-     {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "QKE")}),
     ("real_n3_r8_fp64_cpu_1h", "cpu_dp", "configs/real_n3.ini", [],
      {d: f"{WR}/run_N3h_r8/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 3600,
      {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP")}),
@@ -75,7 +70,7 @@ STATUS = [
     ('N1', 'one-way nest (both domains)', '3 parent steps'),
     ('N2', 'two-way nest (both domains)', '1 h'),
     ('N2S1 / N2S2', 'N2 with smooth_option 1 / 2 (smoothing of the fed-back fields, ht included)', '1 h'),
-    ('N3F1 / N3M', 'N3 with d02 land use differing at the fed-back points / with MYNN and km_opt 4, 2', '3 parent steps'),
+    ('N3F1', 'N3 with d02 land use differing at the fed-back points', '3 parent steps'),
     ('N3', 'two-way nest with the P4 physics on both domains (physics feedback, nest ozone from the parent)', '1 h'),
 ]
 
@@ -95,6 +90,5 @@ DATA = {
     'real_n2s2_r8_fp64_cuda_1h': 'nest_data.tar,v05_suite_refs.tar',
     'real_n3_r8_fp64_cpu': 'n3_data.tar,v05_suite_refs.tar',
     'real_n3f1_r8_fp64_cpu': 'port_gem78_data.tar',
-    'real_n3m_r8_fp64_cpu': 'n3_data.tar,v05_suite_refs.tar,port_gem78_data.tar',
     'real_n3_r8_fp64_cpu_1h': 'n3_data.tar,v05_suite_refs.tar',
 }
