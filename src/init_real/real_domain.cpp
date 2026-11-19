@@ -1036,18 +1036,20 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     for (int j = jts; j <= j1; ++j)
       for (int i = its; i <= i1; ++i) {
         if (skip(i, j)) continue;
-        if ((tsk(i, j) < T(170) || tsk(i, j) > T(400)) && tsk_save(i, j) > T(170) && tsk_save(i, j) < T(400))
-          tsk(i, j) = tsk_save(i, j);
-        if ((tsk(i, j) < T(170) || tsk(i, j) > T(400)) && (tsk_save(i, j) < T(170) || tsk_save(i, j) > T(400))) {
+        // module_initialize_real.F:3610 passes (grid%tsk, grid%tsk_save) as the dummies (tsk_old, tsk) of
+        // module_soil_pre.F:170: the routine's "tsk" is tsk_save here (SKINTEMP before SST replaced it over water)
+        if ((tsk_save(i, j) < T(170) || tsk_save(i, j) > T(400)) && tsk(i, j) > T(170) && tsk(i, j) < T(400))
+          tsk_save(i, j) = tsk(i, j);
+        if ((tsk_save(i, j) < T(170) || tsk_save(i, j) > T(400)) && (tsk(i, j) < T(170) || tsk(i, j) > T(400))) {
           throw std::runtime_error("real: TSK is unrealistic, problems for seaice post");
-        } else if (xice(i, j) >= xice_threshold || (landmask(i, j) < T(0.5) && tsk(i, j) < seaice_threshold)) {
+        } else if (xice(i, j) >= xice_threshold || (landmask(i, j) < T(0.5) && tsk_save(i, j) < seaice_threshold)) {
           if (o.fractional_seaice == 0) xice(i, j) = T(1.0);
           if (landmask(i, j) < T(0.5)) tmn(i, j) = T(271.4);
           vegcat(i, j) = T(isice); ivgtyp(i, j) = isice; lu_index(i, j) = T(isice);
           landmask(i, j) = T(1.); xland(i, j) = T(1.); vegfra(i, j) = T(0.);
           for (int l = 1; l <= num_veg_cat; ++l) landusef(i, l, j) = T(0.);
           landusef(i, ivgtyp(i, j), j) = T(1.);
-          tsk_save(i, j) = tsk(i, j);
+          tsk(i, j) = tsk_save(i, j);
           isltyp(i, j) = 16;
           soilcat(i, j) = T(isltyp(i, j));
           for (int l = 1; l <= num_soil_top_cat; ++l) soilctop(i, l, j) = T(0);
@@ -1057,7 +1059,7 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
           const T total_depth = T(3.);
           for (int l = 1; l <= o.num_soil_layers; ++l) {
             T mid = (total_depth / T(o.num_soil_layers)) / T(2.) + T(l - 1) * (total_depth / T(o.num_soil_layers));
-            tslb(i, l, j) = ((total_depth - mid) * tsk(i, j) + mid * tmn(i, j)) / total_depth;
+            tslb(i, l, j) = ((total_depth - mid) * tsk_save(i, j) + mid * tmn(i, j)) / total_depth;
           }
           for (int l = 1; l <= o.num_soil_layers; ++l) { smois(i, l, j) = T(1.0); sh2o(i, l, j) = T(0.0); }
         } else if (xice(i, j) < xice_threshold) {
