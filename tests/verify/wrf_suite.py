@@ -407,8 +407,17 @@ def chain_first_step(b, cfg, common, resumed, mid, out):
             res.append(f"first step: {what} run failed: {log[-200:]}")
             continue
         with _NC, netCDF4.Dataset(os.path.join(ref, name)) as A, netCDF4.Dataset(os.path.join(d, name)) as B:
-            dif = [v for v in A.variables if v in B.variables and
-                   not np.array_equal(np.asarray(A[v][:]), np.asarray(B[v][:]), equal_nan=True)]
+            dif = []
+            for v in A.variables:
+                if v not in B.variables:
+                    continue
+                x, y = np.asarray(A[v][:]), np.asarray(B[v][:])
+                if x.shape != y.shape or np.array_equal(x, y, equal_nan=True):
+                    continue
+                bad_at = np.argwhere(~((x == y) | (np.isnan(x) & np.isnan(y))))
+                lo, hi = bad_at.min(axis=0), bad_at.max(axis=0)
+                dif.append(f"{v}[{bad_at.shape[0]} pts, idx {tuple(int(a) for a in lo)}..{tuple(int(a) for a in hi)} "
+                           f"of {x.shape}, max|d| {float(np.nanmax(np.abs(x - y))):.1e}]")
         res.append(f"first step after {mid:g}s ({what}): {' '.join(dif) if dif else 'identical'}")
     return res
 
