@@ -67,6 +67,10 @@ CASES = [
       "output.out_interval=10", "output.diag_interval=10", "d02.out_interval=30", "d02.diag_interval=30"],
      {d: f"{WR}/run_FDN_r8/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 3600, _TN),
 ]
+# CUDA FP64 twins (tolerance 0) of the CPU cases of FD2 ... FD9 and FDN: the same configuration, overrides, reference
+# and variables, kind cuda_dp
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and not c[0].startswith("real_fd1_")]
 
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
 # duration
