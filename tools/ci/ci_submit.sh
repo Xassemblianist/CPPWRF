@@ -9,7 +9,7 @@
 #       [--data-tag TAG] [--out DIR] [--hours H] [--no-wait]
 #
 # COMMIT: default HEAD. Without --cases the full suite: every CPU FP64 case of wrf_suite.py but the slow ones (packed
-# into --suite-jobs jobs, default 13, by their recorded times), the output files tests (run_wrf_files_test.sh), the
+# into --suite-jobs jobs, default 26, by their recorded times), the output files tests (run_wrf_files_test.sh), the
 # ideal files test, the differential and ctest tests (tools/gcp/run_diff_tests.sh), the translator tests and the
 # comparators' self-test. --cases: only these suite cases (exact names) and the translator tests and self-test;
 # --full adds the other jobs. --data: the data tars instead of the cases' own (wrf_suite.py --data-for).
@@ -22,7 +22,7 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CI=${CPPWRF_CI_REPO:-Xassemblianist/cppwrf-data}
-COMMIT=HEAD CASES= FULL=0 DATA= SLOW=0 NJ=13 DTAG=data-v1 OUT= HOURS=8 WAIT=1
+COMMIT=HEAD CASES= FULL=0 DATA= SLOW=0 NJ=26 DTAG=data-v1 OUT= HOURS=8 WAIT=1
 while [ $# -gt 0 ]; do
   case $1 in
     --cases) CASES=$2; shift 2 ;; --full) FULL=1; shift ;; --data) DATA=$2; shift 2 ;; --slow) SLOW=1; shift ;;
