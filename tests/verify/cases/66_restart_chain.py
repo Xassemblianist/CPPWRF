@@ -38,6 +38,15 @@ CASES = [
     ("real_nmp1_r8_fp64_cpu_chain", "cpu_dp", "configs/real_nmp1_r8.ini",
      ["real.dir=" + f"{WR}/run_NMP1_r8", "phys.bldt=5", "output.out_interval=3", "output.diag_interval=3",
       "suite.chain=360,180"], f"{WR}/run_NMP1_r8/wrfout_d01_{_D}", 900, {}),
+    # SR1 (slope_rad, topo_shading, radt 10) resumed at 245 min, in daylight between the radiation calls of 240 and
+    # 250 min
+    ("real_sr1_r8_fp64_cpu_chain", "cpu_dp", "configs/real_sr1_r8.ini",
+     ["real.dir=" + f"{WR}/run_SR1_r8", "output.out_interval=30", "output.diag_interval=30", "suite.chain=14700,2100"],
+     f"{WR}/run_SR1_r8/wrfout_d01_{_D}", 16800, {}),
+    # SLAB1 (the slab LSM: THC, CAPG) with PBL every 5 min
+    ("real_slab1_r8_fp64_cpu_chain", "cpu_dp", "configs/real_slab1_r8.ini",
+     ["real.dir=" + f"{WR}/run_SLAB1_r8", "phys.bldt=5", "output.out_interval=3", "output.diag_interval=3",
+      "suite.chain=360,180"], f"{WR}/run_SLAB1_r8/wrfout_d01_{_D}", 900, {}),
     ("real_n3_r8_fp64_cpu_chain", "cpu_dp", "configs/real_n3.ini", _N3 + ["suite.chain=600,300"],
      {d: f"{WR}/run_N3h_r8/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 1200, {}),
     # the same on the GPU (CUDA FP64: deterministic, resumed = straight bit for bit)
@@ -48,7 +57,7 @@ CASES = [
 ]
 
 STATUS = [
-    ('D0, P4, G2, P8, NMP1, N3 chains', 'resumed from CPPWRF\'s wrfrst (and native) restart files between the radiation, '
+    ('D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains', 'resumed from CPPWRF\'s wrfrst (and native) restart files between the radiation, '
      'PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run\'s',
      '15-20 min'),
 ]
@@ -60,6 +69,8 @@ DATA = {
     'real_p8_r8_fp64_cpu_chain': 'suite_data.tar,v05_suite_refs.tar',
     'real_nmp1_r8_fp64_cpu_chain': 'suite_data.tar,v05_suite_refs.tar',
     'real_n3_r8_fp64_cpu_chain': 'n3_data.tar,v05_suite_refs.tar',
+    'real_sr1_r8_fp64_cpu_chain': 'suite_data.tar,port_a0204_data.tar',
+    'real_slab1_r8_fp64_cpu_chain': 'port_c22_data.tar',
     'real_p4_r8_fp64_cuda_chain': 'suite_data.tar,v05_suite_refs.tar',
     'real_n3_r8_fp64_cuda_chain': 'n3_data.tar,v05_suite_refs.tar',
 }

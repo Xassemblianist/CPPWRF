@@ -212,7 +212,7 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | N2S1 / N2S2 | N2 with smooth_option 1 / 2 (smoothing of the fed-back fields, ht included) | 1 h |
 | N3 | two-way nest with the P4 physics on both domains (physics feedback, nest ozone from the parent) | 1 h |
 | P4, P6, P9, N3 long runs | inputs from real.exe for 24 h / 72 h (wrfbdy every 6 h; 24-72 h from the GFS forecast through WPS), history every 3 h, CPPWRF restarted in the middle from its own wrfrst files | 24 h; 72 h (P4, P6, P9) |
-| D0, P4, G2, P8, NMP1, N3 chains | resumed from CPPWRF's wrfrst (and native) restart files between the radiation, PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run's | 15-20 min |
+| D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains | resumed from CPPWRF's wrfrst (and native) restart files between the radiation, PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run's | 15-20 min |
 | P4D16 | P4 with dt = 16 s and radt = 10 min on the 72 h inputs, history every hour (WRF's clock past one day: XTIME, coszen) | 30 h |
 | N3D50 | N3 with d01 dt = 50 s, so a nest step of 50/3 s (WRF's clock with a fraction of a second: XTIME, julian) | 1 h |
 | RSA | P4 with dt = 50 s and restart_interval = 2 min (not a multiple of dt), history every 150 s; the wrfrst files too; resumed from its wrfrst file of 150 s with restart_interval = 2 and = 0 (WRF's restart alarm of a resumed run: the first ring at the file's seconds to the next ring) | 700 s |

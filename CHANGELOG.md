@@ -186,6 +186,18 @@ resumes across versions from WRF's wrfrst files.
   `sf_lake_physics` /= 0, `sf_ocean_physics = 2`, `seaice_albedo_opt = 2`, `seaice_snowdepth_opt = 1` and
   `seaice_thickness_opt = 1` instead of writing real.exe's LAKE_DEPTH, OM_*, ALBSI, SNOWSI, ICEDEPTH fields as zeros.
   No verified configuration changes.
+- Restarts between the radiation, PBL and cumulus calls (radt, bldt, cudt > dt): the resumed run now carries, from
+  WRF's wrfrst files and CPPWRF's own restart file, the restart-stream state of the last calls that WRF carries:
+  O3RAD (RRTMG; a nest's radiation reads domain 1's, so a nest whose radiation ran before domain 1's after the
+  restart used zero ozone and left the uninterrupted run), HRANG, DECLIN / SOLCON (also without slope_rad), URATX,
+  VRATX, TRATX, RA, RS (Noah, slab, RUC), GWDO's DTAUX3D / DTAUY3D / DUSFCG / DVSFCG, KF's SHALL and AKPBL, which
+  is now KPBL of the last cumulus call as in cumulus_driver (it was the current KPBL). They were 0 in the wrfrst
+  files and history of the resumed run until the next call. A wrfrst restart leaves grid%ch at 0 as WRF (it read
+  Noah-MP's CH = CHXY into it); DTBC of an ideal domain grows from the start as solve_em's (it wrapped at
+  interval_seconds). CPPWRF's restart file (format version 4; version 3 files are refused) also holds WW, WW_M,
+  PHP, ALT and the base state, as the wrfrst file. Suite: restart chains (tests/verify/cases/66_restart_chain.py:
+  D0, P4, G2, P8, NMP1, SLAB1, SR1, N3 resumed from both files against the straight run, every later wrfout frame
+  and wrfrst file at tolerance 0) and SR1 resumed from its own restart file at 245 min.
 - CPPWRF's own restart file (`restart_<step>.nc`, format version 3; files of version 2 are refused, the run's
   wrfrst files still resume): it now holds the scalars of WRF's restart stream, NSTEPS (output_diagnostics' means)
   and DECLIN / SOLCON of the last radiation call (read by slope_rad's TOPO_RAD_ADJ and the urban canopy model until

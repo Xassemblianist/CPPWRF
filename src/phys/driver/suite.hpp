@@ -358,6 +358,8 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // surface_driver diagnostics: uratx, vratx, tratx (obs-nudging ratios), ra (Noah), rs (Noah canopy
   // resistance), shall (KF shallow flag)
   Field2 uratx, vratx, tratx, ra, rs, shall;
+  // cumulus_driver's AKPBL (Registry r): KPBL of the last cumulus call
+  Field2 akpbl;
   Field2 lwupt, lwuptc, lwdnt, lwdntc, lwupb, lwupbc, lwdnb, lwdnbc, olr, swupt, swuptc, swdnt, swdntc, swupb, swupbc, swdnb, swdnbc;
   // RRTMG_SWRAD's surface components (restart fields): visible / near-IR direct and diffuse, direct, direct normal,
   // diffuse, clear-sky direct and direct normal irradiance; the diffuse fraction (radiation_driver)

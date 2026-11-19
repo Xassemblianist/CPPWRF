@@ -372,7 +372,8 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out):
                 if not after:
                     bad.append(f"{what}: {dom}: the straight run has no {kind} after {mid:g}s")
                 nfr, nrst = (nfr + n, nrst) if kind == "wrfout" else (nfr, nrst + n)
-                bad += [f"{what}: {dom}.{kind}.{k}: {v}" for k, v in dif.items()]
+                # NOAHMP_INIT on a restart: CROPCAT (an output) restarts at undefined_int (PhysicsSuite::restarted)
+                bad += [f"{what}: {dom}.{kind}.{k}: {v}" for k, v in dif.items() if k != "CROPCAT"]
     return bad, (f"resumed at {mid:g}s ({', '.join(w for w, _, _ in resumed)}) = straight: {nfr} wrfout frames, "
                  f"{nrst} wrfrst files")
 

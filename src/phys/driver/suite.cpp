@@ -292,7 +292,7 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
       psim(g, Stagger::M, "psim"), psih(g, Stagger::M, "psih"), gz1oz0(g, Stagger::M, "gz1oz0"),
       chklowq(g, Stagger::M, "chklowq"), qgh(g, Stagger::M, "qgh"), chs(g, Stagger::M, "chs"),
       chs2(g, Stagger::M, "chs2"), cqs2(g, Stagger::M, "cqs2"), cpm(g, Stagger::M, "cpm"),
-      u_phytmp(g, Stagger::M, "u_phytmp"), v_phytmp(g, Stagger::M, "v_phytmp"), t1_lag_(g, Stagger::M, "t1_lag"), coszen(g, Stagger::M, "coszen"), rthratenlw(g, Stagger::M, "rthratenlw"), rthratensw(g, Stagger::M, "rthratensw"), rthratenlwc(g, Stagger::M, "rthratenlwc"), rthratenswc(g, Stagger::M, "rthratenswc"), o3rad(g, Stagger::M, "o3rad"), lwcf(g, Stagger::M, "lwcf"), swcf(g, Stagger::M, "swcf"), hrang(g, Stagger::M, "hrang"), uratx(g, Stagger::M, "uratx"), vratx(g, Stagger::M, "vratx"), tratx(g, Stagger::M, "tratx"), ra(g, Stagger::M, "ra"), rs(g, Stagger::M, "rs"), shall(g, Stagger::M, "shall"), lwupt(g, Stagger::M, "lwupt"), lwuptc(g, Stagger::M, "lwuptc"), lwdnt(g, Stagger::M, "lwdnt"), lwdntc(g, Stagger::M, "lwdntc"), lwupb(g, Stagger::M, "lwupb"), lwupbc(g, Stagger::M, "lwupbc"), lwdnb(g, Stagger::M, "lwdnb"), lwdnbc(g, Stagger::M, "lwdnbc"), olr(g, Stagger::M, "olr"), swupt(g, Stagger::M, "swupt"), swuptc(g, Stagger::M, "swuptc"), swdnt(g, Stagger::M, "swdnt"), swdntc(g, Stagger::M, "swdntc"), swupb(g, Stagger::M, "swupb"), swupbc(g, Stagger::M, "swupbc"), swdnb(g, Stagger::M, "swdnb"), swdnbc(g, Stagger::M, "swdnbc"), swvisdir(g, Stagger::M, "swvisdir"), swvisdif(g, Stagger::M, "swvisdif"), swnirdir(g, Stagger::M, "swnirdir"), swnirdif(g, Stagger::M, "swnirdif"), swddir(g, Stagger::M, "swddir"), swddni(g, Stagger::M, "swddni"), swddif(g, Stagger::M, "swddif"), swddirc(g, Stagger::M, "swddirc"), swddnic(g, Stagger::M, "swddnic"), diffuse_frac(g, Stagger::M, "diffuse_frac"), aclwupt(g, Stagger::M, "aclwupt"), aclwuptc(g, Stagger::M, "aclwuptc"), aclwdnt(g, Stagger::M, "aclwdnt"), aclwdntc(g, Stagger::M, "aclwdntc"), aclwupb(g, Stagger::M, "aclwupb"), aclwupbc(g, Stagger::M, "aclwupbc"), aclwdnb(g, Stagger::M, "aclwdnb"), aclwdnbc(g, Stagger::M, "aclwdnbc"), acswupt(g, Stagger::M, "acswupt"), acswuptc(g, Stagger::M, "acswuptc"), acswdnt(g, Stagger::M, "acswdnt"), acswdntc(g, Stagger::M, "acswdntc"), acswupb(g, Stagger::M, "acswupb"), acswupbc(g, Stagger::M, "acswupbc"), acswdnb(g, Stagger::M, "acswdnb"), acswdnbc(g, Stagger::M, "acswdnbc"), g_(g), gs_(g), o_(o) {
+      u_phytmp(g, Stagger::M, "u_phytmp"), v_phytmp(g, Stagger::M, "v_phytmp"), t1_lag_(g, Stagger::M, "t1_lag"), coszen(g, Stagger::M, "coszen"), rthratenlw(g, Stagger::M, "rthratenlw"), rthratensw(g, Stagger::M, "rthratensw"), rthratenlwc(g, Stagger::M, "rthratenlwc"), rthratenswc(g, Stagger::M, "rthratenswc"), o3rad(g, Stagger::M, "o3rad"), lwcf(g, Stagger::M, "lwcf"), swcf(g, Stagger::M, "swcf"), hrang(g, Stagger::M, "hrang"), uratx(g, Stagger::M, "uratx"), vratx(g, Stagger::M, "vratx"), tratx(g, Stagger::M, "tratx"), ra(g, Stagger::M, "ra"), rs(g, Stagger::M, "rs"), shall(g, Stagger::M, "shall"), akpbl(g, Stagger::M, "akpbl"), lwupt(g, Stagger::M, "lwupt"), lwuptc(g, Stagger::M, "lwuptc"), lwdnt(g, Stagger::M, "lwdnt"), lwdntc(g, Stagger::M, "lwdntc"), lwupb(g, Stagger::M, "lwupb"), lwupbc(g, Stagger::M, "lwupbc"), lwdnb(g, Stagger::M, "lwdnb"), lwdnbc(g, Stagger::M, "lwdnbc"), olr(g, Stagger::M, "olr"), swupt(g, Stagger::M, "swupt"), swuptc(g, Stagger::M, "swuptc"), swdnt(g, Stagger::M, "swdnt"), swdntc(g, Stagger::M, "swdntc"), swupb(g, Stagger::M, "swupb"), swupbc(g, Stagger::M, "swupbc"), swdnb(g, Stagger::M, "swdnb"), swdnbc(g, Stagger::M, "swdnbc"), swvisdir(g, Stagger::M, "swvisdir"), swvisdif(g, Stagger::M, "swvisdif"), swnirdir(g, Stagger::M, "swnirdir"), swnirdif(g, Stagger::M, "swnirdif"), swddir(g, Stagger::M, "swddir"), swddni(g, Stagger::M, "swddni"), swddif(g, Stagger::M, "swddif"), swddirc(g, Stagger::M, "swddirc"), swddnic(g, Stagger::M, "swddnic"), diffuse_frac(g, Stagger::M, "diffuse_frac"), aclwupt(g, Stagger::M, "aclwupt"), aclwuptc(g, Stagger::M, "aclwuptc"), aclwdnt(g, Stagger::M, "aclwdnt"), aclwdntc(g, Stagger::M, "aclwdntc"), aclwupb(g, Stagger::M, "aclwupb"), aclwupbc(g, Stagger::M, "aclwupbc"), aclwdnb(g, Stagger::M, "aclwdnb"), aclwdnbc(g, Stagger::M, "aclwdnbc"), acswupt(g, Stagger::M, "acswupt"), acswuptc(g, Stagger::M, "acswuptc"), acswdnt(g, Stagger::M, "acswdnt"), acswdntc(g, Stagger::M, "acswdntc"), acswupb(g, Stagger::M, "acswupb"), acswupbc(g, Stagger::M, "acswupbc"), acswdnb(g, Stagger::M, "acswdnb"), acswdnbc(g, Stagger::M, "acswdnbc"), g_(g), gs_(g), o_(o) {
   dt_clock_ = wrf_time::from_seconds(g.dt);
   if ((o.sf_sfclay_physics != 1 && o.sf_sfclay_physics != 2 && o.sf_sfclay_physics != 4 && o.sf_sfclay_physics != 5 &&
        o.sf_sfclay_physics != 7) ||
@@ -1132,10 +1132,16 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
     for (Field2* f : {&prec_acc_c, &prec_acc_nc, &snow_acc_nc}) v.emplace_back("sfc_" + f->name(), f);
   // slope_rad: TOPO_RAD_ADJ reads HRANG (Registry r) until the next radiation call (DIFFUSE_FRAC: with the
   // radiation diagnostics above); SWNORM (r); topo_shading: HT_SHAD (r; HGT_SHAD)
-  if (o_.slope_rad == 1) {
-    v.emplace_back("sfc_hrang", &hrang);
-    v.emplace_back("sfc_swnorm", &topo_->swnorm);
-  }
+  if (rad_) v.emplace_back("sfc_hrang", &hrang);  // HRANG (Registry r) of the last radiation call
+  if (o_.slope_rad == 1) v.emplace_back("sfc_swnorm", &topo_->swnorm);
+  // the surface driver's URATX, VRATX, TRATX, RA and RS (Registry r, no package; RS is Noah-MP's below) and the
+  // outputs of the calls between bldt / cudt calls: GWDO's DUSFCG, DVSFCG (rh), KF's SHALL (r), AKPBL (r)
+  for (Field2* f : {&uratx, &vratx, &tratx, &ra}) v.emplace_back("sfc_" + f->name(), f);
+  if (o_.sf_surface_physics != 4) v.emplace_back("sfc_rs", &rs);
+  if (o_.gwd_opt == 1)
+    for (Field2* f : {&dusfcg, &dvsfcg}) v.emplace_back("sfc_" + f->name(), f);
+  if (o_.cu_physics == 1) v.emplace_back("sfc_shall", &shall);
+  if (o_.cu_physics != 0) v.emplace_back("sfc_akpbl", &akpbl);
   if (o_.topo_shading == 1) v.emplace_back("sfc_ht_shad", &topo_->ht_shad);
   for (Field2* f : clwrf_) v.emplace_back("sfc_" + f->name(), f);  // output_diagnostics (Registry rh3)
   if (o_.fdda.grid_fdda == 1)  // fdda2d members (Registry i{10}r)
@@ -1200,6 +1206,11 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
     for (Field3* f : {&tsnoxy, &snicexy, &snliqxy, &zsnsoxy, &albsoildirxy, &albsoildifxy, &smoiseq, &acc_etranixy})
       v.emplace_back("sfc_" + f->name(), f);
   }
+  if (o_.gwd_opt == 1)  // GWDO's DTAUX3D, DTAUY3D (rh): bl_gwdo's outputs of the last PBL call
+    for (Field3* f : {&dtaux3d, &dtauy3d}) v.emplace_back("sfc_" + f->name(), f);
+  // O3RAD (Registry r, packages rrtmg_lw / rrtmg_sw): domain 1's ozone of the last radiation call, which a nest's
+  // radiation reads (med_nest_force interpolates it to the nest)
+  if (rad_ && (o_.rad.ra_lw_physics == 4 || o_.rad.ra_sw_physics == 4)) v.emplace_back("sfc_o3rad", &o3rad);
   if (rad_) {
     v.emplace_back("sfc_cldfra", &cldfra);
     v.emplace_back("sfc_rthratenlw", &rthratenlw);

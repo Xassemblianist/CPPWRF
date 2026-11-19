@@ -29,6 +29,13 @@ using namespace suite_detail;
 
 namespace {
 
+// cumulus_driver of a cumulus call: AKPBL = KPBL (REAL; Registry r, kept until the next call)
+struct KAkpbl {
+  CI2 kpbl;
+  V2 akpbl;
+  CPPWRF_HD void operator()(int i, int j) const { akpbl(i, j) = real(kpbl(i, j)); }
+};
+
 // ------------------------------------------------------------ Grell-Freitas-Li
 // module_cu_gfl_wrf.F90 cu_grell_freitas_li (GFLSCHEME, cu_physics = 3).
 struct KGrellFreitas {
@@ -538,6 +545,7 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
     cudtacttime = curr_secs + real(o_.cudt) * real(60);
   }
   if (!run_param) return;
+  column_for(g_.columns(), KAkpbl{kpbl.cview(), akpbl.view()});  // module_cumulus_driver.F:913-918
   using namespace wrfc;
   if (o_.cu_physics == 3) {
     KGrellFreitas k{};

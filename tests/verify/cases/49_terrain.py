@@ -36,6 +36,10 @@ for _n in ("SR1", "SR2", "SR3", "SR4"):
 CASES += [
     ("real_sr1_r8_fp64_cpu_5h_rst", "cpu_dp", "configs/real_sr1_r8.ini",
      [f"real.dir={WR}/run_SR1_r8"] + _5H + ["suite.restart_at=9000"], f"{WR}/run_SR1_r8/wrfout_d01_{_D}", 18000, _TS),
+    # SR1 resumed from CPPWRF's own restart file at 245 min, between two radiation calls (steps 241 and 251)
+    ("real_sr1_r8_fp64_cpu_5h_nrst", "cpu_dp", "configs/real_sr1_r8.ini",
+     [f"real.dir={WR}/run_SR1_r8"] + _5H + ["suite.restart_at=14700", "suite.native_restart"],
+     f"{WR}/run_SR1_r8/wrfout_d01_{_D}", 18000, _TS),
     # CUDA FP64 (tolerance 0)
     ("real_tw1_r8_fp64_cuda_1h", "cuda_dp", "configs/real_tw1_r8.ini", [f"real.dir={WR}/run_TW1_r8"] + _1H,
      f"{WR}/run_TW1_r8/wrfout_d01_{_D}", 3600, _G),

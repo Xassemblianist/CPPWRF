@@ -637,8 +637,9 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
   if (name == "SAVE_TOPO_FROM_REAL") { out.assign(1, 0.0); return true; }
   if (name == "DTBC") {  // time since the last boundary update (spec_bdyupdate's dtbc)
     // nests: med_nest_force sets dtbc = 0 at every parent step
+    // an ideal domain (no specified boundaries) never resets it: solve_em's dtbc + dt from the start
     const double iv = wc_->domain() > 1 ? m_.g.dt * std::max(1, wc_->integer("parent_time_step_ratio"))
-                                        : wc_->num("interval_seconds");
+                      : m_.g.bc_x == BC::Specified ? wc_->num("interval_seconds") : 0.0;
     out.assign(1, iv > 0 ? std::fmod(time_sec_, iv) == 0 && time_sec_ > 0 ? iv : std::fmod(time_sec_, iv) : time_sec_);
     return true;
   }  // output_wrf: 0 in model output
@@ -720,8 +721,8 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
     return true;
   }
   if (name == "AKPBL" && m_.suite && m_.suite->options().cu_physics != 0 && dims.size() == 2) {  // cumulus_driver
-    std::vector<int> h;
-    const Layout L = download_timed(m_.suite->kpbl, h);
+    std::vector<real> h;  // KPBL of the last cumulus call
+    const Layout L = download_timed(m_.suite->akpbl, h);
     out.resize(n);
     for (std::size_t j = 0; j < dims[0]; ++j)
       for (std::size_t i = 0; i < dims[1]; ++i) out[j * dims[1] + i] = double(h[L.index(int(i), int(j), 0)]);

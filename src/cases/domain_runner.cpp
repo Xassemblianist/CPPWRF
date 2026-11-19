@@ -96,7 +96,9 @@ std::vector<std::string> wrf_names(const std::string& n) {
       {"sfc_xlat_sfc", "XLAT"}, {"sfc_xlong_sfc", "XLONG"}, {"sfc_rthratenlw", "RTHRATLW"},
       {"sfc_rthratensw", "RTHRATSW"}, {"sfc_rthratenlwc", "RTHRATLWC"}, {"sfc_rthratenswc", "RTHRATSWC"},
       {"sfc_t2mvxy", "T2V"}, {"sfc_t2mbxy", "T2B"}, {"sfc_q2mvxy", "Q2V"}, {"sfc_q2mbxy", "Q2B"},
-      {"sfc_ht_shad", "HGT_SHAD"}};
+      {"sfc_ht_shad", "HGT_SHAD"},
+      // grid%ch is in no stream (WRF restarts it at 0); a Noah-MP file's CH is CHXY
+      {"sfc_ch", "ch"}};
   auto r = renamed.find(n);
   if (r != renamed.end()) return {r->second};
   if (n.rfind("sfc_", 0) == 0) {
@@ -315,6 +317,26 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   add_field2("mu_1", st.mu_1); add_field2("mu_2", st.mu_2);
   add_field3("p", st.p);
   add_field3("al", st.al);
+  // WRF's restart stream also carries the last step's WW, WW_M, PHP, ALT and the base state (load_restart_file reads
+  // them from either file)
+  add_field3("ww", st.ww); add_field3("ww_m", st.ww_m); add_field3("php", st.php); add_field3("alt", st.alt);
+  {
+    const dyn::BaseState& b = *m_.base;
+    auto add_base = [&](const std::string& name, const auto& f, char stag) {
+      if (f.uniform()) return;
+      bufs.emplace_back();
+      const Layout L = tile::download_any(f, bufs.back());
+      vars.emplace_back(name, stag, L.nx, L.ny, L.nz, bufs.back().data() + L.offset, dt, L.sj, L.sk);
+    };
+    add_base("PHB", b.phb, 'W'); add_base("PB", b.pb, 'M'); add_base("ALB", b.alb, 'M'); add_base("T_INIT", b.t_init, 'M');
+    add_base("MUB", b.mub, 'M'); add_base("HGT", b.ht, 'M');
+    if (b.mapped) {
+      add_base("MAPFAC_MX", b.msftx, 'M'); add_base("MAPFAC_MY", b.msfty, 'M'); add_base("MAPFAC_UX", b.msfux, 'U');
+      add_base("MAPFAC_UY", b.msfuy, 'U'); add_base("MAPFAC_VX", b.msfvx, 'V'); add_base("MAPFAC_VY", b.msfvy, 'V');
+      add_base("MF_VX_INV", b.msfvx_inv, 'V'); add_base("F", b.f, 'M'); add_base("E", b.e, 'M');
+      add_base("SINALPHA", b.sina, 'M'); add_base("COSALPHA", b.cosa, 'M');
+    }
+  }
 
   for (int n = 0; n < st.n_scalars(); ++n) {
     add_field3("q1_" + st.q_names[n], st.q_1[n]);
@@ -413,7 +435,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
   // base-state fields of a WRF restart file (nest feedback changes the parent's)
   struct TargetB { BaseFieldT<3>* f3; BaseFieldT<2>* f2; size_t buf_idx; };
   std::vector<TargetB> targets_b;
-  if (wrf_file) {  // WRF's restart stream also carries these diagnostics of the last step
+  {  // the restart stream also carries these diagnostics of the last step (CPPWRF's file too, save_restart_file)
     reg_field3("ww", st.ww);
     reg_field3("ww_m", st.ww_m);
     reg_field3("php", st.php);
@@ -595,8 +617,8 @@ void DomainRunner::load_restart_file(const std::string& path) {
     }
     if (m_.suite) m_.suite->nsteps = int(wrf_scalar(path, "NSTEPS"));  // grid%nsteps (clwrf_output_calc)
     // grid%declin, grid%solcon (Registry r) of the last radiation call: slope_rad's TOPO_RAD_ADJ reads DECLIN until
-    // the next one
-    if (m_.suite && m_.suite->options().slope_rad == 1 && m_.suite->rad_)
+    // the next one, and the next wrfrst file writes them
+    if (m_.suite && m_.suite->rad_)
       m_.suite->rad_->set_solar(wrf_scalar(path, "DECLIN"), wrf_scalar(path, "SOLCON"));
     if (m_.suite && m_.suite->options().tmn_update == 1) {  // tmnupdate's NYEAR and NDAY (Registry r)
       m_.suite->nyear = int(std::lround(wrf_scalar(path, "NYEAR")));
