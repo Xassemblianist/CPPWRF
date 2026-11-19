@@ -41,7 +41,7 @@ struct NsslConfig {
 template <typename Real>
 class NsslScheme {
  public:
-  NsslScheme(const NsslConfig& c, int nx_row, int nz);
+  NsslScheme(const NsslConfig& c, int nx_row, int nz, int max_rows = 4096);  // max_rows: the domain's rows
   void run(const NsslRowArgs<Real>& A, int j0, int j1) const;
   int ccn_is_ccna() const;  // nssl_2mom_init's ccn_is_ccna (1: QNN holds the activated CCN)
   static std::size_t work_bytes(int nx_row, int nz);  // one row's work space

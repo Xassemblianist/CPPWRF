@@ -74,6 +74,24 @@ CPPWRF_HD inline double rpow(double a, double b) {
   return std::pow(a, b);
 #endif
 }
+// gfortran's NINT on x86-64 (lround / lroundf): LONG_MIN for NaN, +-Inf and values at or beyond 2^63. The device's
+// conversion saturates (+Inf -> LONG_MAX, whose int is -1, where the CPU's int is 0): the same result on both.
+CPPWRF_HD inline long lround_x86(double x) {
+#if defined(__CUDA_ARCH__)
+  if (!(x < 9223372036854775808.0)) return LONG_MIN;
+  return ::lround(x);
+#else
+  return std::lround(x);
+#endif
+}
+CPPWRF_HD inline long lround_x86(float x) {
+#if defined(__CUDA_ARCH__)
+  if (!(x < 9223372036854775808.0f)) return LONG_MIN;
+  return ::lroundf(x);
+#else
+  return std::lround(x);
+#endif
+}
 // x**2.0 with the constant exponent 2.0: gcc folds pow(x, 2.0) into x * x (WRF's gfortran build and the CPU build);
 // the device cannot test for a constant, so the CUDA FP64 build writes the product out
 template <typename T>

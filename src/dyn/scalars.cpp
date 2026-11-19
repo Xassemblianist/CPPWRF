@@ -40,23 +40,24 @@ constexpr real H = real(0.5);
 
 // WENO 5th-order face flux of advect_scalar_weno / advect_scalar_wenopd (module_advect_em.F, Jiang and Shu 1996):
 // q* are the upwind-ordered stencil values (qi upwind of the face), vel the face mass flux. WRF's DOUBLE PRECISION
-// locals (f0..f2, beta0..2, wi0..2, sumwk) are real*8 in the -r8 -fdefault-double-8 build the references come from.
+// locals (f0..f2, beta0..2, wi0..2, sumwk) are real*8 in the -r8 -fdefault-double-8 build the references come from
+// and in the real*4 build: f and beta are REAL expressions stored in double, the weights (eps = 1d-40, whose square
+// is 0 in float) and the flux are double, the flux stored as REAL. FP64: every step in double as before.
 CPPWRF_HD inline real weno5(real vel, real qim2, real qim1, real qi, real qip1, real qip2) {
-  const real f0 = (real(1.) / real(3.)) * qim2 - (real(7.) / real(6.)) * qim1 + (real(11.) / real(6.)) * qi;
-  const real f1 = -((real(1.) / real(6.)) * qim1) + (real(5.) / real(6.)) * qi + (real(1.) / real(3.)) * qip1;
-  const real f2 = (real(1.) / real(3.)) * qi + (real(5.) / real(6.)) * qip1 - (real(1.) / real(6.)) * qip2;
+  const double f0 = (real(1.) / real(3.)) * qim2 - (real(7.) / real(6.)) * qim1 + (real(11.) / real(6.)) * qi;
+  const double f1 = -((real(1.) / real(6.)) * qim1) + (real(5.) / real(6.)) * qi + (real(1.) / real(3.)) * qip1;
+  const double f2 = (real(1.) / real(3.)) * qi + (real(5.) / real(6.)) * qip1 - (real(1.) / real(6.)) * qip2;
   const real a0 = qim2 - real(2.) * qim1 + qi, b0 = qim2 - real(4.) * qim1 + real(3.) * qi;
   const real a1 = qim1 - real(2.) * qi + qip1, b1 = qim1 - qip1;
   const real a2 = qi - real(2.) * qip1 + qip2, b2 = qip2 - real(4.) * qip1 + real(3.) * qi;
-  const real beta0 = (real(13.) / real(12.)) * (a0 * a0) + (real(1.) / real(4.)) * (b0 * b0);
-  const real beta1 = (real(13.) / real(12.)) * (a1 * a1) + (real(1.) / real(4.)) * (b1 * b1);
-  const real beta2 = (real(13.) / real(12.)) * (a2 * a2) + (real(1.) / real(4.)) * (b2 * b2);
-  const real eps = real(1.0e-40);  // (eps + beta)**pw, pw = 2: x*x
-  const real e0 = eps + beta0, e1 = eps + beta1, e2 = eps + beta2;
-  const real wi0 = (real(1.) / real(10.)) / (e0 * e0), wi1 = (real(6.) / real(10.)) / (e1 * e1),
-             wi2 = (real(3.) / real(10.)) / (e2 * e2);
-  const real sumwk = wi0 + wi1 + wi2;
-  return vel * (wi0 * f0 + wi1 * f1 + wi2 * f2) / sumwk;
+  const double beta0 = (real(13.) / real(12.)) * (a0 * a0) + (real(1.) / real(4.)) * (b0 * b0);
+  const double beta1 = (real(13.) / real(12.)) * (a1 * a1) + (real(1.) / real(4.)) * (b1 * b1);
+  const double beta2 = (real(13.) / real(12.)) * (a2 * a2) + (real(1.) / real(4.)) * (b2 * b2);
+  const double eps = 1.0e-40;  // (eps + beta)**pw, pw = 2: x*x
+  const double e0 = eps + beta0, e1 = eps + beta1, e2 = eps + beta2;
+  const double wi0 = (1. / 10.) / (e0 * e0), wi1 = (6. / 10.) / (e1 * e1), wi2 = (3. / 10.) / (e2 * e2);
+  const double sumwk = wi0 + wi1 + wi2;
+  return real(double(vel) * (wi0 * f0 + wi1 * f1 + wi2 * f2) / sumwk);
 }
 // the face between q(m1) and q(0) along a direction: upw = the flow goes from m1 to 0 (vel >= 0, vertical -vel >= 0)
 #define CPPWRF_WENO_FACE(Q, VEL, UPW) \

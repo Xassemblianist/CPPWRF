@@ -97,9 +97,9 @@ CPPWRF_HD inline T ipow(T x) {
   }
 }
 
-// NINT (gfortran: lround)
-CPPWRF_HD inline int nint(double x) { return int(::lround(x)); }
-CPPWRF_HD inline int nint(float x) { return int(::lroundf(x)); }
+// NINT (gfortran: lround; x86-64's result also on the device for NaN, +-Inf and |x| >= 2^63)
+CPPWRF_HD inline int nint(double x) { return int(::lround_x86(x)); }
+CPPWRF_HD inline int nint(float x) { return int(::lround_x86(x)); }
 // SIGN(a, b)
 template <class T>
 CPPWRF_HD inline T fsign(T a, T b) { return std::copysign(a, b); }

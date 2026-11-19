@@ -55,19 +55,19 @@ struct NsslScheme<Real>::Impl {
 };
 
 // the work space of one row (bytes): the driver's arrays an, ancuten, t0 ... and the callees' gather arrays (64
-// points). Measured high-water marks of FP64 rows (tests/phys/mp_nssl, 1 to 100 points, 30 to 60 levels) lie below
-// 62 nx nz + 30 nz + 800 nx + 57400 doubles; this bound is above them and gets a quarter more (counted in doubles
-// also for FP32: some of the arrays are DOUBLE PRECISION). The kernel stops (Work::overflow) rather than write past
-// its end.
+// points). The driver's 64 nx nz values stay live through sediment1d's 31 nx nz (about 97 nx nz doubles at many
+// levels, tests/unit/test_nssl_work: 1 to 200 points, 35 to 600 levels); the bound takes 88 nx nz and a quarter
+// more (counted in doubles also for FP32: some of the arrays are DOUBLE PRECISION). The kernel stops
+// (Work::overflow) rather than write past its end.
 template <typename Real>
 std::size_t NsslScheme<Real>::work_bytes(int nx_row, int nz) {
   const std::size_t nx = std::size_t(nx_row), k = std::size_t(nz);
-  const std::size_t v = nx * k * 72 + k * 40 + nx * 900 + 70000;
+  const std::size_t v = nx * k * 88 + k * 40 + nx * 900 + 70000;
   return (v * sizeof(double) * 5 / 4 + 255) / 256 * 256;
 }
 
 template <typename Real>
-NsslScheme<Real>::NsslScheme(const NsslConfig& c, int nx_row, int nz) : impl_(std::make_shared<Impl>()) {
+NsslScheme<Real>::NsslScheme(const NsslConfig& c, int nx_row, int nz, int max_rows) : impl_(std::make_shared<Impl>()) {
   auto hp = std::make_unique<NsslParams<Real>>();
   auto ht = std::make_unique<NsslTables<Real>>();
   impl_->ccna = nssl_init(*hp, *ht, c);
@@ -89,8 +89,9 @@ NsslScheme<Real>::NsslScheme(const NsslConfig& c, int nx_row, int nz) : impl_(st
   impl_->dmem.push_back(impl_->dparams);
   copy_to_dev(impl_->dparams, dp.get(), sizeof(NsslParams<Real>));
   impl_->wbytes = work_bytes(nx_row, nz);
-  // rows per launch: up to a 1 GiB work space
-  impl_->rows = int(std::min<std::size_t>(4096, std::max<std::size_t>(1, (std::size_t(1) << 30) / impl_->wbytes)));
+  // rows per launch: up to a 1 GiB work space, no more rows than the domain has
+  impl_->rows = int(std::min<std::size_t>(std::size_t(std::max(1, std::min(4096, max_rows))),
+                                          std::max<std::size_t>(1, (std::size_t(1) << 30) / impl_->wbytes)));
   impl_->work = static_cast<char*>(dev_alloc(impl_->wbytes * std::size_t(impl_->rows)));
   impl_->dmem.push_back(impl_->work);
 }

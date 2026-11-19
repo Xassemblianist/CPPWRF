@@ -263,9 +263,10 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     sr = Field2(g, Stagger::M, "sr");
     refl_10cm = Field3(g, Stagger::M, "refl_10cm");  // compute_radar_ref: always with mp_physics 18
     nssl_zero_ = Field3(g, Stagger::M, "nssl_zero");
-    const int sx = g.bc_x == BC::Specified ? 1 : 0;
+    const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
     // phy_init: nssl_2mom_init (mp_init's call for mp_physics 18), once per domain
-    nssl_ = std::make_shared<const phys::mp_nssl::NsslScheme<real>>(phys::mp_nssl::NsslConfig{}, g.nx - 2 * sx, g.nz);
+    nssl_ = std::make_shared<const phys::mp_nssl::NsslScheme<real>>(phys::mp_nssl::NsslConfig{}, g.nx - 2 * sx, g.nz,
+                                                                    g.ny - 2 * sy);
   }
   if (p_.do_radar_ref == 1 && (p_.mp_physics == 6 || thompson())) refl_10cm = Field3(g, Stagger::M, "refl_10cm");
   if (thompson()) {
@@ -573,7 +574,7 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
     if (p_.microp_re) {
       A.re_cloud = re_cloud.view(); A.re_ice = re_ice.view(); A.re_snow = re_snow.view();
     }
-    nssl_->run(A, mp_cols.j0, mp_cols.j1);
+    nssl_->run(A, mp_own.j0, mp_own.j1);  // the worker's rows (a decomposition in y: its patch's)
     vmdump::dump("vm_mp_out", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS],
                                   &s.q_2[s.P_QG], &s.q_2[s.P_QH], &s.q_2[s.P_QNDROP], &s.q_2[s.P_QNR],
                                   &s.q_2[s.P_QNI], &s.q_2[s.P_QNS], &s.q_2[s.P_QNG], &s.q_2[s.P_QNH],

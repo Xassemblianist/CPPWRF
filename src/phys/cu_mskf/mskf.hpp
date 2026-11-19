@@ -654,22 +654,29 @@ struct MSKFKernel {
             }
             // MSKF: no convection when the mean relative humidity (over ice below 273.16 K) of the levels K-1 ..
             // LTOP+1 reaches 1.01; a level above K below 0.99 ends the average (envRHavg = 0); scalar exp (the loop
-            // exits early, not vectorised)
+            // exits early, not vectorised). K-1 is level 0 of WRF's arrays (outside kts:kte) when KLCL = 2, and
+            // LTOP+1 is KTE+1 when the updraft reaches the top: WRF reads T0, P0, Q0 there outside the arrays
+            // (gfortran puts the automatic arrays on the heap: T0(0), P0(0), Q0(0) are malloc's chunk size, a
+            // positive subnormal, so ENVEsat = Inf and envRH = NaN). Such a level counts with T0 = P0 = Q0 = 0,
+            // which gives the same NaN (the mean is then NaN: no suppression), on the CPU and the GPU alike.
             T envrhavg = static_cast<T>(0.0);
             {
                 bool dry = false;
                 for (int nk = k_lcl - 1; nk <= ltop + 1; ++nk) {
+                    const bool in = nk >= 0 && nk < kx;
+                    const T t0k = in ? t0[nk] : static_cast<T>(0.0), p0k = in ? p0[nk] : static_cast<T>(0.0),
+                            q0k = in ? q0[nk] : static_cast<T>(0.0);
                     T envesat;
-                    if (t0[nk] <= static_cast<T>(273.16)) {
-                        envesat = static_cast<T>(6.112) * libm::exp(static_cast<T>(21.87) * (t0[nk] - static_cast<T>(273.16)) /
-                                                                     (t0[nk] - static_cast<T>(7.66)));
+                    if (t0k <= static_cast<T>(273.16)) {
+                        envesat = static_cast<T>(6.112) * libm::exp(static_cast<T>(21.87) * (t0k - static_cast<T>(273.16)) /
+                                                                     (t0k - static_cast<T>(7.66)));
                     } else {
-                        envesat = static_cast<T>(6.112) * libm::exp(static_cast<T>(17.67) * (t0[nk] - static_cast<T>(273.16)) /
-                                                                     (static_cast<T>(243.5) + t0[nk] - static_cast<T>(273.16)));
+                        envesat = static_cast<T>(6.112) * libm::exp(static_cast<T>(17.67) * (t0k - static_cast<T>(273.16)) /
+                                                                     (static_cast<T>(243.5) + t0k - static_cast<T>(273.16)));
                     }
                     envesat = envesat * static_cast<T>(100.0);
-                    const T envqsat = static_cast<T>(0.622) * envesat / (p0[nk] - envesat);
-                    const T envrh = q0[nk] / envqsat;
+                    const T envqsat = static_cast<T>(0.622) * envesat / (p0k - envesat);
+                    const T envrh = q0k / envqsat;
                     if (nk > k_lcl && envrh < static_cast<T>(0.99)) {
                         envrhavg = static_cast<T>(0.0);
                         dry = true;
@@ -905,7 +912,7 @@ struct MSKFKernel {
             timec = timec / libm::pow(static_cast<T>(0.03) * sclvel * abe, static_cast<T>(0.3333));
         }
         timec = c_max(tadvec, timec);
-        int nic = static_cast<int>(std::lround(timec / dt));
+        int nic = static_cast<int>(lround_x86(timec / dt));
         timec = static_cast<T>(nic) * dt;
         timec = c_min(timec, static_cast<T>(86400.));  // cap at 24 h (WRF 4.8.0)
 
@@ -1463,7 +1470,7 @@ struct MSKFKernel {
 
         // Convective timescale & NCA
         if (tadvec < timec) {
-            nic = static_cast<int>(std::lround(tadvec / dt));
+            nic = static_cast<int>(lround_x86(tadvec / dt));
         }
         nca(i, j) = static_cast<T>(nic) * dt;
         if (ishall == 1) {  // MSKF: TIMEC stays the dynamic one (KF: 2400 s)
@@ -1614,6 +1621,10 @@ struct MSKFKernel {
             const T one = static_cast<T>(1.);
             const T c100 = static_cast<T>(100.);
             const int jb = jbb, jd = jdd, jt = jtt;
+            // index 0 (J - 1 of J = JT = 1): outside WRF's arrays, read only into results that are not used
+            cdudt[0] = static_cast<T>(0.);
+            cdvdt[0] = static_cast<T>(0.);
+            crho[0] = static_cast<T>(1.);
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 5
                 bu[jj] = static_cast<T>(0.);
                 bd[jj] = static_cast<T>(0.);
@@ -1801,8 +1812,8 @@ struct MSKFKernel {
             const T rnu = static_cast<T>(0.);
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 950
                 if (jj >= jt && jj <= jb) {
-                    // RNU = 0 (the term only adds a signed zero); DUDT(J-1) of J = 1 would be outside WRF's array,
-                    // JT >= 2 as LTOP < KTE
+                    // RNU = 0 (the term only adds a signed zero); DUDT(J-1) of J = JT = 1 (LTOP = KTE) is outside
+                    // WRF's array (cdudt[0], zero here); UHAT(1) is not read after this
                     uhat[jj] = uhat[jj] + rnu * alpha * dt * cdudt[jj - 1];
                     vhat[jj] = vhat[jj] + rnu * alpha * dt * cdvdt[jj - 1];
                     if (jj == jt) {
