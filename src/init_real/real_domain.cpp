@@ -251,7 +251,8 @@ RealDomain<T>::RealDomain(const RealOptions& opt) : o(opt) {
     *a = F2<T>(1, ide, 1, jde);
   ivgtyp = F2<int>(1, ide, 1, jde);
   isltyp = F2<int>(1, ide, 1, jde);
-  for (F3<T>* a : {&p_gc, &t_gc, &rh_gc, &u_gc, &v_gc, &ght_gc, &qv_gc, &pd_gc}) *a = F3<T>(1, ide, 1, nlev, 1, jde);
+  for (F3<T>* a : {&p_gc, &t_gc, &rh_gc, &u_gc, &v_gc, &ght_gc, &qv_gc, &sh_gc, &pd_gc})
+    *a = F3<T>(1, ide, 1, nlev, 1, jde);
   const int ns = std::max(1, o.num_soil_layers);
   tslb = F3<T>(1, ide, 1, ns, 1, jde);
   smois = F3<T>(1, ide, 1, ns, 1, jde);
@@ -299,9 +300,18 @@ void RealDomain<T>::read_input(const MetEm& m) {
   mminlu = m.att_str("MMINLU", "USGS");
   while (!mminlu.empty() && (mminlu.back() == ' ' || mminlu.back() == '\0')) mminlu.pop_back();
   // 3-D metgrid fields
-  put3(m, "PRES", p_gc); put3(m, "TT", t_gc); put3(m, "RH", rh_gc); put3(m, "UU", u_gc); put3(m, "VV", v_gc);
+  put3(m, "PRES", p_gc); put3(m, "TT", t_gc); put3(m, "UU", u_gc); put3(m, "VV", v_gc);
   put3(m, "GHT", ght_gc);
+  // moisture: RH, or SPECHUMD with FLAG_SH = 1 / QV with FLAG_QV = 1 (module_initialize_real.F:1113-1197 derives
+  // RH from them); without any of them WRF would run on RH = 0
+  const bool fl_sh = flags.count("SH") && flags["SH"] == 1, fl_qv = flags.count("QV") && flags["QV"] == 1;
+  if (m.has("RH")) put3(m, "RH", rh_gc);
+  else if (!fl_sh && !fl_qv)
+    throw std::runtime_error("real: met_em has no RH (nor SPECHUMD with FLAG_SH = 1 or QV with FLAG_QV = 1): " + m.path);
   if (m.has("QV")) put3(m, "QV", qv_gc);
+  else if (fl_qv && !fl_sh) throw std::runtime_error("real: FLAG_QV = 1 but met_em has no QV: " + m.path);
+  if (m.has("SPECHUMD")) put3(m, "SPECHUMD", sh_gc);
+  else if (fl_sh) throw std::runtime_error("real: FLAG_SH = 1 but met_em has no SPECHUMD: " + m.path);
   // 2-D fields (Registry i1 names)
   put2(m, "PSFC", psfc); put2(m, "PMSL", pslv_gc); put2(m, "HGT_M", ht_gc); put2(m, "SKINTEMP", tsk_gc);
   put2(m, "SOILTEMP", tmn_gc); put2(m, "XLAT_M", xlat_gc); put2(m, "XLONG_M", xlong_gc);
@@ -503,13 +513,37 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     if (t_gc(i_valid, 1, j_valid) == T(-1.E30) || rh_gc(i_valid, 1, j_valid) == T(-1.E30) ||
         u_gc(i_valid, 1, j_valid) == T(-1.E30) || v_gc(i_valid, 1, j_valid) == T(-1.E30))
       throw std::runtime_error("real: missing surface fields (use_surface fallback) are not ported");
-    (void)k;
+    auto rh_from_qv = [&](int i, int kk, int j) {
+      const T sat_vap_pres_mb =
+          T(0.6112) * T(10.) * std::exp(T(17.67) * (t_gc(i, kk, j) - T(273.15)) / (t_gc(i, kk, j) - T(29.65)));
+      const T vap_pres_mb = qv_gc(i, kk, j) * p_gc(i, kk, j) / T(100.) / (qv_gc(i, kk, j) + T(0.622));
+      rh_gc(i, kk, j) = sat_vap_pres_mb > T(0) ? (vap_pres_mb / sat_vap_pres_mb) * T(100.) : T(0.);
+    };
     if (flag("QV") != 1 && flag("SH") != 1) {
       use_sh_qv = false;
       Dims dm{ids, ide, jds, jde, 1, nlev};
       rh_to_mxrat1(rh_gc, t_gc, p_gc, qv_gc, ql, nlev, dm, sk);
-    } else {
-      throw std::runtime_error("real: QV / SH metgrid input is not ported");
+    } else if (flag("SH") == 1) {  // module_initialize_real.F:1144-1173
+      if (sh_gc(i_valid, 1, j_valid) < T(1.e-6))
+        for (int j = jts; j <= j1; ++j)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            sh_gc(i, 1, j) = sh_gc(i, k, j);
+          }
+      for (int j = jts; j <= j1; ++j)
+        for (int kk = 1; kk <= nlev; ++kk)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            qv_gc(i, kk, j) = sh_gc(i, kk, j) / (T(1.) - sh_gc(i, kk, j));
+            rh_from_qv(i, kk, j);
+          }
+    } else {  // flag_qv = 1: module_initialize_real.F:1175-1195
+      for (int j = jts; j <= j1; ++j)
+        for (int kk = 1; kk <= nlev; ++kk)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            rh_from_qv(i, kk, j);
+          }
     }
     if (ght_gc(i_valid, nlev / 2, j_valid) < T(1)) throw std::runtime_error("real: GHT reconstruction is not ported");
     if (p_gc(i_valid, nlev / 2, j_valid) < p_gc(i_valid, nlev / 2 + 1, j_valid)) sfcp_to_sfcp = true;
@@ -529,6 +563,12 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
       if (skip(i, j)) continue;
       t2(i, j) = t_gc(i, 1, j);
     }
+  if (flag("QV") == 1 || flag("SH") == 1)  // module_initialize_real.F:1250-1266
+    for (int j = jts; j <= j1; ++j)
+      for (int i = its; i <= i1; ++i) {
+        if (skip(i, j)) continue;
+        q2(i, j) = qv_gc(i, 1, j);
+      }
   {
     Dims dm{ids, ide, jds, jde, 1, nlev};
     T pt = find_p_top(p_gc, nlev, dm, sk);
@@ -652,7 +692,8 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   vo.zap_close_levels = o.zap_close_levels; vo.force_sfc_in_vinterp = o.force_sfc_in_vinterp;
   vo.extrap_type = o.extrap_type;
   vert_interp(rh_gc, pd_gc, u_1, pb, nlev, 'Q', vo, d, sk);
-  if (use_sh_qv) throw std::runtime_error("real: use_sh_qv is not ported");
+  // module_initialize_real.F:1744-1757: with use_sh_qv, Qv itself is interpolated (and not diagnosed from RH)
+  if (use_sh_qv && (flag("SH") == 1 || flag("QV") == 1)) vert_interp(qv_gc, pd_gc, qv, pb, nlev, 'Q', vo, d, sk);
   {
     VInterpOpts vt = vo;
     vt.interp_type = 2;
@@ -662,7 +703,7 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     vert_interp(p_gc, pd_gc, p, pb, nlev, 'T', vt, d, sk);
   }
   v_1 = t_2;
-  rh_to_mxrat1(u_1, v_1, p, qv, ql, kte - 1, d, sk);
+  if (!use_sh_qv) rh_to_mxrat1(u_1, v_1, p, qv, ql, kte - 1, d, sk);
   t_to_theta(t_2, p, p00, kte - 1, d, sk);
   for (const char* q : {"QR", "QC", "QI", "QS", "QG", "QH", "QNI", "QNC", "QNR", "QNS", "QNG", "QNH", "SPECCLDL",
                         "SPECCLDF"})
