@@ -37,6 +37,10 @@ struct HaloField {
       : HaloField(f, f.stagger() == Stagger::U ? Parity::Odd : Parity::Even,
                   f.stagger() == Stagger::V ? Parity::Odd : Parity::Even) {}
   HaloField(Field2& f) : HaloField(f, Parity::Even, Parity::Even) {}  // NOLINT
+  // a base-state field (both parities even: WRF set_physical_bc2d / 3d types 'r', 't', 'x', 'y', 'W')
+  template <int R>
+  explicit HaloField(BaseFieldT<R>& f)
+      : p(f.data()), L(f.layout()), st(f.stagger()), px(Parity::Even), py(Parity::Even) {}
 };
 // Several fields of either rank and any parities, one launch per direction for up to 8 fields: the same values
 // as fill_halo of each field in turn (each field's x pass before its y pass; the fields must be distinct).

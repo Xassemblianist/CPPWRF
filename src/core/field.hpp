@@ -151,6 +151,7 @@ template <int R> class BaseFieldT {
     if (tile::track && !uniform_) tile::track->add(buf_.get(), L_, int(sizeof(real)), name_);
   }
   bool uniform() const { return uniform_; }
+  Stagger stagger() const { return st_; }
   const void* base() const { return buf_.get(); }
   const Layout& layout() const { return L_; }
   real* data() const { return buf_.get() + L_.offset; }

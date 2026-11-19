@@ -617,10 +617,15 @@ void DomainRunner::load_restart_file(const std::string& path) {
     put(*t.f, bufs[t.buf_idx]);
     fill_halo(*t.f, g);
   }
+  std::vector<HaloField> base_halos;
   for (const auto& t : targets_b) {
     if (t.f3) put(*t.f3, bufs[t.buf_idx]);
     else put(*t.f2, bufs[t.buf_idx]);
+    base_halos.push_back(t.f3 ? HaloField(*t.f3) : HaloField(*t.f2));
   }
+  // start_em on a restart: set_physical_bc2d / 3d of the base state (ht, mub, phb, pb, alb, t_init, the map
+  // factors, f, e, sina, cosa) from the file's values, and HALO_EM_INIT
+  fill_halos(base_halos, g);
   for (const auto& t : targets_i) {
     std::vector<int> hw(bufs[t.buf_idx].size());
     for (size_t k = 0; k < hw.size(); ++k) hw[k] = int(std::lround(bufs[t.buf_idx][k]));
