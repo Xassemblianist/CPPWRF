@@ -96,6 +96,7 @@ CPPWRF_HD inline long lround_x86(float x) {
 // the device cannot test for a constant, so the CUDA FP64 build writes the product out
 template <typename T>
 CPPWRF_HD inline T rpow2c(T a) {
+  if constexpr (sizeof(T) == sizeof(float)) return a * a;  // REAL x**2.0: x * x on the host and the device alike
 #if defined(CPPWRF_GLIBC_MATH)
   if constexpr (sizeof(T) == sizeof(double)) return a * a;
 #endif

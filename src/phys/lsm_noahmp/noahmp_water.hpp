@@ -1897,10 +1897,13 @@ CPPWRF_HD inline void GroundWaterTopModel(NoahmpType& noahmp) {
                    rexp(-RunoffDecayFac * WaterTableDepth);
 
   SatDegUnsatSoil = static_cast<double>(std::min(real(1.0), SoilMoisture(IndUnsatSoil) / SoilMoistureSat(IndUnsatSoil)));
-  SatDegUnsatSoil = std::max(SatDegUnsatSoil, 0.01);
-  if (SatDegUnsatSoil < 0.01) SatDegUnsatSoil = 0.01;
-  SoilMatPotFrz = -SoilMatPotentialSat(IndUnsatSoil) * real(1000.0) *
-                  static_cast<real>(rpow(SatDegUnsatSoil, static_cast<double>(-SoilExpCoeffB(IndUnsatSoil))));
+  // real(0.01,kind=8) and the 0.01 of the next line: REAL literals widened (0.01f in WRF real*4, 0.01 with -r8); the
+  // product with the real(kind=8) power is REAL(8), rounded on the assignment
+  const double c001 = static_cast<double>(real(0.01));
+  SatDegUnsatSoil = std::max(SatDegUnsatSoil, c001);
+  if (SatDegUnsatSoil < c001) SatDegUnsatSoil = c001;
+  SoilMatPotFrz = static_cast<real>(-SoilMatPotentialSat(IndUnsatSoil) * real(1000.0) *
+                                    rpow(SatDegUnsatSoil, static_cast<double>(-SoilExpCoeffB(IndUnsatSoil))));
   SoilMatPotFrz = std::max(real(-120000.0), MicroPoreContent * SoilMatPotFrz);
 
   AquiferWatConduct = real(2.0) * (SoilWatConductTmp(IndUnsatSoil) * SoilWatConductivitySat(IndUnsatSoil) * real(1.0e3)) /
