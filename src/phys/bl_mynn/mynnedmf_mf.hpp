@@ -131,7 +131,9 @@ CPPWRF_HD inline void dmp_mf_a(int kte, real dt, A zw1, A dz1, A pres1, A rho1,
   (void)tkeprod_up; (void)el1; (void)vt1; (void)vq1; (void)tk1;
   CPPWRF_MYNN_MF_PLUMES(CPPWRF_MYNN_MF_BIND)
   real exneri[K + 2];
-  int ktop_plume[nup + 1];
+  // WRF sets ktop_plume = 0 inside the plume branch only; zeroed here so that the copy to st below never copies an
+  // indeterminate value (dmp_mf_b reads it only after the plumes ran)
+  int ktop_plume[nup + 1]{};
   int ktop = 0;
   o.ztop = zero;
   o.maxmf = zero;
