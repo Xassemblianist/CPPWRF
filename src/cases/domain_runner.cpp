@@ -109,6 +109,36 @@ std::vector<std::string> wrf_names(const std::string& n) {
   return {up(n)};
 }
 
+// CPPWRF's own restart file keeps the halo points of its fields as well (HALO_<name>: the points of the allocation
+// outside the domain, k, j, i order): the dycore's halos are filled at fixed points of the step (set_physical_bc),
+// so after the last updates of a step (the boundary rows of spec_bdy_final, the microphysics) they are not a copy of
+// the final values, and the next step reads them (WRF's resumed run fills them anew from the file's values)
+template <class F>
+std::vector<double> halo_points(const F& f) {
+  std::vector<real> h;
+  f.download(h);
+  const Layout& L = f.layout();
+  std::vector<double> o;
+  for (int k = 0; k < std::max(1, L.nz); ++k)
+    for (int j = L.wj0; j < L.wj1; ++j)
+      for (int i = L.wi0; i < L.wi1; ++i)
+        if (i < 0 || i >= L.nx || j < 0 || j >= L.ny) o.push_back(double(h[L.index(i, j, k)]));
+  return o;
+}
+
+template <class F>
+void set_halo_points(F& f, const std::vector<double>& o) {
+  std::vector<real> h;
+  f.download(h);
+  const Layout& L = f.layout();
+  std::size_t n = 0;
+  for (int k = 0; k < std::max(1, L.nz); ++k)
+    for (int j = L.wj0; j < L.wj1; ++j)
+      for (int i = L.wi0; i < L.wi1; ++i)
+        if (i < 0 || i >= L.nx || j < 0 || j >= L.ny) h[L.index(i, j, k)] = real(o[n++]);
+  copy_to_dev(f.data() - L.offset, h.data(), L.total * sizeof(real));
+}
+
 // Restart fields from a WRF wrfrst file (Time = 0); WRF's kms:kme arrays give their first nz levels
 void read_wrfrst(const std::string& path, io_netcdf::RestartMeta& meta, std::vector<io_netcdf::VarView>& vars) {
   int id;
@@ -296,7 +326,9 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   std::vector<std::vector<real>> bufs;
   std::vector<io_netcdf::VarView> vars;
 
+  std::vector<std::pair<std::string, std::vector<double>>> halos;  // one patch: the halo points (halo_points)
   auto add_field3 = [&](const std::string& name, const Field3& f) {
+    if (!g.patched()) halos.emplace_back(name, halo_points(f));
     bufs.emplace_back();
     const Layout L = tile::download_any(f, bufs.back());
     char stag = f.stagger() == Stagger::U ? 'U' : (f.stagger() == Stagger::V ? 'V' : (f.stagger() == Stagger::W ? 'W' : 'M'));
@@ -304,6 +336,7 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   };
 
   auto add_field2 = [&](const std::string& name, const Field2& f) {
+    if (!g.patched()) halos.emplace_back(name, halo_points(f));
     bufs.emplace_back();
     const Layout L = tile::download_any(f, bufs.back());
     vars.emplace_back(name, 'M', L.nx, L.ny, 1, bufs.back().data() + L.offset, dt, L.sj, 0);
@@ -368,6 +401,31 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   }
 
   io_netcdf::write_restart(path, meta, vars);
+  if (!halos.empty()) {  // HALO_<name> (halo_points), one dimension per variable
+    int id;
+    if (nc_open(path.c_str(), NC_WRITE, &id) != NC_NOERR) throw std::runtime_error("cannot reopen " + path);
+    nc_redef(id);
+    std::vector<int> vids(halos.size(), -1);
+    std::map<std::size_t, int> dims;  // one dimension per length
+    for (std::size_t n = 0; n < halos.size(); ++n) {
+      const std::size_t len = halos[n].second.size();
+      if (len == 0) continue;
+      auto d = dims.find(len);
+      if (d == dims.end()) {
+        int dim;
+        if (nc_def_dim(id, ("halo_" + std::to_string(len)).c_str(), len, &dim) != NC_NOERR)
+          throw std::runtime_error(path + ": cannot define halo_" + std::to_string(len));
+        d = dims.emplace(len, dim).first;
+      }
+      if (nc_def_var(id, ("HALO_" + halos[n].first).c_str(), NC_DOUBLE, 1, &d->second, &vids[n]) != NC_NOERR)
+        throw std::runtime_error(path + ": cannot define HALO_" + halos[n].first);
+    }
+    nc_enddef(id);
+    for (std::size_t n = 0; n < halos.size(); ++n)
+      if (vids[n] >= 0 && nc_put_var_double(id, vids[n], halos[n].second.data()) != NC_NOERR)
+        throw std::runtime_error(path + ": cannot write HALO_" + halos[n].first);
+    nc_close(id);
+  }
 }
 
 void DomainRunner::load_restart_file(const std::string& path) {
@@ -615,14 +673,30 @@ void DomainRunner::load_restart_file(const std::string& path) {
     const std::vector<real> h = tile::local_part(f, whole);
     copy_to_dev(f.data() - f.layout().offset, h.data(), f.layout().total * sizeof(real));
   };
+  // CPPWRF's own file of one patch: the halo points as the run had them (HALO_<name>, save_restart_file)
+  int hid = -1;
+  if (!wrf_file && !g.patched() && nc_open(path.c_str(), NC_NOWRITE, &hid) != NC_NOERR) hid = -1;
+  auto halo_of = [&](auto& f, const std::string& name) {
+    fill_halo(f, g);
+    int vid, dim;
+    std::size_t len = 0;
+    if (hid < 0 || nc_inq_varid(hid, ("HALO_" + name).c_str(), &vid) != NC_NOERR) return;
+    nc_inq_vardimid(hid, vid, &dim);
+    nc_inq_dimlen(hid, dim, &len);
+    std::vector<double> o(len);
+    if (nc_get_var_double(hid, vid, o.data()) != NC_NOERR || halo_points(f).size() != len)
+      throw std::runtime_error(path + ": HALO_" + name + " does not fit the field");
+    set_halo_points(f, o);
+  };
   for (const auto& t : targets3) {
     put(*t.f, bufs[t.buf_idx]);
-    fill_halo(*t.f, g);
+    halo_of(*t.f, t.name);
   }
   for (const auto& t : targets2) {
     put(*t.f, bufs[t.buf_idx]);
-    fill_halo(*t.f, g);
+    halo_of(*t.f, t.name);
   }
+  if (hid >= 0) nc_close(hid);
   std::vector<HaloField> base_halos;
   for (const auto& t : targets_b) {
     if (t.f3) put(*t.f3, bufs[t.buf_idx]);
