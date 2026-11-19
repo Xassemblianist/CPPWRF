@@ -2076,6 +2076,13 @@ class WrfTranslator:
                                    "(the MYNN surface layer's RUC branches are not ported).")
                     if mp_physics == 0:
                         self.error("WRF sf_surface_physics = 3 (RUC) needs a microphysics with cloud water (qc_curr).")
+                elif sf_surface == 0:
+                    # check_a_mundo sets 5 layers without a land surface model; whether wrf.exe's history then keeps
+                    # the namelist's soil dimension (as found for Noah) is not proven: only 5 is accepted
+                    num_soil = self.get_opt("physics", "num_soil_layers", 5)
+                    if num_soil != 5:
+                        self.error(f"WRF num_soil_layers = {num_soil} is not supported with sf_surface_physics = 0; "
+                                   "CPPWRF requires 5 soil layers.")
                 elif sf_surface != 0:
                     # check_a_mundo uses 4 layers for Noah and Noah-MP, but the history output keeps the
                     # namelist's soil dimension (P1 with num_soil_layers = 5: same values, ZS/TSLB/SMOIS shapes differ)
@@ -2555,8 +2562,13 @@ class WrfTranslator:
                        "memory).")
 
         icloud = self.get_opt("physics", "icloud", 1)
+        # check_a_mundo (module_check_a_mundo.F:1390-1398): MSKF (cu_physics = 11) on any domain sets icloud = 1,
+        # one value for every domain (a nest without cumulus included)
+        mskf = any(self.get_dom_opt("physics", "cu_physics", d, 0) == 11 for d in range(max(1, self._max_dom)))
         if icloud not in (0, 1):
             self.error(f"WRF icloud = {icloud} is not supported; CPPWRF supports icloud 0 and 1.")
+        elif mskf and icloud != 1:
+            self.notice(f"Option &physics.icloud = {icloud}: set to 1 with cu_physics = 11 (check_a_mundo).")
         elif (ra_lw != 0 or ra_sw != 0) and icloud != 1:
             sections.setdefault("phys", {})["icloud"] = icloud
 

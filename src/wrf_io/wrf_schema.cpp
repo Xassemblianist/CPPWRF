@@ -64,7 +64,13 @@ WrfConfig::WrfConfig(const Namelist& nl, const std::map<std::string, std::pair<s
 std::string WrfConfig::get(const std::string& name0, int dom) const {
   if (dom == 0) dom = dom_;
   const std::string name = to_lower(name0);
-  auto dv = derived_.find(name);
+  // the derived values are this domain's (model_config_rec%x(dom_)): another domain's entry of a max_domains option
+  // is its namelist value or the Registry default
+  const bool other_domain = dom != dom_ && entries_ && [&] {
+    auto e = entries_->find(name);
+    return e != entries_->end() && e->second == "max_domains";
+  }();
+  auto dv = other_domain ? derived_.end() : derived_.find(name);
   if (dv != derived_.end()) return dv->second;
   auto d = defaults_.find(name);
   if (d != defaults_.end() && d->second.first != "derived") {
@@ -113,23 +119,68 @@ int physics_suite_option(std::string suite, const std::string& option, int value
 }
 
 void derive_config(WrfConfig& c, int max_dom, bool real_exe) {
+  const std::string suite = c.get("physics_suite");
+  // a domain's physics option after setup_physics_suite (-1: the suite's scheme; no suite: no package)
+  auto phys_opt = [&](const char* opt, int id) { return std::max(0, physics_suite_option(suite, opt, c.integer(opt, id))); };
+  // check_nml_consistency loops over 1..max_dom; this domain is one of them also when the namelist has fewer
+  const int ndom = std::max(max_dom, c.domain());
   for (const char* p : {"mp_physics", "cu_physics", "ra_lw_physics", "ra_sw_physics", "sf_sfclay_physics",
                         "sf_surface_physics", "bl_pbl_physics"}) {
     const int v = c.integer(p);
-    const int w = std::max(0, physics_suite_option(c.get("physics_suite"), p, v));  // no suite: -1 is no package
+    const int w = std::max(0, physics_suite_option(suite, p, v));  // no suite: -1 is no package
     if (w != v) c.set(p, std::to_string(w));
   }
-  c.set("cu_used", c.integer("cu_physics") != 0 ? "1" : "0");
-  c.set("shcu_used", c.integer("shcu_physics") != 0 ? "1" : "0");
-  c.set("gwd_used", c.integer("gwd_opt") == 1 ? "1" : c.integer("gwd_opt") == 3 ? "3" : "0");
+  // check_nml_consistency (module_check_a_mundo.F:248-251): a specified boundary on domain 1 sets spec_zone = 1 and
+  // relax_zone = spec_bdy_width - 1 whatever the namelist says (lbc_fcx_gcx's FCX / GCX, the feedback's margin)
+  if (c.logical("specified", 1)) {
+    c.set("spec_zone", "1");
+    c.set("relax_zone", std::to_string(c.integer("spec_bdy_width") - 1));
+  }
+  // check_nml_consistency (module_check_a_mundo.F:289-312): a nest's km_opt / diff_opt of -1 (no namelist column)
+  // takes domain 1's
+  if (c.domain() > 1)
+    for (const char* o : {"km_opt", "diff_opt"})
+      if (c.integer(o) == -1) c.set(o, std::to_string(c.integer(o, 1)));
+  // check_nml_consistency (module_check_a_mundo.F:1852-1890): the cumulus, shallow cumulus and gravity wave drag
+  // packages are allocated on every domain when any domain uses the scheme (gwd_used 3 over 1)
+  {
+    bool cu = false, shcu = false;
+    int gwd = 0;
+    for (int id = 1; id <= ndom; ++id) {
+      cu = cu || phys_opt("cu_physics", id) != 0;
+      shcu = shcu || c.integer("shcu_physics", id) != 0;
+      if (c.integer("gwd_opt", id) == 1) gwd = 1;
+    }
+    for (int id = 1; id <= ndom; ++id)
+      if (c.integer("gwd_opt", id) == 3) gwd = 3;
+    c.set("cu_used", cu ? "1" : "0");
+    c.set("shcu_used", shcu ? "1" : "0");
+    c.set("gwd_used", std::to_string(gwd));
+  }
   c.set("aercu_used", c.integer("aercu_opt") > 0 ? "1" : "0");
   c.set("fft_used", "0");
   c.set("cam_used", "0");
   c.set("use_wps_input", real_exe ? "1" : "0");
-  // check_nml_consistency (WRF 4.8): ghg_input is reset to 0 when a domain has no shortwave radiation
+  // check_nml_consistency (WRF 4.8): ghg_input is reset to 0 when a domain has no shortwave radiation (after
+  // setup_physics_suite)
   if (c.integer("ghg_input") == 1)
-    for (int id = 1; id <= max_dom; ++id)
-      if (c.integer("ra_sw_physics", id) == 0) c.set("ghg_input", "0");
+    for (int id = 1; id <= ndom; ++id)
+      if (phys_opt("ra_sw_physics", id) == 0) c.set("ghg_input", "0");
+  // check_nml_consistency (module_check_a_mundo.F:2514-2526): MYNN mixing scalars, number concentrations or aerosols
+  // turns this domain's scalar_pblmix off (the history attribute SCALAR_PBLMIX)
+  if (c.integer("bl_pbl_physics") == 5 && (c.integer("bl_mynn_mixscalars") == 1 || c.integer("bl_mynn_mixnumcon") == 1 ||
+                                           c.integer("bl_mynn_mixaerosols") == 1))
+    c.set("scalar_pblmix", "0");
+  // check_nml_consistency (module_check_a_mundo.F:3566-3612): domain 1's RRTMG gives the ozone / aerosol climatology
+  // dimensions (levsiz, alevsiz, no_src_types)
+  {
+    const int lw = phys_opt("ra_lw_physics", 1), sw = phys_opt("ra_sw_physics", 1);
+    if (lw == 4 || sw == 4 || lw == 14 || sw == 14 || lw == 24 || sw == 24) {
+      c.set("levsiz", "59");
+      c.set("alevsiz", "12");
+      c.set("no_src_types", "6");
+    }
+  }
   // MYNN EDMF options only with the MYNN PBL (bl_pbl_physics = 5)
   if (c.integer("bl_pbl_physics") != 5) {
     c.set("bl_mynn_edmf", "0");
@@ -141,11 +192,11 @@ void derive_config(WrfConfig& c, int max_dom, bool real_exe) {
     const int cu = c.integer("cu_physics");
     c.set("cu_diag", cu == 93 || cu == 3 || cu == 10 || cu == 5 ? "1" : "0");
   }
-  // check_a_mundo (real.exe and wrf.exe): MSKF sets cu_rad_feedback = .true. and icloud = 1
-  if (c.integer("cu_physics") == 11) {
-    c.set("icloud", "1");
-    c.set("cu_rad_feedback", ".true.");
-  }
+  // check_a_mundo (real.exe and wrf.exe, module_check_a_mundo.F:1390-1398): MSKF on a domain sets its
+  // cu_rad_feedback = .true. and icloud (one value for every domain) = 1
+  for (int id = 1; id <= ndom; ++id)
+    if (phys_opt("cu_physics", id) == 11) c.set("icloud", "1");
+  if (c.integer("cu_physics") == 11) c.set("cu_rad_feedback", ".true.");
   // phy_init (module_physics_init.F:1192-1206, wrf.exe only): icloud_cu = 2 for KF with cu_rad_feedback and for
   // MSKF (11), 1 for the Grell schemes with cu_rad_feedback, else 0 (the history attribute ICLOUD_CU)
   if (!real_exe) {
@@ -343,9 +394,11 @@ bool fill_out(OutVar& o, const SchemaVar& v, const WrfConfig& c, int ide, int jd
   } else if (mo == "Z") {
     order = {0};
     o.memorder_att = "Z  ";
-  } else if (mo.find('X') == std::string::npos && mo.find('Y') == std::string::npos && !mo.empty() && mo != "ZZ") {
-    for (int k = int(mo.size()) - 1; k >= 0; --k) order.push_back(k);  // C, Z, CC, CZ, ZZ, CCZ: slowest first
-    o.memorder_att = mo + std::string(3 - std::min<std::size_t>(3, mo.size()), ' ');
+  } else if (mo == "C" || mo == "CC") {
+    // io_netcdf's GetDim takes 'c' and 'cc' (ExtOrder's bad-order status for 'cc' is not checked: written in the
+    // memory order); 'cz', 'ccz', 'zz' fail GetDim and ext_ncd_write_field returns without the variable
+    for (int k = int(mo.size()) - 1; k >= 0; --k) order.push_back(k);  // slowest first
+    o.memorder_att = mo + std::string(3 - mo.size(), ' ');
   } else {
     return false;
   }
@@ -376,15 +429,18 @@ std::vector<OutVar> WrfSchema::stream_vars(const WrfConfig& c, int ide, int jde,
   auto on = [&](std::uint32_t s1, std::uint32_t s2) { return ((word == 0 ? s1 : s2) & mask) != 0; };
   std::vector<OutVar> out;
   for (const SchemaVar& v : vars_) {
-    if (!on(v.s1, v.s2) || !in_use(v.conds, c)) continue;
+    if (!in_use(v.conds, c)) continue;
     if (!all_levels && v.ntl > 0 && v.ntl / 100 != v.ntl % 100) continue;
     if (!v.array4d) {
+      if (!on(v.s1, v.s2)) continue;
       OutVar o;
       o.name = v.dataname;
       if (v.ntl > 0 && !all_levels) o.name = o.name.substr(0, o.name.size() - 2);
       o.desc = v.desc; o.units = v.units; o.var = &v;
       if (fill_out(o, v, c, ide, jde, kde, real_bytes)) out.push_back(std::move(o));
     } else {
+      // output_wrf.F:1453-1460: a scalar array's members by their own stream masks (streams_table, which
+      // iofields_filename changes), not the array's
       std::set<std::string> seen;
       for (const SchemaMember& m : members_) {
         if (m.array != v.varname || seen.count(m.member) || !in_use(m.conds, c)) continue;

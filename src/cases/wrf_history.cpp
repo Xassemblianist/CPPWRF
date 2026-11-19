@@ -208,7 +208,8 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
       c.set("dveg", std::to_string(o.noahmp.dveg));
       c.set("opt_crs", std::to_string(o.noahmp.opt_crs));
       c.set("opt_btr", std::to_string(o.noahmp.opt_btr));
-      c.set("opt_run", std::to_string(o.noahmp.opt_runsub));
+      c.set("opt_runsub", std::to_string(o.noahmp.opt_runsub));
+      c.set("opt_runsrf", std::to_string(o.noahmp.opt_runsrf));
       c.set("opt_sfc", std::to_string(o.noahmp.opt_sfc));
       c.set("opt_frz", std::to_string(o.noahmp.opt_frz));
       c.set("opt_inf", std::to_string(o.noahmp.opt_inf));
@@ -224,6 +225,10 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
       c.set("opt_crop", std::to_string(o.noahmp.opt_crop));
       c.set("opt_irr", std::to_string(o.noahmp.opt_irr));
       c.set("opt_irrm", std::to_string(o.noahmp.opt_irrm));
+      c.set("opt_compact", std::to_string(o.noahmp.opt_compact));
+      c.set("opt_tksno", std::to_string(o.noahmp.opt_tksno));
+      c.set("opt_scf", std::to_string(o.noahmp.opt_scf));
+      c.set("opt_wetland", std::to_string(o.noahmp.opt_wetland));
       c.set("opt_infdv", std::to_string(o.noahmp.opt_infdv));
       c.set("opt_tdrn", std::to_string(o.noahmp.opt_tdrn));
     }
@@ -1190,7 +1195,7 @@ wrf_io::DomainAtts WrfHistory::domain_atts() {
   d.grid_id = wc_->domain();
   d.parent_id = wc_->integer("parent_id"); d.i_parent_start = wc_->integer("i_parent_start");
   d.j_parent_start = wc_->integer("j_parent_start"); d.parent_grid_ratio = wc_->integer("parent_grid_ratio");
-  if (d.grid_id == 1) { d.parent_id = 0; d.parent_grid_ratio = 1; }  // i/j_parent_start: the namelist value (WRF writes it)
+  // output_wrf.F:312-315: the namelist values of every domain (d01's parent_id may be 0 or 1, check_a_mundo)
   d.dt = g.dt;
   if (m_.adapt) {
     d.adaptive = true;
@@ -1312,7 +1317,10 @@ void WrfHistory::write_restart(long step, double time_sec, double history_interv
       // data) turns it off
       ring = specified && !bdy_due ? 0 : 1;
     } else if (a == 55) {  // created at the start of this run (the restart time of a resumed run)
-      secs = int(-(el - std::lround(restart_sec_)));
+      // interval 0 - (time - start).S: WRFU_TimeIntervalGet's S truncates the fraction (an adaptive time step's
+      // restart time, a time_step_fract run), it does not round
+      const long whole = has_exact_ ? long(exact_.S) : el;
+      secs = int(-(whole - std::lround(restart_sec_)));
     }
     d.restart_alarms.push_back({n1, ring});
     d.restart_alarms.push_back({n2, secs});

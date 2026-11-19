@@ -679,6 +679,15 @@ class TestValidationAndWarnings(unittest.TestCase):
                            (", sst_update = 1", "sst_update = 1 with sf_surface_physics = 1")):
             err, _ = phys(extra)
             self.assertIn(msg, " ".join(err), extra)
+        # no land surface model: check_a_mundo's 5 layers; another namelist value is not proven
+        t = WrfTranslator(parse_namelist(real_case("""
+            &time_control /
+            &domains time_step = 60 /
+            &physics sf_sfclay_physics = 1, sf_surface_physics = 0, bl_pbl_physics = 1, num_soil_layers = 4 /
+            &dynamics /
+            """)))
+        t.translate()
+        self.assertIn("num_soil_layers = 4 is not supported with sf_surface_physics = 0", " ".join(t.errors))
 
     def test_boulac(self):
         # bl_pbl_physics = 8 (module_bl_boulac.F) over sf_sfclay_physics = 1 or 2 (module_physics_init: 'use sfclay or
@@ -1613,6 +1622,15 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertTrue(any("aercu_opt" in e for e in t.errors), t.errors)
         t, _ = self.translate(self.NEST + "&physics cu_physics = 11, 11, kf_edrates = 1, 1 /\n")
         self.assertTrue(any("kf_edrates" in e for e in t.errors), t.errors)
+        # check_a_mundo: MSKF on any domain sets icloud = 1 for every domain (a nest without cumulus included)
+        t, sec = self.translate(self.NEST + "&physics cu_physics = 11, 0, icloud = 0, ra_lw_physics = 4, 4,"
+                                " ra_sw_physics = 4, 4 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertTrue(all("icloud" not in v for v in sec.values() if isinstance(v, dict)), sec)
+        t, sec = self.translate(self.NEST + "&physics cu_physics = 1, 0, icloud = 0, ra_lw_physics = 4, 4,"
+                                " ra_sw_physics = 4, 4 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["icloud"], 0)
         t, _ = self.translate(self.NEST + "&physics cu_physics = 10, 10 /\n")
         self.assertTrue(any("KF-CuP" in e for e in t.errors), t.errors)
         t, _ = self.translate(self.NEST + "&physics cu_physics = 99, 99 /\n")
