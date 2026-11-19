@@ -430,6 +430,7 @@ void wrap_hook(const void* const* bases, int n, int axis) {
   const std::vector<int> idx = entries_of(bases, n);
   const int t = W->id;
   std::vector<std::vector<Piece>> snd(std::size_t(W->n)), rcv(std::size_t(W->n));
+  std::vector<Piece> self_src, self_dst;  // the wrapped points the receiver owns itself
   for (int i : idx) {
     const Entry& e = W->reg.e[std::size_t(i)];
     const Layout& L = e.L;
@@ -442,7 +443,7 @@ void wrap_hook(const void* const* bases, int n, int axis) {
     auto trange = [&](int w) { return axis == 0 ? meet(win_y(D, w, L), Iv{0, L.ny}) : win_x(D, w, L); };
     // from sender s to receiver r: the receiver's halo boxes (dst) and the sender's source boxes (dst shifted)
     auto pieces = [&](int s, int r, bool dst, std::vector<Piece>& out) {
-      if (s == r || tang(s) != tang(r)) return;
+      if (tang(s) != tang(r)) return;
       const Iv own{lo(s), hi(s)};
       const Iv tr = trange(r);
       for (int side = 0; side < 2; ++side) {
@@ -456,11 +457,24 @@ void wrap_hook(const void* const* bases, int n, int axis) {
       }
     };
     for (int o = 0; o < W->n; ++o) {
+      if (o == t) continue;
       pieces(t, o, false, snd[std::size_t(o)]);
       pieces(o, t, true, rcv[std::size_t(o)]);
     }
+    // two patches along a direction of 6 or 7 points: the face halo point n + 3 of the east (north) patch is its
+    // own face 3
+    pieces(t, t, false, self_src);
+    pieces(t, t, true, self_dst);
   }
   transfer(snd, rcv, kWrap);
+  if (!self_src.empty()) {
+    const std::size_t nb = layout_pieces(self_src);
+    layout_pieces(self_dst);
+    std::vector<char> buf(nb);
+    move_pieces(self_src, buf.data(), nb, false);
+    move_pieces(self_dst, buf.data(), nb, true);
+    dev_sync();
+  }
 }
 
 // One line of a field from the other side of a periodic direction with several patches along it (hooks.line): the

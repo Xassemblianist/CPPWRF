@@ -66,5 +66,14 @@ elif grep -q "first: none" "$W/nan_every.log" || ! grep -q "first: .* at (i, j, 
   note "FAIL nan_every: no field and point named: $(grep -m1 non-finite "$W/nan_every.log")"
 else note "ok   nan_every: $(grep -m1 non-finite "$W/nan_every.log")"; fi
 
+# tiles: a 3-D periodic bubble of 7 x 7 points as 2 x 2 patches (the east and north patches own the face 3 that
+# their halo point n + 3 wraps to) with sixth-order diffusion, every launch against the run without tiles
+TW=(configs/warm_bubble.ini --set domain.nx=7 --set domain.ny=7 --set domain.nz=20 --set domain.bc_x=periodic
+    --set domain.bc_y=periodic --set dyn.diff_6th_opt=1 --set dyn.diff_6th_factor=0.12 --set time.dt=2
+    --set run.run_time=6 --set output.out_interval=3 --set output.diag_interval=3)
+if CPPWRF_TILES=2x2 CPPWRF_TILE_CHECK=1 run tiles_wrap "${TW[@]}"; then note "ok   tiles_wrap"
+elif grep -q "the CPU build only" "$W/tiles_wrap.log"; then echo "skip tiles_wrap: the tile check is for CPU builds"
+else note "FAIL tiles_wrap: $(grep -m1 "tile check" "$W/tiles_wrap.log" | cut -c1-300) $(tail -1 "$W/tiles_wrap.log")"; fi
+
 [ $fails = 0 ] && echo "PASS robustness" || echo "FAIL robustness ($fails)"
 exit $((fails > 0))
