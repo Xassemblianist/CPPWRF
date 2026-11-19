@@ -130,6 +130,23 @@ void derive_config(WrfConfig& c, int max_dom, bool real_exe) {
     const int w = std::max(0, physics_suite_option(suite, p, v));  // no suite: -1 is no package
     if (w != v) c.set(p, std::to_string(w));
   }
+  // set_physics_rconfigs (module_check_a_mundo.F:3588-3612): num_soil_layers follows domain 1's land surface model
+  // whatever the namelist says (WRF v4.8.0 run G9F6A5: Noah with num_soil_layers = 5 writes 4 soil layers; G9F6A0:
+  // no land surface model with 4 writes 5)
+  {
+    const int n = c.integer("num_soil_layers");
+    int k = n;
+    switch (phys_opt("sf_surface_physics", 1)) {
+      case 0: case 1: k = 5; break;                   // NOLSMSCHEME, SLABSCHEME
+      case 2: case 4: case 6: k = 4; break;           // LSMSCHEME, NOAHMPSCHEME, CTSMSCHEME
+      case 3: k = (n == 6 || n == 9) ? n : 6; break;  // RUCLSMSCHEME
+      case 5: k = 10; break;                          // CLMSCHEME
+      case 7: k = 2; break;                           // PXLSMSCHEME
+      case 8: k = 3; break;                           // SSIBSCHEME
+      default: break;
+    }
+    if (k != n) c.set("num_soil_layers", std::to_string(k));
+  }
   // check_nml_consistency (module_check_a_mundo.F:248-251): a specified boundary on domain 1 sets spec_zone = 1 and
   // relax_zone = spec_bdy_width - 1 whatever the namelist says (lbc_fcx_gcx's FCX / GCX, the feedback's margin)
   if (c.logical("specified", 1)) {
