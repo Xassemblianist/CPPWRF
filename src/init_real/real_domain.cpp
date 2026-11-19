@@ -337,9 +337,11 @@ void RealDomain<T>::read_input(const MetEm& m) {
   // optional input-stream fields WRF passes from met_em to wrfinput, not carried by cppwrf_real
   // (Registry DataNames are upper case in the I/O: allocs_*.F DataName = 'O3_GFS_DU'; write_wrfinput refuses any
   // other auxinput1 field of wrfinput that the met_em file has and cppwrf_real does not read)
-  for (const char* n : {"UOCE", "VOCE", "TOPOSLPX", "TOPOSLPY", "EROD", "ICEDEPTH", "ALBSI", "SNOWSI", "LANDUSEF2",
-                        "SOILT1", "O3_GFS_DU", "CANWAT"})
+  for (const char* n : {"ICEDEPTH", "ALBSI", "SNOWSI", "LANDUSEF2", "SOILT1", "O3_GFS_DU"})
     if (m.has(n)) throw std::runtime_error(std::string("real: met_em field ") + n + " is not ported");
+  // CANWAT: met_em -> wrfinput unchanged (no grid%canwat statement in module_initialize_real.F / real_em.F); the
+  // other pure pass-through fields: real_output.hpp kPassThrough
+  if (m.has("CANWAT")) put2(m, "CANWAT", canwat);
   if (m.has("SNOALB")) put2(m, "SNOALB", snoalb);
   if (m.has("SCT_DOM")) put2(m, "SCT_DOM", sct_dom_gc);
   if (m.has("SCB_DOM")) put2(m, "SCB_DOM", scb_dom_gc);
