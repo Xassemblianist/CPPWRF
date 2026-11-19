@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Noah-MP v5.1.2 option values (sf_surface_physics = 4, phys/noahmp in WRF 4.8.0) other than the defaults, each
-against its WRF v4.8.0 run (wrfref workflow of Xassemblianist/cppwrf-data, tags a14-n1a/b/c, a14-x4a/b/c, a14-v4-0..9):
+against its WRF v4.8.0 run (wrfref workflow of Xassemblianist/cppwrf-data, tags a14-n1a/b/c, a14-x4a/b/c,
+a14-x4w, a14-v4-0..9):
   N*   NMP1 (P1 column physics + Noah-MP, no radiation or microphysics) with one option changed: 1 h, history every
        10 min (some with wrfrst at 30 min: the *_1h_rst cases restart there), steps/ = 3 steps, history every step;
   X4*  NMP4 = NMP1's inputs with P4's physics (WSM6, Kain-Fritsch, RRTMG with radt 10, diff_opt 1 / km_opt 4):
@@ -77,10 +78,10 @@ for _n, _o in _X.items():
     _run = f"{WR}/run_{_n}_r8"
     CASES.append((f"real_{_n.lower()}_r8_fp64_cpu_6h", "cpu_dp", "configs/real_nmp4_r8.ini",
                   [f"real.dir={_run}"] + _opts(_o) + _6H, f"{_run}/wrfout_d01_{_D}", 21600, _TX))
-# the wetland state (FSAT / WSURF) across a restart, with rain
+# the wetland state (FSAT / WSURF) across a restart, with rain: X4WET1R = X4WET1 with WRF's wrfrst at 3 h
 CASES.append(("real_x4wet1_r8_fp64_cpu_6h_rst", "cpu_dp", "configs/real_nmp4_r8.ini",
-              [f"real.dir={WR}/run_X4WET1_r8"] + _opts(_X["X4WET1"]) + _6H + ["suite.restart_at=10800"],
-              f"{WR}/run_X4WET1_r8/wrfout_d01_{_D}", 21600, _TX))
+              [f"real.dir={WR}/run_X4WET1R_r8"] + _opts(_X["X4WET1"]) + _6H + ["suite.restart_at=10800"],
+              f"{WR}/run_X4WET1R_r8/wrfout_d01_{_D}", 21600, _TX))
 for _n, _o in _XS.items():
     _run = f"{WR}/run_{_n}_r8"
     CASES += [
@@ -149,6 +150,8 @@ def _data(c):
     run = c[4].split("/run_")[1].split("_r8/")[0]
     if run.startswith("V"):
         return "suite_data.tar,port_a14v2_data.tar,v05_files_links.tar"
+    if run == "X4WET1R":
+        return "suite_data.tar,port_a14x3_data.tar"
     if run.startswith(("X4RUN", "X4WET")):
         return "suite_data.tar,port_a14x2_data.tar"
     return "suite_data.tar," + _TAR.get(run, "port_a14x_data.tar")

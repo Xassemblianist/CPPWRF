@@ -88,6 +88,7 @@ port_a14n2_data.tar
 port_a14n3_data.tar
 port_a14x_data.tar
 port_a14x2_data.tar
+port_a14x3_data.tar
 port_a14v2_data.tar
 # whole references (every frame and variable) of the tolerance-0 cases and the ideal namelists
 # (tools/colab/stage_data.py --whole --refs-only --no-steps): after the tars above, whose files they replace
