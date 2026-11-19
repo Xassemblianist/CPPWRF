@@ -104,6 +104,19 @@ class Checker(unittest.TestCase):
         self.assertIn('"status": "ported"', r.stdout)
         self.assertEqual(run(CHECK, d, "nonexistent.input").returncode, 2)
 
+    def test_restart_io_form(self):
+        # restart = .true. is translated as .false. (cppwrf-wrf resumes itself): what the translator would refuse with
+        # it the checker refuses too (input_restart reads io_form_restart)
+        d = make_dir("check_rst_io", restart=".true.")
+        p = os.path.join(d, "namelist.input")
+        with open(p) as f:
+            t = f.read().replace("io_form_restart = 2", "io_form_restart = 1")
+        with open(p, "w") as f:
+            f.write(t)
+        r = run(CHECK, d)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("io_form_restart", r.stdout)
+
 
 @unittest.skipUnless(BIN and os.path.exists(BIN), "CPPWRF_BIN (a cppwrf binary) not set")
 class DropIn(unittest.TestCase):

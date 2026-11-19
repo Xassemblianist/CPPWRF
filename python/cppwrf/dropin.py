@@ -188,6 +188,8 @@ class WrfRun:
         tables = self.run_dir if os.path.exists(os.path.join(self.run_dir, "LANDUSE.TBL")) else None
         tr = nlm.translate(nml_t, namelist_path=self.nml_path, output_format="wrfout", real_dir=self.run_dir,
                            table_dir=tables)
+        if restart:
+            tr.errors.extend(nlm.restart_errors(nml))
         self.translation = tr
         if tr.errors:
             res = nlm.check(self.nml_path)

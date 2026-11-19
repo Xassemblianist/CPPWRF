@@ -112,11 +112,28 @@ def without_restart(nml: Namelist) -> Tuple[Namelist, bool]:
     return n, on
 
 
+def restart_errors(nml: Namelist) -> List[str]:
+    """What the translator would refuse with restart = .true. and cppwrf-wrf must refuse itself (it translates the
+    namelist with restart = .false.)."""
+    errs = []
+    if not bool(get(nml, "time_control", "restart", False)):
+        return errs
+    io_rst = get(nml, "time_control", "io_form_restart", 2)
+    if io_rst != 2:  # input_restart reads the wrfrst file in io_form_restart
+        errs.append(f"WRF io_form_restart = {io_rst} with restart = .true. is not supported; CPPWRF reads NetCDF "
+                    "wrfrst files (2).")
+    if any(v not in (0, None) for v in nml.get("physics", {}).get("sf_urban_physics", [])):
+        errs.append("WRF restart = .true. with sf_urban_physics = 1 is not supported by CPPWRF (the UCM restart "
+                    "state is not ported).")
+    return errs
+
+
 def start_date(nml: Namelist, dom: int = 0) -> str:
     """The namelist's start date of a domain, WRF's YYYY-MM-DD_hh:mm:ss."""
     g = lambda k, d=0: int(get(nml, "time_control", k, d, dom))  # noqa: E731
-    return (f"{g('start_year', 2000):04d}-{g('start_month', 1):02d}-{g('start_day', 1):02d}_"
-            f"{g('start_hour'):02d}:{g('start_minute'):02d}:{g('start_second'):02d}")
+    # Registry defaults (start_year 1993, start_month 03, start_day 13, start_hour 12)
+    return (f"{g('start_year', 1993):04d}-{g('start_month', 3):02d}-{g('start_day', 13):02d}_"
+            f"{g('start_hour', 12):02d}:{g('start_minute'):02d}:{g('start_second'):02d}")
 
 
 def stream_filename(pattern: str, dom: int, date: str) -> str:
@@ -184,6 +201,8 @@ def check(path: str, real_dir: Optional[str] = None, table_dir: Optional[str] = 
     nml = read(path)
     nml_t, restart = without_restart(nml) if dropin else (nml, False)
     tr = translate(nml_t, namelist_path=path, output_format="wrfout", real_dir=real_dir, table_dir=table_dir)
+    if restart:
+        tr.errors.extend(restart_errors(nml))
     blamed = set()
     opts = []
     for grp, kv in nml.items():
