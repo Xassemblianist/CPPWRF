@@ -732,13 +732,16 @@ struct P3Kernel {
         }
         // immersion freezing of rain
         if (QR >= qsmall && T <= Real(269.15)) {
-          const Real tmpdbl1 = libm::exp(libm::log(cdistr[k]) + libm::log(libm::tgamma(Real(7.) + mu_r[k])) -
-                                         Real(6.) * libm::log(lamr[k]));
-          const Real tmpdbl2 = libm::exp(libm::log(cdistr[k]) + libm::log(libm::tgamma(mu_r[k] + Real(4.))) -
-                                         Real(3.) * libm::log(lamr[k]));
-          const Real tmpdbl3 = libm::exp(C.aimm * (Real(273.15) - T));
-          Q_nuc = C.cons6 * (tmpdbl1 * tmpdbl3);
-          N_nuc = C.cons5 * (tmpdbl2 * tmpdbl3);
+          // DOUBLE PRECISION tmpdbl1..3 = dexp(dble(REAL expression)); Q_nuc = cons6 * sngl(tmpdbl1 * tmpdbl3)
+          const double tmpdbl1 = libm::exp(static_cast<double>(libm::log(cdistr[k]) +
+                                                               libm::log(libm::tgamma(Real(7.) + mu_r[k])) -
+                                                               Real(6.) * libm::log(lamr[k])));
+          const double tmpdbl2 = libm::exp(static_cast<double>(libm::log(cdistr[k]) +
+                                                               libm::log(libm::tgamma(mu_r[k] + Real(4.))) -
+                                                               Real(3.) * libm::log(lamr[k])));
+          const double tmpdbl3 = libm::exp(static_cast<double>(C.aimm * (Real(273.15) - T)));
+          Q_nuc = C.cons6 * static_cast<Real>(tmpdbl1 * tmpdbl3);
+          N_nuc = C.cons5 * static_cast<Real>(tmpdbl2 * tmpdbl3);
           qrheti = Q_nuc;
           nrheti = N_nuc;
         }
@@ -783,10 +786,12 @@ struct P3Kernel {
         sup_cld = sup[k];
         sup_r = sup[k];
         supi_cld = supi[k];
+        // 1. - sngl(dexp(-dble(xx * dt))): the relaxation factor in double precision, rounded to REAL
+        const Real relax = Real(1.) - static_cast<Real>(libm::exp(-static_cast<double>(xx * dt)));
         if (QC >= qsmall)
-          qccon = (aaa * epsc * oxx + (ssat_cld - aaa * oxx) * odt * epsc * oxx * (Real(1.) - libm::exp(-(xx * dt)))) / ab;
+          qccon = (aaa * epsc * oxx + (ssat_cld - aaa * oxx) * odt * epsc * oxx * relax) / ab;
         if (QR >= qsmall)
-          qrcon = (aaa * epsr * oxx + (ssat_r - aaa * oxx) * odt * epsr * oxx * (Real(1.) - libm::exp(-(xx * dt)))) / ab;
+          qrcon = (aaa * epsr * oxx + (ssat_r - aaa * oxx) * odt * epsr * oxx * relax) / ab;
         if (sup_cld < Real(-0.001) && QC < Real(1.e-12)) qccon = -QC * odt;
         if (sup_r < Real(-0.001) && QR < Real(1.e-12)) qrcon = -QR * odt;
         if (qccon < Real(0.)) {
@@ -803,7 +808,7 @@ struct P3Kernel {
           qrcon = c_min(qrcon, QV * odt);
         }
         if (QI >= qsmall && T < Real(273.15))
-          qidep = (aaa * epsi * oxx + (ssat_cld - aaa * oxx) * odt * epsi * oxx * (Real(1.) - libm::exp(-(xx * dt)))) *
+          qidep = (aaa * epsi * oxx + (ssat_cld - aaa * oxx) * odt * epsi * oxx * relax) *
                       oabi +
                   (qvs[k] - dumqvi) * epsi * oabi;
         if (supi_cld < Real(-0.001) && QI < Real(1.e-12)) qidep = -QI * odt;

@@ -317,6 +317,10 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
   const bool rrtmg_sw = o.ra_sw_physics == 4;
   if (rrtmg_sw) p_->sw = std::make_unique<RrtmgSwTables>();
   // RRTMG tables: phys.table_dir, then CPPWRF's copy (data/rrtmg of the data directory, core/data_dir.hpp)
+  // WRF real*4 builds RRTMG's tables in single precision (rb = REAL): the FP32 builds read the dump of that build
+  auto rrtmg_table_name = [](const char* band) {
+    return std::string("rrtmg_") + band + (sizeof(rr) == 4 ? "_tables_r4.bin" : "_tables.bin");
+  };
   auto table_file = [&](const std::string& name) {
     const std::string a = o.table_dir + "/" + name;
     if (std::ifstream(a).good()) return a;
@@ -324,7 +328,7 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
     if (std::ifstream(b).good()) return b;
     throw std::runtime_error("radiation: cannot find " + name + " in " + o.table_dir + " or the data directory");
   };
-  if (rrtmg_lw && !load_rrtmg_lw_tables(table_file("rrtmg_lw_tables.bin"), *p_->lw))
+  if (rrtmg_lw && !load_rrtmg_lw_tables(table_file(rrtmg_table_name("lw")), *p_->lw))
     throw std::runtime_error("radiation: cannot read rrtmg_lw_tables.bin");
   if (!rrtmg_lw) {  // rrtminit (phy_init): rrtm_lookuptable reads RRTM_DATA of the run directory
     p_->rrtm = std::make_unique<RrtmLwTables>();
@@ -332,7 +336,7 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
     if (!load_rrtm_lw_tables(o.table_dir + "/RRTM_DATA", *p_->rrtm, err)) throw std::runtime_error("radiation: " + err);
     p_->rrtm_nlayers = rrtm_lw_nlayers(g.nz, o.p_top);
   }
-  if (rrtmg_sw && !load_rrtmg_sw_tables(table_file("rrtmg_sw_tables.bin"), *p_->sw))
+  if (rrtmg_sw && !load_rrtmg_sw_tables(table_file(rrtmg_table_name("sw")), *p_->sw))
     throw std::runtime_error("radiation: cannot read rrtmg_sw_tables.bin");
   // the SW column arrays (CPU and GPU) hold RRTMG_SW_COL_MAX layers: the model's and the one above the top (WRF:
   // mxlay = 203)
@@ -423,8 +427,14 @@ bool RadiationDriver::run(long itimestep, rr xtime, rr julian, int yr, const Rad
   RrtmgLwConfig lc;
   lc.icloud = o_.icloud; lc.cldovrlp = o_.cldovrlp; lc.idcor = o_.idcor; lc.p_top = o_.p_top;
   lc.yr = yr; lc.julian = julian; lc.o3input = o_.o3input;
-  if (o_.ghg_input == 1) p_->gases.interpolate(yr, julian, lc.co2, lc.n2o, lc.ch4, lc.cfc11, lc.cfc12);
-  else rrtmg_default_gases(lc);
+  if (o_.ghg_input == 1) {
+    // read_CAMgases' REAL(8) co2 .. cfc12, rounded to rb where RRTMG stores them (co2vmr(ncol,k) = co2)
+    double g[5];
+    p_->gases.interpolate(yr, julian, g[0], g[1], g[2], g[3], g[4]);
+    lc.co2 = rr(g[0]); lc.n2o = rr(g[1]); lc.ch4 = rr(g[2]); lc.cfc11 = rr(g[3]); lc.cfc12 = rr(g[4]);
+  } else {
+    rrtmg_default_gases(lc);
+  }
   RrtmgSwConfig sc;
   sc.icloud = o_.icloud; sc.cldovrlp = o_.cldovrlp; sc.idcor = o_.idcor; sc.p_top = o_.p_top; sc.yr = yr;
   sc.julian = julian; sc.solcon = solcon; sc.o3input = o_.o3input; sc.co2 = lc.co2; sc.n2o = lc.n2o; sc.ch4 = lc.ch4;

@@ -15,7 +15,7 @@ constexpr int cyr = 1800;  // maximum number of records (module_ra_clWRF_support
 bool leap(int y) { return (y % 4 == 0 && y % 100 != 0) || y % 400 == 0; }
 
 // valid_years (1-based indices as in WRF)
-void valid_years(int yearIN, const std::vector<rr>& gas, int tot_years, int& yr1, int& yr2) {
+void valid_years(int yearIN, const std::vector<double>& gas, int tot_years, int& yr1, int& yr2) {
   auto g = [&](int i) { return gas[std::size_t(i - 1)]; };
   int yr_loc = yearIN;
   yr2 = yr_loc;
@@ -49,8 +49,9 @@ void valid_years(int yearIN, const std::vector<rr>& gas, int tot_years, int& yr1
   }
 }
 
-rr interpolate(int yr, rr julian, int yeari, int juli, int yr1, int yr2, int yearf, int julf,
-                   const std::vector<rr>& gas) {
+// interpolate_CAMgases: fact1, fact2, x, deltat REAL; gas and interp_gas REAL(r8)
+double interpolate(int yr, rr julian, int yeari, int juli, int yr1, int yr2, int yearf, int julf,
+                   const std::vector<double>& gas) {
   const int minyear = std::min(yr, yeari), maxyear = std::max(yr, yearf);
   rr fact2 = juli, fact1 = julf, x = julian;
   for (int ny = minyear; ny <= maxyear - 1; ++ny) {
@@ -62,7 +63,7 @@ rr interpolate(int yr, rr julian, int yeari, int juli, int yr1, int yr2, int yea
   const rr deltat = fact1 - fact2;
   fact1 = (fact1 - x) / deltat;
   fact2 = (x - fact2) / deltat;
-  rr v = gas[std::size_t(yr1 - 1)] * fact1 + gas[std::size_t(yr2 - 1)] * fact2;
+  double v = gas[std::size_t(yr1 - 1)] * fact1 + gas[std::size_t(yr2 - 1)] * fact2;
   if (v < rr(0.)) v = -rr(99999.);
   return v;
 }
@@ -78,14 +79,14 @@ void CamGases::load(const std::string& path) {
   // FORMAT (I4, 1x, F8.3, 1x, 4(F10.3, 1x)) up to the end of the file; a record the read rejects is fatal
   // ("Not normal ending of CAMtr_volume_mixing_ratio file")
   static constexpr std::size_t at[5] = {5, 14, 25, 36, 47}, width[5] = {8, 10, 10, 10, 10};
-  std::vector<rr>* gas[5] = {&co2, &n2o, &ch4, &cfc11, &cfc12};
+  std::vector<double>* gas[5] = {&co2, &n2o, &ch4, &cfc11, &cfc12};
   while (std::getline(f, line)) {
     if (!line.empty() && line.back() == '\r') line.pop_back();
     // yrdata etc. hold cyr = 1800 records, mondata(idata) is set after the end-of-file read too
     if (yr.size() + 1 >= std::size_t(cyr))
       throw std::runtime_error("CLWRF: '" + path + "' has more records than WRF's arrays hold (1799)");
     long y;
-    rr v[5];
+    double v[5];  // READ into co2r(idata) .. : REAL(r8)
     bool ok = fortran_i_field(line, 0, 4, y);
     for (int n = 0; n < 5 && ok; ++n) ok = fortran_f_field(line, at[n], width[n], 3, v[n]);
     if (!ok) throw std::runtime_error("CLWRF: Not normal ending of '" + path + "' (record '" + line + "')");
@@ -97,8 +98,8 @@ void CamGases::load(const std::string& path) {
   }
 }
 
-void CamGases::interpolate(int year, rr julian, rr& co2v, rr& n2ov, rr& ch4v, rr& cfc11v,
-                           rr& cfc12v) const {
+void CamGases::interpolate(int year, rr julian, double& co2v, double& n2ov, double& ch4v, double& cfc11v,
+                           double& cfc12v) const {
   const int max_years = int(yr.size());
   // records past the table are 0 (WRF's SAVE arrays); fewer than 2 records give yearIN < 1, whose values WRF
   // reads before its arrays but does not use (tot_valid < 2: orig_val)

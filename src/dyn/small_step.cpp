@@ -2,6 +2,7 @@
 #include "dyn/small_step.hpp"
 
 #include <cmath>
+#include <type_traits>
 
 #include "core/backend.hpp"
 #include "core/constants.hpp"
@@ -521,8 +522,15 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
                                      s.t_2.cview(), t_save.cview(), c2a.cview(), s.mu_2.cview(), s.muts.cview(), c});
   fill_halos({&s.p, &s.al}, g);
 
-  const double cof_h = 0.5 * double(dts) * cst::g * (1.0 + double(p_.epssm));  // (...)**2: x*x
-  const real cof = real(cof_h * cof_h);
+  // cof(i) = (.5*dts*g*(1.+epssm))**2: REAL in WRF (x*x); the FP64 builds as before
+  real cof;
+  if constexpr (std::is_same_v<real, double>) {
+    const double cof_h = 0.5 * double(dts) * cst::g * (1.0 + double(p_.epssm));
+    cof = real(cof_h * cof_h);
+  } else {
+    const real cof_h = real(0.5) * real(dts) * real(cst::g) * (real(1.0) + p_.epssm);
+    cof = cof_h * cof_h;
+  }
   column_for(g.columns(), KCoefW{a.view(), alpha.view(), gamma.view(), c2a.cview(), s.mut.cview(), c, mc, cof,
                                  p_.top_lid ? real(0) : real(1), nz});
   vmdump::dump("vm_s0_rk", stage_, {&s.p, &s.al, &t_save, &u_save, &v_save, &s.ph_2, &s.php, &s.alt, &s.cqu},

@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cmath>
+#include <type_traits>
 
 #include "core/backend.hpp"
 #include "core/field.hpp"
@@ -14,20 +15,27 @@ namespace cppwrf::phys::wsm6 {
 
 constexpr int kMaxLevels = 128;
 
-// The type of the floating literals of the per-step code: Real in CUDA builds (float in FP32: WRF real*4's
-// default-kind literals; an unsuffixed C++ literal is double and would turn the arithmetic into FP64), double in
-// CPU builds (the code as before, so CPU FP32 results are unchanged). In FP64 builds both are double.
-#if defined(CPPWRF_USE_CUDA)
+// The type of the floating literals of the per-step code: Real (float in the FP32 builds: WRF real*4's default-kind
+// literals, CPU and CUDA alike; an unsuffixed C++ literal is double and would turn the arithmetic into FP64; double
+// in the FP64 builds).
 template <typename Real>
 using wlit = Real;
-#else
-template <typename Real>
-using wlit = double;
-#endif
 
+// rgmma (mp_wsm6.F90, module_mp_wsm5_accel.F, module_mp_wdm5.F / wdm6): real(kind_phys) / REAL, single precision
+// in WRF real*4 (ccpp_kind_types: kind_phys = selected_real_kind(6) without DOUBLE_PRECISION), the product of the
+// 10000 factors in float; the FP64 builds below as before
 template <typename Real>
 inline Real rgmma_calc(Real x) {
     if (x == static_cast<Real>(1.0)) return static_cast<Real>(0.0);
+    if constexpr (std::is_same_v<Real, float>) {
+        const float euler = 0.577215664901532f;  // a real(kind_phys) parameter
+        float r = x * libm::exp(euler * x);
+        for (int i = 1; i <= 10000; ++i) {
+            const float y = float(i);
+            r = r * (1.000f + x / y) * libm::exp(-x / y);
+        }
+        return 1.f / r;
+    }
     constexpr double euler = 0.577215664901532;
     double r = static_cast<double>(x) * libm::exp(euler * static_cast<double>(x));
     for (int i = 1; i <= 10000; ++i) {

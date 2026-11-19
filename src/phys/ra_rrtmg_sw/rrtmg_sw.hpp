@@ -40,7 +40,9 @@ struct RrtmgSwConfig {
   rr cp{rr(1004.5)};
   int o3input{0};                     // 2: o33d on model levels
   rr co2{0}, n2o{0}, ch4{0};      // trace gases (vmr), as for RrtmgLwConfig
-  rr heatfac{rr(8.4349451468392243)};  // rrsw_con heatfac (rrtmg_sw_ini), checked against WRF
+  // rrsw_con heatfac = grav * secdy / (cpdair * 1.e2_rb) (rrtmg_sw_ini), checked against WRF; rb arithmetic (float in
+  // the FP32 builds, as WRF real*4 computes it)
+  rr heatfac{sizeof(rr) == 4 ? rr(9.8066f * 86400.0f / (1004.5f * 100.0f)) : rr(8.4349451468392243)};
 };
 
 RrtmgSwCallConfig rrtmg_sw_call_config(int num_levels, const RrtmgSwConfig& config);

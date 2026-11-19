@@ -30,7 +30,7 @@ template <typename T>
 CPPWRF_HD inline T psih_stable_full(T zolf) {
   using std::log;
   using std::pow;
-  return static_cast<T>(-5.3) * libm::log(zolf + libm::pow(static_cast<T>(1.0) + libm::pow(zolf, static_cast<T>(1.1)), static_cast<T>(1.0 / 1.1)));
+  return static_cast<T>(-5.3) * libm::log(zolf + libm::pow(static_cast<T>(1.0) + libm::pow(zolf, static_cast<T>(1.1)), static_cast<T>(1.0) / static_cast<T>(1.1)));  // 1./1.1: REAL
 }
 
 template <typename T>

@@ -455,7 +455,8 @@ struct NsslParams {
   int ngm0 = 3001;
   int ngm1 = 500;
   int ngm2 = 500;
-  double dgam = double(hexd(0x3F847AE147AE147Bull));  // 1.00000000000000002E-002
+  // double precision, parameter :: dgam = 0.01: a REAL literal (widened 0.01f in WRF real*4; 0.01 with -r8)
+  double dgam = sizeof(Real) == 4 ? double(0.01f) : double(hexd(0x3F847AE147AE147Bull));  // 1.00000000000000002E-002
   double dgami = double(hexd(0x4059000000000000ull));  // 1.00000000000000000E+002
   int nqiacralpha = 300;
   int nqiacrratio = 400;

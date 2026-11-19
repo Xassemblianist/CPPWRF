@@ -47,59 +47,61 @@ constexpr size_t N_EFSW = static_cast<size_t>(nbs) * nbc;                       
 constexpr size_t N_WEV  = static_cast<size_t>(nbc) * ntb_c * nbc;                          // 370,000
 constexpr size_t N_CCN  = static_cast<size_t>(ntb_arc) * ntb_arw * ntb_art * ntb_arr * ntb_ark; // 8,820
 
-// Trivially copyable view holding pointers and scalar constants for CPU/CUDA kernels
+// Trivially copyable view holding pointers and scalar constants for CPU/CUDA kernels. The collection, freezing,
+// autoconversion, efficiency and evaporation tables are REAL(KIND=R8SIZE), R8SIZE = 8, and the bins Dr, Ds, t_Nc
+// DOUBLE PRECISION in every WRF build (double in WRF real*4 too); tnccn_act is REAL(KIND=R4SIZE) (float in every build)
 template <typename Real>
 struct ThompsonTablesView {
     // 1. Graupel-rain collection (5 tables, 37x37x1x37x37)
     // Fortran indices: (i=ntb_g1, j=ntb_g, n3=dimNRHG, k=ntb_r1, m=ntb_r)
-    const Real* tcg_racg{nullptr};
-    const Real* tmr_racg{nullptr};
-    const Real* tcr_gacr{nullptr};
-    const Real* tnr_racg{nullptr};
-    const Real* tnr_gacr{nullptr};
+    const double* tcg_racg{nullptr};
+    const double* tmr_racg{nullptr};
+    const double* tcr_gacr{nullptr};
+    const double* tnr_racg{nullptr};
+    const double* tnr_gacr{nullptr};
 
     // 2. Snow-rain collection (12 tables, 37x9x37x37)
     // Fortran indices: (i=ntb_s, j=ntb_t, k=ntb_r1, m=ntb_r)
-    const Real* tcs_racs1{nullptr};
-    const Real* tmr_racs1{nullptr};
-    const Real* tcs_racs2{nullptr};
-    const Real* tmr_racs2{nullptr};
-    const Real* tcr_sacr1{nullptr};
-    const Real* tms_sacr1{nullptr};
-    const Real* tcr_sacr2{nullptr};
-    const Real* tms_sacr2{nullptr};
-    const Real* tnr_racs1{nullptr};
-    const Real* tnr_racs2{nullptr};
-    const Real* tnr_sacr1{nullptr};
-    const Real* tnr_sacr2{nullptr};
+    const double* tcs_racs1{nullptr};
+    const double* tmr_racs1{nullptr};
+    const double* tcs_racs2{nullptr};
+    const double* tmr_racs2{nullptr};
+    const double* tcr_sacr1{nullptr};
+    const double* tms_sacr1{nullptr};
+    const double* tcr_sacr2{nullptr};
+    const double* tms_sacr2{nullptr};
+    const double* tnr_racs1{nullptr};
+    const double* tnr_racs2{nullptr};
+    const double* tnr_sacr1{nullptr};
+    const double* tnr_sacr2{nullptr};
 
     // 3. Rain freezing (4 tables, 37x37x45x55)
     // Fortran indices: (i=ntb_r, j=ntb_r1, k=45, m=ntb_IN)
-    const Real* tpi_qrfz{nullptr};
-    const Real* tpg_qrfz{nullptr};
-    const Real* tni_qrfz{nullptr};
-    const Real* tnr_qrfz{nullptr};
+    const double* tpi_qrfz{nullptr};
+    const double* tpg_qrfz{nullptr};
+    const double* tni_qrfz{nullptr};
+    const double* tnr_qrfz{nullptr};
 
     // 4. Cloud water freezing (2 tables, 37x100x45x55)
     // Fortran indices: (i=ntb_c, j=nbc, k=45, m=ntb_IN)
-    const Real* tpi_qcfz{nullptr};
-    const Real* tni_qcfz{nullptr};
+    const double* tpi_qcfz{nullptr};
+    const double* tni_qcfz{nullptr};
 
     // 5. Ice autoconversion to snow (3 tables, 64x55)
     // Fortran indices: (i=ntb_i, j=ntb_i1)
-    const Real* tps_iaus{nullptr};
-    const Real* tni_iaus{nullptr};
-    const Real* tpi_ide{nullptr};
+    const double* tps_iaus{nullptr};
+    const double* tni_iaus{nullptr};
+    const double* tpi_ide{nullptr};
 
     // 6. Collision efficiencies (2 tables, 100x100)
     // Fortran indices: (i=nbr/nbs, j=nbc)
-    const Real* t_Efrw{nullptr};
-    const Real* t_Efsw{nullptr};
+    const double* t_Efrw{nullptr};
+    const double* t_Efsw{nullptr};
 
     // 7. Cloud droplet evaporation (2 tables, 100x37x100)
     // Fortran indices: (i=nbc, j=ntb_c, k=nbc)
-    const Real* tpc_wev{nullptr};
-    const Real* tnc_wev{nullptr};
+    const double* tpc_wev{nullptr};
+    const double* tnc_wev{nullptr};
 
     // 8. CCN activated fraction (CCN_ACTIVATE.BIN, REAL(KIND=4) values)
     // Fortran indices: (i=ntb_arc, j=ntb_arw, k=ntb_art, l=ntb_arr, m=ntb_ark)
@@ -173,13 +175,13 @@ struct ThompsonTablesView {
     Real sa[10];
     Real sb[10];
 
-    Real Dr_0;
-    Real log_Dr;
-    Real inv_log_Dr;
-    Real Ds_0;
-    Real log_Ds;
-    Real inv_log_Ds;
-    Real t_Nc_0;
+    double Dr_0;
+    double log_Dr;
+    double inv_log_Dr;
+    double Ds_0;
+    double log_Ds;
+    double inv_log_Ds;
+    double t_Nc_0;
     Real inv_nic1;
 
     Real t1_qg_qc;
@@ -187,13 +189,15 @@ struct ThompsonTablesView {
     Real xm0s;
     Real xm0g;
 
-    CPPWRF_HD inline int get_table_index(Real val, int ni_ref, int ntb_max) const {
+    // val REAL (ALOG10) or DOUBLE PRECISION (N0_exp: DLOG10, val / 10.**nn in double); 10.**nn is REAL
+    template <class V>
+    CPPWRF_HD inline int get_table_index(V val, int ni_ref, int ntb_max) const {
         int ni_val = static_cast<int>(std::round(libm::log10(val)));
         int n = ni_val;
         for (int nn = ni_val - 1; nn <= ni_val + 1; ++nn) {
             n = nn;
             Real p10 = powi(Real(10.0), nn);  // WRF: 10.**nn, INTEGER nn (__powidf2)
-            Real scaled = val / p10;
+            V scaled = val / p10;
             if (scaled >= Real(1.0) && scaled < Real(10.0)) {
                 break;
             }
@@ -260,48 +264,48 @@ struct ThompsonTablesView {
 template <typename Real>
 struct ThompsonHostTables {
     // 1. Graupel-rain collection (5 tables)
-    std::vector<Real> tcg_racg{std::vector<Real>(N_RACG, Real(0))};
-    std::vector<Real> tmr_racg{std::vector<Real>(N_RACG, Real(0))};
-    std::vector<Real> tcr_gacr{std::vector<Real>(N_RACG, Real(0))};
-    std::vector<Real> tnr_racg{std::vector<Real>(N_RACG, Real(0))};
-    std::vector<Real> tnr_gacr{std::vector<Real>(N_RACG, Real(0))};
+    std::vector<double> tcg_racg{std::vector<double>(N_RACG, 0.0)};
+    std::vector<double> tmr_racg{std::vector<double>(N_RACG, 0.0)};
+    std::vector<double> tcr_gacr{std::vector<double>(N_RACG, 0.0)};
+    std::vector<double> tnr_racg{std::vector<double>(N_RACG, 0.0)};
+    std::vector<double> tnr_gacr{std::vector<double>(N_RACG, 0.0)};
 
     // 2. Snow-rain collection (12 tables)
-    std::vector<Real> tcs_racs1{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tmr_racs1{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tcs_racs2{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tmr_racs2{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tcr_sacr1{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tms_sacr1{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tcr_sacr2{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tms_sacr2{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tnr_racs1{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tnr_racs2{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tnr_sacr1{std::vector<Real>(N_RACS, Real(0))};
-    std::vector<Real> tnr_sacr2{std::vector<Real>(N_RACS, Real(0))};
+    std::vector<double> tcs_racs1{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tmr_racs1{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tcs_racs2{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tmr_racs2{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tcr_sacr1{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tms_sacr1{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tcr_sacr2{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tms_sacr2{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tnr_racs1{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tnr_racs2{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tnr_sacr1{std::vector<double>(N_RACS, 0.0)};
+    std::vector<double> tnr_sacr2{std::vector<double>(N_RACS, 0.0)};
 
     // 3. Rain freezing (4 tables)
-    std::vector<Real> tpi_qrfz{std::vector<Real>(N_QRFZ, Real(0))};
-    std::vector<Real> tpg_qrfz{std::vector<Real>(N_QRFZ, Real(0))};
-    std::vector<Real> tni_qrfz{std::vector<Real>(N_QRFZ, Real(0))};
-    std::vector<Real> tnr_qrfz{std::vector<Real>(N_QRFZ, Real(0))};
+    std::vector<double> tpi_qrfz{std::vector<double>(N_QRFZ, 0.0)};
+    std::vector<double> tpg_qrfz{std::vector<double>(N_QRFZ, 0.0)};
+    std::vector<double> tni_qrfz{std::vector<double>(N_QRFZ, 0.0)};
+    std::vector<double> tnr_qrfz{std::vector<double>(N_QRFZ, 0.0)};
 
     // 4. Cloud water freezing (2 tables)
-    std::vector<Real> tpi_qcfz{std::vector<Real>(N_QCFZ, Real(0))};
-    std::vector<Real> tni_qcfz{std::vector<Real>(N_QCFZ, Real(0))};
+    std::vector<double> tpi_qcfz{std::vector<double>(N_QCFZ, 0.0)};
+    std::vector<double> tni_qcfz{std::vector<double>(N_QCFZ, 0.0)};
 
     // 5. Ice autoconversion to snow (3 tables)
-    std::vector<Real> tps_iaus{std::vector<Real>(N_IAUS, Real(0))};
-    std::vector<Real> tni_iaus{std::vector<Real>(N_IAUS, Real(0))};
-    std::vector<Real> tpi_ide{std::vector<Real>(N_IAUS, Real(0))};
+    std::vector<double> tps_iaus{std::vector<double>(N_IAUS, 0.0)};
+    std::vector<double> tni_iaus{std::vector<double>(N_IAUS, 0.0)};
+    std::vector<double> tpi_ide{std::vector<double>(N_IAUS, 0.0)};
 
     // 6. Collision efficiencies (2 tables)
-    std::vector<Real> t_Efrw{std::vector<Real>(N_EFRW, Real(0))};
-    std::vector<Real> t_Efsw{std::vector<Real>(N_EFSW, Real(0))};
+    std::vector<double> t_Efrw{std::vector<double>(N_EFRW, 0.0)};
+    std::vector<double> t_Efsw{std::vector<double>(N_EFSW, 0.0)};
 
     // 7. Cloud droplet evaporation (2 tables)
-    std::vector<Real> tpc_wev{std::vector<Real>(N_WEV, Real(0))};
-    std::vector<Real> tnc_wev{std::vector<Real>(N_WEV, Real(0))};
+    std::vector<double> tpc_wev{std::vector<double>(N_WEV, 0.0)};
+    std::vector<double> tnc_wev{std::vector<double>(N_WEV, 0.0)};
 
     // 8. CCN activation (thompson_init: 1.0 until table_ccnAct reads CCN_ACTIVATE.BIN)
     std::vector<Real> tnccn_act{std::vector<Real>(N_CCN, Real(1))};
@@ -375,13 +379,13 @@ struct ThompsonHostTables {
     Real sa[10];
     Real sb[10];
 
-    Real Dr_0{0};
-    Real log_Dr{0};
-    Real inv_log_Dr{0};
-    Real Ds_0{0};
-    Real log_Ds{0};
-    Real inv_log_Ds{0};
-    Real t_Nc_0{0};
+    double Dr_0{0};
+    double log_Dr{0};
+    double inv_log_Dr{0};
+    double Ds_0{0};
+    double log_Ds{0};
+    double inv_log_Ds{0};
+    double t_Nc_0{0};
     Real inv_nic1{0};
 
     Real t1_qg_qc{0};
@@ -520,38 +524,46 @@ struct ThompsonHostTables {
 // Device-resident table container owning a single contiguous device allocation for all 28 tables
 template <typename Real>
 struct ThompsonDeviceTables {
-    Real* buf_{nullptr};
+    double* buf_{nullptr};  // the REAL(KIND=R8SIZE) tables
+    Real* ccn_{nullptr};    // tnccn_act
     ThompsonTablesView<Real> view_{};
 
     ThompsonDeviceTables() = default;
     ~ThompsonDeviceTables() {
         if (buf_) dev_free(buf_);
+        if (ccn_) dev_free(ccn_);
     }
     ThompsonDeviceTables(const ThompsonDeviceTables&) = delete;
     ThompsonDeviceTables& operator=(const ThompsonDeviceTables&) = delete;
-    ThompsonDeviceTables(ThompsonDeviceTables&& o) noexcept : buf_(o.buf_), view_(o.view_) {
+    ThompsonDeviceTables(ThompsonDeviceTables&& o) noexcept : buf_(o.buf_), ccn_(o.ccn_), view_(o.view_) {
         o.buf_ = nullptr;
+        o.ccn_ = nullptr;
     }
     ThompsonDeviceTables& operator=(ThompsonDeviceTables&& o) noexcept {
         if (this != &o) {
             if (buf_) dev_free(buf_);
+            if (ccn_) dev_free(ccn_);
             buf_ = o.buf_;
+            ccn_ = o.ccn_;
             view_ = o.view_;
             o.buf_ = nullptr;
+            o.ccn_ = nullptr;
         }
         return *this;
     }
 
     void upload(const ThompsonHostTables<Real>& h) {
         if (buf_) dev_free(buf_);
+        if (ccn_) dev_free(ccn_);
         constexpr size_t total = 5 * N_RACG + 12 * N_RACS + 4 * N_QRFZ + 2 * N_QCFZ +
-                                 3 * N_IAUS + N_EFRW + N_EFSW + 2 * N_WEV + N_CCN;
-        buf_ = static_cast<Real*>(dev_alloc(total * sizeof(Real)));
+                                 3 * N_IAUS + N_EFRW + N_EFSW + 2 * N_WEV;
+        buf_ = static_cast<double*>(dev_alloc(total * sizeof(double)));
+        ccn_ = static_cast<Real*>(dev_alloc(N_CCN * sizeof(Real)));
         view_ = h.view();
         size_t off = 0;
-        auto up = [&](const std::vector<Real>& src) -> const Real* {
-            Real* dst = buf_ + off;
-            copy_to_dev(dst, src.data(), src.size() * sizeof(Real));
+        auto up = [&](const std::vector<double>& src) -> const double* {
+            double* dst = buf_ + off;
+            copy_to_dev(dst, src.data(), src.size() * sizeof(double));
             off += src.size();
             return dst;
         };
@@ -592,7 +604,8 @@ struct ThompsonDeviceTables {
         view_.tpc_wev = up(h.tpc_wev);
         view_.tnc_wev = up(h.tnc_wev);
 
-        view_.tnccn_act = up(h.tnccn_act);
+        copy_to_dev(ccn_, h.tnccn_act.data(), h.tnccn_act.size() * sizeof(Real));
+        view_.tnccn_act = ccn_;
     }
 
     const ThompsonTablesView<Real>& view() const { return view_; }

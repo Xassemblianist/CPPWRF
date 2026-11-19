@@ -205,6 +205,19 @@ namespace cppwrf::phys {
 
 bool load_rrtmg_sw_tables(const std::string& filepath, RrtmgSwTables& tables) {
   std::ifstream file(filepath, std::ios::binary);
+  // FP32 builds: the dump of WRF real*4 (rrtmg_sw_tables_r4.bin: rb = REAL, the tables as rrtmg_swinit computes
+  // them in single precision) is a memory image of RrtmgSwTables itself
+  if constexpr (sizeof(RrtmgSwTables) != sizeof(f64::RrtmgSwTables)) {
+    if (file.is_open()) {
+      file.seekg(0, std::ios::end);
+      const std::streamoff n = file.tellg();
+      file.seekg(0, std::ios::beg);
+      if (n == static_cast<std::streamoff>(sizeof(RrtmgSwTables))) {
+        file.read(reinterpret_cast<char*>(&tables), sizeof(RrtmgSwTables));
+        if (file.gcount() == static_cast<std::streamsize>(sizeof(RrtmgSwTables))) return true;
+      }
+    }
+  }
   if (file.is_open()) {
     auto f = std::make_unique<f64::RrtmgSwTables>();
     file.read(reinterpret_cast<char*>(f.get()), sizeof(f64::RrtmgSwTables));

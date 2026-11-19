@@ -310,7 +310,8 @@ CPPWRF_HD inline void CanopyRadiationTwoStream(NoahmpType& noahmp, int IndSwBnd,
       // calls neither atan nor cos here.
       real TanArg = CrownRadiusVert / energy.param.TreeCrownRadius *
                     libm::tan(libm::acos(std::max(real(0.01), domain.CosSolarZenithAngle)));
-      real CosSolarAngle = (std::abs(TanArg) < real(0x1.fffffffffffffp+511))
+      // gfortran's cos(atan(x)) = 1/sqrt(x*x+1) below sqrt(HUGE(x)): 0x1.fffffep+63 for a REAL in WRF real*4
+      real CosSolarAngle = (std::abs(TanArg) < (sizeof(real) == 4 ? real(0x1.fffffep+63f) : real(0x1.fffffffffffffp+511)))
                                ? real(1.0) / std::sqrt(TanArg * TanArg + real(1.0))
                                : std::copysign(real(0.0), TanArg);
       energy.state.GapBtwCanopy =

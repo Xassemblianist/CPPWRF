@@ -195,9 +195,9 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                            tables.tnccn_act);
     // WRF's own table files when present (bit-identical to the WRF run), else computed below
     const std::string dd = wrf_dat_dir.empty() ? std::string(".") : wrf_dat_dir;
-    const bool have_qg = !wrf_dat_dir.empty() && read_wrf_dat<Real>(dd + "/qr_acr_qg_V4.dat", {&tables.tcg_racg, &tables.tmr_racg, &tables.tcr_gacr, &tables.tnr_racg, &tables.tnr_gacr});
-    const bool have_qs = !wrf_dat_dir.empty() && read_wrf_dat<Real>(dd + "/qr_acr_qsV2.dat", {&tables.tcs_racs1, &tables.tmr_racs1, &tables.tcs_racs2, &tables.tmr_racs2, &tables.tcr_sacr1, &tables.tms_sacr1, &tables.tcr_sacr2, &tables.tms_sacr2, &tables.tnr_racs1, &tables.tnr_racs2, &tables.tnr_sacr1, &tables.tnr_sacr2});
-    const bool have_fz = !wrf_dat_dir.empty() && read_wrf_dat<Real>(dd + "/freezeH2O.dat", {&tables.tpi_qrfz, &tables.tni_qrfz, &tables.tpg_qrfz, &tables.tnr_qrfz, &tables.tpi_qcfz, &tables.tni_qcfz});
+    const bool have_qg = !wrf_dat_dir.empty() && read_wrf_dat<double>(dd + "/qr_acr_qg_V4.dat", {&tables.tcg_racg, &tables.tmr_racg, &tables.tcr_gacr, &tables.tnr_racg, &tables.tnr_gacr});
+    const bool have_qs = !wrf_dat_dir.empty() && read_wrf_dat<double>(dd + "/qr_acr_qsV2.dat", {&tables.tcs_racs1, &tables.tmr_racs1, &tables.tcs_racs2, &tables.tmr_racs2, &tables.tcr_sacr1, &tables.tms_sacr1, &tables.tcr_sacr2, &tables.tms_sacr2, &tables.tnr_racs1, &tables.tnr_racs2, &tables.tnr_sacr1, &tables.tnr_sacr2});
+    const bool have_fz = !wrf_dat_dir.empty() && read_wrf_dat<double>(dd + "/freezeH2O.dat", {&tables.tpi_qrfz, &tables.tni_qrfz, &tables.tpg_qrfz, &tables.tnr_qrfz, &tables.tpi_qcfz, &tables.tni_qcfz});
     // force_read_thompson: qr_acr_qg, qr_acr_qs and freezeH2O (in this order) stop instead of computing
     auto require = [&](bool have, const char* name) {
         if (!force_read || have) return;
@@ -554,13 +554,13 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
         tables.sb[i] = Real(sb[i]);
     }
 
-    tables.Dr_0 = Real(Dr[0]);
-    tables.log_Dr = Real(libm::log(Dr[nbr - 1] / Dr[0]));
-    tables.inv_log_Dr = Real(1.0 / libm::log(Dr[nbr - 1] / Dr[0]));
-    tables.Ds_0 = Real(Ds[0]);
-    tables.log_Ds = Real(libm::log(Ds[nbs - 1] / Ds[0]));
-    tables.inv_log_Ds = Real(1.0 / libm::log(Ds[nbs - 1] / Ds[0]));
-    tables.t_Nc_0 = Real(t_Nc[0]);
+    tables.Dr_0 = double(Dr[0]);
+    tables.log_Dr = double(libm::log(Dr[nbr - 1] / Dr[0]));
+    tables.inv_log_Dr = double(1.0 / libm::log(Dr[nbr - 1] / Dr[0]));
+    tables.Ds_0 = double(Ds[0]);
+    tables.log_Ds = double(libm::log(Ds[nbs - 1] / Ds[0]));
+    tables.inv_log_Ds = double(1.0 / libm::log(Ds[nbs - 1] / Ds[0]));
+    tables.t_Nc_0 = double(t_Nc[0]);
     tables.inv_nic1 = Real(1.0 / tables.nic1);
 
     tables.t1_qg_qc = Real(PI * 0.25 * av_g * cgg[8]);
@@ -607,7 +607,7 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                 double yc0 = 2.0 / PI * libm::atan(H);
                 Ef_rw = (yc0 + p) * (yc0 + p) / ((1.0 + p) * (1.0 + p));
             }
-            tables.t_Efrw[view.idx_efrw(i, j)] = Real(std::max(0.0, std::min(Ef_rw, 0.95)));
+            tables.t_Efrw[view.idx_efrw(i, j)] = double(std::max(0.0, std::min(Ef_rw, 0.95)));
         }
     }
 
@@ -632,7 +632,7 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                 double yc0 = 2.0 / PI * libm::atan(H);
                 Ef_sw = (yc0 + p) * (yc0 + p) / ((1.0 + p) * (1.0 + p));
             }
-            tables.t_Efsw[view.idx_efsw(i, j)] = Real(std::max(0.0, std::min(Ef_sw, 0.95)));
+            tables.t_Efsw[view.idx_efsw(i, j)] = double(std::max(0.0, std::min(Ef_sw, 0.95)));
         }
     }
 
@@ -654,8 +654,8 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                     summ += massc[n] * N_c_n;
                     summ2 += N_c_n;
                 }
-                tables.tpc_wev[view.idx_wev(i, j, k)] = Real(summ);
-                tables.tnc_wev[view.idx_wev(i, j, k)] = Real(summ2);
+                tables.tpc_wev[view.idx_wev(i, j, k)] = double(summ);
+                tables.tnc_wev[view.idx_wev(i, j, k)] = double(summ2);
             }
         }
     }
@@ -722,11 +722,11 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                     }
                 }
                 size_t idx = view.idx_racg(i, j, n3, k, m);
-                tables.tcg_racg[idx] = Real(t1);
-                tables.tmr_racg[idx] = Real(std::min(z1, static_cast<double>(tables.r_r[m])));
-                tables.tcr_gacr[idx] = Real(t2);
-                tables.tnr_racg[idx] = Real(y1);
-                tables.tnr_gacr[idx] = Real(y2);
+                tables.tcg_racg[idx] = double(t1);
+                tables.tmr_racg[idx] = double(std::min(z1, static_cast<double>(tables.r_r[m])));
+                tables.tcr_gacr[idx] = double(t2);
+                tables.tnr_racg[idx] = double(y1);
+                tables.tnr_gacr[idx] = double(y2);
             }
         }
     });
@@ -841,18 +841,18 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                     }
                 }
                 size_t idx = view.idx_racs(i, j, k, m);
-                tables.tcs_racs1[idx] = Real(t1);
-                tables.tmr_racs1[idx] = Real(std::min(z1, static_cast<double>(tables.r_r[m])));
-                tables.tcs_racs2[idx] = Real(t3);
-                tables.tmr_racs2[idx] = Real(z3);
-                tables.tcr_sacr1[idx] = Real(t2);
-                tables.tms_sacr1[idx] = Real(z2);
-                tables.tcr_sacr2[idx] = Real(t4);
-                tables.tms_sacr2[idx] = Real(z4);
-                tables.tnr_racs1[idx] = Real(y1);
-                tables.tnr_racs2[idx] = Real(y3);
-                tables.tnr_sacr1[idx] = Real(y2);
-                tables.tnr_sacr2[idx] = Real(y4);
+                tables.tcs_racs1[idx] = double(t1);
+                tables.tmr_racs1[idx] = double(std::min(z1, static_cast<double>(tables.r_r[m])));
+                tables.tcs_racs2[idx] = double(t3);
+                tables.tmr_racs2[idx] = double(z3);
+                tables.tcr_sacr1[idx] = double(t2);
+                tables.tms_sacr1[idx] = double(z2);
+                tables.tcr_sacr2[idx] = double(t4);
+                tables.tms_sacr2[idx] = double(z4);
+                tables.tnr_racs1[idx] = double(y1);
+                tables.tnr_racs2[idx] = double(y3);
+                tables.tnr_sacr1[idx] = double(y2);
+                tables.tnr_sacr2[idx] = double(y4);
             }
         }
     });
@@ -892,10 +892,10 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                     if ((sum1 + sum2) >= tables.r_r[i]) break;
                 }
                 size_t idx = view.idx_qrfz(i, j, k, m);
-                tables.tpi_qrfz[idx] = Real(sum1);
-                tables.tni_qrfz[idx] = Real(sumn1);
-                tables.tpg_qrfz[idx] = Real(sum2);
-                tables.tnr_qrfz[idx] = Real(sumn2);
+                tables.tpi_qrfz[idx] = double(sum1);
+                tables.tni_qrfz[idx] = double(sumn1);
+                tables.tpg_qrfz[idx] = double(sum2);
+                tables.tnr_qrfz[idx] = double(sumn2);
             }
         }
 
@@ -915,8 +915,8 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                     if (sum1 >= tables.r_c[i]) break;
                 }
                 size_t idx = view.idx_qcfz(i, j, k, m);
-                tables.tpi_qcfz[idx] = Real(sum1);
-                tables.tni_qcfz[idx] = Real(sumn2);
+                tables.tpi_qcfz[idx] = double(sum1);
+                tables.tni_qcfz[idx] = double(sumn2);
             }
         }
     });
@@ -932,14 +932,14 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
             if (Di_mean > 5.0 * D0s) {
                 t1 = tables.r_i[i];
                 t2 = tables.Nt_i[j];
-                tables.tpi_ide[idx] = Real(0);
+                tables.tpi_ide[idx] = double(0);
             } else if (Di_mean < D0i) {
                 t1 = 0.0;
                 t2 = 0.0;
-                tables.tpi_ide[idx] = Real(1);
+                tables.tpi_ide[idx] = double(1);
             } else {
                 double xlimit_intg = lami * D0s;
-                tables.tpi_ide[idx] = Real(gammp(mu_i + 2.0, xlimit_intg));
+                tables.tpi_ide[idx] = double(gammp(mu_i + 2.0, xlimit_intg));
                 for (int n2 = 0; n2 < nbi; ++n2) {
                     double N_i_n2 = N0_i * libm::pow(Di[n2], mu_i) * libm::exp(-lami * Di[n2]) * dti[n2];
                     if (Di[n2] >= D0s) {
@@ -948,8 +948,8 @@ void init_thompson_tables(ThompsonHostTables<Real>& tables, const std::string& w
                     }
                 }
             }
-            tables.tps_iaus[idx] = Real(t1);
-            tables.tni_iaus[idx] = Real(t2);
+            tables.tps_iaus[idx] = double(t1);
+            tables.tni_iaus[idx] = double(t2);
         }
     }
 }
