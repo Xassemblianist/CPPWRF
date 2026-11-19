@@ -299,6 +299,84 @@ def restarted_case(b, cfg, sets, refs, t, mid, out, native=False):
     return bad, f"{what}, restarted at {mid:g}s (wrfrst identical)" if not bad else what
 
 
+def chain_at(sets):
+    """A restart-chain case (suite.chain=MID,INTERVAL in its --set list: restart_chain), (MID, INTERVAL) [s], or
+    None."""
+    v = next((x.split("=", 1)[1] for x in sets if x.startswith("suite.chain=")), None)
+    return tuple(float(x) for x in v.split(",")) if v else None
+
+
+def restart_chain(b, cfg, sets, refs, t, mid, iv, out):
+    """The restart contract without a WRF restarted run: CPPWRF's run to `t` s with restart files every `iv` s
+    (wrfrst and, for one domain, CPPWRF's own restart_<step>.nc) and the runs resumed at `mid` s from them (each
+    domain's wrfrst file; the native file) must write the same files after `mid`: every wrfout frame and every
+    wrfrst file later than `mid`, each variable at tolerance 0 (restart-stream state a resumed run lost shows in
+    its next wrfrst file even when the history does not use it). `refs`: the WRF run whose inputs (and
+    namelist.input, when there) the case reads; not compared. (differences, summary)."""
+    import configparser
+    import netCDF4
+    import exact
+    nl = os.path.join(os.path.dirname(next(iter(refs.values()))), "namelist.input")
+    common = sets + ["output.format=wrfout", f"run.run_time={t:g}", f"restart.interval={iv:g}"] + \
+        ([f"output.wrf_namelist={nl}"] if os.path.exists(nl) else [])
+    straight = os.path.join(out, "a_straight")
+    rc, log = run(b, cfg, common, straight)
+    if rc != 0:
+        return [f"straight run failed: {log[-200:]}"], ""
+
+    def files(d, kind, dom):
+        return sorted(glob.glob(os.path.join(d, f"{kind}_{dom}_*")) + glob.glob(os.path.join(d, dom, f"{kind}_{dom}_*")))
+
+    def secs(ds, i):  # a frame's time [s]
+        return float(ds["XTIME"][i]) * 60.0
+    doms = sorted({re.search(r"wrfrst_(d\d\d)_", f).group(1)
+                   for f in glob.glob(os.path.join(straight, "**", "wrfrst_d??_*"), recursive=True)})
+    at = {}
+    for d in doms:
+        for f in files(straight, "wrfrst", d):
+            with _NC, netCDF4.Dataset(f) as ds:
+                if abs(secs(ds, 0) - mid) < 1e-6:
+                    at[d] = f
+    if not doms or sorted(at) != doms:
+        return [f"the straight run wrote no wrfrst files at {mid:g}s"], ""
+    rst = os.path.join(out, "rst")
+    os.makedirs(rst, exist_ok=True)
+    for d in doms:
+        os.symlink(at[d], os.path.join(rst, os.path.basename(at[d])))
+    resumed = [("wrfrst", os.path.join(out, "b_resumed"), os.path.join(rst, os.path.basename(at["d01"])))]
+    if doms == ["d01"]:  # CPPWRF's own restart file of the same step (nests resume from wrfrst files only)
+        ini = configparser.ConfigParser(interpolation=None)
+        ini.read(os.path.join(REPO, cfg))
+        dt = float(next((x.split("=", 1)[1] for x in sets if x.startswith("time.dt=")), ini.get("time", "dt")))
+        resumed.append(("native", os.path.join(out, "c_native"),
+                        os.path.join(straight, f"restart_{round(mid / dt):06d}.nc")))
+    bad, nfr, nrst = [], 0, 0
+    for what, d_out, f in resumed:
+        rc, log = run(b, cfg, common + [f"run.restart_file={f}"], d_out)
+        if rc != 0:
+            bad.append(f"{what}: resumed run failed: {log[-200:]}")
+            continue
+        for dom in doms:
+            for kind in ("wrfout", "wrfrst"):
+                opened = []
+                try:
+                    with _NC:
+                        A = exact.frames(files(straight, kind, dom), opened)
+                        B = exact.frames(files(d_out, kind, dom), opened)
+                        after = sorted(k for k, (ds, i) in A.items() if secs(ds, i) > mid + 1e-6)
+                        dif, n = exact._compare_stream({k: B[k] for k in after if k in B}, {k: A[k] for k in after},
+                                                       False, None, False) if after else ({}, 0)
+                finally:
+                    for ds in opened:
+                        ds.close()
+                if not after:
+                    bad.append(f"{what}: {dom}: the straight run has no {kind} after {mid:g}s")
+                nfr, nrst = (nfr + n, nrst) if kind == "wrfout" else (nfr, nrst + n)
+                bad += [f"{what}: {dom}.{kind}.{k}: {v}" for k, v in dif.items()]
+    return bad, (f"resumed at {mid:g}s ({', '.join(w for w, _, _ in resumed)}) = straight: {nfr} wrfout frames, "
+                 f"{nrst} wrfrst files")
+
+
 def compare(wrfout, out, t):
     r = subprocess.run([sys.executable, os.path.join(REPO, "tests/verify/compare_real.py"), wrfout, out],
                        capture_output=True, text=True)
@@ -428,7 +506,13 @@ def main():
         mid = restart_at(sets)
         rst_check = wrfrst_check(sets)
         native = "suite.native_restart" in sets
+        chain = chain_at(sets)
         sets = [x for x in sets if not x.startswith("suite.")]
+        if chain:  # CPPWRF resumed against CPPWRF straight (restart_chain)
+            bad, what = restart_chain(b, cfg, sets, refs, t, chain[0], chain[1], out)
+            done(out, not bad)
+            return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
+                             + (f"  [{'; '.join(x[:300] for x in bad[:8])}{' ...' if len(bad) > 8 else ''}]" if bad else ""))
         exact = all(x == 0.0 for x in tol.values())
         if exact:  # WRF history output; with the reference's namelist.input CPPWRF writes WRF's global attributes
             nl = os.path.join(os.path.dirname(next(iter(refs.values()))), "namelist.input")
