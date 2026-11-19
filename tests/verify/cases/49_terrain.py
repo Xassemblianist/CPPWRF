@@ -50,6 +50,11 @@ CASES += [
     ("real_sr4_r8_fp64_cuda_5h", "cuda_dp", "configs/real_sr4_r8.ini", [f"real.dir={WR}/run_SR4_r8"] + _5H,
      f"{WR}/run_SR4_r8/wrfout_d01_{_D}", 18000, dict(_G, SWDOWN=0.0, SWNORM=0.0)),
 ]
+# CUDA FP64 twins (tolerance 0) of the CPU cases of TW2, SR2 and SR3 (the options without a CUDA FP64 case), not the
+# restarted ones: the same configuration, overrides, reference and variables
+_HAS = {c[0].split("_fp64_cuda")[0] for c in CASES if c[1] == "cuda_dp"}
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and not c[0].endswith("_rst") and c[0].split("_fp64_cpu")[0] not in _HAS]
 # FP32 tolerances: about 3x the rel L2 measured on the Colab G4 (TW1 U 7.2e-5 W 3.0e-3 THM 5.0e-7 QV 3.2e-5; TW4 U
 # 8.5e-4 W 2.1e-2 THM 1.1e-5 QV 6.3e-4; SR1 U 6.0e-3 W 1.4e-1 THM 7.7e-5 QV 3.9e-3; SR4 U 7.2e-3 W 1.5e-1 THM 9.2e-5
 # QV 4.9e-3)

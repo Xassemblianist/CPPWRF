@@ -41,6 +41,10 @@ CASES = [
     ("real_p4n18_fp32_1h", "cuda", _C, ["real.dir=" + _R] + _1H, f"{_R}/wrfout_d01_{_D}", 3600,
      {"U": 1.3e-2, "W": 0.4, "THM": 1.7e-4, "QV": 6e-3}),
 ]
+# CUDA FP64 twin (tolerance 0) of N17's CPU case (WRF's mp_physics 17 run; N18 and N18V have CUDA FP64 cases): the
+# same configuration, overrides, reference and variables
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].startswith("real_p4n17_")]
 
 STATUS = [
     ('N18', 'P4 with NSSL 2-moment (mp_physics 18: hail, CCN, graupel / hail volume) and KF; restarted at 30 min',
