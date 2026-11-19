@@ -53,7 +53,10 @@ MetEm MetEm::read(const std::string& path) {
       char dn[NC_MAX_NAME + 1];
       std::size_t len = 0;
       ck(nc_inq_dim(nc, dimids[d], dn, &len), "dim");
-      if (d == 0 && std::string(dn) == "Time") continue;  // first time only
+      if (d == 0 && std::string(dn) == "Time") {  // one time per met_em file (metgrid's output)
+        if (len != 1) throw std::runtime_error("met_em: " + path + " has " + std::to_string(len) + " times (one expected)");
+        continue;
+      }
       count[std::size_t(d)] = len;
       mv.dims.emplace_back(dn);
       mv.shape.push_back(len);
