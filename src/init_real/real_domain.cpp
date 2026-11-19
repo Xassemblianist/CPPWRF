@@ -122,6 +122,23 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
     if (c.integer(k) != 0) throw std::runtime_error(std::string("real: ") + k + " is not ported");
   for (const char* k : {"insert_init_cloud", "all_ic_times", "multi_bdy_files", "slucm_distributed_drag"})
     if (c.logical(k)) throw std::runtime_error(std::string("real: ") + k + " = .true. is not ported");
+  // options whose wrfinput fields real.exe fills (module_initialize_real.F) and cppwrf_real does not: LAKE_DEPTH /
+  // LAKE_DEPTH_FLAG (sf_lake_physics), the 3-D PWP ocean OM_* (sf_ocean_physics = 2), ALBSI / SNOWSI / ICEDEPTH
+  // and their FND* flags (seaice_albedo_opt = 2, seaice_snowdepth_opt = 1, seaice_thickness_opt = 1)
+  if (c.integer("sf_lake_physics") != 0)
+    throw std::runtime_error("real: sf_lake_physics = " + std::to_string(c.integer("sf_lake_physics")) +
+                             " is not ported (LAKE_DEPTH, LAKE_DEPTH_FLAG)");
+  if (c.integer("sf_ocean_physics") == 2)
+    throw std::runtime_error("real: sf_ocean_physics = 2 (3-D PWP ocean: OM_TMP, OM_S, OM_DEPTH, ... from ocean_levels, "
+                             "ocean_z, ocean_t, ocean_s) is not ported");
+  if (c.integer("seaice_albedo_opt") == 2)
+    throw std::runtime_error("real: seaice_albedo_opt = 2 (ALBSI, FNDALBSI) is not ported");
+  if (c.integer("seaice_snowdepth_opt") != 0)
+    throw std::runtime_error("real: seaice_snowdepth_opt = " + std::to_string(c.integer("seaice_snowdepth_opt")) +
+                             " (SNOWSI, FNDSNOWSI) is not ported");
+  if (c.integer("seaice_thickness_opt") != 0)
+    throw std::runtime_error("real: seaice_thickness_opt = " + std::to_string(c.integer("seaice_thickness_opt")) +
+                             " (ICEDEPTH, FNDICEDEPTH) is not ported");
   if (o.mp_physics == 28) {  // aerosol-aware Thompson: aer_init_opt = 0 (QNWFA, QNIFA, QNWFA2D, QNIFA2D zero)
     // module_initialize_real.F:2743-2748
     if (c.integer("wif_input_opt") == 0) throw std::runtime_error("real: wif_input_opt=0 but mp_physics=28, 29, or 88");

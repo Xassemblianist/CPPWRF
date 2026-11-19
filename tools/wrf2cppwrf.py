@@ -621,18 +621,18 @@ IGNORED_WRF_OPTIONS = {
     "iofields_filename": "Custom NetCDF field selection (handled by WrfHistory via output.wrf_namelist)",
     "use_netcdf_classic": "NetCDF classic format of the wrfout / wrfrst files (read by the model from the WRF namelist)",
     "io_form_restart": "No restart files (restart_interval = 0)",
-    "start_year": "Start date component",
-    "start_month": "Start date component",
-    "start_day": "Start date component",
-    "start_hour": "Start date component",
-    "start_minute": "Start date component",
-    "start_second": "Start date component",
-    "end_year": "End date component",
-    "end_month": "End date component",
-    "end_day": "End date component",
-    "end_hour": "End date component",
-    "end_minute": "End date component",
-    "end_second": "End date component",
+    "start_year": "Start date component (every domain the same; a missing entry is the Registry default)",
+    "start_month": "Start date component (every domain the same; a missing entry is the Registry default)",
+    "start_day": "Start date component (every domain the same; a missing entry is the Registry default)",
+    "start_hour": "Start date component (every domain the same; a missing entry is the Registry default)",
+    "start_minute": "Start date component (every domain the same; a missing entry is the Registry default)",
+    "start_second": "Start date component (every domain the same; a missing entry is the Registry default)",
+    "end_year": "End date component (domain 1's run length without run_*; a nest must not end before domain 1)",
+    "end_month": "End date component (domain 1's run length without run_*; a nest must not end before domain 1)",
+    "end_day": "End date component (domain 1's run length without run_*; a nest must not end before domain 1)",
+    "end_hour": "End date component (domain 1's run length without run_*; a nest must not end before domain 1)",
+    "end_minute": "End date component (domain 1's run length without run_*; a nest must not end before domain 1)",
+    "end_second": "End date component (domain 1's run length without run_*; a nest must not end before domain 1)",
     "interval_seconds": "Lateral boundary interval (read directly from wrfbdy_d01 NetCDF in real case)",
     # &domains
     "time_step_fract_num": "Combined into time.dt if non-zero",
@@ -669,12 +669,12 @@ IGNORED_WRF_OPTIONS = {
     # &dynamics
     "base_temp": "Base potential temperature (read from sounding or wrfinput)",
     "hybrid_opt": "Real case hybrid coordinate flag read directly from wrfinput_d01 global attribute",
-    "h_sca_adv_order": "Scalar horizontal advection order (coupled with h_mom_adv_order in CPPWRF)",
-    "v_sca_adv_order": "Scalar vertical advection order (coupled with v_mom_adv_order in CPPWRF)",
+    "h_sca_adv_order": "Scalar horizontal advection order (equal to h_mom_adv_order on every domain in CPPWRF)",
+    "v_sca_adv_order": "Scalar vertical advection order (equal to v_mom_adv_order on every domain in CPPWRF)",
     "epssm": "Acoustic divergence damping parameter (default 0.1)",
     "smdiv": "Acoustic divergence damping parameter (default 0.1)",
     "emdiv": "External mode filter coefficient (default 0.01)",
-    "diff_6th_factor": "Sixth-order diffusion factor (default 0.12)",
+    "diff_6th_factor": "Sixth-order diffusion factor (default 0.12; each domain's, used with its diff_6th_opt)",
     # &bdy_control
     "spec_bdy_width": "Real case lateral boundary width (must be 5; read from wrfbdy_d01)",
     "nested": "Child domain nested lateral boundary flag (handled automatically for [d02]..[d0N])",
@@ -886,6 +886,18 @@ class WrfTranslator:
     def has_opt(self, group: str, key: str) -> bool:
         grp = self.nml.get(group, {})
         return key in grp and len(grp[key]) > 0
+
+    def domain_date_part(self, key: str, d: int) -> int:
+        """&time_control start_* / end_* of domain d+1: a missing entry is the Registry default (WRF's namelist read)."""
+        vals = self.get_opt_list("time_control", key)
+        v = vals[d] if d < len(vals) and vals[d] is not None else REGISTRY_DEFAULTS[key][1]
+        return int(v)
+
+    def domain_date(self, which: str, d: int) -> datetime.datetime:
+        # WRFU_TimeSet: hours, minutes and seconds beyond their range carry over (end_minute = 120)
+        y, mo, dy, h, mi, se = (self.domain_date_part(f"{which}_{p}", d)
+                                for p in ("year", "month", "day", "hour", "minute", "second"))
+        return datetime.datetime(y, mo, dy) + datetime.timedelta(hours=h, minutes=mi, seconds=se)
 
     def check_entry_counts(self):
         """WRF's namelist read (config_reads.inc, READ ... ERR=9201) stops on more values than a single-entry option
@@ -1338,28 +1350,16 @@ class WrfTranslator:
         total_s = (run_days * 86400) + (run_hours * 3600) + (run_minutes * 60) + run_seconds
 
         if total_s <= 0:
-            s_yr = self.get_opt("time_control", "start_year", 2000)
-            s_mo = self.get_opt("time_control", "start_month", 1)
-            s_dy = self.get_opt("time_control", "start_day", 1)
-            s_hr = self.get_opt("time_control", "start_hour", 0)
-            s_mi = self.get_opt("time_control", "start_minute", 0)
-            s_se = self.get_opt("time_control", "start_second", 0)
-
-            e_yr = self.get_opt("time_control", "end_year", s_yr)
-            e_mo = self.get_opt("time_control", "end_month", s_mo)
-            e_dy = self.get_opt("time_control", "end_day", s_dy)
-            e_hr = self.get_opt("time_control", "end_hour", s_hr)
-            e_mi = self.get_opt("time_control", "end_minute", s_mi)
-            e_se = self.get_opt("time_control", "end_second", s_se)
-
+            # set_timekeeping: stopTime = end_*(1) without run_*; a component the namelist leaves out is the Registry
+            # default (start 1993-03-13_12:00:00, end 1993-03-14_12:00:00)
             try:
-                t0 = datetime.datetime(s_yr, s_mo, s_dy, s_hr, s_mi, s_se)
-                t1 = datetime.datetime(e_yr, e_mo, e_dy, e_hr, e_mi, e_se)
-                total_s = int((t1 - t0).total_seconds())
+                total_s = int((self.domain_date("end", 0) - self.domain_date("start", 0)).total_seconds())
             except Exception as e:
                 self.error(f"Could not compute run duration from start/end dates: {e}")
                 total_s = 3600
 
+        if total_s <= 0:
+            self.error(f"WRF run length {total_s} s (run_* or end_* - start_* of domain 1) is not positive.")
         sections["run"]["run_time"] = total_s
 
         # 4. Physics Options (evaluated early to determine physics suite activity)
@@ -1721,14 +1721,13 @@ class WrfTranslator:
         elif momentum_adv_opt == 3:
             sections["dyn"]["momentum_adv_opt"] = 3
 
-        # scalar_adv_opt: included when physics suite is enabled, when explicitly 0, or when != 0 for non-dry ideal runs
-        scalar_adv_opt = self.get_opt("dynamics", "scalar_adv_opt", 0)
+        # scalar_adv_opt (Registry default 1, the model's default): WRF applies it in every run, also without physics
+        # (3 / 4 switch the theta flux of the last RK stage to WENO, module_em.F rk_tendency)
+        scalar_adv_opt = self.get_opt("dynamics", "scalar_adv_opt", 1)
         if scalar_adv_opt not in ADV_OPTS:
             self.error(f"WRF scalar_adv_opt = {scalar_adv_opt} is not supported; {ADV_OPTS_TEXT}")
-        elif self.has_opt("dynamics", "scalar_adv_opt") and scalar_adv_opt == 0:
-            sections["dyn"]["scalar_adv_opt"] = 0
-        elif has_physics_suite or (scalar_adv_opt != 0 and case_name in ("quarter_ss",)):
-            sections["dyn"]["scalar_adv_opt"] = scalar_adv_opt if scalar_adv_opt != 0 else 1
+        elif has_physics_suite or scalar_adv_opt != 1:
+            sections["dyn"]["scalar_adv_opt"] = scalar_adv_opt
 
         # WRF's prandtl is the constant 1./3. of module_model_constants.F, not a namelist option (an
         # &dynamics prandtl is rejected with the other options WRF does not have, below)
@@ -1907,8 +1906,11 @@ class WrfTranslator:
         if (bucket_mm > 0 or bucket_j > 0 or any(v > 0 for v in prec_acc)) and not has_physics_suite:
             self.error("WRF bucket_mm / bucket_J / prec_acc_dt need the column physics (surface layer, land surface, "
                        "PBL or cumulus) in CPPWRF.")
-        if self.get_opt("physics", "sst_update", 0) != 0 and not (mp_physics != 0 or has_physics_suite):
-            self.error("WRF sst_update = 1 needs the physics suite (mp_physics /= 0) in CPPWRF.")
+        # WRF reads the auxinput4 records (SST, SEAICE, VEGFRA, ALBBCK, LAI into the history output) in every run with
+        # sst_update = 1; CPPWRF reads wrflowinp with the column physics suite only
+        if self.get_opt("physics", "sst_update", 0) != 0 and not has_physics_suite:
+            self.error("WRF sst_update = 1 without surface-layer, land-surface, PBL, cumulus or radiation physics is "
+                       "not supported by CPPWRF (wrflowinp is read with the column physics suite only).")
         if mp_physics != 0 or has_physics_suite:
             sections["phys"] = {}
             if mp_physics != 0:
@@ -2645,12 +2647,27 @@ class WrfTranslator:
             for val in self.get_opt_list(group, key):
                 if val != default:
                     self.error(f"WRF {key} = {val} ({desc}) is not supported by CPPWRF.")
-        # nests open at t = 0 and run to the end of domain 1 (no delayed or early-ending nests)
+        # nests open at t = 0 and run to the end of domain 1 (no delayed or early-ending nests); a domain without an
+        # entry has the Registry default (WRF's namelist read), not domain 1's value
         for key in ("start_year", "start_month", "start_day", "start_hour", "start_minute", "start_second",
                     "end_year", "end_month", "end_day", "end_hour", "end_minute", "end_second"):
-            vals = self.get_opt_list("time_control", key)[:max(1, self._max_dom)]
+            vals = [self.domain_date_part(key, d) for d in range(max(1, self._max_dom))]
             if len(set(vals)) > 1:
-                self.error(f"WRF {key} = {vals}: nests with their own start or end time are not supported.")
+                self.error(f"WRF {key} = {vals}: nests with their own start or end time are not supported (a "
+                           f"missing entry is WRF's Registry default {REGISTRY_DEFAULTS[key][1]}).")
+        # set_timekeeping: run_* sets domain 1's stop time only; a nest stops at its end_* date (and its feedback ends)
+        if self._max_dom > 1 and sections["run"].get("run_time", 0) > 0:
+            try:
+                stop1 = self.domain_date("start", 0) + datetime.timedelta(seconds=sections["run"]["run_time"])
+                for d in range(1, self._max_dom):
+                    end_d = self.domain_date("end", d)
+                    if end_d < stop1:
+                        self.error(f"WRF end date of domain {d + 1} ({end_d}) is before domain 1's stop time ({stop1}, "
+                                   "start + run_*): WRF stops the nest there (run_* sets domain 1's stop time only); "
+                                   "nests that end before domain 1 are not supported.")
+                        break
+            except ValueError as e:
+                self.error(f"Could not compute the nests' end dates: {e}")
 
         for (group, key), (default, desc) in DEFAULT_ONLY_OPTIONS.items():
             for val in self.get_opt_list(group, key)[:max(1, self._max_dom)]:
@@ -3027,7 +3044,9 @@ class WrfTranslator:
                             self.error(f"Domain {tag}: WRF diff_6th_opt = {v_d} is not supported (0, 1, or 2 only).")
                         elif ini_k in ("diff_6th_factor", "mix_upper_bound", "tke_upper_bound") and float(v_d) <= 0.0:
                             self.error(f"Domain {tag}: WRF {nml_k} = {v_d} must be > 0.")
-                        if v_d != v_0 and v_d is not None:
+                        # a nest inherits [dyn]: domain 1 writes diff_6th_factor only with its own diff_6th_opt /= 0
+                        inherited = v_0 if ini_k != "diff_6th_factor" or ini_k in sections["dyn"] else 0.12
+                        if v_d != inherited and v_d is not None:
                             sections[tag][ini_k] = int(v_d) if isinstance(v_d, (int, float)) and float(v_d).is_integer() and ini_k in ("khdif", "kvdif", "zdamp") else v_d
                             if ini_k in ("khdif", "kvdif") and self.get_dom_opt("dynamics", "diff_opt", d, 0) == 0:
                                 sections[tag]["diff_opt"] = 0  # WRF: no diffusion; CPPWRF's default with khdif/kvdif is 1
@@ -3041,6 +3060,15 @@ class WrfTranslator:
                         if v_d != v_0:
                             self.error(f"Domain {tag}: WRF {nml_k} = {v_d} differs from domain 1's {v_0}; "
                                        "CPPWRF uses domain 1's value on every domain.")
+                # WRF advects the scalars of each domain with its own h_sca / v_sca_adv_order (Registry 5 / 3 whatever
+                # the momentum orders); CPPWRF's [d0N] h_adv_order / v_adv_order serve momentum and scalars
+                for sca_k, mom_k, def_sca, def_mom in (("h_sca_adv_order", "h_mom_adv_order", 5, 5),
+                                                       ("v_sca_adv_order", "v_mom_adv_order", 3, 3)):
+                    sca_d = self.get_dom_opt("dynamics", sca_k, d, def_sca)
+                    mom_d = self.get_dom_opt("dynamics", mom_k, d, def_mom)
+                    if sca_d != mom_d:
+                        self.error(f"Domain {tag}: WRF {sca_k} = {sca_d} differs from {mom_k} = {mom_d}; CPPWRF uses "
+                                   "a single advection order for momentum and scalars.")
 
                 if self.has_opt("dynamics", "time_step_sound"):
                     tss_d = self.get_dom_opt("dynamics", "time_step_sound", d, 0)

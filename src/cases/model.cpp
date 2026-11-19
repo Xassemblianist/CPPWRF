@@ -448,6 +448,10 @@ Model Model::build(const io::Config& cfg) {
       throw std::runtime_error("phys.ra_lw/ra_sw_physics without surface-layer, land-surface, PBL or cumulus physics "
                                "is not supported");
     }
+    // sst_update = 1: WRF reads the auxinput4 records in every run; CPPWRF reads wrflowinp with the column physics suite
+    if (!m.suite && cfg.get_int("phys.sst_update", 0) != 0)
+      throw std::runtime_error("phys.sst_update = 1 without surface-layer, land-surface, PBL or cumulus physics is not "
+                               "supported (wrflowinp is read with the column physics suite only)");
     // diagnostic_output_calc's buckets and prec_acc_dt sums are ported with the column physics suite (RAINC, T2, AC*)
     if (!m.suite && (cfg.get_double("phys.bucket_mm", -1.0) > 0 || cfg.get_double("phys.bucket_j", -1.0) > 0 ||
                      cfg.get_double("phys.prec_acc_dt", 0.0) > 0))

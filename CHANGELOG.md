@@ -164,6 +164,18 @@ resumes across versions from WRF's wrfrst files.
 - Repository files: issue and pull request templates, CONTRIBUTING, SECURITY and the Code of Conduct.
 
 ### Fixed
+- Namelist options that changed WRF's run and were dropped or misread: `scalar_adv_opt` 0 / 2 / 3 / 4 now reaches the
+  model also without the column physics (ideal cases, real runs with microphysics only; 3 / 4 advect theta with WENO
+  on the last RK stage in dry runs too); a nest's `diff_6th_factor` reaches it when domain 1 has `diff_6th_opt = 0`;
+  `h_sca_adv_order` / `v_sca_adv_order` different from the momentum orders on a nest is an error (it was checked on
+  domain 1 only); a nest's missing `start_*` / `end_*` entry is WRF's Registry default (an error, as every per-domain
+  start or end time), a nest whose `end_*` is before domain 1's stop time with `run_*` is an error (WRF stops it
+  there), and without `run_*` the run length takes the Registry default for a date component the namelist leaves
+  out (WRFU_TimeSet carries minutes and seconds over); `sst_update = 1` without the column physics is an error in the
+  translator and the model (WRF reads wrflowinp into the history fields; CPPWRF did not). cppwrf_real stops on
+  `sf_lake_physics` /= 0, `sf_ocean_physics = 2`, `seaice_albedo_opt = 2`, `seaice_snowdepth_opt = 1` and
+  `seaice_thickness_opt = 1` instead of writing real.exe's LAKE_DEPTH, OM_*, ALBSI, SNOWSI, ICEDEPTH fields as zeros.
+  No verified configuration changes.
 - The restart alarm of a run resumed from a restart file (WRF's or CPPWRF's own) with a restart interval that is not
   a multiple of the time step: the first ring is at the restart time + WRF_ALARM_SECS_TIL_NEXT_RING_51 and the later
   ones are counted from that ring's step (share/input_wrf.F, ESMF_ClockAdvance), so the wrfrst files and their alarm

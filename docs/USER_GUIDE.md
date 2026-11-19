@@ -433,11 +433,11 @@ an error, never silently:
 
 | WRF option | Why |
 |---|---|
-| moving nests, vertical nest refinement, nests with their own start or end time, ndown.exe | not ported |
+| moving nests, vertical nest refinement, nests with their own start or end time (a missing `start_*` / `end_*` entry of a nest is WRF's Registry default, not domain 1's value; with `run_*` a nest whose `end_*` is before domain 1's stop time stops early in WRF), ndown.exe | not ported |
 | nests in ideal cases; Noah-MP with nests | not ported; wrf.exe 4.8.0 itself aborts with Noah-MP on nests (heap corruption in the nest's first history output) |
 | `io_form_*` other than 2, `nocolons`, auxiliary history / input streams other than auxhist3 and wrflowinp | CPPWRF reads and writes NetCDF; WRF writes no other stream by default |
 | `restart = .true.` in the namelist | resume with `run.restart_file` (section 9) |
-| `non_hydrostatic = .false.`, `rk_ord` 2, `use_theta_m = 0`, `h_sca_adv_order` different from `h_mom_adv_order`, `spec_exp` != 0 | not ported |
+| `non_hydrostatic = .false.`, `rk_ord` 2, `use_theta_m = 0`, `h_sca_adv_order` / `v_sca_adv_order` different from `h_mom_adv_order` / `v_mom_adv_order` on any domain, `spec_exp` != 0 | not ported |
 | `km_opt` 5 (SMS-3DTKE) | not ported |
 | `mp_physics` other than 0, 1, 3, 4, 6, 8, 10, 14, 16, 17, 18, 28, 50, 51 (9: Milbrandt-Yau, 19 / 21 / 22: NSSL single-moment and without hail, 24: WSM7, 26: WDM7, 40: Morrison with aerosols, 52 / 53: P3 with two ice categories / three-moment ice, 106: WSM6R) | not ported |
 | `sf_surface_physics = 3` with `mosaic_lu` / `mosaic_soil` 1, `fractional_seaice = 1`, `sst_update = 1`, `sf_sfclay_physics = 5`, nests, `num_soil_layers` other than 6 / 9, or input from `cppwrf_real` | not ported (RUC's mosaic and fractional sea-ice branches, MYNNSFC's RUC branches, the nest interpolation of its fields, cppwrf_real's RUC soil levels) |
@@ -460,6 +460,8 @@ an error, never silently:
 | `ra_lw_physics` / `ra_sw_physics` other than 0, 1, 4; a longwave scheme without a shortwave scheme or the reverse; `aer_opt` != 0 | not ported; wrf.exe stops |
 | `nwp_diagnostics`, `do_avgflx_em`, `do_avgflx_cugd` and the other diagnostic packages | not ported (diagnostic_output_nwp, cal_helicity, the averaged fluxes) |
 | `iau`, `dyn_lightning_option`, `topo_wind`, `slope_rad`, `topo_shading`, `swint_opt`, `seaice_thickness_opt`, `seaice_snowdepth_opt`, `ra_call_offset`, `shalwater_z0`, `scm_force_flux`, spectral nudging (`grid_fdda = 2`), surface analysis nudging (`grid_sfdda`: OBSGRID's `wrfsfdda_d0N`), observation nudging (`obs_nudge_opt`), stochastic physics, chemistry | not ported |
+| `sst_update = 1` without surface-layer, land-surface, PBL, cumulus or radiation physics | not ported (WRF still reads wrflowinp into SST, VEGFRA, LAI, ... of the history output; CPPWRF reads it with the column physics suite) |
+| cppwrf_real with `sf_lake_physics` /= 0, `sf_ocean_physics = 2`, `seaice_albedo_opt = 2`, `seaice_snowdepth_opt = 1` or `seaice_thickness_opt = 1` | not ported (real.exe's LAKE_DEPTH, the PWP ocean's OM_* profiles, ALBSI, SNOWSI, ICEDEPTH and their flags) |
 | the adaptive time step with nests, `sst_update`, `sst_skin`, `tmn_update`, `grid_fdda`, ideal cases or `output_diagnostics` | not ported |
 | `sst_skin = 1` or `tmn_update = 1` with a land surface model other than Noah | not ported (no reference run); `tmn_update` resumes from wrfrst files only (NYEAR, NDAY) |
 | a wind across a symmetric wall (ideal cases) | WRF's solution breaks down within a minute there (the wall keeps the normal velocity while the sign of `muu` flips) |

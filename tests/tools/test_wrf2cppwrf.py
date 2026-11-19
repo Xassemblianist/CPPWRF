@@ -1928,6 +1928,84 @@ class TestWrfNamelistSemantics(unittest.TestCase):
             t.translate()
             self.assertIn(err, " ".join(t.errors), nl)
 
+    def test_scalar_adv_opt_without_physics(self):
+        # module_em.F rk_tendency: scalar_adv_opt 3 / 4 advect theta with WENO on the last RK stage, also in dry runs
+        ideal = ("&time_control run_minutes = 10 /\n&domains time_step = 3, e_we = 202, e_sn = 3, e_vert = 81, dx = 250,"
+                 " dy = 250, ztop = 20000 /\n&dynamics scalar_adv_opt = {v} /\n&bdy_control periodic_x = .true.,"
+                 " periodic_y = .true. /\n&ideal ideal_case = 1 /\n")
+        for v in (0, 2, 3, 4):
+            t, sec = self.translate(ideal.format(v=v))
+            self.assertEqual(t.errors, [])
+            self.assertEqual(sec["dyn"]["scalar_adv_opt"], v)
+        t, sec = self.translate(ideal.format(v=1))
+        self.assertNotIn("scalar_adv_opt", sec["dyn"])  # the model's default 1
+        t, sec = self.translate(self.FULL.replace("mp_physics = 0", "mp_physics = 8")
+                                .replace("&dynamics ", "&dynamics scalar_adv_opt = 2, "))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["dyn"]["scalar_adv_opt"], 2)
+
+    def test_nest_diff_6th_factor(self):
+        # each domain diffuses with its own diff_6th_factor when its diff_6th_opt /= 0 (domain 1 has none here)
+        t, sec = self.translate(self.NEST + "&dynamics diff_6th_opt = 0, 2, diff_6th_factor = 0.25, 0.25 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("diff_6th_factor", sec["dyn"])
+        self.assertEqual((sec["d02"]["diff_6th_opt"], sec["d02"]["diff_6th_factor"]), (2, 0.25))
+        t, sec = self.translate(self.NEST + "&dynamics diff_6th_opt = 2, 2, diff_6th_factor = 0.25, 0.25 /\n")
+        self.assertEqual(sec["dyn"]["diff_6th_factor"], 0.25)
+        self.assertNotIn("diff_6th_factor", sec["d02"])
+        t, sec = self.translate(self.NEST + "&dynamics diff_6th_opt = 0, 2 /\n")
+        self.assertNotIn("diff_6th_factor", sec["d02"])  # the Registry default 0.12, the model's
+
+    def test_nest_scalar_advection_orders(self):
+        # module_advect_em.F: each domain's h_sca_adv_order / v_sca_adv_order (Registry 5 / 3) for theta and scalars
+        for dyn, err in (("h_mom_adv_order = 5, 6", "h_sca_adv_order = 5 differs from h_mom_adv_order = 6"),
+                         ("h_mom_adv_order = 5, 6, h_sca_adv_order = 5, 5", "h_sca_adv_order = 5 differs"),
+                         ("v_mom_adv_order = 3, 4", "v_sca_adv_order = 3 differs from v_mom_adv_order = 4")):
+            t, _ = self.translate(self.NEST + f"&dynamics {dyn} /\n")
+            self.assertTrue(any(err in e and "d02" in e for e in t.errors), (dyn, t.errors))
+        t, _ = self.translate(self.NEST + "&dynamics h_mom_adv_order = 5, 5, v_mom_adv_order = 3, 3 /\n")
+        self.assertEqual(t.errors, [])
+
+    def test_nest_start_and_end_dates(self):
+        # set_timekeeping: run_* sets domain 1's stop time only, a nest stops at its end_*; a missing entry is the
+        # Registry default (start 1993-03-13_12, end 1993-03-14_12), not domain 1's value
+        dates = ("run_hours = 6, start_year = 2024, 2024, start_month = 7, 7, start_day = 1, 1, start_hour = {sh} "
+                 "end_year = 2024, 2024, end_month = 7, 7, end_day = 1, 1, end_hour = {eh} ")
+
+        def nest(sh, eh):
+            return self.NEST.replace("&time_control ", "&time_control " + dates.format(sh=sh, eh=eh))
+        t, _ = self.translate(nest("0, 0,", "6, 6,"))
+        self.assertEqual(t.errors, [])
+        t, _ = self.translate(nest("0, 0,", "12, 12,"))  # the nest's end after domain 1's stop: WRF's run
+        self.assertEqual(t.errors, [])
+        t, _ = self.translate(nest("0, 0,", "3, 3,"))
+        self.assertTrue(any("end date of domain 2" in e for e in t.errors), t.errors)
+        t, _ = self.translate(nest("0,", "6, 6,"))
+        self.assertTrue(any("start_hour = [0, 12]" in e for e in t.errors), t.errors)
+        t, _ = self.translate(nest("0, 0,", "6,"))
+        self.assertTrue(any("end_hour = [6, 12]" in e for e in t.errors), t.errors)
+
+    def test_run_length_from_registry_dates(self):
+        # without run_*: end_*(1) - start_*(1), a component the namelist leaves out the Registry default
+        t, sec = self.translate(self.FULL)
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["run"]["run_time"], 86400)  # 1993-03-13_12 to 1993-03-14_12
+        t, sec = self.translate(self.FULL.replace("&time_control ", "&time_control start_hour = 0, end_day = 13, "))
+        self.assertEqual(sec["run"]["run_time"], 12 * 3600)
+        t, sec = self.translate(self.FULL.replace("&time_control ", "&time_control end_day = 13, "))
+        self.assertTrue(any("run length 0 s" in e for e in t.errors), t.errors)
+        t, sec = self.translate(self.FULL.replace("&time_control ", "&time_control end_day = 13, end_hour = 0, "
+                                                  "end_minute = 900, "))  # WRFU_TimeSet carries the minutes over
+        self.assertEqual(sec["run"]["run_time"], 3 * 3600)
+
+    def test_sst_update_without_column_physics(self):
+        # WRF reads wrflowinp (auxinput4) in every run with sst_update = 1; CPPWRF with the column physics only
+        text = self.FULL.replace("mp_physics = 0", "mp_physics = 6").replace(
+            "&time_control ", "&time_control auxinput4_interval = 360, io_form_auxinput4 = 2, ").replace(
+            "&physics ", "&physics sst_update = 1, ")
+        t, _ = self.translate(text)
+        self.assertTrue(any("sst_update = 1 without" in e for e in t.errors), t.errors)
+
 
 class TestExecution2Steps(unittest.TestCase):
     """Verify that generated INI executes for 2 steps (binary: $CPPWRF_BIN, default build/cppwrf)."""

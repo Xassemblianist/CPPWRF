@@ -209,6 +209,25 @@ class RealExe(unittest.TestCase):
         self.assertIn("FATAL CALLED", err)
         self.assertIn("cppwrf_real stopped with exit status", err)
 
+    def test_unported_real_options(self):
+        # real.exe fills LAKE_DEPTH, OM_*, ALBSI, SNOWSI, ICEDEPTH for these options (module_initialize_real.F);
+        # cppwrf_real stops before reading met_em instead of writing their fields as zeros
+        for opt, msg in (("sf_lake_physics = 1", "sf_lake_physics = 1 is not ported"),
+                         ("sf_ocean_physics = 2", "sf_ocean_physics = 2 (3-D PWP ocean"),
+                         ("seaice_albedo_opt = 2", "seaice_albedo_opt = 2 (ALBSI, FNDALBSI) is not ported"),
+                         ("seaice_snowdepth_opt = 1", "seaice_snowdepth_opt = 1 (SNOWSI, FNDSNOWSI) is not ported"),
+                         ("seaice_thickness_opt = 1", "seaice_thickness_opt = 1 (ICEDEPTH, FNDICEDEPTH) is not ported")):
+            d = make_dir("realexe_" + opt.split()[0])
+            p = os.path.join(d, "namelist.input")
+            nml = text(p).replace(" cu_physics = 0,", f" cu_physics = 0, {opt},")
+            with open(p, "w") as f:
+                f.write(nml)
+            r = subprocess.run([REAL_BIN, "--namelist", p, "--met-dir", d, "--out-dir", d], capture_output=True,
+                               text=True)
+            self.assertEqual(r.returncode, 1, opt)
+            self.assertIn(msg, r.stderr, opt)
+            self.assertNotIn("met_em", r.stderr, opt)
+
 
 if __name__ == "__main__":
     unittest.main()

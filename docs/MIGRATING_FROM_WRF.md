@@ -278,7 +278,7 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `coriolis2d` | not used by wrf.exe |
 | `dampcoef` | damp_opt = 0 |
 | `debug_level` | WRF internal logging verbosity |
-| `diff_6th_factor` | Sixth-order diffusion factor (default 0.12) |
+| `diff_6th_factor` | Sixth-order diffusion factor (default 0.12; each domain's, used with its diff_6th_opt) |
 | `dk_zfac_ph` | spectral nudging (grid_fdda = 2) only |
 | `dk_zfac_q` | spectral nudging (grid_fdda = 2) only |
 | `dk_zfac_t` | spectral nudging (grid_fdda = 2) only |
@@ -296,12 +296,12 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `e_vert` | Grid dimension (real case: checked against wrfinput as input_wrf does) |
 | `e_we` | Grid dimension (real case: checked against wrfinput as input_wrf does) |
 | `emdiv` | External mode filter coefficient (default 0.01) |
-| `end_day` | End date component |
-| `end_hour` | End date component |
-| `end_minute` | End date component |
-| `end_month` | End date component |
-| `end_second` | End date component |
-| `end_year` | End date component |
+| `end_day` | End date component (domain 1's run length without run_*; a nest must not end before domain 1) |
+| `end_hour` | End date component (domain 1's run length without run_*; a nest must not end before domain 1) |
+| `end_minute` | End date component (domain 1's run length without run_*; a nest must not end before domain 1) |
+| `end_month` | End date component (domain 1's run length without run_*; a nest must not end before domain 1) |
+| `end_second` | End date component (domain 1's run length without run_*; a nest must not end before domain 1) |
+| `end_year` | End date component (domain 1's run length without run_*; a nest must not end before domain 1) |
 | `epssm` | Acoustic divergence damping parameter (default 0.1) |
 | `eta_levels` | real.exe only |
 | `extrap_type` | real.exe only |
@@ -335,7 +335,7 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `gt_sfc` | surface analysis nudging (grid_sfdda) only |
 | `guv` | grid_fdda = 1 only |
 | `guv_sfc` | surface analysis nudging (grid_sfdda) only |
-| `h_sca_adv_order` | Scalar horizontal advection order (coupled with h_mom_adv_order in CPPWRF) |
+| `h_sca_adv_order` | Scalar horizontal advection order (equal to h_mom_adv_order on every domain in CPPWRF) |
 | `hybrid_opt` | Real case hybrid coordinate flag read directly from wrfinput_d01 global attribute |
 | `i_parent_start` | Domain nesting starting index |
 | `if_no_pbl_nudging_ph` | spectral nudging (grid_fdda = 2) only |
@@ -440,12 +440,12 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `snicar_use_aerosol` | SNICAR (opt_alb = 3) only |
 | `snicar_use_oc` | SNICAR (opt_alb = 3) only |
 | `spec_bdy_width` | Real case lateral boundary width (must be 5; read from wrfbdy_d01) |
-| `start_day` | Start date component |
-| `start_hour` | Start date component |
-| `start_minute` | Start date component |
-| `start_month` | Start date component |
-| `start_second` | Start date component |
-| `start_year` | Start date component |
+| `start_day` | Start date component (every domain the same; a missing entry is the Registry default) |
+| `start_hour` | Start date component (every domain the same; a missing entry is the Registry default) |
+| `start_minute` | Start date component (every domain the same; a missing entry is the Registry default) |
+| `start_month` | Start date component (every domain the same; a missing entry is the Registry default) |
+| `start_second` | Start date component (every domain the same; a missing entry is the Registry default) |
+| `start_year` | Start date component (every domain the same; a missing entry is the Registry default) |
 | `starting_time_step` | adaptive time step only |
 | `starting_time_step_den` | adaptive time step only |
 | `step_to_output_time` | adaptive time step only |
@@ -468,7 +468,7 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `use_surface` | real.exe only |
 | `use_tavg_for_tsk` | real.exe only |
 | `use_trop_level` | real.exe only |
-| `v_sca_adv_order` | Scalar vertical advection order (coupled with v_mom_adv_order in CPPWRF) |
+| `v_sca_adv_order` | Scalar vertical advection order (equal to v_mom_adv_order on every domain in CPPWRF) |
 | `wif_input_opt` | aerosol-aware microphysics (mp_physics = 28) only |
 | `write_hist_at_0h_rst` | restart runs only |
 | `xwavenum` | spectral nudging (grid_fdda = 2) only |

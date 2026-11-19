@@ -3,6 +3,7 @@
 # Deliberate faults the model must refuse, with their messages (ctest robustness; analytic cases, seconds, no data):
 #  - a misspelled configuration key, and a key in the wrong section: "unknown configuration key";
 #  - a column above the physics' level limit (nz = 129 with Kessler): an error in Release builds too;
+#  - sst_update = 1 without the column physics suite (wrflowinp is read with the suite only);
 #  - a resume from CPPWRF's own restart file with other options: refused (the same options resume, bit-identical);
 #  - run.check_nonfinite_every_step: an unstable run stops at the first non-finite step (the step a diagnostic every
 #    step finds), naming the first non-finite field and point.
@@ -35,6 +36,7 @@ expect_ok base "${SQ[@]}"
 expect_fail misspelled_key "unknown configuration key 'phys.mp_physic'" "${SQ[@]}" --set phys.mp_physic=1
 expect_fail wrong_section "unknown configuration key 'dyn.mp_physics'" "${SQ[@]}" --set dyn.mp_physics=1
 expect_fail nz_limit "Kessler: nz = 129 exceeds the column limit 128" "${SQ[@]}" --set domain.nz=129
+expect_fail sst_update_no_suite "phys.sst_update = 1 without surface-layer" "${SQ[@]}" --set phys.sst_update=1
 
 # CPPWRF's own restart file: written at steps 1 and 2 (restart.interval = dt)
 if run rst_a "${SQ[@]}" --set restart.interval=6; then
