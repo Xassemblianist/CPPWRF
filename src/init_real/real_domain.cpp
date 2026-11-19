@@ -268,6 +268,8 @@ void put2(const MetEm& m, const char* name, F2<T>& f) {
   const MetVar& v = m.var(name);
   if (v.shape.size() != 2) throw std::runtime_error(std::string("met_em: ") + name + " is not 2-D");
   const std::size_t ny = v.shape[0], nx = v.shape[1];
+  if (nx > std::size_t(f.ihi() - f.ilo() + 1) || ny > std::size_t(f.jhi() - f.jlo() + 1))
+    throw std::runtime_error(std::string("met_em: ") + name + " is larger than the domain (e_we / e_sn)");
   for (std::size_t j = 0; j < ny; ++j)
     for (std::size_t i = 0; i < nx; ++i) f(int(i) + 1, int(j) + 1) = T(v.v[j * nx + i]);
 }
@@ -276,6 +278,11 @@ void put3(const MetEm& m, const char* name, F3<T>& f, int k0 = 1) {
   const MetVar& v = m.var(name);
   if (v.shape.size() != 3) throw std::runtime_error(std::string("met_em: ") + name + " is not 3-D");
   const std::size_t nk = v.shape[0], ny = v.shape[1], nx = v.shape[2];
+  if (nx > std::size_t(f.ihi() - f.ilo() + 1) || ny > std::size_t(f.jhi() - f.jlo() + 1))
+    throw std::runtime_error(std::string("met_em: ") + name + " is larger than the domain (e_we / e_sn)");
+  if (int(nk) != f.khi() - k0 + 1)
+    throw std::runtime_error(std::string("met_em: ") + name + " has " + std::to_string(nk) + " levels, the namelist " +
+                             std::to_string(f.khi() - k0 + 1) + " (num_metgrid_levels / num_metgrid_soil_levels)");
   for (std::size_t k = 0; k < nk; ++k)
     for (std::size_t j = 0; j < ny; ++j)
       for (std::size_t i = 0; i < nx; ++i) f(int(i) + 1, int(k) + k0, int(j) + 1) = T(v.v[(k * ny + j) * nx + i]);
@@ -288,9 +295,11 @@ void RealDomain<T>::read_input(const MetEm& m) {
   flags.clear();
   for (const auto& [name, v] : m.int_atts())
     if (name.rfind("FLAG_", 0) == 0 && !v.empty()) flags[name.substr(5)] = v[0];
-  if (m.att_int("NUM_METGRID_LEVELS", nlev) != nlev)
-    throw std::runtime_error("real: num_metgrid_levels in the namelist does not match " + m.path);
-  if (m.att_int("WEST-EAST_GRID_DIMENSION", ide) != ide || m.att_int("SOUTH-NORTH_GRID_DIMENSION", jde) != jde)
+  // input_wrf.F:423-432 / :946-970 (metgrid writes BOTTOM-TOP_GRID_DIMENSION = its number of levels)
+  if (m.att_int("BOTTOM-TOP_GRID_DIMENSION", -1) != nlev)
+    throw std::runtime_error("real: num_metgrid_levels in the namelist does not match BOTTOM-TOP_GRID_DIMENSION of " +
+                             m.path);
+  if (m.att_int("WEST-EAST_GRID_DIMENSION", -1) != ide || m.att_int("SOUTH-NORTH_GRID_DIMENSION", -1) != jde)
     throw std::runtime_error("real: e_we / e_sn do not match " + m.path);
   iswater = m.att_int("ISWATER", 16);
   islake = m.att_int("ISLAKE", -1);
@@ -376,6 +385,10 @@ void RealDomain<T>::read_input(const MetEm& m) {
     }
     if (flag("SOIL_LAYERS") != 1) throw std::runtime_error("real: legacy soil input (no FLAG_SOIL_LAYERS) is not ported");
     const int n = num_st_levels_input;
+    // module_optional_input.F:1929-1934 checks n against the allocation after filling it; init_soil_2_real then
+    // also writes level n + 2 (bottom): refused before either would write past the 3 * num_soil_layers levels
+    if (n + 2 > nalloc)
+      throw std::runtime_error("real: soil_levels_too_few (num_metgrid_soil_levels + 2 > 3 * num_soil_layers)");
     F3<T> sl(1, ide, 1, n, 1, jde), st(1, ide, 1, n, 1, jde), sm(1, ide, 1, n, 1, jde);
     put3(m, "SOIL_LAYERS", sl);
     put3(m, "ST", st);
@@ -397,7 +410,6 @@ void RealDomain<T>::read_input(const MetEm& m) {
           sm_input(i, k + 1, j) = sm(i, n + 1 - k, j);
           sw_input(i, k + 1, j) = T(0);  // grid%sw: not in the metgrid output
         }
-    if (n > nalloc) throw std::runtime_error("real: soil_levels_too_few");
   }
   // monthly and category fields
   auto put_cat = [&](const char* name, F3<T>& fld, int& ncat) {
@@ -693,6 +705,23 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     compute_eta(znw, eo, p_top, kde);
   }
   compute_vcoord_1d_coeffs(T(o.etac), znw, o.hybrid_opt, p_top, kde, znu, c1f, c2f, c3f, c4f, c1h, c2h, c3h, c4h);
+  {  // nest_init_utils.F:1158-1182: the reference pressure must decrease monotonically in every column
+    const T R_d = Const<T>::r_d, g = Const<T>::g;
+    for (int j = jts; j <= j1; ++j)
+      for (int i = its; i <= i1; ++i) {
+        const T p_surf = p00 * std::exp(-t00 / a + std::sqrt((t00 / a) * (t00 / a) - T(2.) * g * ht(i, j) / a / R_d));
+        for (int k = 1; k <= kde - 1; ++k) {
+          const T press_above = c3f(k + 1) * (p_surf - p_top) + c4f(k + 1) + p_top;
+          const T press_below = c3f(k) * (p_surf - p_top) + c4f(k) + p_top;
+          if (press_below - press_above <= T(0.0))
+            throw std::runtime_error("real: the reference pressure is not monotonically decreasing (very high "
+                                     "topography: (i,j) = (" + std::to_string(i) + "," + std::to_string(j) +
+                                     "), " + std::to_string(double(ht(i, j))) + " m, k = " + std::to_string(k) +
+                                     "); in the dynamics namelist record, reduce etac from " +
+                                     std::to_string(o.etac));
+        }
+      }
+  }
   if (o.interp_theta) throw std::runtime_error("real: interp_theta is not ported");
   if (flag("SLP") == 1) {
     p_dry(mu0, znw, p_top, pb, true, c3f, c3h, c4f, c4h, d, sk);
