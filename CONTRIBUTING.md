@@ -45,7 +45,8 @@ tools/ci/ci_submit.sh HEAD --affected origin/main       # submit just those
 cases that use that scheme, including their 1 h versions. A scheme that most cases use, such as WSM6 or YSU, keeps
 all its short cases but only 6 of its long ones. The dynamics, core, I/O, driver and build files select a
 fixed core sample: the R1/T1 dycore, P4 for 3 steps and 1 h, the N3 nest, a restart, an ideal case and Straka.
-Documentation selects nothing. Tools and tests outside the suite select only the translator tests and the self-test.
+Documentation, tools and tests outside the suite select no case, and `--affected` then submits nothing (main's
+per-push suite covers them).
 A file the table does not cover selects the core sample and prints a warning. When you add a scheme directory under
 src/phys, give it a line in that table (`ctest -R affected_cases` checks this).
 

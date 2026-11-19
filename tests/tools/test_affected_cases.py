@@ -182,6 +182,27 @@ class Cli(unittest.TestCase):
         self.assertEqual(set(out.getvalue().strip().split(",")), with_opt("mp_physics", 17, 18))
         self.assertTrue(re.search(r"\d+ cases", err.getvalue()))
 
+    def test_ci_submit_submits_nothing_without_cases(self):
+        import shutil
+        import subprocess
+        import tempfile
+        if subprocess.run(["git", "-C", REPO, "rev-parse", "HEAD"], capture_output=True).returncode != 0:
+            self.skipTest("not a git checkout")
+        with tempfile.TemporaryDirectory() as d:
+            calls = os.path.join(d, "calls")
+            gh = os.path.join(d, "gh")
+            with open(gh, "w") as fh:
+                fh.write(f'#!/bin/sh\necho "$*" >> {calls}\nexit 1\n')
+            os.chmod(gh, 0o755)
+            env = dict(os.environ, PATH=d + os.pathsep + os.environ["PATH"])
+            # HEAD..HEAD: no changed file, no case
+            r = subprocess.run(["bash", os.path.join(REPO, "tools", "ci", "ci_submit.sh"), "HEAD", "--affected", "HEAD",
+                                "--no-wait"], env=env, capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertIn("no suite case affected; nothing submitted", r.stdout)
+            self.assertFalse(os.path.exists(calls), "gh was called")
+            self.assertIsNotNone(shutil.which("bash"))
+
 
 if __name__ == "__main__":
     unittest.main()

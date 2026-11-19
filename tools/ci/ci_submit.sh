@@ -14,8 +14,8 @@
 # comparators' self-test. --cases: only these suite cases (exact names) and the translator tests and self-test;
 # --full adds the other jobs. --affected BASE (development runs only; merges are proven with the full suite,
 # CONTRIBUTING.md): --cases from tools/ci/affected_cases.py BASE COMMIT (the cases the change BASE..COMMIT affects; with
-# --slow the slow ones too); when no case is affected, the one 5-step case real_r1_fp64_cpu carries the translator
-# tests and the self-test (the workflow has no run without cases). --data: the data tars instead of the cases' own
+# --slow the slow ones too); when no case is affected nothing is submitted (exit 0: documentation and tools changes
+# are covered by main's per-push suite). --data: the data tars instead of the cases' own
 # (wrf_suite.py --data-for). --slow: the slow cases too (their tars must be in the data release). --data-tag: the
 # cppwrf-data release
 # (default data-v1). The script waits for the run (--hours, default 8; --no-wait: print the run's URL and exit),
@@ -43,9 +43,9 @@ if [ -n "$AFFECTED" ]; then  # development feedback: the cases BASE..COMMIT affe
   sel=(python3 "$REPO/tools/ci/affected_cases.py" "$AFFECTED" "$SHA")
   [ "$SLOW" = 1 ] && sel+=(--slow)
   CASES=$("${sel[@]}") || { echo "[ci_submit] tools/ci/affected_cases.py failed"; exit 2; }
-  if [ -z "$CASES" ]; then
-    CASES=real_r1_fp64_cpu
-    echo "[ci_submit] --affected $AFFECTED: no suite case affected; $CASES carries the translator tests and self-test"
+  if [ -z "$CASES" ]; then  # documentation, tools: main's per-push suite covers them
+    echo "[ci_submit] --affected $AFFECTED: no suite case affected; nothing submitted"
+    exit 0
   else
     echo "[ci_submit] --affected $AFFECTED: $(tr ',' '\n' <<< "$CASES" | wc -l) cases" \
          "(a development run; merges need the full suite)"
