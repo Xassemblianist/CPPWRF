@@ -39,9 +39,12 @@ CASES = [
      ["real.dir=" + f"{WR}/run_NMP1_r8", "phys.bldt=5", "output.out_interval=3", "output.diag_interval=3",
       "suite.chain=360,180"], f"{WR}/run_NMP1_r8/wrfout_d01_{_D}", 900, {}),
     # SR1 (slope_rad, topo_shading, radt 10) resumed at 245 min, in daylight between the radiation calls of 240 and
-    # 250 min
+    # 250 min, from CPPWRF's own restart file only: WRF's SHADOWMASK is in no stream (Registry '-') and its
+    # pre_radiation_driver sets it on the first step and the radiation steps only, so WRF's own run resumed there
+    # (and CPPWRF's from the wrfrst file) shades nothing until the next radiation call; CPPWRF's file keeps it
     ("real_sr1_r8_fp64_cpu_chain", "cpu_dp", "configs/real_sr1_r8.ini",
-     ["real.dir=" + f"{WR}/run_SR1_r8", "output.out_interval=30", "output.diag_interval=30", "suite.chain=14700,2100"],
+     ["real.dir=" + f"{WR}/run_SR1_r8", "output.out_interval=30", "output.diag_interval=30",
+      "suite.chain=14700,2100,native"],
      f"{WR}/run_SR1_r8/wrfout_d01_{_D}", 16800, {}),
     # SLAB1 (the slab LSM: THC, CAPG) with PBL every 5 min
     ("real_slab1_r8_fp64_cpu_chain", "cpu_dp", "configs/real_slab1_r8.ini",

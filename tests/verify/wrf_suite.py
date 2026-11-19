@@ -303,16 +303,20 @@ def chain_at(sets):
     """A restart-chain case (suite.chain=MID,INTERVAL in its --set list: restart_chain), (MID, INTERVAL) [s], or
     None."""
     v = next((x.split("=", 1)[1] for x in sets if x.startswith("suite.chain=")), None)
-    return tuple(float(x) for x in v.split(",")) if v else None
+    if not v:
+        return None
+    f = v.split(",")
+    return float(f[0]), float(f[1]), f[2:] == ["native"]
 
 
-def restart_chain(b, cfg, sets, refs, t, mid, iv, out):
+def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False):
     """The restart contract without a WRF restarted run: CPPWRF's run to `t` s with restart files every `iv` s
     (wrfrst and, for one domain, CPPWRF's own restart_<step>.nc) and the runs resumed at `mid` s from them (each
     domain's wrfrst file; the native file) must write the same files after `mid`: every wrfout frame and every
     wrfrst file later than `mid`, each variable at tolerance 0 (restart-stream state a resumed run lost shows in
     its next wrfrst file even when the history does not use it). `refs`: the WRF run whose inputs (and
-    namelist.input, when there) the case reads; not compared. (differences, summary)."""
+    namelist.input, when there) the case reads; not compared. native_only (suite.chain=MID,INTERVAL,native): the
+    native resume alone, where WRF's own resumed run is not the straight one. (differences, summary)."""
     import configparser
     import netCDF4
     import exact
@@ -343,7 +347,8 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out):
     os.makedirs(rst, exist_ok=True)
     for d in doms:
         os.symlink(at[d], os.path.join(rst, os.path.basename(at[d])))
-    resumed = [("wrfrst", os.path.join(out, "b_resumed"), os.path.join(rst, os.path.basename(at["d01"])))]
+    resumed = [] if native_only else [("wrfrst", os.path.join(out, "b_resumed"),
+                                       os.path.join(rst, os.path.basename(at["d01"])))]
     if doms == ["d01"]:  # CPPWRF's own restart file of the same step (nests resume from wrfrst files only)
         ini = configparser.ConfigParser(interpolation=None)
         ini.read(os.path.join(REPO, cfg))
@@ -554,7 +559,7 @@ def main():
         chain = chain_at(sets)
         sets = [x for x in sets if not x.startswith("suite.")]
         if chain:  # CPPWRF resumed against CPPWRF straight (restart_chain)
-            bad, what = restart_chain(b, cfg, sets, refs, t, chain[0], chain[1], out)
+            bad, what = restart_chain(b, cfg, sets, refs, t, chain[0], chain[1], out, chain[2])
             done(out, not bad)
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
                              + (f"  [{'; '.join(x[:300] for x in bad[:8])}{' ...' if len(bad) > 8 else ''}]" if bad else ""))

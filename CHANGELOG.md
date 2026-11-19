@@ -195,7 +195,7 @@ resumes across versions from WRF's wrfrst files.
   files and history of the resumed run until the next call. A wrfrst restart leaves grid%ch at 0 as WRF (it read
   Noah-MP's CH = CHXY into it); DTBC of an ideal domain grows from the start as solve_em's (it wrapped at
   interval_seconds). CPPWRF's restart file (format version 4; version 3 files are refused) also holds WW, WW_M,
-  PHP, ALT and the base state, as the wrfrst file. Suite: restart chains (tests/verify/cases/66_restart_chain.py:
+  PHP and ALT, as the wrfrst file. Suite: restart chains (tests/verify/cases/66_restart_chain.py:
   D0, P4, G2, P8, NMP1, SLAB1, SR1, N3 resumed from both files against the straight run, every later wrfout frame
   and wrfrst file at tolerance 0) and SR1 resumed from its own restart file at 245 min.
 - CPPWRF's own restart file (`restart_<step>.nc`, format version 3; files of version 2 are refused, the run's

@@ -317,26 +317,9 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   add_field2("mu_1", st.mu_1); add_field2("mu_2", st.mu_2);
   add_field3("p", st.p);
   add_field3("al", st.al);
-  // WRF's restart stream also carries the last step's WW, WW_M, PHP, ALT and the base state (load_restart_file reads
-  // them from either file)
+  // WRF's restart stream also carries the last step's WW, WW_M, PHP, ALT (load_restart_file reads them from either
+  // file); the base state of one domain (CPPWRF's file: no nests) is the initial one, rebuilt from the input
   add_field3("ww", st.ww); add_field3("ww_m", st.ww_m); add_field3("php", st.php); add_field3("alt", st.alt);
-  {
-    const dyn::BaseState& b = *m_.base;
-    auto add_base = [&](const std::string& name, const auto& f, char stag) {
-      if (f.uniform()) return;
-      bufs.emplace_back();
-      const Layout L = tile::download_any(f, bufs.back());
-      vars.emplace_back(name, stag, L.nx, L.ny, L.nz, bufs.back().data() + L.offset, dt, L.sj, L.sk);
-    };
-    add_base("PHB", b.phb, 'W'); add_base("PB", b.pb, 'M'); add_base("ALB", b.alb, 'M'); add_base("T_INIT", b.t_init, 'M');
-    add_base("MUB", b.mub, 'M'); add_base("HGT", b.ht, 'M');
-    if (b.mapped) {
-      add_base("MAPFAC_MX", b.msftx, 'M'); add_base("MAPFAC_MY", b.msfty, 'M'); add_base("MAPFAC_UX", b.msfux, 'U');
-      add_base("MAPFAC_UY", b.msfuy, 'U'); add_base("MAPFAC_VX", b.msfvx, 'V'); add_base("MAPFAC_VY", b.msfvy, 'V');
-      add_base("MF_VX_INV", b.msfvx_inv, 'V'); add_base("F", b.f, 'M'); add_base("E", b.e, 'M');
-      add_base("SINALPHA", b.sina, 'M'); add_base("COSALPHA", b.cosa, 'M');
-    }
-  }
 
   for (int n = 0; n < st.n_scalars(); ++n) {
     add_field3("q1_" + st.q_names[n], st.q_1[n]);
@@ -435,11 +418,12 @@ void DomainRunner::load_restart_file(const std::string& path) {
   // base-state fields of a WRF restart file (nest feedback changes the parent's)
   struct TargetB { BaseFieldT<3>* f3; BaseFieldT<2>* f2; size_t buf_idx; };
   std::vector<TargetB> targets_b;
-  {  // the restart stream also carries these diagnostics of the last step (CPPWRF's file too, save_restart_file)
-    reg_field3("ww", st.ww);
-    reg_field3("ww_m", st.ww_m);
-    reg_field3("php", st.php);
-    reg_field3("alt", st.alt);
+  // the restart stream also carries these diagnostics of the last step (CPPWRF's file too, save_restart_file)
+  reg_field3("ww", st.ww);
+  reg_field3("ww_m", st.ww_m);
+  reg_field3("php", st.php);
+  reg_field3("alt", st.alt);
+  if (wrf_file) {  // and the base state (nest feedback changes the parent's)
     dyn::BaseState& b = *m_.base;
     auto reg_base = [&](const std::string& name, auto& f, char stag) {
       if (f.uniform()) return;

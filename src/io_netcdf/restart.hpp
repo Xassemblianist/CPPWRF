@@ -12,7 +12,7 @@ namespace cppwrf::io_netcdf {
 // the format of CPPWRF's own restart file (the global attribute CPPWRF_RESTART_VERSION): raise it when the file's
 // contents change; a file of another version is refused (WRF's wrfrst files are the cross-version restart)
 inline constexpr int kRestartVersion = 4;  // 2: WRF_ALARM_SECS_TIL_NEXT_RING_51; 3: the scalars (SCALAR_*);
-// 4: WW, WW_M, PHP, ALT, the base state, the carried diagnostics of the restart stream (O3RAD, HRANG, URATX, ...)
+// 4: WW, WW_M, PHP, ALT, the carried diagnostics of the restart stream (O3RAD, HRANG, URATX, ...)
 
 struct RestartMeta {
   int version = kRestartVersion;  // read: 0 when the file has none (written before the version was recorded)
