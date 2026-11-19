@@ -36,6 +36,9 @@ CASES = [
     ("real_p8g3_fp32_1h", "cuda", "configs/real_p8g3_r8.ini", ["real.dir=" + f"{WR}/run_G3P8_r8"] + _1H,
      f"{WR}/run_G3P8_r8/wrfout_d01_{_D}", 3600, {"U": 9.3e-4, "W": 2.9e-2, "THM": 1.8e-5, "QV": 1.1e-3}),
 ]
+# CUDA FP64 twin (tolerance 0) of G3P4A3's CPU case: the same configuration, reference and variables
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].startswith("real_p4g3a3_")]
 
 STATUS = [
     ('G3P8', 'P8 with the Grell-3D cumulus (cu_physics 5, ishallow 1; restarted at 30 min)', '1 h'),

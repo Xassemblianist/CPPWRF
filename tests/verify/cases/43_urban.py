@@ -30,6 +30,9 @@ CASES += [
     ("real_p4u_fp32_1h", "cuda", "configs/real_p4u_r8.ini", [f"real.dir={WR}/run_U4_r8"] + _1H,
      f"{WR}/run_U4_r8/wrfout_d01_{_D}", 3600, {"U": 1.9e-3, "W": 5.1e-2, "THM": 2.6e-5, "QV": 1.6e-3}),
 ]
+# CUDA FP64 twins (tolerance 0) of U4L's CPU cases: the same configuration, reference and variables, kind cuda_dp
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].startswith("real_p4ul_")]
 
 STATUS = [
     ('U4', 'P4 with the single-layer urban canopy model (sf_urban_physics 1, URBPARM.TBL)', '1 h'),

@@ -41,6 +41,9 @@ CASES = [
       "output.out_interval=10", "output.diag_interval=10", "d02.out_interval=30", "d02.diag_interval=30"],
      {d: f"{WR}/run_MORN_r8/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 3600, _TN),
 ]
+# CUDA FP64 twins (tolerance 0) of MORG's and MORN's CPU cases: the same configuration, reference and variables
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].split("_")[1] in ("morg", "morn")]
 
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
 # duration

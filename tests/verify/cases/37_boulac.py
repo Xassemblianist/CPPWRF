@@ -33,6 +33,9 @@ CASES += [
     ("real_bl4_fp32_1h", "cuda", "configs/real_bl4_r8.ini", ["real.dir=" + f"{WR}/run_BL4_r8"] + _1H,
      f"{WR}/run_BL4_r8/wrfout_d01_{_D}", 3600, {"U": 2.1e-3, "W": 6.6e-2, "THM": 2.8e-5, "QV": 1.7e-3}),
 ]
+# CUDA FP64 twins (tolerance 0) of BL9's CPU cases: the same configuration, reference and variables, kind cuda_dp
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].startswith("real_bl9_")]
 
 STATUS = [
     ('BL1', 'P1 with the BouLac PBL (bl_pbl_physics 8; restarted at 30 min)', '1 h'),

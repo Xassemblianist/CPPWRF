@@ -56,6 +56,10 @@ CASES = [
       "suite.restart_at=1800"],
      {d: f"{WR}/run_SKN_r8/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 3600, _TN),
 ]
+# CUDA FP64 twins (tolerance 0) of SKU's and SKN's CPU cases (not the restarted one): the same configuration, reference
+# and variables, kind cuda_dp
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].split("_")[1] in ("sku", "skn") and not c[0].endswith("_rst")]
 
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
 # duration
