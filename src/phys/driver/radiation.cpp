@@ -139,7 +139,8 @@ struct KRadColumn {
         const rr b = rr(cfbl(i, j, k));
         if (itimestep != 1) cf[q] = b;
         if (qcw[q] < rr(1.E-6) && b > rr(0.001)) qcw[q] = qcw[q] + rr(qcbl(i, j, k));
-        if (qiw[q] < rr(1.E-8) && b > rr(0.001)) qiw[q] = qiw[q] + rr(qibl(i, j, k));
+        // without F_QI WRF adds QI_BL to its placeholder, which no radiation scheme reads
+        if (qiw && qiw[q] < rr(1.E-8) && b > rr(0.001)) qiw[q] = qiw[q] + rr(qibl(i, j, k));
       }
     }
     if (bmj) {  // module_radiation_driver.F:1578-1591 (PCC scheme)
@@ -494,7 +495,7 @@ bool RadiationDriver::run(long itimestep, rr xtime, rr julian, int yr, const Rad
     if (kc.has_diag) { kc.hrang_out = out.hrang->view(); kc.o3_out = out.o3rad->view(); }
     kc.o3_field = !o_.oznini && out.o3rad;
     if (kc.o3_field) kc.o3_in = out.o3rad->cview();
-    kc.bl_clouds = in.cldfra_bl != nullptr && in.qc && in.qi;
+    kc.bl_clouds = in.cldfra_bl != nullptr && in.qc;  // as the host path; with F_QC (clouds) only
     kc.itimestep = itimestep;
     kc.qcw = in.qc ? q.qc : nullptr; kc.qiw = in.qi ? q.qi : nullptr;
     if (kc.bl_clouds) {
@@ -762,7 +763,8 @@ bool RadiationDriver::run(long itimestep, rr xtime, rr julian, int yr, const Rad
           const std::size_t q = Lm.index(i, j, k);
           if (itimestep != 1) ccf[k] = cfbl[q];
           if (cqc[k] < rr(1.E-6) && cfbl[q] > rr(0.001)) cqc[k] = cqc[k] + qcbl[q];
-          if (cqi[k] < rr(1.E-8) && cfbl[q] > rr(0.001)) cqi[k] = cqi[k] + qibl[q];
+          // without F_QI WRF adds QI_BL to its placeholder, which no radiation scheme reads
+          if (!qi.empty() && cqi[k] < rr(1.E-8) && cfbl[q] > rr(0.001)) cqi[k] = cqi[k] + qibl[q];
         }
       }
       if (o_.bmj_feedback) {  // BMJ (module_radiation_driver.F:1578-1591, PCC scheme)
