@@ -778,6 +778,11 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     const long cu = sp.cfg.get_int("phys.cu_physics", 0);
     if (cu != 0 && cu != c1.get_int("phys.cu_physics", 0))
       throw std::runtime_error(sp.tag + ": phys.cu_physics must be d01's or 0 (check_a_mundo)");
+    // check_a_mundo (module_check_a_mundo.F:1390-1398): MSKF on any domain sets the single icloud to 1, also for a
+    // nest without cumulus (real_physics forces it only where the domain itself runs cu_physics 11)
+    if (c1.get_int("phys.cu_physics", 0) == 11 && sp.cfg.get_int("phys.icloud", 1) != 1)
+      throw std::runtime_error(sp.tag + ": phys.icloud must be 1 with cu_physics = 11 (WRF sets icloud = 1 on every "
+                               "domain)");
     // a parent with column physics for its cumulus scheme alone and a nest without (cu_physics = N, 0 and no surface
     // layer, LSM or PBL): WRF feeds the nest's state arrays RAINC, TSK, XLAND, ... back (every domain allocates
     // them); CPPWRF's nest without column physics does not carry them

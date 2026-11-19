@@ -377,12 +377,14 @@ Model Model::build(const io::Config& cfg) {
                     pp.mp_physics == 14 || pp.mp_physics == 16 || pp.mp_physics == 28 || pp.mp_physics == 50 ||
                     pp.mp_physics == 51 || pp.mp_physics == 18);
     pp.cu_used = cfg.get_int("phys.cu_physics", 0) != 0;  // check_a_mundo: cu_used
-    if (pp.mp_physics == 28) {  // aerosol-aware Thompson: aer_init_opt = 0, wif_input_opt 0 / 1, qna_update = 0
-      if (cname != "real") throw std::runtime_error("phys.mp_physics = 28: real-data runs only");
+    {  // registry.new3d_wif: wif_input_opt = 2 adds the scalar QNBCA and QNBCA2D whatever mp_physics
       const long wif = cfg.get_int("phys.wif_input_opt", 0);
       if (wif == 2)
         throw std::runtime_error("phys.wif_input_opt = 2 (black-carbon aerosols QNBCA, frc_urb2d) is not ported");
       if (wif != 0 && wif != 1) throw std::runtime_error("phys.wif_input_opt must be 0, 1 or 2");
+    }
+    if (pp.mp_physics == 28) {  // aerosol-aware Thompson: aer_init_opt = 0, wif_input_opt 0 / 1, qna_update = 0
+      if (cname != "real") throw std::runtime_error("phys.mp_physics = 28: real-data runs only");
       if (cfg.get_bool("phys.use_aero_icbc", false) || cfg.get_bool("phys.use_rap_aero_icbc", false))
         throw std::runtime_error("phys.use_aero_icbc / use_rap_aero_icbc (aer_init_opt 1 / 2, the aerosol "
                                  "climatology with scalar_pblmix = 1) are not ported");
