@@ -705,8 +705,6 @@ NO_EFFECT_OPTIONS = {
         "qv_max_flag", "qv_max_value", "qv_min_p_safe", "qv_min_flag", "qv_min_value", "use_sh_qv", "aggregate_lu",
         "use_tavg_for_tsk", "use_maxw_level", "maxw_above_this_level", "maxw_horiz_pres_diff", "use_trop_level",
         "trop_horiz_pres_diff", "max_dz", "auto_levels_opt", "eta_levels")},
-    # read by the aerosol-aware schemes (mp_physics 28, 29, 38) and aer_opt = 3 only (both translated or rejected)
-    "wif_input_opt": "aerosol-aware microphysics (mp_physics = 28) only",
     # restart runs only (restart = .true. is rejected)
     "override_restart_timers": "restart runs only", "write_hist_at_0h_rst": "restart runs only",
     # time series files (written only with a tslist file), the history read of iofields_filename
@@ -1027,6 +1025,9 @@ class WrfTranslator:
                     sections.setdefault(tag, {})[f"fdda_{k}"] = v
         # auxinput10_inname = gfdda_inname (default "gfdda_d<domain>"); real.exe writes wrffdda_d0N
         inname = str(self.get_opt("fdda", "gfdda_inname", "gfdda_d<domain>")).strip("'\"")
+        if any(t != "<domain>" for t in re.findall(r"<[^>]*>", inname)):
+            # construct_filename2a expands <date>, <year>, ... (one file per time); the model reads one file
+            self.error(f"WRF gfdda_inname = '{inname}': only <domain> is supported in the file name.")
         if "<domain>" not in inname and n > 1 and any(v == 1 for v in gf[1:]):
             self.error(f"WRF gfdda_inname = '{inname}' without <domain> names one file for every domain.")
         if inname != "wrffdda_d<domain>":
@@ -1072,7 +1073,8 @@ class WrfTranslator:
             self.error("WRF use_adaptive_time_step with step_to_output_time needs a history interval "
                        "(WRF takes mod(time, 0)).")
         t["history_interval_s"] = hs
-        t["interval_seconds"] = self.get_opt("time_control", "interval_seconds", 21600)
+        # Registry default 10800 (adapt_timestep steps to the boundary times; real_case.cpp checks it against wrfbdy)
+        t["interval_seconds"] = self.get_opt("time_control", "interval_seconds", 10800)
 
     def history_steps(self, d: int, dt: float, fallback: int) -> int:
         """Steps between the history frames of domain index d (set_timekeeping_alarms.inc: the interval is
@@ -1370,6 +1372,16 @@ class WrfTranslator:
         radt = self.get_opt("physics", "radt", 0)
         bldt = self.get_opt("physics", "bldt", 0)
         cudt = self.get_opt("physics", "cudt", 0)
+        # wif_input_opt (registry.new3d_wif): 1 allocates input-only (i1) climatology fields; 2 (package
+        # use_wif_input_bc) adds the scalar QNBCA and QNBCA2D (history, restart, nest, boundary) for any mp_physics
+        wif = self.get_opt("domains", "wif_input_opt", 0)
+        if wif == 2:
+            self.error("WRF wif_input_opt = 2 (black-carbon aerosols QNBCA, QNBCA2D with frc_urb2d) is not "
+                       "supported by CPPWRF.")
+        elif wif not in (0, 1):
+            self.error(f"WRF wif_input_opt = {wif} is not a WRF value (0, 1 or 2).")
+        elif wif == 1 and mp_physics != 28:
+            self.notice("Option &domains.wif_input_opt = 1: no effect on wrf.exe without mp_physics = 28.")
 
         has_physics_suite = (sf_sfclay != 0 or sf_surface != 0 or bl_pbl != 0 or
                              cu_physics != 0 or ra_lw != 0 or ra_sw != 0)
@@ -1649,6 +1661,9 @@ class WrfTranslator:
                 self.error(f"WRF diff_opt = {diff_opt} is not supported; CPPWRF supports diff_opt 0, 1 and 2.")
 
         km_opt = self.get_opt("dynamics", "km_opt", 1)
+        if km_opt == 0 and diff_opt != 0:
+            # calculate_km_kh (module_diffusion_em.F) runs with diff_opt 1 / 2: km_opt 0 is its CASE DEFAULT
+            self.error("WRF km_opt = 0 with diff_opt /= 0 stops wrf.exe ('Please choose diffusion coefficient scheme').")
         if (diff_opt != 0 or km_opt != 1) and km_opt is not None:
             if km_opt not in (0, 1):
                 sections["dyn"]["km_opt"] = km_opt
@@ -1818,8 +1833,9 @@ class WrfTranslator:
             self.error(f"WRF rk_ord = {rk_ord} is unsupported; CPPWRF strictly uses 3rd-order Runge-Kutta (RK3).")
 
         use_thm = self.get_opt("dynamics", "use_theta_m", 1)
-        if use_thm == 0:
-            self.error("WRF use_theta_m = 0 is not supported; CPPWRF requires use_theta_m = 1.")
+        # WRF tests use_theta_m == 1 in most places and /= 0 in start_em (2 would mix both): only 1 is ported
+        if use_thm != 1:
+            self.error(f"WRF use_theta_m = {use_thm} is not supported; CPPWRF requires use_theta_m = 1.")
 
         gwd_opt = self.get_opt("dynamics", "gwd_opt", 0)
         if gwd_opt not in (0, 1):
@@ -1939,13 +1955,7 @@ class WrfTranslator:
                 # check_a_mundo: use_aero_icbc / use_rap_aero_icbc give aer_init_opt 1 / 2 (the aerosol climatology
                 # through metgrid, scalar_pblmix = 1); those and qna_update, dust_emis stay errors (not ported).
                 # wif_input_opt 0 and 1 run wrf.exe alike (real.exe needs 1); 2 adds the black-carbon aerosols
-                wif = self.get_opt("domains", "wif_input_opt", 0)
-                if wif == 2:
-                    self.error("WRF wif_input_opt = 2 (black-carbon aerosols QNBCA, QNBCA2D with frc_urb2d) is not "
-                               "supported by CPPWRF.")
-                elif wif not in (0, 1):
-                    self.error(f"WRF wif_input_opt = {wif} is not a WRF value (0, 1 or 2).")
-                elif wif != 0:
+                if wif == 1:  # 2 and other values: error above
                     sections["phys"]["wif_input_opt"] = wif
                 if self._max_dom > 1:
                     self.error("WRF mp_physics = 28 with nests is not supported by CPPWRF.")
@@ -2128,8 +2138,12 @@ class WrfTranslator:
                     if sf_surface in (1, 3):
                         self.error(f"WRF sst_update = 1 with sf_surface_physics = {sf_surface} is not supported "
                                    "(no reference run).")
-                    if self.get_opt("time_control", "io_form_auxinput4", 0) == 0:
+                    io4 = self.get_opt("time_control", "io_form_auxinput4", 0)
+                    if io4 == 0:
                         self.error("WRF sst_update = 1 needs io_form_auxinput4 /= 0 (as WRF).")
+                    elif io4 != 2:
+                        self.error(f"WRF io_form_auxinput4 = {io4} is not supported; CPPWRF reads NetCDF "
+                                   "wrflowinp files (io_form_auxinput4 = 2).")
                     for k in ("auxinput4_interval_s", "auxinput4_interval_h", "auxinput4_interval_d", "auxinput4_interval_y",
                               "auxinput4_begin_s", "auxinput4_begin_m", "auxinput4_begin_h", "auxinput4_begin_d",
                               "auxinput4_begin_y", "auxinput4_interval_m"):
@@ -2140,7 +2154,12 @@ class WrfTranslator:
                         self.error("WRF sst_update = 1 needs auxinput4_interval (minutes).")
                     sections["phys"]["sst_update"] = 1
                     sections["phys"]["auxinput4_interval"] = iv
-                    inname = str(self.get_opt("time_control", "auxinput4_inname", "wrflowinp_d<domain>")).strip("'\"")
+                    # Registry default auxinput4_d<domain>_<date> (one file per time): the model reads one file
+                    inname = str(self.get_opt("time_control", "auxinput4_inname",
+                                              "auxinput4_d<domain>_<date>")).strip("'\"")
+                    if any(t != "<domain>" for t in re.findall(r"<[^>]*>", inname)):
+                        self.error(f"WRF auxinput4_inname = '{inname}': only <domain> is supported in the file name "
+                                   "(set auxinput4_inname = 'wrflowinp_d<domain>' as real.exe's output).")
                     if inname != "wrflowinp_d<domain>":
                         sections["real"]["wrflowinp"] = inname.replace("<domain>", "01")
                     # each nest reads its wrflowinp_d0N every auxinput4_interval(id) (set_timekeeping_alarms: a
@@ -2486,8 +2505,16 @@ class WrfTranslator:
                 sections.setdefault("phys", {})["ishallow"] = 1
 
         # check_a_mundo: cu_diag = 1 needs a Grell scheme (GF, G3, GD) or KF-CuP on that domain (fatal otherwise);
-        # with those schemes it is set to 1 whatever the namelist says
-        for d, cu_diag in enumerate(self.get_opt_list("physics", "cu_diag")[:max(1, self._max_dom)]):
+        # with those schemes it is set to 1 whatever the namelist says. Before that check
+        # (module_check_a_mundo.F:2198-2211) a domain with cu_rad_feedback gets cu_diag = 1 if domain 1's cu_physics
+        # is GF, G3 or GD, else 0
+        cu_diags = list(self.get_opt_list("physics", "cu_diag")[:max(1, self._max_dom)])
+        cu_diags += [0] * (max(1, self._max_dom) - len(cu_diags))
+        cu1 = self.get_dom_opt("physics", "cu_physics", 0, 0)
+        for d in range(len(cu_diags)):
+            if self.get_dom_opt("physics", "cu_rad_feedback", d, False, fallback_d0=False) is True:
+                cu_diags[d] = 1 if cu1 in (3, 5, 93) else 0
+        for d, cu_diag in enumerate(cu_diags):
             if cu_diag == 1 and self.get_dom_opt("physics", "cu_physics", d, 0) not in (3, 5):
                 self.error(f"WRF cu_diag = 1 on domain {d + 1} requires Grell-Freitas or Grell-3D cumulus "
                            "(cu_physics = 3 or 5); wrf.exe stops.")
@@ -2674,7 +2701,10 @@ class WrfTranslator:
                 if ts[0] != 0:
                     ph["topo_shading"] = ts[0]
                     if self.has_opt("physics", "shadlen"):
-                        ph["shadlen"] = float(self.get_opt("physics", "shadlen", 25000.))
+                        shadlen = float(self.get_opt("physics", "shadlen", 25000.))
+                        if not shadlen > 0.0:  # the model refuses it too (suite.cpp)
+                            self.error(f"WRF shadlen = {shadlen} with topo_shading = 1 is not supported (> 0 only).")
+                        ph["shadlen"] = shadlen
 
         for unsup_key, desc in UNSUPPORTED_DYNAMICS_SWITCHES.items():
             if self.has_opt("dynamics", unsup_key):
@@ -2750,7 +2780,8 @@ class WrfTranslator:
 
         if self.has_opt("bdy_control", "spec_bdy_width"):
             spec_bdy = self.get_opt("bdy_control", "spec_bdy_width", 5)
-            if case_name == "real" and max_dom == 1 and spec_bdy != 5:
+            # (nests too: domain 1 reads its wrfbdy_d01 with 5 points, real_case.cpp, lateral_bc.cpp)
+            if case_name == "real" and spec_bdy != 5:
                 self.error(f"WRF spec_bdy_width = {spec_bdy} is not supported; CPPWRF requires spec_bdy_width = 5.")
         # lbc_fcx_gcx (dyn_em/module_bc_em.F:1320): CPPWRF's relaxation weights assume spec_exp = 0
         spec_exp = self.get_opt("bdy_control", "spec_exp", 0.0)
@@ -2970,8 +3001,10 @@ class WrfTranslator:
                                        f"reaches within 2 cells of parent domain d{parent_id:02d}'s edge (ny={p_ny}).")
 
                 if self.has_opt("domains", "e_vert"):
-                    c_ev = self.get_dom_opt("domains", "e_vert", d, None, fallback_d0=False)
-                    p_ev = self.get_dom_opt("domains", "e_vert", p_idx, None, fallback_d0=False)
+                    # a domain without an entry has the Registry default 31 (check_a_mundo compares those too)
+                    c_ev = self.get_dom_opt("domains", "e_vert", d, REGISTRY_DEFAULTS["e_vert"][1], fallback_d0=False)
+                    p_ev = self.get_dom_opt("domains", "e_vert", p_idx, REGISTRY_DEFAULTS["e_vert"][1],
+                                            fallback_d0=False)
                     if c_ev is not None and p_ev is not None and c_ev != p_ev:
                         self.error(f"Domain {tag}: e_vert = {c_ev} must match parent domain e_vert = {p_ev}.")
 
@@ -3088,7 +3121,8 @@ class WrfTranslator:
                     if self.has_opt("dynamics", nml_k):
                         v_d = self.get_dom_opt("dynamics", nml_k, d, None)
                         v_0 = self.get_dom_opt("dynamics", nml_k, 0, None)
-                        if ini_k in SUPPORTED_OPTIONS and v_d is not None and v_d not in SUPPORTED_OPTIONS[ini_k] and not (ini_k == "km_opt" and v_d == 0):
+                        if ini_k in SUPPORTED_OPTIONS and v_d is not None and v_d not in SUPPORTED_OPTIONS[ini_k] and not (
+                                ini_k == "km_opt" and v_d == 0 and self.get_dom_opt("dynamics", "diff_opt", d, 0) == 0):
                             self.error(f"Domain {tag}: WRF {nml_k} = {v_d} is not supported.")
                         elif ini_k in ("moist_adv_opt", "scalar_adv_opt", "tke_adv_opt") and v_d not in ADV_OPTS:
                             self.error(f"Domain {tag}: WRF {nml_k} = {v_d} is not supported; {ADV_OPTS_TEXT}")
@@ -3132,6 +3166,21 @@ class WrfTranslator:
 
         self.translate_fdda(sections, max_dom, has_physics_suite, case_name)
         self.check_input_intervals(sections, max_dom)
+
+        # s_we / s_sn / s_vert set WRF's domain start index (ids = s_we, frame/module_domain.F); a real case reads
+        # its dimensions from wrfinput (start index 1)
+        if case_name == "real":
+            for k in ("s_we", "s_sn", "s_vert"):
+                if any(v not in (1, None) for v in self.get_opt_list("domains", k)[:max(1, self._max_dom)]):
+                    self.error(f"WRF {k} other than 1 is not supported for real-data runs.")
+
+        # check_a_mundo (wrf_tsin_exist): a file named tslist in wrf.exe's directory turns the time series on
+        # (process_time_series; the *.TS / *.UU ... files and max_ts_locs, ts_buf_size, ...): not ported
+        for ts_dir in {d for d in (self.real_dir, os.path.dirname(self.namelist_path) if self.namelist_path else None)
+                       if d}:
+            if os.path.isfile(os.path.join(ts_dir, "tslist")):
+                self.error(f"A tslist file in {ts_dir}: WRF's time series output (process_time_series) is not "
+                           "supported by CPPWRF.")
 
         # 15. Check for unused / ignored options
         wrf_groups = {g for g, _ in WRF_NAMELIST_OPTIONS}  # a group WRF does not read is not checked (WRF skips it)

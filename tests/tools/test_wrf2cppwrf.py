@@ -1610,6 +1610,57 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, _ = self.translate(self.NEST + "&physics cu_physics = 5, 5, ra_sw_physics = 2*1, cu_rad_feedback = .true. /\n")
         self.assertTrue(any("Dudhia shortwave" in e for e in t.errors), t.errors)
 
+    def test_values_wrf_runs_differently(self):
+        """Values the translator accepted while wrf.exe runs (or stops) otherwise."""
+        def errs(text):
+            t, _ = self.translate(text)
+            return " ".join(t.errors)
+        real = "&domains time_step = 60 /\n&bdy_control specified = .true. /\n"
+        # use_theta_m: only 1 (2 mixes the == 1 and /= 0 tests of the dycore)
+        self.assertIn("use_theta_m = 2", errs(real + "&dynamics use_theta_m = 2 /\n"))
+        # km_opt = 0 with diffusion: calculate_km_kh's CASE DEFAULT stops wrf.exe
+        self.assertIn("km_opt = 0", errs(real + "&dynamics diff_opt = 1, km_opt = 0 /\n"))
+        self.assertNotIn("km_opt", errs(real + "&dynamics diff_opt = 0, km_opt = 0 /\n"))
+        self.assertIn("km_opt = 0", errs(self.NEST + "&dynamics diff_opt = 1, 1, km_opt = 4, 0 /\n"))
+        # wif_input_opt = 2 adds QNBCA / QNBCA2D whatever mp_physics; 1 has no effect without mp_physics 28
+        self.assertIn("wif_input_opt = 2", errs(real.replace("/\n", ", wif_input_opt = 2 /\n", 1) + "&physics mp_physics = 6 /\n"))
+        self.assertIn("wif_input_opt = 3", errs(real.replace("/\n", ", wif_input_opt = 3 /\n", 1) + "&physics mp_physics = 6 /\n"))
+        self.assertEqual(errs(real.replace("/\n", ", wif_input_opt = 1 /\n", 1) + "&physics mp_physics = 6 /\n"), "")
+        # spec_bdy_width other than 5: refused with nests too (d01 reads a 5-point wrfbdy)
+        self.assertIn("spec_bdy_width = 7", errs(self.NEST.replace(".false. /", ".false., spec_bdy_width = 7 /")))
+        # check_a_mundo: cu_rad_feedback gives cu_diag = 1 on every such domain when d01 runs GF / G3 / GD
+        self.assertIn("cu_diag = 1 on domain 2", errs(
+            self.NEST + "&physics cu_physics = 3, 0, cu_rad_feedback = .true., .true., sf_sfclay_physics = 1, 1,"
+            " sf_surface_physics = 2, 2, bl_pbl_physics = 1, 1 /\n"))
+        # a nest without an e_vert entry has the Registry default 31
+        nest_ev = self.NEST.replace("e_vert = 45, 45,", "e_vert = 45,")
+        self.assertIn("e_vert = 31 must match parent domain e_vert = 45", errs(nest_ev))
+        # the domain start index of a real case
+        self.assertIn("s_we other than 1", errs(real.replace("/\n", ", s_we = 2 /\n", 1)))
+        # sst_update: NetCDF wrflowinp with a name of <domain> only (Registry default auxinput4_d<domain>_<date>)
+        sst = real + "&physics sst_update = 1, sf_surface_physics = 2 /\n"
+        self.assertIn("auxinput4_inname", errs(sst + "&time_control io_form_auxinput4 = 2, auxinput4_interval = 360 /\n"))
+        self.assertIn("io_form_auxinput4 = 1", errs(
+            sst + "&time_control io_form_auxinput4 = 1, auxinput4_interval = 360,"
+            " auxinput4_inname = 'wrflowinp_d<domain>' /\n"))
+        self.assertNotIn("auxinput4", errs(
+            sst + "&time_control io_form_auxinput4 = 2, auxinput4_interval = 360,"
+            " auxinput4_inname = 'wrflowinp_d<domain>' /\n"))
+
+    def test_tslist_in_run_dir(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as d:
+            nml = os.path.join(d, "namelist.input")
+            with open(nml, "w") as f:
+                f.write(complete("&domains time_step = 60 /\n&bdy_control specified = .true. /\n"))
+            t = WrfTranslator(parse_namelist(open(nml).read()), namelist_path=nml)
+            t.translate()
+            self.assertFalse(any("tslist" in e for e in t.errors), t.errors)
+            open(os.path.join(d, "tslist"), "w").close()
+            t = WrfTranslator(parse_namelist(open(nml).read()), namelist_path=nml)
+            t.translate()
+            self.assertTrue(any("tslist" in e for e in t.errors), t.errors)
+
     def test_mskf_and_unported_kf_variants(self):
         # cu_physics = 11 (multi-scale Kain-Fritsch) is ported; 10 (KF-CuP) and 99 (old Kain-Fritsch) are not
         t, sec = self.translate(self.NEST + "&physics cu_physics = 11, 11, kfeta_trigger = 3 /\n")
@@ -1623,12 +1674,15 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, _ = self.translate(self.NEST + "&physics cu_physics = 11, 11, kf_edrates = 1, 1 /\n")
         self.assertTrue(any("kf_edrates" in e for e in t.errors), t.errors)
         # check_a_mundo: MSKF on any domain sets icloud = 1 for every domain (a nest without cumulus included)
+        # (the nest keeps column physics: a parent with it and a nest without is refused)
         t, sec = self.translate(self.NEST + "&physics cu_physics = 11, 0, icloud = 0, ra_lw_physics = 4, 4,"
-                                " ra_sw_physics = 4, 4 /\n")
+                                " ra_sw_physics = 4, 4, sf_sfclay_physics = 1, 1, sf_surface_physics = 2, 2,"
+                                " bl_pbl_physics = 1, 1 /\n")
         self.assertEqual(t.errors, [])
         self.assertTrue(all("icloud" not in v for v in sec.values() if isinstance(v, dict)), sec)
         t, sec = self.translate(self.NEST + "&physics cu_physics = 1, 0, icloud = 0, ra_lw_physics = 4, 4,"
-                                " ra_sw_physics = 4, 4 /\n")
+                                " ra_sw_physics = 4, 4, sf_sfclay_physics = 1, 1, sf_surface_physics = 2, 2,"
+                                " bl_pbl_physics = 1, 1 /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["icloud"], 0)
         t, _ = self.translate(self.NEST + "&physics cu_physics = 10, 10 /\n")
@@ -1967,7 +2021,8 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         tm = cfg["time"]
         self.assertTrue(tm["adaptive"])
         self.assertEqual((tm["target_cfl"], tm["max_time_step"], tm["step_to_output_time"]), (1.1, 90, False))
-        self.assertEqual((tm["history_interval_s"], tm["interval_seconds"]), (600, 21600))
+        # interval_seconds: the Registry default 10800 (real_case checks it against the wrfbdy interval)
+        self.assertEqual((tm["history_interval_s"], tm["interval_seconds"]), (600, 10800))
         self.assertNotIn("target_hcfl", tm)
         for nl, err in (("&domains time_step = 60, use_adaptive_time_step = .true. /\n&physics sst_update = 1 /",
                          "sst_update"),):

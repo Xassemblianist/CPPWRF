@@ -466,7 +466,6 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `use_tavg_for_tsk` | real.exe only |
 | `use_trop_level` | real.exe only |
 | `v_sca_adv_order` | Scalar vertical advection order (equal to v_mom_adv_order on every domain in CPPWRF) |
-| `wif_input_opt` | aerosol-aware microphysics (mp_physics = 28) only |
 | `write_hist_at_0h_rst` | restart runs only |
 | `xwavenum` | spectral nudging (grid_fdda = 2) only |
 | `ywavenum` | spectral nudging (grid_fdda = 2) only |
