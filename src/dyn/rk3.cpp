@@ -160,7 +160,10 @@ void RK3::step(State& s, Tendencies& t, const BaseState& b) {
   if (bc_) {  // spec_bdy_final: exact boundary values at t + dt
     bc_->final(s, b);
     // WRF (serial) does not refresh any halo after spec_bdy_final: until the next refresh the halos
-    // keep the values from before it (read e.g. by calc_cq for q and by calc_ww_cp for mu_2)
+    // keep the values from before it (read e.g. by calc_cq for q and by calc_ww_cp for mu_2).
+    // A decomposed run: the boundary values the neighbours own (solve_em's HALO_EM_MOIST_E / SCALAR_E /
+    // TRACER_E after spec_bdy_final; the advection of the next step reads them across the patch's edge)
+    tile::exchange(s.q_2);
     small_->ss.calc_p_rho_phi_interior(s, b, bc_->spec_zone());  // solve_em after spec_bdy_final
   }
   // solve_em: "reset surface w for consistency" (kinematic condition from the new u, v)
