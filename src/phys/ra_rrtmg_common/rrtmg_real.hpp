@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// RRTMG's arithmetic type (src/phys/ra_rrtmg_lw, ra_rrtmg_sw, ra_rrtmg_common, the radiation driver, Dudhia SW).
-// CUDA FP32 builds: float, as RRTMG's rb in WRF real*4; the FP64 rate of most GPUs is 1/32 to 1/64 of the FP32 rate,
-// and RRTMG in double dominated the FP32 step with radt = 1 (CHANGELOG, Performance). CPU builds and FP64
-// builds: double, the same code as with double written out (rr(x) is x).
+// RRTMG's arithmetic type (src/phys/ra_rrtmg_lw, ra_rrtmg_sw, ra_rrtmg_common, the radiation driver, Dudhia SW):
+// the model's real, as RRTMG's rb in WRF (parkind: kind_rb = kind(1.0), the native real): float in the FP32 builds
+// (WRF real*4, CPU and CUDA alike), double in the FP64 builds (rr(x) is x).
 #include "core/precision.hpp"
 namespace cppwrf::phys {
-#if defined(CPPWRF_USE_CUDA)
 using rr = ::cppwrf::real;
-#else
-using rr = double;
-#endif
 }  // namespace cppwrf::phys

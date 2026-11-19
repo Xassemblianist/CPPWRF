@@ -267,43 +267,36 @@ CPPWRF_HD inline float exp(float a, int, int) {
   return std::exp(a);
 #endif
 }
-#if defined(CPPWRF_USE_CUDA)
-// CUDA builds: float overloads, so that a float argument is not promoted to the double function (FP64 at 1/32 to 1/64
-// of the FP32 rate in GPU FP32 runs; WRF real*4 calls the single-precision function). On the host they round the
-// double result. CPU builds keep the double functions for float arguments (CPU FP32 results unchanged).
-CPPWRF_HD inline float atan(float a, int i, int n) {
+// float overloads (reached only in the FP32 builds), so that a float argument is not promoted to the double function:
+// WRF real*4 calls the single-precision function (atanf, sinf, cosf, log10f), on the CPU and the GPU alike.
+CPPWRF_HD inline float atan(float a, int, int) {
 #if defined(__CUDA_ARCH__)
-  (void)i; (void)n;
   return atanf(a);
 #else
-  return static_cast<float>(atan(static_cast<double>(a), i, n));
+  return std::atan(a);
 #endif
 }
-CPPWRF_HD inline float sin(float a, int i, int n) {
+CPPWRF_HD inline float sin(float a, int, int) {
 #if defined(__CUDA_ARCH__)
-  (void)i; (void)n;
   return sinf(a);
 #else
-  return static_cast<float>(sin(static_cast<double>(a), i, n));
+  return std::sin(a);
 #endif
 }
-CPPWRF_HD inline float cos(float a, int i, int n) {
+CPPWRF_HD inline float cos(float a, int, int) {
 #if defined(__CUDA_ARCH__)
-  (void)i; (void)n;
   return cosf(a);
 #else
-  return static_cast<float>(cos(static_cast<double>(a), i, n));
+  return std::cos(a);
 #endif
 }
-CPPWRF_HD inline float log10(float a, int i, int n) {
+CPPWRF_HD inline float log10(float a, int, int) {
 #if defined(__CUDA_ARCH__)
-  (void)i; (void)n;
   return log10f(a);
 #else
-  return static_cast<float>(log10(static_cast<double>(a), i, n));
+  return std::log10(a);
 #endif
 }
-#endif
 }  // namespace cppwrf::vm
 
 namespace cppwrf {

@@ -16,14 +16,10 @@
 
 namespace cppwrf::nest {
 
-// The arithmetic type of the device-side SINT interpolation (the View kernels below and nest_bdy.hpp's slab
-// kernels): the model's real in CUDA builds (float in FP32, as WRF real*4's REAL in share/sint.F; double would run at
-// 1/32 to 1/64 of the FP32 rate), double in CPU builds (the code as before). In FP64 builds both are double.
-#if defined(CPPWRF_USE_CUDA)
+// The arithmetic type of the SINT interpolation (the View kernels below and nest_bdy.hpp's slab kernels): the
+// model's real, as WRF's REAL in share/sint.F (float in the FP32 builds, WRF real*4, CPU and CUDA alike; double in
+// the FP64 builds).
 using nreal = ::cppwrf::real;
-#else
-using nreal = double;
-#endif
 
 CPPWRF_HD inline double sint_max(double a, double b) { return fmax(a, b); }
 CPPWRF_HD inline double sint_min(double a, double b) { return fmin(a, b); }

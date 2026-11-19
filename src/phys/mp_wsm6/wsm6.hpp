@@ -14,16 +14,11 @@ namespace cppwrf::phys::wsm6 {
 
 constexpr int kMaxLevels = 128;
 
-// The type of the floating literals of the per-step code: Real in CUDA builds (float in FP32: WRF real*4's
-// default-kind literals; an unsuffixed C++ literal is double and would turn the arithmetic into FP64), double in
-// CPU builds (the code as before, so CPU FP32 results are unchanged). In FP64 builds both are double.
-#if defined(CPPWRF_USE_CUDA)
+// The type of the floating literals of the per-step code: Real (float in the FP32 builds: WRF real*4's default-kind
+// literals, CPU and CUDA alike; an unsuffixed C++ literal is double and would turn the arithmetic into FP64; double
+// in the FP64 builds).
 template <typename Real>
 using wlit = Real;
-#else
-template <typename Real>
-using wlit = double;
-#endif
 
 template <typename Real>
 inline Real rgmma_calc(Real x) {
