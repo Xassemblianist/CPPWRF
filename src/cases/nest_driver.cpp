@@ -37,6 +37,34 @@ std::string make_dom_tag(int dom_id) {
   return std::string(buf);
 }
 
+// The scalars of a parent and its nest that WRF's nest functions pair: the generated nest_forcedown / feedbackup
+// code loops over the moist, scalar and tracer 4D arrays by index, the same on both domains (check_a_mundo and
+// module_configure give every domain the same packages). WRF's tke_2 is a 3D state array without nest functions,
+// not one of these scalars; CPPWRF's tke scalar exists on a domain with km_opt = 2 only (a nest may have another
+// km_opt than its parent), so the pairs are by name without it: (parent index, nest index).
+std::vector<std::pair<int, int>> nest_scalar_pairs(const dyn::State& p, const dyn::State& c) {
+  std::vector<int> pi, ci;
+  for (int s = 0; s < p.n_scalars(); ++s)
+    if (s != p.P_TKE) pi.push_back(s);
+  for (int s = 0; s < c.n_scalars(); ++s)
+    if (s != c.P_TKE) ci.push_back(s);
+  bool same = pi.size() == ci.size();
+  for (std::size_t n = 0; same && n < pi.size(); ++n)
+    same = p.q_names[std::size_t(pi[n])] == c.q_names[std::size_t(ci[n])];
+  if (!same) {
+    auto list = [](const dyn::State& st, const std::vector<int>& ix) {
+      std::string r;
+      for (int s : ix) r += (r.empty() ? "" : ",") + st.q_names[std::size_t(s)];
+      return r;
+    };
+    throw std::runtime_error("a nest's moist species / scalars (" + list(c, ci) + ") differ from its parent's (" +
+                             list(p, pi) + "): WRF runs the same packages on every domain");
+  }
+  std::vector<std::pair<int, int>> r;
+  for (std::size_t n = 0; n < pi.size(); ++n) r.emplace_back(pi[n], ci[n]);
+  return r;
+}
+
 #ifdef CPPWRF_HAVE_NETCDF
 struct BaseParams {
   double t00, p00, a, tiso, a_strat, p_strat;
@@ -605,13 +633,11 @@ void med_nest_force(Model& parent, Model& child, const NestDomainSpec& child_spe
       const nest::WholeField<2> P(parent.st->mu_2, pbox);  // the nest's mu_2: exchanged before the coupling
       nest::force_nest_bdy_field2(lbc, dyn::LateralBC::MU, P, child.st->mu_2, cg.nx, cg.ny, ipos, jpos, nri, nrj, cdt);
     }
-    const int n_scalars = std::min(parent.st->n_scalars(), child.st->n_scalars());
-    for (int s = 0; s < n_scalars; ++s) {
-      // Registry: tke has no f (force) flag - the nest keeps flow-dependent boundaries for it (solve_em)
-      if (s == child.st->P_TKE) continue;
-      nest::exchange_field(child.st->q_2[s]);
-      const nest::WholeField<3> P(parent.st->q_2[s], pbox);
-      nest::force_nest_bdy_scalar_field3(lbc, s, P, child.st->q_2[s], cg.nx, cg.ny, cg.nz, ipos, jpos, nri, nrj, cdt);
+    // Registry: tke has no f (force) flag - the nest keeps flow-dependent boundaries for it (solve_em)
+    for (const auto& [ps, cs] : nest_scalar_pairs(*parent.st, *child.st)) {
+      nest::exchange_field(child.st->q_2[cs]);
+      const nest::WholeField<3> P(parent.st->q_2[ps], pbox);
+      nest::force_nest_bdy_scalar_field3(lbc, cs, P, child.st->q_2[cs], cg.nx, cg.ny, cg.nz, ipos, jpos, nri, nrj, cdt);
     }
   }
   lbc.dtbc = 0.0;
@@ -678,11 +704,8 @@ void med_nest_feedback(Model& parent, const Model& child, const NestDomainSpec& 
   nest::feedback_field3(pg, parent.st->t_2, W3(child.st->t_2), n_nx, n_ny, n_nz, ipos, jpos, nri, nrj, false, false, sm, 1, scratch);
   nest::feedback_field2(pg, parent.st->mu_2, W2(child.st->mu_2), n_nx, n_ny, ipos, jpos, nri, nrj, sm, 1, scratch);
 
-  const int n_scalars = std::min(parent.st->n_scalars(), child.st->n_scalars());
-  for (int s = 0; s < n_scalars; ++s) {
-    if (s == parent.st->P_TKE) continue;  // tke is not fed back (Registry: no u flag)
-    nest::feedback_field3(pg, parent.st->q_2[s], W3(child.st->q_2[s]), n_nx, n_ny, n_nz, ipos, jpos, nri, nrj, false, false, sm, 1, scratch);
-  }
+  for (const auto& [ps, cs] : nest_scalar_pairs(*parent.st, *child.st))  // tke is not fed back (Registry: no u flag)
+    nest::feedback_field3(pg, parent.st->q_2[ps], W3(child.st->q_2[cs]), n_nx, n_ny, n_nz, ipos, jpos, nri, nrj, false, false, sm, 1, scratch);
 
   // Base-state fields fed back in inc/nest_feedbackup_interp.inc; inc/nest_feedbackup_smooth.inc smooths them
   // and ht as well (map factors, f, e, sina, cosa are fed back without smoothing)
