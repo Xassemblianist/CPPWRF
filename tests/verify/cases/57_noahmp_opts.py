@@ -124,6 +124,11 @@ CASES += [
     ("real_x4_fp32_1h", "cuda", "configs/real_nmp4_r8.ini", [f"real.dir={_X4}"] + _1H, f"{_X4}/wrfout_d01_{_D}", 3600,
      {"U": 3e-3, "W": 5e-2, "THM": 3e-5, "QV": 3e-3}),
 ]
+# CUDA FP64 twins (tolerance 0) of the CPU cases of every option that had no CUDA FP64 case (all but X4, X4DV2 and
+# NRUN7), not the restarted ones: the same configuration, overrides (suite.slow included), reference and variables
+_HAS = {c[0].split("_fp64_cuda")[0] for c in CASES if c[1] == "cuda_dp"}
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and not c[0].endswith("_rst") and c[0].split("_fp64_cpu")[0] not in _HAS]
 
 STATUS = [
     ('N* (37 runs)', 'NMP1 with one Noah-MP option changed (dveg 1-3/5-9, opt_crs 2, opt_btr 2/3, opt_runsrf/sub 1/2/4/6/7 '
