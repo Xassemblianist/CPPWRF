@@ -43,6 +43,9 @@ CASES += [
      ["real.dir=" + _run, "run.run_time=600", "output.out_interval=10", "output.diag_interval=10"],
      f"{_run}/wrfout_d01_{_D}", 600, _T6),
 ]
+# CUDA FP64 twins (tolerance 0) of D6C's CPU cases: the same configuration, reference and variables, kind cuda_dp
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].startswith("real_p4d6c_")]
 
 STATUS = [
     ('D6', 'P4 with WDM6 (mp_physics 16) instead of WSM6; restarted at 30 min', '1 h'),
