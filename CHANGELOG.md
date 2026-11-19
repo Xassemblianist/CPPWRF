@@ -1,7 +1,9 @@
 # Changelog
 
 All notable changes of CPPWRF. Versions follow [Semantic Versioning](https://semver.org/): a change of the results of
-a verified configuration, of a configuration key or of an output file is a new major version.
+a verified configuration, of a configuration key or of an output file is a new major version. CPPWRF's native
+restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
+resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
@@ -19,7 +21,8 @@ a verified configuration, of a configuration key or of an output file is a new m
   RRTMG: icloud_cu = 2 and icloud = 1 as check_a_mundo sets them), the momentum transport MSKF_CMT (RUCUTEN /
   RVCUTEN, staggered with add_a2c_u / add_a2c_v), cudt; aercu_opt = 0 and kf_edrates = 0 only. Column driver
   tests/phys/cu_mskf against WRF's MSKF_CPS; suite cases M4 (also restarted at 30 min), M4C5, M9 and the nest M3N
-  against WRF real*8. KF-CuP (10) and the old Kain-Fritsch (99) are rejected by tools/wrf2cppwrf.py and the model.
+  against WRF real*8. Tier: verified (CPU FP64 and CUDA FP64 at tolerance 0). KF-CuP (10) and the old Kain-Fritsch
+  (99) are rejected by tools/wrf2cppwrf.py and the model.
 - Monotonic and WENO advection: `moist_adv_opt` / `scalar_adv_opt` / `tke_adv_opt` 2 (WRF's advect_scalar_mono, the
   Smolarkiewicz flux limiter after rk_update_scalar_pd), 3 (advect_scalar_weno; theta also takes the WENO fluxes on
   the last RK stage) and 4 (advect_scalar_wenopd), and `momentum_adv_opt` 3 (advect_weno_u / _v / _w), all on the
@@ -36,7 +39,8 @@ a verified configuration, of a configuration key or of an output file is a new m
   real-data model as `[phys] mp_physics = 18` (the translator maps WRF's 17 and 18 with the default nssl_* options to
   it): QHAIL, QNDROP, QNHAIL, QNCCN, QVGRAUPEL, QVHAIL, HAILNC / HAILNCV (also Noah-MP's MP_HAIL), REFL_10CM, the
   effective radii to RRTMG, the cumulus tendencies of the rain / snow / ice / cloud water, one row per thread over
-  WRF's tile i-range. Suite cases 48_nssl (N18, N17, N18V). 19, 21, 22, non-default nssl_* options, nests, the ideal
+  WRF's tile i-range. Tier: verified (suite cases 48_nssl: N18, N17, N18V against WRF real*8 of the -r8
+  -fdefault-double-8 build, CPU FP64 at tolerance 0; the CUDA cases await the G4 run). 19, 21, 22, non-default nssl_* options, nests, the ideal
   cases and a decomposition in x stay errors.
 - Grell-3D ensemble cumulus (cu_physics = 5, WRF's module_cu_g3.F): G3DRV with the 3 x 3 neighbours' vertical
   motion and advective forcing (ens4 = 9), CUP_enss_3d with its closure ensemble (maxens 3, maxens2 3, maxens3 16),
@@ -116,6 +120,41 @@ a verified configuration, of a configuration key or of an output file is a new m
   3 steps and 1 h against WRF real*8 (CPU FP64 and CUDA FP64 at tolerance 0); column driver tests/phys/sf_urban
   (WRF's urban_param_init and urban of the -r8 build, 9000 point-steps per table, tolerance 0). BEP / BEP+BEM (2, 3), slucm_distributed_drag, NUDAPT morphology, the other
   table options, nests, restarts and cppwrf_real's urban input stay errors.
+- Domain decomposition with divided memory, and MPI (docs/MPI.md, USER_GUIDE section 7): a domain and its nests run
+  as P x Q patches, each worker holding its patch and a halo of 3 points under the domain's indices. The workers
+  are tiles (`run.tiles`, as before, now also with nests) or MPI ranks: a build with `-DCPPWRF_MPI=ON` (off by
+  default) under `mpirun -np N`, layout `run.ranks = PxQ` / `CPPWRF_RANKS` (default the most square with P <= Q),
+  `CPPWRF_RANK_DEVICES` for the GPUs of a CUDA build. One worker writes every output file. The result has the same
+  bits for every worker count and layout (CPU FP64 = one-process WRF real*8): proved on one machine for 1 to 8
+  ranks in 13 layouts on eight cases, 53 suite cases in three layouts, and up to 48 ranks against the one-process
+  run; not run on several GPUs or nodes. A real-data start reads only the worker's window of wrfinput's 3-D
+  variables. Results without tiles and outside `mpirun` are unchanged.
+- tools/colab/colab_mpi.sh (suite cases under `mpirun` with several layouts on a Colab runtime, CPU and GPU, each
+  against the WRF references and byte for byte against one rank) and tools/bench/colab_bench.sh `--scaling` (strong
+  scaling next to WRF real*8 dmpar).
+- Skin SST (`sst_skin = 1`) and deep soil temperature update (`tmn_update = 1`, `lagday`) as WRF's
+  module_sf_sstskin.F, module_sf_tmnupdate.F and their surface_driver calls, with the Noah LSM: SSTSK / DTW and TYR,
+  TYRA, TDLY, TLAG, NYEAR, NDAY in the restart files (tmn_update resumes from wrfrst files only). Tier: verified
+  (suite cases SKV, SKU, SKN against WRF real*8, SKV also restarted at 3 h against WRF's run restarted there). The
+  other land surface models, `lagday = 1` and the adaptive time step stay errors.
+- Drop-in `wrf.exe` and `real.exe`: `cppwrf-wrf`, `cppwrf-realexe` and `cppwrf-check` run in a WRF run directory and
+  write WRF's file names there, with rsl logs, WRF's timing lines and SUCCESS COMPLETE; `output.wrf_dir`,
+  `output.wrf_timing`, `restart.native` and `cppwrf --version` for them; suite cases dropin_*. With `restart =
+  .true.`, `override_restart_timers` and `write_hist_at_0h_rst` stop with an error (WRF's resumed alarms with them
+  are not ported).
+- Install and packaging: `cmake --install` (bin/cppwrf-<flavour>, share/cppwrf data, tools, python, verify, docs),
+  the data directory found from the binary (`CPPWRF_DATA_DIR` overrides), CPack tarballs per flavour and CUDA
+  architectures, Docker and Apptainer recipes, a Spack recipe, tools/release/make_release.sh.
+- Python package `cppwrf` (python/, docs/PYTHON.md): namelists (read, write, translate through tools/wrf2cppwrf.py,
+  check), runs (start, progress from the rsl log, cancel, wait, typed errors), `open_wrfout` (xarray or numpy) and
+  diagnostics (T2 in C, 10 m wind, wrf-python's slp, precipitation with buckets).
+- User tools (docs/TOOLS.md): `cppwrf-compare` (two sets of WRF output files with the suite's comparison),
+  `cppwrf-bench` (an em_quarter_ss benchmark per installed mode), `cppwrf-fit` (memory and time of a namelist from
+  the bench results), bash completion.
+- User documentation: docs/INSTALL.md, QUICKSTART.md, MIGRATING_FROM_WRF.md (option tables generated from the
+  translator, ctest docs_options_current), FAQ.md, Turkish KURULUM.md and HIZLI_BASLANGIC.md; examples/quickstart
+  through cppwrf-realexe and cppwrf-wrf; examples/selftest with the FP64 value hash.
+- Repository files: issue and pull request templates, CONTRIBUTING, SECURITY and the Code of Conduct.
 
 ### Fixed
 - The restart alarm of a run resumed from a restart file (WRF's or CPPWRF's own) with a restart interval that is not
@@ -138,6 +177,17 @@ a verified configuration, of a configuration key or of an output file is a new m
   by parent_time_step_ratio). New suite cases P4D16 (30 h, dt 16 s, radt 10 min) and N3D50 (N3 with d01 dt 50 s,
   nest dt 50/3 s), CPU and CUDA FP64 at tolerance 0 (data port_af1_data.tar). Results of the suite's earlier cases
   are unchanged.
+- Acoustic step count with `time_step_sound = 0`: computed in REAL as solve_em does, so in float in the FP32 build,
+  as in WRF real*4 (dx 10 km, dt 67 s: 6 steps, not 4); FP64 results unchanged (tests/unit/test_sound_steps.cpp).
+- FP32 builds: WSM6, the nest interpolation (SINT, boundary slabs) and the vm math functions compute in float in
+  CUDA builds, and MYNN-EDMF's DOUBLE PRECISION locals stay double, as in WRF real*4. FP64 and CPU builds unchanged.
+- RRTMG LW / SW with WSM3: WRF's "MP option 3" hydrometeor split (no F_QI, not warm_rain) on the host and CUDA
+  paths.
+- The whole CUDA build compiles with CUDA 12.4 (real_case's namelist / input checks without a range-for over a braced
+  list).
+- Python test fixtures and the self-test read the Times characters with numpy 2.3.
+- The translator names CAM radiation (`ra_lw_physics` / `ra_sw_physics = 3`, module_ra_cam.F not ported) in its
+  error.
 
 ### Performance
 - RRTMG LW / SW (and the radiation driver's RRTMG paths, Dudhia SW) compute in single precision in CUDA FP32 builds:
@@ -157,23 +207,10 @@ a verified configuration, of a configuration key or of an output file is a new m
 - tools/colab/colab_run.sh `--base REV` (both builds in one session: times, memory, kernel times, outputs byte for
   byte) and `--device-mib N` (the runs see N MiB of free device memory).
 
-### Added
-- Domain decomposition with divided memory, and MPI (docs/MPI.md, USER_GUIDE section 7): a domain and its nests run
-  as P x Q patches, each worker holding its patch and a halo of 3 points under the domain's indices. The workers
-  are tiles (`run.tiles`, as before, now also with nests) or MPI ranks: a build with `-DCPPWRF_MPI=ON` (off by
-  default) under `mpirun -np N`, layout `run.ranks = PxQ` / `CPPWRF_RANKS` (default the most square with P <= Q),
-  `CPPWRF_RANK_DEVICES` for the GPUs of a CUDA build. One worker writes every output file. The result has the same
-  bits for every worker count and layout (CPU FP64 = one-process WRF real*8): proved on one machine for 1 to 8
-  ranks in 13 layouts on eight cases, 53 suite cases in three layouts, and up to 48 ranks against the one-process
-  run; not run on several GPUs or nodes. A real-data start reads only the worker's window of wrfinput's 3-D
-  variables. Results without tiles and outside `mpirun` are unchanged.
-- tools/colab/colab_mpi.sh (suite cases under `mpirun` with several layouts on a Colab runtime, CPU and GPU, each
-  against the WRF references and byte for byte against one rank) and tools/bench/colab_bench.sh `--scaling` (strong
-  scaling next to WRF real*8 dmpar).
-
 ### Changed
 - Tiles no longer write `output.dir.tileN` copies: tile 0 writes the run's files from gathered fields.
 - An MPI run prints the peak host memory of the writer, of the largest other rank and of all ranks.
+
 ### Verification
 - New suite cases against WRF v4.8.0 real*8 (tests/verify/cases/69_coverage.py, data port_cov1_data.tar and
   port_cov1b_data.tar; 3 steps and 1 h on the CPU, 1 h on the GPU, every variable at tolerance 0) for option values

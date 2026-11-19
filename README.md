@@ -10,9 +10,10 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** All 122 CUDA FP64 runs of the suite match WRF and the CPU build at
-  tolerance 0. They were checked on the Colab G4 (RTX PRO 6000 Blackwell, sm_120) at main a37a639, and earlier subsets on L4
-  (sm_89) and A100 (sm_80).
+- **GPU, FP64: bit-identical to WRF too.** The suite has 134 CUDA FP64 runs at main 1d21532; they are compared with
+  WRF and the CPU build at tolerance 0. The G4 proof for v1.1 is pending: the last full run, all 122 CUDA FP64 runs
+  of main a37a639, matched on the Colab G4 (RTX PRO 6000 Blackwell, sm_120), and earlier subsets on L4 (sm_89) and
+  A100 (sm_80).
 - **GPU, FP32:** the fast mode, compared with WRF by relative L2 error.
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
@@ -39,7 +40,7 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 
 | Area | WRF options |
 |---|---|
-| Dynamics | RK3 split-explicit, adaptive time step, hybrid coordinate, map projections (Lambert, Mercator, polar), terrain; specified, open, periodic and symmetric boundaries; damping, 5th/6th-order advection, positive-definite moisture |
+| Dynamics | RK3 split-explicit, adaptive time step, hybrid coordinate, map projections (Lambert, Mercator, polar), terrain; specified, open, periodic and symmetric boundaries; damping, 5th/6th-order, monotonic and WENO advection, positive-definite moisture |
 | Diffusion | diff_opt 1 and 2; km_opt 1-4 (constant K, Smagorinsky, 1.5-order TKE); 6th-order diffusion |
 | Microphysics | Kessler, WSM3, WSM5, WSM6, WDM5, WDM6, Thompson, aerosol-aware Thompson (mp 28), Morrison two-moment, P3 (one ice category), NSSL 2-moment with hail (mp 18 / 17); radar reflectivity |
 | Cumulus | Kain-Fritsch, multi-scale Kain-Fritsch, Betts-Miller-Janjic, Grell-Freitas-Li, Grell-3D ensemble, Tiedtke, New Tiedtke |
@@ -52,13 +53,15 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 
 WRF's `namelist.input` works as is: `tools/wrf2cppwrf.py` translates it, including `physics_suite`. An option
 without a port is reported as an error and never silently ignored. Still missing: runs on several GPUs or nodes
-(MPI ranks are proved on one machine, docs/MPI.md), moving nests, BEP urban and lake models, and the other schemes listed in [docs/STATUS.md](docs/STATUS.md#not-yet-implemented).
+(MPI ranks are proved on one machine, docs/MPI.md), moving nests, BEP urban and lake models, and the other schemes listed in [docs/STATUS.md](docs/STATUS.md#not-yet-implemented) and in
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md#rejected-options-and-why).
 
 ## How it is verified
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
-- **Model runs against WRF** (`tests/verify/wrf_suite.py`): 259 cases plus 36 restart checks. They cover
+- **Model runs against WRF** (`tests/verify/wrf_suite.py`): 300 CPU FP64 checks (281 cases, 18 restart
+  checks and the Straka check at main 1d21532) and 134 CUDA FP64 runs. They cover
   real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
   at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are
   compared with WRF's in every variable and output time.

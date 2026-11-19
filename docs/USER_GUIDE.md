@@ -44,19 +44,19 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files, for the 259 suite cases (real-data
+  process, in every variable and output time of the wrfout and wrfrst files, for the 300 CPU FP64 checks of the suite at main 1d21532 (real-data
   domains in the mid-latitudes, the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
-- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (122 GPU runs of the suite on the RTX PRO 6000
-  Blackwell, earlier subsets on NVIDIA L4 and A100).
+- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (134 CUDA FP64 runs of the suite at main 1d21532; the G4 proof for v1.1 is pending, the last full
+  run, 122 runs at main a37a639, was on the RTX PRO 6000 Blackwell, earlier subsets on NVIDIA L4 and A100).
 - **GPU, FP32**: the fast mode; its distance from WRF real*8 is that of stock WRF real*4 for most physics suites,
   and in the first hour of single runs with ACM2 / Pleim-Xiu, Morrison or the skin SST up to about twice it, as a
   rounding draw rather than a defect (docs/FP32_ACCURACY.md). Use it for forecasts and
   ensembles on GPUs with slow FP64; use FP64 when the answer must be WRF real*8's (verification, comparisons with
   WRF runs, continuing a WRF run).
 
-Every WRF option is either ported identically or rejected with an error; nothing is silently ignored. Not ported:
-MPI runs (CPPWRF runs on one node: OpenMP threads or one GPU), moving nests, ndown.exe, I/O forms other than NetCDF,
+Every WRF option is either ported identically or rejected with an error; nothing is silently ignored. Not proved:
+runs on several GPUs or several nodes (MPI ranks and tiles are proved on one machine, docs/MPI.md). Not ported: moving nests, ndown.exe, I/O forms other than NetCDF,
 and the schemes listed under [Rejected Options and Why](#rejected-options-and-why).
 
 The design (one source for CPU and GPU kernels, the physics driver, the nests) is described in
@@ -447,7 +447,7 @@ an error, never silently:
 | `mp_physics = 50 / 51` with nests, in the ideal cases or with `do_radar_ref = 1` | not ported (TH_OLD / QV_OLD of a nest, REFD_MAX) |
 | `progn = 1`, `do_radar_ref = 1` with `mp_physics = 10`, `mp_physics = 10` in the ideal cases | not ported (prognostic droplet number needs module_mixactivate; Morrison's 10 cm reflectivity is DOUBLE PRECISION, quad in a -r8 WRF) |
 | `cu_physics` other than 0, 1, 2, 3, 5, 6, 11, 16 (93 Grell-Devenyi, 10 KF-CuP and 99 old Kain-Fritsch are not ported); `aercu_opt` > 0 and `kf_edrates` 1 | not ported |
-| `bl_pbl_physics` other than 0, 1, 2, 5, 7, 8 (e.g. Shin-Hong, 11); `shcu_physics` | not ported |
+| `bl_pbl_physics` other than 0, 1, 2, 4, 5, 7, 8 (e.g. Shin-Hong, 11); `shcu_physics` | not ported |
 | `sf_sfclay_physics` 91 and other values; `sf_lake_physics` | not ported |
 | `sf_urban_physics` 2 / 3 (BEP, BEP+BEM), the UCM with another land-surface model than Noah, on nests or with a restart, `slucm_distributed_drag`, `distributed_ahe_opt`, NUDAPT morphology input (HGT_URB2D > 0), URBPARM.TBL options other than the defaults (green roofs, trees, irrigation, anthropogenic heat, CH_SCHEME 1, TS_SCHEME 2, ...); cppwrf_real with urban input | not ported |
 | `sf_sfclay_physics` 7 without ACM2 or Noah, with `fractional_seaice = 1` or `isfflx = 0` | not ported (the Pleim-Xiu surface layer is verified with ACM2 and Noah; its sea-ice wrapper is not ported) |

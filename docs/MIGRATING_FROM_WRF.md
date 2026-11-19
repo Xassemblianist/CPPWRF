@@ -52,13 +52,14 @@ running.
 
 ## What differs
 
-- **Parallelism.** A CPPWRF run is one process: OpenMP threads on the CPU, or one GPU. There is no MPI, so a domain
-  must fit in one machine's memory, or in one GPU's (`cppwrf-fit` estimates it). The CPU result does not depend on
+- **Parallelism.** A CPPWRF process uses OpenMP threads on the CPU, or one GPU. MPI ranks (`-DCPPWRF_MPI=ON`,
+  docs/MPI.md) are proved on one machine only, so a domain must fit in one machine's memory, or in its GPUs'
+  (`cppwrf-fit` estimates it). The CPU result does not depend on
   the thread count.
 - **Options without a port** stop the run at start-up with the option, the value and what is supported. They are:
-  - MPI runs and moving nests;
+  - moving nests;
   - vertical nest refinement, ndown.exe;
-  - the urban and lake models;
+  - the urban models other than the single-layer UCM with Noah, and the lake model;
   - spectral and observation nudging;
   - stochastic physics and chemistry;
   - I/O forms other than NetCDF;
@@ -129,10 +130,10 @@ Each option accepts these values; any other value stops `cppwrf-wrf` (and the tr
 
 | Option | Values CPPWRF runs |
 |---|---|
-| `mp_physics` | 0: None / off; 1: Kessler warm-rain; 3: WSM3 3-class simple ice (column-verified); 4: WSM5 5-class single-moment (column-verified); 6: WSM6 6-class single-moment; 8: Thompson; 10: Morrison two-moment (morr_rimed_ice 0 / 1, constant droplet number: progn = 0); 14: WDM5 5-class double-moment warm rain (ccn_conc); 16: WDM6 6-class double-moment warm rain (hail_opt 0 / 1, ccn_conc); 28: Thompson aerosol-aware (aer_init_opt = 0, wif_input_opt 0 / 1); 17: NSSL 2-moment with hail (as mp_physics = 18 with its defaults); 18: NSSL 2-moment with hail, CCN and graupel / hail volume (WRF's defaults of the nssl_* options); 50: P3, one ice category, constant droplet number; 51: P3, one ice category, predicted droplet number |
-| `sf_sfclay_physics` | 0: None / off; 1: Revised MM5 surface layer (sfclayrev); 2: Eta similarity surface layer (MYJ); 4: QNSE surface layer (with the QNSE PBL; column-verified); 5: MYNN surface layer; 7: Pleim-Xiu surface layer (with the ACM2 PBL and Noah) |
-| `sf_surface_physics` | 0: None / off; 1: 5-layer thermal diffusion land surface (slab); 2: Unified Noah land surface model (4 soil layers); 3: RUC land surface model (6 or 9 soil levels, column-verified); 4: Noah-MP land surface model (v5.1.2, 4 soil layers) |
-| `bl_pbl_physics` | 0: None / off; 1: YSU (Yonsei University) planetary boundary layer; 2: MYJ (Mellor-Yamada-Janjic) planetary boundary layer; 4: QNSE (quasi-normal scale elimination) planetary boundary layer (column-verified; mfshconv 0, 1); 5: MYNN-EDMF planetary boundary layer; 7: ACM2 (Asymmetric Convective Model 2) planetary boundary layer; 8: BouLac (Bougeault-Lacarrere) TKE planetary boundary layer (column-verified, without BEP urban) |
+| `mp_physics` | 0: None / off; 1: Kessler warm-rain; 3: WSM3 3-class simple ice; 4: WSM5 5-class single-moment; 6: WSM6 6-class single-moment; 8: Thompson; 10: Morrison two-moment (morr_rimed_ice 0 / 1, constant droplet number: progn = 0); 14: WDM5 5-class double-moment warm rain (ccn_conc); 16: WDM6 6-class double-moment warm rain (hail_opt 0 / 1, ccn_conc); 28: Thompson aerosol-aware (aer_init_opt = 0, wif_input_opt 0 / 1); 17: NSSL 2-moment with hail (as mp_physics = 18 with its defaults); 18: NSSL 2-moment with hail, CCN and graupel / hail volume (WRF's defaults of the nssl_* options); 50: P3, one ice category, constant droplet number; 51: P3, one ice category, predicted droplet number |
+| `sf_sfclay_physics` | 0: None / off; 1: Revised MM5 surface layer (sfclayrev); 2: Eta similarity surface layer (MYJ); 4: QNSE surface layer (with the QNSE PBL); 5: MYNN surface layer; 7: Pleim-Xiu surface layer (with the ACM2 PBL and Noah) |
+| `sf_surface_physics` | 0: None / off; 1: 5-layer thermal diffusion land surface (slab); 2: Unified Noah land surface model (4 soil layers); 3: RUC land surface model (6 or 9 soil levels); 4: Noah-MP land surface model (v5.1.2, 4 soil layers) |
+| `bl_pbl_physics` | 0: None / off; 1: YSU (Yonsei University) planetary boundary layer; 2: MYJ (Mellor-Yamada-Janjic) planetary boundary layer; 4: QNSE (quasi-normal scale elimination) planetary boundary layer (mfshconv 0, 1); 5: MYNN-EDMF planetary boundary layer; 7: ACM2 (Asymmetric Convective Model 2) planetary boundary layer; 8: BouLac (Bougeault-Lacarrere) TKE planetary boundary layer (without BEP urban) |
 | `cu_physics` | 0: None / off; 1: Kain-Fritsch cumulus parameterization; 2: Betts-Miller-Janjic cumulus parameterization; 3: Grell-Freitas cumulus parameterization; 5: Grell 3D ensemble cumulus parameterization; 6: Tiedtke cumulus parameterization; 11: Multi-scale Kain-Fritsch cumulus parameterization; 16: New Tiedtke cumulus parameterization |
 | `ra_lw_physics` | 0: None / off; 1: RRTM longwave radiation; 4: RRTMG longwave radiation |
 | `ra_sw_physics` | 0: None / off; 1: Dudhia shortwave radiation; 4: RRTMG shortwave radiation |

@@ -6,7 +6,8 @@ Yes, in FP64, for the configurations CPPWRF verifies. `cpu-fp64` and `gpu-fp64` 
 at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must equal NaN, and -0 must differ from
 +0.
 
-- **What was compared.** The verification suite runs 259 cases against WRF:
+- **What was compared.** The verification suite runs 300 CPU FP64 checks against WRF (281 cases, 18 restart checks and the Straka
+  check at main 1d21532), and 134 CUDA FP64 runs:
   - real-data domains in the mid-latitudes, the tropics, the Arctic and the Alps;
   - 24 h and 72 h forecasts;
   - nests, restarts, and WRF's idealized cases;
@@ -24,9 +25,10 @@ at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must
 
 ### Why FP32?
 
-Speed. On the GPU, FP32 is 2 to 3 times faster than FP64, and it needs about 60 % of the memory. On a 359 x 269 x 44
-domain, an hour of forecast steps in 3.0 s in FP32 against 9.6 s in FP64. WRF real*4 on 48 CPU threads takes 24.8 s
-(docs/PERF.md).
+Speed. On the GPU, FP32 is 1.6 to 4 times faster than FP64 in the benchmark of docs/STATUS.md (rerun at main
+c9c95c5, before RRTMG ran in single precision in CUDA FP32), and it needs about 60 % of the memory. On a
+359 x 269 x 44 domain, an hour of forecast steps in 2.50 s in FP32 against 7.52 s in FP64. WRF real*4 at its best
+layout on the same machine (48 hardware threads) takes 25.72 s (docs/STATUS.md, "Performance").
 
 FP32 is not bit-identical to anything. Its difference from WRF real*8 is about the size of the difference between
 WRF's own real*4 and real*8 builds. For U after an hour, that is a relative L2 error of 2e-4 to 8e-4. Most
@@ -58,9 +60,10 @@ On the GPU, the domain has to fit in the GPU's memory. Measured peaks with full 
 | the same with a 120 x 90 x 44 nest | 9.5 GB | 15.4 GB |
 | 359 x 269 x 44 (4.25 M cells) | 20.8 GB | 30.0 GB |
 
-Part of each peak is a fixed stack reserve for the column physics. It is 3 GB (FP32) and 8 GB (FP64) on a 96 GB
-Blackwell card, and it scales with the number of threads the GPU can hold, so a 6 GB card reserves 9 times less.
-Beyond that reserve, large domains take about 4 KB per cell in FP32 and 5 KB in FP64.
+Part of each peak is a stack reserve: CUDA reserves a kernel's local arrays for every thread the GPU can hold, so it
+grows with the GPU (about 3 GB on an RTX PRO 6000, 0.4 GB on an RTX 2060). The large per-column arrays of the column
+physics live in a work buffer of at most 1/8 of the device memory instead (docs/USER_GUIDE.md, "GPU memory").
+Beyond that, large domains take about 4 KB per cell in FP32 and 5 KB in FP64.
 
 `cppwrf-fit namelist.input` estimates the memory and the run time of your namelist on your machine. On the CPU, the
 limit is the machine's RAM. One run is one machine: MPI ranks and tiles are proved on one machine only (docs/MPI.md).
@@ -74,7 +77,7 @@ silently. `physics_suite` and the `-1` options work as in WRF.
 
 ### What is not ported?
 
-- MPI runs (one process: OpenMP threads or one GPU);
+- runs on several GPUs or several nodes (MPI ranks are proved on one machine only, docs/MPI.md);
 - moving nests, vertical nest refinement, ndown.exe;
 - the urban canopy models other than the single-layer UCM (sf_urban_physics = 1 with Noah), and the lake model;
 - the schemes outside the ported list: other microphysics, cumulus, PBL, surface-layer and land-surface schemes,

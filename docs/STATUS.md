@@ -4,16 +4,16 @@ Version 1.0.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
-(259 cases, 9 of them the slow 24 h, 30 h and 72 h runs of `--slow`, and 36 restart checks plus the Straka checks, all passing) and
+(at main 1d21532: 300 CPU FP64 checks, i.e. 281 cases, 18 restart checks and the Straka check, all passing, plus the 9 slow 24 h, 30 h and 72 h runs of `--slow`; 116 CUDA FP64 cases and 18 CUDA FP64 restart checks, 134 runs; 38 CUDA FP32 cases) and
 `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
 
 | Component | WRF options | Tier |
 |---|---|---|
-| Dynamics | RK3 split-explicit, adaptive time step (use_adaptive_time_step, single-domain real-data runs: target_cfl, target_hcfl, max_step_increase_pct, starting / max / min_time_step, step_to_output_time, restarts), hybrid_opt 0/2, hypsometric_opt 1/2, map factors, Coriolis and curvature, terrain, specified (spec_zone 1, relax_zone 4), open, periodic and symmetric lateral boundaries (symmetric: no wind across the walls), w_damping, damp_opt 1, 2 and 3, h_adv_order 5/6, v_adv_order 3/4, positive-definite moisture, scalar and TKE advection (h_adv_order 5 and 6) | verified |
+| Dynamics | RK3 split-explicit, adaptive time step (use_adaptive_time_step, single-domain real-data runs: target_cfl, target_hcfl, max_step_increase_pct, starting / max / min_time_step, step_to_output_time, restarts), hybrid_opt 0/2, hypsometric_opt 1/2, map factors, Coriolis and curvature, terrain, specified (spec_zone 1, relax_zone 4), open, periodic and symmetric lateral boundaries (symmetric: no wind across the walls), w_damping, damp_opt 1, 2 and 3, h_adv_order 5/6, v_adv_order 3/4, positive-definite moisture, scalar and TKE advection (h_adv_order 5 and 6), monotonic (2) and WENO (3, 4) moist / scalar / TKE advection (moist_adv_opt, scalar_adv_opt, tke_adv_opt), WENO momentum advection (momentum_adv_opt 3) | verified |
 | Diffusion | diff_opt 1 with km_opt 1 (constant K), 3 (3-D Smagorinsky) and 4 (2-D Smagorinsky); diff_opt 2 with km_opt 2 (1.5-order TKE, advected TKE); 6th-order diffusion (diff_6th_opt 1, 2) | verified |
-| Microphysics | Kessler (1), WSM6 (6, with effective radii), Thompson (8), Morrison two-moment (10: morr_rimed_ice 0 / 1, progn 0, real data), aerosol-aware Thompson (28: aer_init_opt 0, wif_input_opt 0 / 1; single domain, not with MYNN), P3 with one ice category (50, 51: predicted droplet number; real data, single domain, not with do_radar_ref 1, MYNN or ACM2), NSSL 2-moment with hail, CCN and graupel / hail volume (18 with the default nssl_* options, and 17; real data, single domain), NSSL 2-moment with hail, CCN and graupel / hail volume (18 with the default nssl_* options, and 17; real data, single domain) | verified |
+| Microphysics | Kessler (1), WSM6 (6, with effective radii), Thompson (8), Morrison two-moment (10: morr_rimed_ice 0 / 1, progn 0, real data), aerosol-aware Thompson (28: aer_init_opt 0, wif_input_opt 0 / 1; single domain, not with MYNN), P3 with one ice category (50, 51: predicted droplet number; real data, single domain, not with do_radar_ref 1, MYNN or ACM2), NSSL 2-moment with hail, CCN and graupel / hail volume (18 with the default nssl_* options, and 17; real data, single domain) | verified |
 | Microphysics | WSM3 (3, simple ice: qc and qr hold the ice and the snow below 0 C) and WSM5 (4, with qi and qs), both with the effective radii for RRTMG; real data, not with do_radar_ref 1: module_mp_wsm3.F / module_mp_wsm5.F bit for bit in the column driver tests/phys/mp_wsm35 (wsm3init / wsm5init constants and every output); suite cases W3 / W5 | verified |
 | Microphysics | WDM6 (16, `hail_opt` 0 / 1) and WDM5 (14): double-moment warm rain with the CCN, cloud and rain numbers QNCCN / QNCLOUD / QNRAIN (start_em's ccn_conc fill, the first step's CCN reset, flow_dep_bdy_qnn at the boundaries), the effective radii for RRTMG; real data, one domain, not with do_radar_ref 1: module_mp_wdm6.F / module_mp_wdm5.F bit for bit in the column driver tests/phys/mp_wdm; suite cases D6, D6H, D6C, D5 | verified |
 | Cumulus | Kain-Fritsch (1), multi-scale Kain-Fritsch (11: scale-aware trigger, entrainment and closure, cloud fractions in the radiation, momentum transport RUCUTEN / RVCUTEN; aercu_opt 0, kf_edrates 0; column driver tests/phys/cu_mskf), Grell-Freitas-Li (3, deep and shallow), Tiedtke (6), New Tiedtke (16), Betts-Miller-Janjic (2: deep and shallow convection, CLDEFI, BMJINIT's tables; column driver tests/phys/cu_bmj) with bmj_rad_feedback (its convective clouds in the radiation) | verified |
@@ -146,10 +146,6 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | MYNN | P6 with the MYNN surface layer and the MYNN-EDMF PBL (icloud_bl 1) + RRTMG (radt 10 min) | 1 h |
 | MYNNSF1 / MYNNSF2 | MYNN with the revised MM5 / Eta surface layer instead of the MYNN one | 1 h |
 | MYNNX1 / MYNNX2 | MYNN with non-default MYNN options (X1: tkeadvect, cloudpdf 1, mixlength 2, closure 3.0, edmf_tke 1, mixqt 1, output 1, tke_budget 1, sfcflux land 2 / water 3, grav_settling 2; X2: edmf 0, cloudmix 0, cloudpdf 0, mixlength 0, closure 2.5, ess 0, mixscalars 1, sfcflux land 3 / water 4, grav_settling 1) | 1 h |
-| M4 | P4 with the multi-scale Kain-Fritsch (cu_physics 11) instead of KF; restarted at 30 min | 1 h |
-| M4C5 | M4 with cudt = 5 | 1 h |
-| M9 | P9 (MYJ, no microphysics) with the multi-scale Kain-Fritsch | 1 h |
-| M3N | N3 two-way nest with the multi-scale Kain-Fritsch on both domains | 1 h |
 | P9BMJ | P9 with the Betts-Miller-Janjic cumulus (cu_physics 2; restarted at 30 min; cudt 5) | 1 h |
 | P4BMJ | P4 with BMJ instead of Kain-Fritsch, without and with bmj_rad_feedback | 1 h |
 | BL1 | P1 with the BouLac PBL (bl_pbl_physics 8; restarted at 30 min) | 1 h |
@@ -168,6 +164,15 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | Q4M | Q4 with the EDKF mass flux of the QNSE PBL (mfshconv 1; restarted at 30 min) | 1 h |
 | U4 | P4 with the single-layer urban canopy model (sf_urban_physics 1, URBPARM.TBL) | 1 h |
 | U4L | U4 with use_wudapt_lcz 1 (URBPARM_LCZ.TBL) | 1 h |
+| M4 | P4 with the multi-scale Kain-Fritsch (cu_physics 11) instead of KF; restarted at 30 min | 1 h |
+| M4C5 | M4 with cudt = 5 | 1 h |
+| M9 | P9 (MYJ, no microphysics) with the multi-scale Kain-Fritsch | 1 h |
+| M3N | N3 two-way nest with the multi-scale Kain-Fritsch on both domains | 1 h |
+| T6 | P2 with Tiedtke (cu_physics 6) | 3 h |
+| G2 | P2 with gravity wave drag (gwd_opt 1; ELVMAX = HGT + 3 VAR, WPS 4.6 writes none) | 3 h |
+| F1 / F2 | V2 with fractional sea ice (real.exe with fractional_seaice 1), sfclayrev + YSU / Eta + MYJ | 3 h |
+| D0 / D0V | WRF's default em_real namelist (physics_suite CONUS, fractional sea ice, gwd_opt 1, diff_opt 2 / km_opt 4, w_damping 0) on the P2 / V2 domains, configuration from tools/wrf2cppwrf.py | 6 h |
+| SU1 / SU2 | D0V with sst_update 1 (wrflowinp from real.exe, read every 6 h); SU2: changed sea ice at the start (water/ice transitions) | 7 h / 20 min |
 | MO4 | P4 with monotonic moist / scalar advection (moist_adv_opt 2, scalar_adv_opt 2) | 1 h |
 | MOK4 | P4 with diff_opt 2 / km_opt 2, monotonic moist and TKE advection (moist_adv_opt 2, tke_adv_opt 2) | 1 h |
 | MOMY | MYNN with monotonic moist / scalar advection (qni, qnr, qke_adv) | 1 h |
@@ -178,14 +183,12 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | WK4 | P4 with km_opt 2, WENO moist (3) and positive-definite WENO TKE (tke_adv_opt 4) advection | 1 h |
 | WMY | MYNN with positive-definite WENO moist (4) and WENO scalar (3) advection | 1 h |
 | WN3 | two-way nest N3 with positive-definite WENO moist / scalar and WENO momentum advection | 1 h |
-| T6 | P2 with Tiedtke (cu_physics 6) | 3 h |
-| G2 | P2 with gravity wave drag (gwd_opt 1; ELVMAX = HGT + 3 VAR, WPS 4.6 writes none) | 3 h |
-| F1 / F2 | V2 with fractional sea ice (real.exe with fractional_seaice 1), sfclayrev + YSU / Eta + MYJ | 3 h |
-| D0 / D0V | WRF's default em_real namelist (physics_suite CONUS, fractional sea ice, gwd_opt 1, diff_opt 2 / km_opt 4, w_damping 0) on the P2 / V2 domains, configuration from tools/wrf2cppwrf.py | 6 h |
-| SU1 / SU2 | D0V with sst_update 1 (wrflowinp from real.exe, read every 6 h); SU2: changed sea ice at the start (water/ice transitions) | 7 h / 20 min |
 | SKV | V1 with the skin SST (sst_skin 1, without sst_update) and the deep soil temperature update (tmn_update 1; restarted at 3 h, against WRF's run restarted there) | 6 h |
 | SKU | SU1 (sst_update 1, fractional sea ice) with sst_skin 1 and tmn_update 1 | 7 h |
 | SKN | N3 with sst_skin 1, tmn_update 1 and lagday 5 on both domains (restarted at 30 min) | 1 h |
+| N18 | P4 with NSSL 2-moment (mp_physics 18: hail, CCN, graupel / hail volume) and KF; restarted at 30 min | 1 h |
+| N17 | P4 with WRF mp_physics 17 (= 18 with its defaults) | 3 steps |
+| N18V | V3 (3 km, Noah-MP, no cumulus) with NSSL 2-moment (mp_physics 18) | 30 min |
 | HY1 | P1 with hypsometric_opt 1 (real.exe and wrf.exe) | 1 h |
 | SLAB1 / SLAB4 | P1 / P4 with the 5-layer thermal diffusion land surface (sf_surface_physics 1; inputs from real.exe) | 1 h |
 | NMP1 | P1 with Noah-MP | 1 h |
@@ -243,14 +246,13 @@ tests/phys/libmvec_intel.cpp, whose `_ZGVbN2v_log` / `_ZGVbN2v_log10` are these 
 (on Intel identical to libmvec), so WRF's side gives Intel's bits on AMD too (with libmvec's own log / log10 it
 differed on AMD EPYC by 1 ulp in KF, Noah-MP, the MYNN surface layer and the WSM6 / Thompson reflectivity).
 The full CPU suite therefore runs on the AMD CPU of Colab's G4 runtime (`tools/colab/colab_suite.sh --gpu G4
---any-cpu --jobs 12 --threads 4`: 121 cases, the output files, ideal files, differential and ctest tests in about
-42 min); the Intel L4 runtime (2 h 45 min) and the GCP VMs stay possible.
+--any-cpu --jobs 12 --threads 4`: the CPU suite, the output files, ideal files, differential and ctest tests); the Intel L4 runtime (2 h 45 min) and the GCP VMs stay possible.
 The CPU result does not depend on the OpenMP thread count or on the Intel machine: P4, P6, P8, P9, MYNN,
 P1 with Noah-MP and the two-way nest N3s (1 h, both domains) and em_quarter_ss (30 min) with 1, 16 and 44
 threads are bit-identical to serial WRF on c3 (Sapphire Rapids) and n2 machines (`run.threads` in
 tools/gcp/gcp_matrix.sh). The required build flags are in [USER_GUIDE.md](USER_GUIDE.md#required-flags-and-determinism).
 
-Restarts reproduce an uninterrupted run bit for bit (P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, ACM7, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1, MORR; P1 also in FP32 on the GPU), and a run
+Restarts reproduce an uninterrupted run bit for bit (P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, ACM7, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1, MORR, P3MP; P1 also in FP32 on the GPU), and a run
 resumed from WRF's own wrfrst files continues as WRF does (also the two-way physics nest N3, both domains).
 The restart variants of tests/verify/matrix_restart_io.txt (tools/gcp/gcp_matrix.sh) write restart files in the
 middle of a run and resume both models from WRF's: the wrfrst files of the straight and the resumed runs (data and
@@ -279,8 +281,8 @@ inputs, 30 h, every hourly frame) covers XTIME past one day (days*1440 + seconds
 the first whose coszen depends on it) and N3D50 (N3 with d01 dt 50 s, a nest step of 50/3 s, 1 h) a step that is a
 fraction of a second; both pass at tolerance 0 on the CPU (Colab L4, Intel) and in CUDA FP64 (L4).
 
-CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (122 runs at main a37a639 with the GPU
-restart cases: R1, T1, P1 to P9, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
+CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (134 runs at main 1d21532 with the GPU
+restart cases; the G4 proof for v1.1 is pending, the last full G4 run covered the 122 runs of main a37a639: R1, T1, P1 to P9, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
 D0V, sst_update, hybrid, nest and ideal cases) passes with tolerance 0 (tests/verify/exact.py, every frame and variable of the history) on Colab's
 L4 (sm_89), RTX PRO 6000 Blackwell "G4" (sm_120) and A100 (sm_80); H100 was not available. The FP64 device code
 computes as WRF's gfortran real*8 build on x86-64:
@@ -310,7 +312,7 @@ single-precision runs (relative L2 at 1 h):
 | N1 (1 h) | FP32 vs WRF FP32 | 1.9e-4 (d01), 2.8e-4 (d02) | 3.6e-3 / 4.7e-3 | 6.5e-7 / 9.7e-7 | 2.0e-5 / 3.1e-5 |
 
 On the GPU a run restarted after its first step reproduces the uninterrupted run bit for bit
-(restart_<case>_fp64_cuda for P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, ACM7, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1), and the
+(restart_<case>_fp64_cuda for P1, A01, A05, A05G, P7, P8, P9, NMP1, SLAB1, ACM7, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, T1, MORR, P3MP), and the
 wrfout / wrfrst files of a GPU run (P1, P4, MYNN, N2, also resumed from WRF's wrfrst) have WRF's variables,
 dimensions, attributes, global attributes and times (run_wrf_files_test.sh with CPPWRF_FILES_NO_VALUES=1).
 
@@ -405,10 +407,10 @@ serial compression). Wall times, GPU memory and the details are in docs/PERF.md.
 
 ## Not yet implemented
 
-Milbrandt-Yau (mp_physics 9), NSSL other than mp_physics 18 / 17 with the default nssl_* options (19, 21, 22, nssl_3moment, nssl_hail_on 0, non-default nssl_cccn ... nssl_icdxhl, nssl_ssat_output, &nssl_mp_params, nests, the ideal cases), P3 with two ice categories (52) or three-moment ice (53), P3 with nests, ideal cases or do_radar_ref 1 (REFD_MAX), Morrison with aerosols (mp_physics 40), Morrison's prognostic droplet number (progn 1) and its 10 cm reflectivity (do_radar_ref 1 with mp_physics 10), the Dudhia shortwave with cu_rad_feedback and Grell-Freitas (wrf.exe writes NaN cloud fractions there), the PX land surface (sf_surface_physics 7, pxlsm_* options and PX soil nudging), the Pleim-Xiu surface layer without ACM2 or Noah or with fractional_seaice = 1, sf_sfclay_physics 91, km_opt 5, the MYNN PBL with fractional_seaice = 1, the MYNN options bl_mynn_edmf 2, bl_mynn_edmf_dd, bl_mynn_mixnumcon, bl_mynn_mixaerosols 0, bl_mynn_output 2, other bl_mynn_closure values and the GFS surface-layer forms (sf_mynn_sfcflux_land 4, sf_mynn_sfcflux_water 5), Noah-MP options other than the defaults (and crop/irrigation/
+Milbrandt-Yau (mp_physics 9), WSM7 (24), WDM7 (26), WSM6R (106), WSM3 / WSM5 / WDM5 / WDM6 with do_radar_ref 1, in the ideal cases or (WDM) with nests, KF-CuP (cu_physics 10), Grell-Devenyi (93), the old Kain-Fritsch (99), multi-scale Kain-Fritsch with aercu_opt > 0 or kf_edrates 1, Shin-Hong (bl_pbl_physics 11), shcu_physics, the QNSE surface layer with fractional_seaice = 1, BEP and BEP+BEM (sf_urban_physics 2, 3), the single-layer urban model with a land surface model other than Noah, on nests or with a restart, the lake model (sf_lake_physics), CLM and SSiB (sf_surface_physics 5, 8), the RUC LSM with mosaic_lu / mosaic_soil, fractional_seaice, sst_update, the MYNN surface layer, nests or cppwrf_real input, CAM radiation (ra_lw_physics / ra_sw_physics 3), NSSL other than mp_physics 18 / 17 with the default nssl_* options (19, 21, 22, nssl_3moment, nssl_hail_on 0, non-default nssl_cccn ... nssl_icdxhl, nssl_ssat_output, &nssl_mp_params, nests, the ideal cases), P3 with two ice categories (52) or three-moment ice (53), P3 with nests, ideal cases or do_radar_ref 1 (REFD_MAX), Morrison with aerosols (mp_physics 40), Morrison's prognostic droplet number (progn 1) and its 10 cm reflectivity (do_radar_ref 1 with mp_physics 10), the Dudhia shortwave with cu_rad_feedback and Grell-Freitas (wrf.exe writes NaN cloud fractions there), the PX land surface (sf_surface_physics 7, pxlsm_* options and PX soil nudging), the Pleim-Xiu surface layer without ACM2 or Noah or with fractional_seaice = 1, sf_sfclay_physics 91, km_opt 5, the MYNN PBL with fractional_seaice = 1, the MYNN options bl_mynn_edmf 2, bl_mynn_edmf_dd, bl_mynn_mixnumcon, bl_mynn_mixaerosols 0, bl_mynn_output 2, other bl_mynn_closure values and the GFS surface-layer forms (sf_mynn_sfcflux_land 4, sf_mynn_sfcflux_water 5), Noah-MP options other than the defaults (and crop/irrigation/
 tile drainage), sst_skin and tmn_update with land surface models other than Noah, the adaptive time step with nests, sst_update, sst_skin, tmn_update, grid_fdda or ideal cases, spectral nudging (grid_fdda = 2),
 surface analysis nudging (grid_sfdda, needs OBSGRID's wrfsfdda_d0N), observation nudging (obs_nudge_opt), moving nests, ndown.exe (one-way nesting from a parent run's wrfout), I/O forms other than NetCDF
 (io_form 2) and auxiliary history / input streams other than sst_update's wrflowinp and grid_fdda's wrffdda (WRF writes none by default),
 and runs on several GPUs or several nodes (docs/MPI.md, section 6). Options without a port are rejected by `tools/wrf2cppwrf.py` and by the model with an
-error. Noah-MP with nests is rejected because wrf.exe 4.8.0 aborts with it (heap corruption in the nest run's
+error; docs/USER_GUIDE.md, "Rejected Options and Why", lists each with its reason. Noah-MP with nests is rejected because wrf.exe 4.8.0 aborts with it (heap corruption in the nest run's
 first history output).

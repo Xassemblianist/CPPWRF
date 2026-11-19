@@ -8,7 +8,6 @@ This document specifies the exact mathematical formulations, index conventions, 
 
 All kernels are single-source C++20 / CUDA (`CPPWRF_HD` functions and kernel structs) in `src/nest/`:
 
-- [`nest_types.hpp`](../src/nest/nest_types.hpp): `NestParams` (`i_parent_start`, `j_parent_start`, `parent_grid_ratio`, `parent_time_step_ratio`, `spec_bdy_width`, `smooth_option`, coarse/nest `ids..jde`, `kds..kde`) and `BdySide` (`XS=0`, `XE=1`, `YS=2`, `YE=3`).
 - [`nest_interp.hpp`](../src/nest/nest_interp.hpp): 2D 4-point Smolarkiewicz (`sint` / `sintb` / `interp_fcn_sint`) horizontal interpolation (`share/sint.F`, `share/interp_fcn.F:42`).
 - [`nest_bdy.hpp`](../src/nest/nest_bdy.hpp): Lateral boundary value (`*B`) and tendency (`*BT`) slab filling (`bdy_interp1`, `share/interp_fcn.F:2423`) and `dyn::LateralBC` helpers (`force_nest_lateral_bc`, `force_nest_lateral_bc_scalar`).
 - [`nest_feedback.hpp`](../src/nest/nest_feedback.hpp): Two-way cell-averaging feedback (`copy_fcn`, `share/interp_fcn.F:1397`) for odd and even refinement ratios, plus post-feedback parent smoothers `sm121` (`smooth_option = 1`, 1-2-1 filter) and `smdsm` (`smooth_option = 2`, smoother-desmoother).

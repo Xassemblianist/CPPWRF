@@ -1,4 +1,4 @@
-# Verification tiers of CPPWRF options (docs/STATUS.md "Verification tiers"; docs/PORTING in CONTRIBUTING.md).
+# Verification tiers of CPPWRF options (docs/STATUS.md "Implemented"; CONTRIBUTING.md "Rules for model code").
 #
 # Every option and value WITHOUT a row here is "verified": the whole model's output is identical to WRF v4.8.0's at
 # tolerance 0 (CPU FP64 and CUDA FP64, tests/verify/wrf_suite.py). Every option on main when this table was added
@@ -19,5 +19,5 @@
 #   <tier>         column_verified or unverified
 #   <note>         the scheme and where its column driver is
 #
-# Example (WSM5 ported with a column driver, not yet compared with a whole WRF run):
-#   phys.mp_physics   physics.mp_physics   4   column_verified   WSM5 (tests/phys/mp_wsm5)
+# Example (a scheme ported with a column driver, not yet compared with a whole WRF run; WSM5 itself is verified):
+#   phys.mp_physics   physics.mp_physics   4   column_verified   WSM5 (tests/phys/mp_wsm35)
