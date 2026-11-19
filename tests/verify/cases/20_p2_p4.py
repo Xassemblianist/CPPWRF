@@ -75,5 +75,5 @@ DATA = {
     'real_p4_r8_fp64_cpu': 'v05_files_data.tar,v05_files_links.tar',
     'real_p4_r8_fp64_cpu_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_p4_r8_fp64_cuda_1h': 'suite_data.tar,v05_suite_refs.tar',
-    'real_p4_fp32_1h': '',
+    'real_p4_fp32_1h': 'port_fp32r4_data.tar',
 }

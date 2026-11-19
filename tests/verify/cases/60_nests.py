@@ -72,7 +72,7 @@ STATUS = [
 DATA = {
     'real_n1_r8_fp64_cpu': 'suite_data.tar,v05_files_data.tar',
     'real_n1_r8_fp64_cuda': 'suite_data.tar,v05_files_data.tar',
-    'real_n1_fp32_1h': '',
+    'real_n1_fp32_1h': 'port_fp32r4_data.tar',
     'real_n2_r8_fp64_cpu': 'suite_data.tar,v05_files_data.tar',
     'real_n2_r8_fp64_cpu_1h': 'v05_suite_refs.tar,v05_files_links.tar',
     'real_n2s1_r8_fp64_cpu': 'nest_data.tar,v05_files_data.tar,v05_files_links.tar',
