@@ -314,7 +314,7 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
   // returns at once and spcvmc_sw gets zcldfmc = 0, zomgcmc = 1 (rrtmg_sw), a clear column
   bool any_cloud = false;
   for (int ilev = 0; ilev < nlayers; ++ilev) {
-    if (c.icld != 0 && CSD(v.cldfrac)[ilev] >= rr(1.0e-20)) any_cloud = true;
+    if (c.icld != 0 && RSD(v.cldfrac)[ilev] >= rr(1.0e-20)) any_cloud = true;
   }
 #if defined(__CUDA_ARCH__)
   const bool run_mcica = __any_sync(__activemask(), any_cloud);
@@ -324,8 +324,8 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
   int any_cld_subcol = 0;
   if (run_mcica && any_cloud) {
     KissRng rng;
-    rng.init_from_pressure(CSD(v.pavel)[0] * rr(100.0), CSD(v.pavel)[1] * rr(100.0), CSD(v.pavel)[2] * rr(100.0),
-                           CSD(v.pavel)[3] * rr(100.0));
+    rng.init_from_pressure(RSD(v.pavel)[0] * rr(100.0), RSD(v.pavel)[1] * rr(100.0), RSD(v.pavel)[2] * rr(100.0),
+                           RSD(v.pavel)[3] * rr(100.0));
     rng.permute(1);
     // layer mid-point heights from dz8w (exponential overlaps): the buffer layer above the top gets the top dz
     rr hgt[kMcicaMaxLayers];
@@ -339,7 +339,7 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
       }
       zo_inv = rr(1.0) / mcica_decorr_len(c.idcor, c.juldat, in.xlat);
     }
-    auto cldf_of = [&](int l) { const rr cf = CSD(v.cldfrac)[l]; return cf < rr(1.0e-20) ? rr(0.0) : cf; };
+    auto cldf_of = [&](int l) { const rr cf = RSD(v.cldfrac)[l]; return cf < rr(1.0e-20) ? rr(0.0) : cf; };
     auto alpha_of = [&](int l) {
       if (c.icld == 5 && cldf_of(l) == rr(0.0) && cldf_of(l - 1) > rr(0.0)) return rr(0.0);
       return libm::exp(-(hgt[l] - hgt[l - 1]) * zo_inv);

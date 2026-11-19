@@ -83,6 +83,32 @@ struct CSD2 {
   CPPWRF_FORCEINLINE CSD operator[](int a) const { return CSD{p + std::ptrdiff_t(a) * n * s, s}; }
 };
 
+// Read-only views through ordinary (coherent) loads, for arrays the same kernel launch writes before it reads
+// them: CSD / CSI / CSD2 load through __ldg (ld.global.nc), which is defined only for data no thread writes during
+// the kernel's lifetime (CUDA C++ Programming Guide, __ldg; PTX ISA, ld.global.nc).
+struct RSD {
+  const rr* p;
+  int s;
+  CPPWRF_FORCEINLINE RSD(const rr* p_, int s_) : p(p_), s(s_) {}
+  CPPWRF_FORCEINLINE RSD(SD v) : p(v.p), s(v.s) {}
+  CPPWRF_FORCEINLINE rr operator[](int i) const { return p[std::ptrdiff_t(i) * s]; }
+};
+
+struct RSI {
+  const int* p;
+  int s;
+  CPPWRF_FORCEINLINE RSI(SI v) : p(v.p), s(v.s) {}
+  CPPWRF_FORCEINLINE int operator[](int i) const { return p[std::ptrdiff_t(i) * s]; }
+};
+
+struct RSD2 {
+  const rr* p;
+  int s;
+  int n;
+  CPPWRF_FORCEINLINE RSD2(SD2 v) : p(v.p), s(v.s), n(v.n) {}
+  CPPWRF_FORCEINLINE RSD operator[](int a) const { return RSD{p + std::ptrdiff_t(a) * n * s, s}; }
+};
+
 // view of a local stride-1 array
 CPPWRF_FORCEINLINE SD sd(rr* p) { return SD{p, 1}; }
 

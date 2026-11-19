@@ -380,7 +380,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
   // icld = 0: mcica_subcol_lw returns at once and inatm keeps its zeroed cloud arrays, a clear column
   bool any_cloud = false;
   for (int ilev = 0; ilev < nlayers; ++ilev) {
-    if (c.icld != 0 && CSD(v.cldfrac)[ilev] >= rr(1.0e-20)) any_cloud = true;
+    if (c.icld != 0 && RSD(v.cldfrac)[ilev] >= rr(1.0e-20)) any_cloud = true;
   }
 #if defined(__CUDA_ARCH__)
   const bool run_mcica = __any_sync(__activemask(), any_cloud);
@@ -390,8 +390,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
   std::uint64_t icld_mask_lo = 0, icld_mask_hi = 0;
   if (run_mcica && any_cloud) {
     KissRng rng;
-    rng.init_from_pressure(CSD(v.pavel)[0] * rr(100.0), CSD(v.pavel)[1] * rr(100.0), CSD(v.pavel)[2] * rr(100.0),
-                           CSD(v.pavel)[3] * rr(100.0));
+    rng.init_from_pressure(RSD(v.pavel)[0] * rr(100.0), RSD(v.pavel)[1] * rr(100.0), RSD(v.pavel)[2] * rr(100.0),
+                           RSD(v.pavel)[3] * rr(100.0));
     rng.permute(150);
     // layer mid-point heights from dz8w (exponential overlaps): above the model top the top layer's dz
     rr hgt[kMcicaMaxLayers];
@@ -405,7 +405,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
       }
       zo_inv = rr(1.0) / mcica_decorr_len(c.idcor, c.juldat, in.xlat);
     }
-    auto cldf_of = [&](int l) { const rr cf = CSD(v.cldfrac)[l]; return cf < rr(1.0e-20) ? rr(0.0) : cf; };
+    auto cldf_of = [&](int l) { const rr cf = RSD(v.cldfrac)[l]; return cf < rr(1.0e-20) ? rr(0.0) : cf; };
     auto alpha_of = [&](int l) {
       if (c.icld == 5 && cldf_of(l) == rr(0.0) && cldf_of(l - 1) > rr(0.0)) return rr(0.0);
       return libm::exp(-(hgt[l] - hgt[l - 1]) * zo_inv);

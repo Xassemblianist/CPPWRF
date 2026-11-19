@@ -10,28 +10,29 @@
 
 namespace cppwrf::phys {
 
+// inputs from setcoef_sw in the same kernel (rrtmg_sw_core_prep): coherent loads (RSD / RSI), not __ldg
 CPPWRF_FORCEINLINE void taumol_sw(
     int nlayers,
     int laytrop,
-    CSI jp,
-    CSI jt,
-    CSI jt1,
-    CSD colh2o,
-    CSD colco2,
-    CSD colch4,
-    CSD colo2,
-    CSD colo3,
-    CSD colmol,
-    CSD fac00,
-    CSD fac01,
-    CSD fac10,
-    CSD fac11,
-    CSD selffac,
-    CSD selffrac,
-    CSI indself,
-    CSD forfac,
-    CSD forfrac,
-    CSI indfor,
+    RSI jp,
+    RSI jt,
+    RSI jt1,
+    RSD colh2o,
+    RSD colco2,
+    RSD colch4,
+    RSD colo2,
+    RSD colo3,
+    RSD colmol,
+    RSD fac00,
+    RSD fac01,
+    RSD fac10,
+    RSD fac11,
+    RSD selffac,
+    RSD selffrac,
+    RSI indself,
+    RSD forfac,
+    RSD forfrac,
+    RSI indfor,
     SD2 taug,                 // (nlayers, 112)
     SD2 taur,                 // (nlayers, 112)
     SD sfluxzen,         // (112)
