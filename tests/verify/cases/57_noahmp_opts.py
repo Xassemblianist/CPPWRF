@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Noah-MP v5.1.2 option values (sf_surface_physics = 4, phys/noahmp in WRF 4.8.0) other than the defaults, each
-against its WRF v4.8.0 run (wrfref workflow of Xassemblianist/cppwrf-data, tags a14-n1a/b/c, a14-x4a/b, a14-v3a/b):
+against its WRF v4.8.0 run (wrfref workflow of Xassemblianist/cppwrf-data, tags a14-n1a/b/c, a14-x4a/b/c, a14-v4-0..9):
   N*   NMP1 (P1 column physics + Noah-MP, no radiation or microphysics) with one option changed: 1 h, history every
        10 min (some with wrfrst at 30 min: the *_1h_rst cases restart there), steps/ = 3 steps, history every step;
   X4*  NMP4 = NMP1's inputs with P4's physics (WSM6, Kain-Fritsch, RRTMG with radt 10, diff_opt 1 / km_opt 4):
        X4 1 h (wrfrst at 30 min) and 3 steps, X4L and the option runs 6 h (past sunrise at 03:50 UTC), history
        every hour, X4SNF* 1 h;
   V*   V3 (Alps, 3 km, Thompson, MYJ, Eta, RRTMG; snow, glacier points) with one option changed: 30 min, history
-       every 10 min, steps/ = 3 steps (VB = V3 itself, wrfrst at 15 min).
+       every 15 min, steps/ = 3 steps (VB = V3 itself, wrfrst at 15 min).
 
 CASES: see tests/verify/cases/__init__.py."""
 from cases.common import WR  # noqa: F401
@@ -17,7 +17,7 @@ _T = {"U": 0.0, "V": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0,
       "T2": 0.0, "SMOIS": 0.0, "TSLB": 0.0}
 _1H = ["run.run_time=3600", "output.out_interval=10", "output.diag_interval=10"]
 _6H = ["run.run_time=21600", "output.out_interval=60", "output.diag_interval=60"]
-_30M = ["run.run_time=1800", "output.out_interval=100", "output.diag_interval=100"]  # V3: dt = 18 s
+_30M = ["run.run_time=1800", "output.out_interval=50", "output.diag_interval=50"]  # V3: dt = 18 s, history 900 s
 
 # NAME: the option keys ([phys] of the config); RST: the runs with wrfrst at 30 min (V3: 15 min)
 _N = {f"NDV{v}": {"dveg": v} for v in (1, 2, 3, 5, 6, 7, 8, 9)}
@@ -77,6 +77,10 @@ for _n, _o in _X.items():
     _run = f"{WR}/run_{_n}_r8"
     CASES.append((f"real_{_n.lower()}_r8_fp64_cpu_6h", "cpu_dp", "configs/real_nmp4_r8.ini",
                   [f"real.dir={_run}"] + _opts(_o) + _6H, f"{_run}/wrfout_d01_{_D}", 21600, _TX))
+# the wetland state (FSAT / WSURF) across a restart, with rain
+CASES.append(("real_x4wet1_r8_fp64_cpu_6h_rst", "cpu_dp", "configs/real_nmp4_r8.ini",
+              [f"real.dir={WR}/run_X4WET1_r8"] + _opts(_X["X4WET1"]) + _6H + ["suite.restart_at=10800"],
+              f"{WR}/run_X4WET1_r8/wrfout_d01_{_D}", 21600, _TX))
 for _n, _o in _XS.items():
     _run = f"{WR}/run_{_n}_r8"
     CASES += [
@@ -101,6 +105,12 @@ for _n, _o in _V.items():
         (f"real_{_s}_r8_fp64_cpu_30min", "cpu_dp", "configs/real_v3_r8.ini", [f"real.dir={_run}"] + _opts(_o) + _30M,
          f"{_run}/wrfout_d01_{_D}", 1800, _TV),
     ]
+# the per-merge suite runs these (data: port_a14x / port_a14x2, ~13 GB); the others are suite.slow (wrf_suite.py
+# --slow, or by name): all their tars together are ~45 GB, more than a GitHub runner's disk holds next to the rest
+_PER_MERGE = {"real_x4_r8_fp64_cpu", "real_x4_r8_fp64_cpu_1h", "real_x4_r8_fp64_cpu_1h_rst", "real_x4dv2_r8_fp64_cpu_6h",
+              "real_x4rad1_r8_fp64_cpu_6h", "real_x4run6_r8_fp64_cpu_6h", "real_x4run7_r8_fp64_cpu_6h",
+              "real_x4wet1_r8_fp64_cpu_6h", "real_x4wet1_r8_fp64_cpu_6h_rst"}
+CASES = [c if c[0] in _PER_MERGE else c[:3] + (c[3] + ["suite.slow"],) + c[4:] for c in CASES]
 CASES += [
     # CUDA FP64 (exact) and FP32 (tolerances to be measured on the G4)
     ("real_x4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_nmp4_r8.ini", [f"real.dir={_X4}"] + _1H,
@@ -115,14 +125,14 @@ CASES += [
 ]
 
 STATUS = [
-    ('N* (36 runs)', 'NMP1 with one Noah-MP option changed (dveg 1-3/5-9, opt_crs 2, opt_btr 2/3, opt_runsrf/sub 1/2/4/6/7 '
+    ('N* (37 runs)', 'NMP1 with one Noah-MP option changed (dveg 1-3/5-9, opt_crs 2, opt_btr 2/3, opt_runsrf/sub 1/2/4/6/7 '
      'and 1/2, opt_sfc 2, opt_frz 2, opt_inf 2, opt_rad 1/2, opt_alb 1, opt_tbot 1, opt_stc 2/3, opt_rsf 2-4, '
      'opt_tksno 2-5, opt_compact 1, opt_scf 2, opt_wetland 1, soiltstep 180; 5 restarted at 30 min)', '1 h'),
     ('X4', 'NMP1 inputs with P4 physics (WSM6, KF, RRTMG radt 10) and Noah-MP; restarted at 30 min', '1 h'),
     ('X4L, X4* (23 runs)', 'X4 with dveg 1-3/5-9, opt_crs 2, opt_btr 2/3, opt_rad 1/2, opt_rsf 2/3, opt_sfc 2, '
-     'opt_runsrf/sub 1/2/4/6/7, opt_wetland 1', '6 h'),
+     'opt_runsrf/sub 1/2/4/6/7, opt_wetland 1 (X4WET1 also restarted at 3 h)', '6 h'),
     ('X4SNF* (4 runs)', 'X4 with opt_snf 2-5', '1 h'),
-    ('VB, V* (16 runs)', 'V3 (Alps snow and glacier) with opt_tksno 2-5, opt_compact 1, opt_scf 2, opt_gla 2, opt_alb 1, '
+    ('VB, V* (20 runs)', 'V3 (Alps snow and glacier) with opt_tksno 2-5, opt_compact 1, opt_scf 2, opt_gla 2, opt_alb 1, '
      'opt_stc 2/3, opt_frz 2, opt_inf 2, opt_tbot 1, opt_rsf 4, dveg 2, opt_snf 2-5; VB restarted at 15 min', '30 min'),
 ]
 
@@ -138,7 +148,7 @@ _TAR.update({n: "port_a14n3_data.tar" for n in ("NSTC2", "NSTC3", "NRSF2", "NRSF
 def _data(c):
     run = c[4].split("/run_")[1].split("_r8/")[0]
     if run.startswith("V"):
-        return "suite_data.tar,port_a14v_data.tar,v05_files_links.tar"
+        return "suite_data.tar,port_a14v2_data.tar,v05_files_links.tar"
     if run.startswith(("X4RUN", "X4WET")):
         return "suite_data.tar,port_a14x2_data.tar"
     return "suite_data.tar," + _TAR.get(run, "port_a14x_data.tar")

@@ -194,6 +194,11 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | NMP1 | P1 with Noah-MP | 1 h |
 | RUC4 | P4 with the RUC LSM (sf_surface_physics 3, 9 levels) instead of Noah; restarted at 30 min | 1 h |
 | RUC4J | RUC4 with MYJSFC + MYJ PBL and 6 soil levels; restarted at 30 min | 1 h |
+| N* (37 runs) | NMP1 with one Noah-MP option changed (dveg 1-3/5-9, opt_crs 2, opt_btr 2/3, opt_runsrf/sub 1/2/4/6/7 and 1/2, opt_sfc 2, opt_frz 2, opt_inf 2, opt_rad 1/2, opt_alb 1, opt_tbot 1, opt_stc 2/3, opt_rsf 2-4, opt_tksno 2-5, opt_compact 1, opt_scf 2, opt_wetland 1, soiltstep 180; 5 restarted at 30 min) | 1 h |
+| X4 | NMP1 inputs with P4 physics (WSM6, KF, RRTMG radt 10) and Noah-MP; restarted at 30 min | 1 h |
+| X4L, X4* (23 runs) | X4 with dveg 1-3/5-9, opt_crs 2, opt_btr 2/3, opt_rad 1/2, opt_rsf 2/3, opt_sfc 2, opt_runsrf/sub 1/2/4/6/7, opt_wetland 1 (X4WET1 also restarted at 3 h) | 6 h |
+| X4SNF* (4 runs) | X4 with opt_snf 2-5 | 1 h |
+| VB, V* (20 runs) | V3 (Alps snow and glacier) with opt_tksno 2-5, opt_compact 1, opt_scf 2, opt_gla 2, opt_alb 1, opt_stc 2/3, opt_frz 2, opt_inf 2, opt_tbot 1, opt_rsf 4, dveg 2, opt_snf 2-5; VB restarted at 15 min | 30 min |
 | N1 | one-way nest (both domains) | 3 parent steps |
 | N2 | two-way nest (both domains) | 1 h |
 | N2S1 / N2S2 | N2 with smooth_option 1 / 2 (smoothing of the fed-back fields, ht included) | 1 h |
