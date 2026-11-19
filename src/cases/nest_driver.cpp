@@ -752,6 +752,38 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       throw std::runtime_error(sp.tag + ": phys.mp_physics = " + std::to_string(mp) + " (P3) with nests is not ported");
     if (mp == 18)  // NSSL: the scalars' nest interpolation and feedback with the hail species are not proven
       throw std::runtime_error(sp.tag + ": phys.mp_physics = 18 (NSSL) with nests is not ported");
+    // aerosol-aware Thompson: the nest's QNWFA2D / QNIFA2D (Registry "d" / "u") are not interpolated / fed back
+    if (mp == 28)
+      throw std::runtime_error(sp.tag + ": phys.mp_physics = 28 (aerosol-aware Thompson) with nests is not supported");
+    // the UCM's and the terrain options' nest fields (tr_urb2d..., utype_urb2d; start_em's CTOPO / CTOPO2 from
+    // topo_wind, which the reset to 1 after the initial feedback assumes 0) are not ported; WRF gives every domain
+    // the innermost domain's sf_urban_physics (check_a_mundo)
+    if (sp.cfg.get_int("phys.sf_urban_physics", 0) != 0)
+      throw std::runtime_error(sp.tag + ": phys.sf_urban_physics with nests is not supported");
+    if (sp.cfg.get_int("phys.topo_wind", 0) != 0 || sp.cfg.get_int("phys.slope_rad", 0) != 0 ||
+        sp.cfg.get_int("phys.topo_shading", 0) != 0)
+      throw std::runtime_error(sp.tag + ": phys.topo_wind / slope_rad / topo_shading with nests are not supported");
+  }
+  // module_configure.F / module_check_a_mundo.F: every domain runs one mp_physics (WRF takes the innermost
+  // domain's), sf_surface_physics, sf_sfclay_physics, ra_lw_physics and ra_sw_physics; a nest's cu_physics and
+  // bl_pbl_physics are domain 1's or 0 (CPPWRF: bl_pbl_physics domain 1's only). The nest functions pair the
+  // fields of the same packages on both domains (nest_scalar_pairs, WrfHistory::feedback_physics).
+  for (const NestDomainSpec& sp : specs) {
+    const io::Config& c1 = specs[0].cfg;
+    for (const char* k : {"phys.mp_physics", "phys.sf_surface_physics", "phys.sf_sfclay_physics", "phys.ra_lw_physics",
+                          "phys.ra_sw_physics", "phys.bl_pbl_physics"})
+      if (sp.cfg.get_int(k, 0) != c1.get_int(k, 0))
+        throw std::runtime_error(sp.tag + ": " + k + " = " + std::to_string(sp.cfg.get_int(k, 0)) + " differs from d01's " +
+                                 std::to_string(c1.get_int(k, 0)) + " (WRF runs one value on every domain)");
+    const long cu = sp.cfg.get_int("phys.cu_physics", 0);
+    if (cu != 0 && cu != c1.get_int("phys.cu_physics", 0))
+      throw std::runtime_error(sp.tag + ": phys.cu_physics must be d01's or 0 (check_a_mundo)");
+    // a parent with column physics for its cumulus scheme alone and a nest without (cu_physics = N, 0 and no surface
+    // layer, LSM or PBL): WRF feeds the nest's state arrays RAINC, TSK, XLAND, ... back (every domain allocates
+    // them); CPPWRF's nest without column physics does not carry them
+    if (sp.parent_id > 0 && wants_column_physics(sp.cfg) != wants_column_physics(specs[sp.parent_id - 1].cfg))
+      throw std::runtime_error(sp.tag + ": a nest without column physics under a parent with column physics (cu_physics "
+                               "on the parent only, no surface layer, LSM or PBL) is not supported");
   }
 
   struct DomInstance {
@@ -776,6 +808,17 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   // first step, before its t = 0 output). Deeper nests open at their parent's first step (open_children below).
   for (int i = 0; i < max_dom; ++i) {
     doms[i].model = Model::build(doms[i].spec.cfg);
+  }
+  for (int i = 1; i < max_dom; ++i) {
+    const DomInstance& p = doms[doms[i].spec.parent_id - 1];
+    // a nest whose wrfinput starts later (WRF: nests_to_open opens it at its start_* time) is not ported: every nest
+    // opens at its parent's first step
+    if (!p.model.start_date.empty() && !doms[i].model.start_date.empty() &&
+        p.model.start_date.substr(0, 19) != doms[i].model.start_date.substr(0, 19))
+      throw std::runtime_error(doms[i].spec.tag + ": wrfinput_" + doms[i].spec.tag + " starts at " +
+                               doms[i].model.start_date + ", its parent at " + p.model.start_date +
+                               ": a nest's delayed start (start_* per domain) is not ported");
+    nest_scalar_pairs(*p.model.st, *doms[i].model.st);  // the same moist species and scalars (throws)
   }
   // A resumed run opens every nest before the restart files are read (they overwrite the initial state).
   const bool resumed = !root_cfg.get_string("run.restart_file", "").empty();

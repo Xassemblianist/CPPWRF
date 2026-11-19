@@ -1637,10 +1637,16 @@ class TestWrfNamelistSemantics(unittest.TestCase):
 
     def test_cu_physics_on_a_nest(self):
         # check_a_mundo: a nest's cu_physics is domain 1's or 0
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 1, 0 /\n")
+        sfc = "sf_sfclay_physics = 1, 1, bl_pbl_physics = 1, 1, "
+        t, _ = self.translate(self.NEST + f"&physics {sfc}cu_physics = 1, 0 /\n")
         self.assertEqual(t.errors, [])
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 0, 1 /\n")
+        t, _ = self.translate(self.NEST + f"&physics {sfc}cu_physics = 0, 1 /\n")
         self.assertTrue(any("cu_physics must be equal" in e for e in t.errors), t.errors)
+        # the cumulus scheme alone on the parent: the nest has no column physics, whose state arrays WRF feeds back
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 1, 0 /\n")
+        self.assertTrue(any("no surface layer, LSM or PBL" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics cu_physics = 1, 1 /\n")
+        self.assertEqual(t.errors, [])
 
     def test_options_wrf_needs(self):
         self.assertEqual(self.errors(self.FULL), [])
