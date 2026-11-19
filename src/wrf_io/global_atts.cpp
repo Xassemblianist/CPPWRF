@@ -169,8 +169,12 @@ void write_global_atts(NcOut& nc, const WrfConfig& c, const DomainAtts& d, Strea
   i("MAP_PROJ", mp);
   nc.att("MAP_PROJ_CHAR", std::string(mp == 0 ? "Cartesian" : mp == 1 ? "Lambert Conformal" : mp == 2 ? "Polar Stereographic"
                                      : mp == 3 ? "Mercator" : mp == 6 ? "Cylindrical Equidistant" : "unknown"));
-  std::string mminlu = d.mminlu.substr(0, 4) == "USGS" ? std::string("USGS") : d.mminlu;
-  nc.att("MMINLU", d.ideal ? std::string() : mminlu.empty() || mminlu[0] == ' ' ? std::string("    ") : mminlu);
+  // output_wrf.F:965-973: 'USGS' for USGS*, "    " for a blank first character, else TRIM(mminlu); input_wrf.F:630 blanks
+  // from a NUL on; ext_ncd_put_dom_ti_char writes len_trim(Data) characters (wrf_io.F90:1906), "    " none
+  std::string mminlu = d.mminlu.substr(0, d.mminlu.find('\0'));
+  if (mminlu.substr(0, 4) == "USGS") mminlu = "USGS";
+  while (!mminlu.empty() && mminlu.back() == ' ') mminlu.pop_back();
+  nc.att("MMINLU", d.ideal || mminlu.empty() || mminlu[0] == ' ' ? std::string() : mminlu);
   i("NUM_LAND_CAT", d.num_land_cat); i("ISWATER", d.iswater); i("ISLAKE", d.islake);
   i("ISICE", d.isice); i("ISURBAN", d.isurban); i("ISOILWATER", d.isoilwater);
   ci("HYBRID_OPT", "hybrid_opt"); r("ETAC", c.integer("hybrid_opt") == 0 ? 0.0 : c.num("etac"));
