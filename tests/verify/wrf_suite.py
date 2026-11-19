@@ -48,12 +48,12 @@ SPECIAL = (["straka_wrf", "straka_wrf_cuda", "restart_p1_fp32_cuda"] + [f"restar
            + [f"restart_{t}_fp64_cuda" for t, _, _ in RESTARTS])
 
 
-def run(binary, cfg, sets, out):
+def run(binary, cfg, sets, out, extra_env=None):
     shutil.rmtree(out, ignore_errors=True)
     cmd = [binary, os.path.join(REPO, cfg), "--set", f"output.dir={out}"]
     for s in sets:
         cmd += ["--set", s]
-    env = dict(os.environ, OMP_NUM_THREADS=os.environ.get("OMP_NUM_THREADS", "3"))
+    env = dict(os.environ, OMP_NUM_THREADS=os.environ.get("OMP_NUM_THREADS", "3"), **(extra_env or {}))
     r = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
 
@@ -401,13 +401,19 @@ def chain_first_step(b, cfg, common, resumed, mid, out):
         [f"run.run_time={mid + dt:g}", f"restart.interval={mid:g}", "output.out_interval=100000"]
     name = f"restart_{round(mid / dt) + 1:06d}.nc"
     ref = os.path.join(out, "x_straight1")
-    rc, log = run(b, cfg, one, ref)
+    dumps = {"straight": os.path.join(out, "dump_straight")}
+    os.makedirs(dumps["straight"], exist_ok=True)
+    rc, log = run(b, cfg, one, ref, {"CPPWRF_VM_DUMP": dumps["straight"],
+                                     "CPPWRF_VM_DUMP_STEP": str(round(mid / dt) + 1)})
     if rc != 0 or not os.path.exists(os.path.join(ref, name)):
         return [f"first step: straight run failed: {log[-200:]}"]
     res = []
     for what, _, f in resumed:
         d = os.path.join(out, f"x_{what}1")
-        rc, log = run(b, cfg, one + [f"run.restart_file={f}"], d)
+        dumps[what] = os.path.join(out, f"dump_{what}")
+        os.makedirs(dumps[what], exist_ok=True)
+        rc, log = run(b, cfg, one + [f"run.restart_file={f}"], d,
+                      {"CPPWRF_VM_DUMP": dumps[what], "CPPWRF_VM_DUMP_STEP": "1"})
         if rc != 0 or not os.path.exists(os.path.join(d, name)):
             res.append(f"first step: {what} run failed: {log[-200:]}")
             continue
@@ -424,7 +430,75 @@ def chain_first_step(b, cfg, common, resumed, mid, out):
                 dif.append(f"{v}[{bad_at.shape[0]} pts, idx {tuple(int(a) for a in lo)}..{tuple(int(a) for a in hi)} "
                            f"of {x.shape}, max|d| {float(np.nanmax(np.abs(x - y))):.1e}]")
         res.append(f"first step after {mid:g}s ({what}): {' '.join(dif) if dif else 'identical'}")
+        res += [f"stage dumps ({what}): {x}" for x in compare_dumps(dumps["straight"], dumps[what])]
     return res
+
+
+def compare_dumps(a, b):
+    """The CPPWRF_VM_DUMP files (core/vm_dump.hpp) of two runs, in the order the first run wrote them: for each file
+    whose arrays differ, the arrays (by position) with their differing points ((i, j, k) ranges; raw dumps include
+    the halos)."""
+    import numpy as np
+
+    def arrays(path):
+        buf, out, p = open(path, "rb").read(), [], 0
+        raw = os.path.basename(path).startswith("vm_raw")
+        while p < len(buf):
+            if raw and len(buf) - p >= 52:
+                wi0, wi1, wj0, wj1, nz = np.frombuffer(buf, np.int32, 5, p)
+                sj, sk, off, tot = np.frombuffer(buf, np.int64, 4, p + 20)
+                v = np.frombuffer(buf, np.float64, int(tot), p + 52)
+                p += 52 + 8 * int(tot)
+                out.append(("raw", (int(wi0), int(wi1), int(wj0), int(wj1), int(nz), int(sj), int(sk), int(off)), v))
+            elif not raw and len(buf) - p >= 12:
+                nx, ny, nz = np.frombuffer(buf, np.int32, 3, p)
+                n = int(nx) * int(ny) * int(nz)
+                if n <= 0 or p + 12 + 8 * n > len(buf):
+                    out.append(("tail", None, np.frombuffer(buf[p:], np.uint8)))
+                    break
+                out.append(("log", (int(nx), int(ny), int(nz)), np.frombuffer(buf, np.float64, n, p + 12)))
+                p += 12 + 8 * n
+            else:
+                out.append(("tail", None, np.frombuffer(buf[p:], np.uint8)))
+                break
+        return out
+
+    def where(kind, shape, idx):
+        if kind == "log":  # j, k, i order
+            nx, ny, nz = shape
+            j, r = divmod(idx, nz * nx)
+            k, i = divmod(r, nx)
+            return np.stack([i, j, k], 1)
+        if kind == "raw":
+            wi0, wi1, wj0, wj1, nz, sj, sk, off = shape
+            pts = [(i, j, k) for k in range(nz) for j in range(wj0, wj1) for i in range(wi0, wi1)]
+            m = {off + i + j * sj + k * sk: (i, j, k) for i, j, k in pts}
+            return np.array([m.get(int(q), (99999, 99999, 99999)) for q in idx])
+        return np.stack([idx, idx, idx], 1)
+
+    res = []
+    files = sorted(glob.glob(os.path.join(a, "*.bin")), key=lambda f: os.stat(f).st_mtime_ns)
+    for fa in files:
+        fb = os.path.join(b, os.path.basename(fa))
+        if not os.path.exists(fb):
+            res.append(f"{os.path.basename(fa)}: missing")
+            continue
+        A, B = arrays(fa), arrays(fb)
+        d = []
+        for n, ((ka, sa, xa), (kb, sb, xb)) in enumerate(zip(A, B)):
+            if sa != sb or xa.shape != xb.shape:
+                d.append(f"#{n} shape {sa} vs {sb}")
+                continue
+            bad = np.flatnonzero(~((xa == xb) | (np.isnan(xa) & np.isnan(xb))))
+            if bad.size:
+                w = where(ka, sa, bad)
+                d.append(f"#{n}[{bad.size} pts i {w[:, 0].min()}..{w[:, 0].max()} j {w[:, 1].min()}..{w[:, 1].max()} "
+                         f"k {w[:, 2].min()}..{w[:, 2].max()} max|d| {float(np.nanmax(np.abs(xa[bad] - xb[bad]))):.1e}]")
+        if len(A) != len(B):
+            d.append(f"{len(A)} vs {len(B)} arrays")
+        if d:
+            res.append(f"{os.path.basename(fa)}: {' '.join(d)}")
+    return res or ["identical"]
 
 
 def compare(wrfout, out, t):

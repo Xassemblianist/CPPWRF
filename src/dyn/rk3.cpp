@@ -92,6 +92,19 @@ void RK3::step(State& s, Tendencies& t, const BaseState& b) {
   scalars_.reserve(s.n_scalars());  // work fields (first step only; not inside the step's graphs)
   StepScope graph(this);  // CUDA: the step as graphs (the same launches in the same order)
   if (bc_) bc_->advance_time(g_.dt);  // solve_em: dtbc = dtbc + dt
+  vmdump::on() = vm_step_ == vm_dump_step();
+  {  // debug: the whole state (halos too) at the start of the dumped step
+    std::vector<const Field3*> f3 = {&s.u_1, &s.u_2, &s.v_1, &s.v_2, &s.w_1, &s.w_2, &s.t_1, &s.t_2, &s.ph_1, &s.ph_2,
+                                     &s.p, &s.al, &s.ww, &s.ww_m, &s.php, &s.alt, &s.ru, &s.rv, &s.ru_m, &s.rv_m,
+                                     &s.h_diabatic};
+    for (int n = 0; n < s.n_scalars(); ++n) { f3.push_back(&s.q_1[n]); f3.push_back(&s.q_2[n]); }
+    if (std::FILE* f = vmdump::open("vm_raw_start", 0)) {
+      for (const Field3* x : f3) vmdump::write_raw(f, *x);
+      for (const Field2* x : {&s.mu_1, &s.mu_2, &s.muu, &s.muv, &s.mut, &s.muts}) vmdump::write_raw(f, *x);
+      std::fclose(f);
+    }
+  }
+  vmdump::on() = false;
   // time-t state (WRF small_step_prep, rk_step == 1)
   s.u_1.copy_from(s.u_2); s.v_1.copy_from(s.v_2); s.w_1.copy_from(s.w_2);
   s.t_1.copy_from(s.t_2); s.ph_1.copy_from(s.ph_2); s.mu_1.copy_from(s.mu_2);
@@ -123,7 +136,7 @@ void RK3::step(State& s, Tendencies& t, const BaseState& b) {
     if (rk == 1 && bc_ && vmdump::on()) {  // debug: boundary slabs (values, tendencies) of T and U, all sides
       if (std::FILE* f = vmdump::open("vm_bdy", 0)) {
         auto* bc = const_cast<LateralBC*>(bc_);
-        for (LateralBC::Var v : {LateralBC::T, LateralBC::U})
+        for (LateralBC::Var v : {LateralBC::T, LateralBC::U, LateralBC::V, LateralBC::PH, LateralBC::MU})
           for (int sd = 0; sd < 4; ++sd)
             for (bool tend : {false, true}) {
               const auto side = LateralBC::Side(sd);
@@ -142,6 +155,8 @@ void RK3::step(State& s, Tendencies& t, const BaseState& b) {
     vmdump::dump("vm_tend_rk", rk, {&t.ru_tend, &t.rv_tend, &t.rw_tend, &t.ph_tend, &t.t_tend, &s.ru, &s.rv, &s.php, &s.alt, &s.ww}, {&s.muu, &s.mut});
     small_->ss.run_stage(s, t, b, real(dt_rk), real(dts_rk), ns, rk);
     scalars_.run_stage(s, t, b, rk, real(dt_rk));
+    vmdump::dump_raw("vm_raw_state_rk", rk, {&s.u_2, &s.v_2, &s.w_2, &s.t_2, &s.ph_2, &s.ww, &s.ww_m, &s.ru_m, &s.rv_m},
+                     {&s.mu_2, &s.muts});
     vmdump::dump("vm_state_rk", rk, {&s.u_2, &s.v_2, &s.w_2, &s.t_2, &s.ph_2, s.P_QV >= 0 ? &s.q_2[s.P_QV] : nullptr, &s.ww, &s.ru_m, &s.rv_m, &s.ww_m}, {&s.mu_2, &s.muts});
     small_->ss.calc_p_rho_phi(s, b);
     vmdump::dump("vm_p_rk", rk, {&s.p, &s.al});

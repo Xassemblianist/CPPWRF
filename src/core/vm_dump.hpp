@@ -51,4 +51,30 @@ inline void dump(const char* name, int rk, std::initializer_list<const Field3*> 
   std::fclose(f);
 }
 
+// the whole allocation (halo included): header wi0, wi1, wj0, wj1, nz, then sj, sk, offset, total (int64), then
+// every value of the buffer (point (i, j, k) at offset + i + j * sj + k * sk)
+template <class F>
+inline void write_raw(std::FILE* f, const F& x) {
+  std::vector<real> h;
+  x.download(h);
+  const Layout& L = x.layout();
+  const int hdr[5] = {L.wi0, L.wi1, L.wj0, L.wj1, L.nz > 0 ? L.nz : 1};
+  const long long st[4] = {(long long)L.sj, (long long)L.sk, (long long)L.offset, (long long)h.size()};
+  std::fwrite(hdr, sizeof(int), 5, f);
+  std::fwrite(st, sizeof(long long), 4, f);
+  for (real v : h) {
+    const double d = double(v);
+    std::fwrite(&d, sizeof(double), 1, f);
+  }
+}
+
+inline void dump_raw(const char* name, int rk, std::initializer_list<const Field3*> f3,
+                     std::initializer_list<const Field2*> f2 = {}) {
+  std::FILE* f = open(name, rk);
+  if (!f) return;
+  for (const Field3* x : f3) if (x) write_raw(f, *x);
+  for (const Field2* x : f2) if (x) write_raw(f, *x);
+  std::fclose(f);
+}
+
 }  // namespace cppwrf::vmdump
