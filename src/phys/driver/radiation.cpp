@@ -423,8 +423,14 @@ bool RadiationDriver::run(long itimestep, rr xtime, rr julian, int yr, const Rad
   RrtmgLwConfig lc;
   lc.icloud = o_.icloud; lc.cldovrlp = o_.cldovrlp; lc.idcor = o_.idcor; lc.p_top = o_.p_top;
   lc.yr = yr; lc.julian = julian; lc.o3input = o_.o3input;
-  if (o_.ghg_input == 1) p_->gases.interpolate(yr, julian, lc.co2, lc.n2o, lc.ch4, lc.cfc11, lc.cfc12);
-  else rrtmg_default_gases(lc);
+  if (o_.ghg_input == 1) {
+    // read_CAMgases' REAL(8) co2 .. cfc12, rounded to rb where RRTMG stores them (co2vmr(ncol,k) = co2)
+    double g[5];
+    p_->gases.interpolate(yr, julian, g[0], g[1], g[2], g[3], g[4]);
+    lc.co2 = rr(g[0]); lc.n2o = rr(g[1]); lc.ch4 = rr(g[2]); lc.cfc11 = rr(g[3]); lc.cfc12 = rr(g[4]);
+  } else {
+    rrtmg_default_gases(lc);
+  }
   RrtmgSwConfig sc;
   sc.icloud = o_.icloud; sc.cldovrlp = o_.cldovrlp; sc.idcor = o_.idcor; sc.p_top = o_.p_top; sc.yr = yr;
   sc.julian = julian; sc.solcon = solcon; sc.o3input = o_.o3input; sc.co2 = lc.co2; sc.n2o = lc.n2o; sc.ch4 = lc.ch4;

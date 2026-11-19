@@ -90,9 +90,10 @@ inline rr wrf_julian(int julyr, int julday, rr gmt, const wrf_time::Interval& el
     if (s < ylen) break;
     s -= ylen;
   }
-  rr rsec = rr(s);
-  if (el.Sd != 0) rsec = rsec + rr(el.Sn) / rr(el.Sd);
-  return (rsec / rr(86400.0) + rr(1.0)) - rr(1.0);
+  // dayOfYear_r8 is REAL(8) (ESMF), currentDayOfYearReal = REAL(currentDayOfYearR8) - 1.0 a REAL
+  double rsec = double(s);
+  if (el.Sd != 0) rsec = rsec + double(el.Sn) / double(el.Sd);
+  return rr(rsec / 86400.0 + 1.0) - rr(1.0);
 }
 inline int wrf_year(int julyr, int julday, rr gmt, const wrf_time::Interval& el) {
   long long s = (long long)(julday - 1) * 86400 + std::llround(gmt * rr(3600.0)) + el.S;
