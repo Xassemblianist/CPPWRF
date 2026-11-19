@@ -59,8 +59,10 @@ CPPWRF_HD inline void diff(int kte, real dt, real* co, const real* rho, const re
 }
 
 // pbl_height: the height where thv first exceeds thv(kts) + 0.5 (interpolated between the cell centres)
+// (K: the column size of the calling kernel, as diff's)
+template <int K>
 CPPWRF_HD inline real pbl_height(int kte, const real* dz, const real* z, const real* th, const real* q) {
-  real thv[kMaxLevels + 2], zc[kMaxLevels + 2];
+  real thv[K + 2], zc[K + 2];
   for (int iz = 1; iz <= kte; ++iz) zc[iz] = z[iz] + dz[iz] / real(2.);
   for (int iz = 1; iz <= kte; ++iz) thv[iz] = th[iz] * (real(1.) + real(0.61) * q[iz]);
   real pblh = real(0.);
@@ -192,7 +194,7 @@ struct BoulacKernel {
     sf1D[kte + 1] = real(1.);
 
     // pbl_height
-    const real pbl = pbl_height(kte, dz1D, z1D, th1D, q1D);
+    const real pbl = pbl_height<K>(kte, dz1D, z1D, th1D, q1D);
     pblh(i, j) = pbl;
 
     // wstar; gamma (igamma = 1: Troen and Mahrt)
