@@ -45,8 +45,8 @@ struct Wsm5Params {
     xlv1 = cl - p_cpv;
     constexpr double r03 = r0 * r0 * r0;  // r0**3, folded by gfortran: the correctly rounded cube, = r0*r0*r0 here
     qc0 = Real(4. / 3.) * pi * denr * Real(r03) * Real(xncr) / den0;
-    qck1 = Real(.104 * 9.8 * peaut) / Real(std::pow(double(Real(xncr) * denr), 1. / 3.)) / Real(xmyu) *
-           Real(std::pow(double(den0), 4. / 3.));
+    qck1 = Real(.104 * 9.8 * peaut) / Real(libm::pow(double(Real(xncr) * denr), 1. / 3.)) / Real(xmyu) *
+           Real(libm::pow(double(den0), 4. / 3.));
     pidnc = pi * denr / Real(6.);
     bvtr1 = Real(1. + bvtr);
     bvtr2 = Real(2.5 + .5 * bvtr);

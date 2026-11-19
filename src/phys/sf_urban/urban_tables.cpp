@@ -9,6 +9,8 @@
 #include <stdexcept>
 #include <vector>
 
+#include "core/libm.hpp"  // the Macdonald lengths with the kernels' pow / exp (glibc's in the CUDA FP64 build)
+
 namespace cppwrf::phys::urban {
 namespace {
 
@@ -242,15 +244,15 @@ void read_urban_table(const std::string& path, int nl, int sf_urban_physics, Urb
     t.betg[lc] = real(0.0);
     const real lambda_p = t.r[lc], lambda_f = t.hgt[lc];
     const real cd = real(1.2), alpha_macd = real(4.43), beta_macd = real(1.0);
-    t.zdc[lc] = t.zr[lc] * (real(1.0) + (std::pow(alpha_macd, -lambda_p)) * (lambda_p - real(1.0)));
+    t.zdc[lc] = t.zr[lc] * (real(1.0) + (libm::pow(alpha_macd, -lambda_p)) * (lambda_p - real(1.0)));
     t.z0c[lc] = t.zr[lc] * (real(1.0) - t.zdc[lc] / t.zr[lc]) *
-                std::exp(-std::pow(real(0.5) * beta_macd * cd / (vonk * vonk) * (real(1.0) - t.zdc[lc] / t.zr[lc]) *
+                libm::exp(-libm::pow(real(0.5) * beta_macd * cd / (vonk * vonk) * (real(1.0) - t.zdc[lc] / t.zr[lc]) *
                                        lambda_f,
                                    real(-0.5)));
     if (sf_urban_physics == 1) {  // roof height variability in Macdonald: Z0R from ZR_SD
       const real lambda_fr = t.sigma_zed[lc] / (road + roof);
       t.z0r[lc] = t.zr[lc] * (real(1.0) - t.zdc[lc] / t.zr[lc]) *
-                  std::exp(-std::pow(real(0.5) * beta_macd * cd / (vonk * vonk) *
+                  libm::exp(-libm::pow(real(0.5) * beta_macd * cd / (vonk * vonk) *
                                          (real(1.0) - t.zdc[lc] / t.zr[lc]) * lambda_fr,
                                      real(-0.5)));
     }
