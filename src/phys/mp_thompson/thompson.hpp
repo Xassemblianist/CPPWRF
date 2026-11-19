@@ -2352,8 +2352,11 @@ struct ThompsonKernel {
                 if (ri[k] > Real(R1)) {
                     Real lami = libm::pow(Real(am_i) * tables.cig[1] * tables.oig1 * ni_loc[k] / ri[k], obmi);
                     Real ilami = Real(1.0) / lami;
-                    vtik[k] = rhof[k] * Real(av_i) * tables.cig[2] * tables.oig2 * libm::pow(ilami, Real(bv_i));
-                    vtnik[k] = rhof[k] * Real(av_i) * tables.cig[5] / tables.cig[6] * libm::pow(ilami, Real(bv_i));
+                    // ilami**bv_i with the parameter bv_i = 1.0: ilami as gfortran folds it (the host's libm::pow
+                    // folds it too; the device's called pow(ilami, 1.0))
+                    static_assert(bv_i == 1.0);
+                    vtik[k] = rhof[k] * Real(av_i) * tables.cig[2] * tables.oig2 * ilami;
+                    vtnik[k] = rhof[k] * Real(av_i) * tables.cig[5] / tables.cig[6] * ilami;
                 } else {
                     vtik[k] = vtik[k + 1];
                     vtnik[k] = vtnik[k + 1];
