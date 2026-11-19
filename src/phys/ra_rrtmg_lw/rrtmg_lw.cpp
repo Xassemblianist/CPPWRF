@@ -110,7 +110,7 @@ RrtmgLwCallConfig rrtmg_lw_call_config(int num_levels, const RrtmgLwConfig& conf
   c.g = config.g;
   c.heatfac = grav * rr(86400.0) / (config.cp * rr(100.0));
   c.has_reqc = hrc; c.has_reqi = hri; c.has_reqs = hrs;
-  c.icld = config.cldovrlp; c.idcor = config.idcor;
+  c.icld = config.cldovrlp; c.idcor = config.idcor; c.icloud = config.icloud;
   c.juldat = int(config.julian);  // juldat = julian (INTEGER)
   return c;
 }

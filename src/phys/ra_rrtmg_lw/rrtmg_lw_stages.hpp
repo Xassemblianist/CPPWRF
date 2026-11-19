@@ -46,6 +46,7 @@ struct RrtmgLwCallConfig {
   rr heatfac;              // rrtmg_lw heatfac = grav*86400/(cp*100)
   int has_reqc, has_reqi, has_reqs;
   int icld, idcor, juldat;     // McICA overlap (cldovrlp), decorrelation length type, day of year
+  int icloud;                  // icloud = 0: RRTMG_LWRAD keeps CLDFRA1D = 0 (a clear column)
 };
 
 // Per-column views. nl = layer dimension (>= nlayers), all level arrays nl + 1.
@@ -231,7 +232,9 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
       qs1 = std::max(rr(0.0), in.qr3d[k]);
       qc1 = rr(0.);
     }
-    const rr cf3 = in.cldfra3d[k];
+    // RRTMG_LWRAD reads CLDFRA3D only IF (ICLOUD .ne. 0) (module_ra_rrtmg_lw.F); bmj_rad_feedback sets CLDFRA with
+    // icloud = 0 too
+    const rr cf3 = c.icloud != 0 ? in.cldfra3d[k] : rr(0.0);
     rr recloud1d = rr(5.0), reice1d = rr(10.0), resnow1d = rr(10.0);
     if (hrc) {
       rr r = std::max(rr(2.5), in.re_cloud[k] * rr(1.E6));

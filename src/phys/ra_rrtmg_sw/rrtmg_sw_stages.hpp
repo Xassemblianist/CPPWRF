@@ -37,6 +37,7 @@ struct RrtmgSwCallConfig {
   rr heatfac;           // rrsw_con heatfac
   rr adjflux;           // adjes*scon/rrsw_scon (dyofyr = 0, adjes = 1)
   int icld, idcor, juldat;  // McICA overlap (cldovrlp), decorrelation length type, day of year
+  int icloud;               // icloud = 0: RRTMG_SWRAD keeps CLDFRA1D = 0 (a clear column)
 };
 
 struct SwViews {
@@ -225,7 +226,9 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
   const bool hrc = in.re_cloud.p != nullptr, hri = in.re_ice.p != nullptr, hrs = in.re_snow.p != nullptr;
   for (int k = 0; k < num_levels; ++k) {
     const rr pdel = v.pz[k] - v.pz[k + 1];
-    const rr cldf = in.cldfra3d[k];
+    // RRTMG_SWRAD reads CLDFRA3D only IF (ICLOUD .ne. 0) (module_ra_rrtmg_sw.F); bmj_rad_feedback sets CLDFRA with
+    // icloud = 0 too
+    const rr cldf = c.icloud != 0 ? in.cldfra3d[k] : rr(0.0);
     rr qc1 = std::max(rr(0.), qc_of(k)), qi1 = std::max(rr(0.), qi_of(k)), qs1 = std::max(rr(0.), qs_of(k));
     if (in.split3 && in.t3d[k] < rr(273.15)) {  // module_ra_rrtmg_sw.F "For MP option 3" (WSM3)
       qi1 = qc1;

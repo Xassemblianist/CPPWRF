@@ -21,7 +21,7 @@ RrtmgSwCallConfig rrtmg_sw_call_config(int num_levels, const RrtmgSwConfig& conf
   c.g = config.g;
   c.heatfac = config.heatfac;
   c.adjflux = rr(1.0) * (config.solcon / rrsw_scon);  // inatm_sw: adjflux = adjes * (scon / rrsw_scon)
-  c.icld = config.cldovrlp; c.idcor = config.idcor;
+  c.icld = config.cldovrlp; c.idcor = config.idcor; c.icloud = config.icloud;
   c.juldat = int(config.julian);  // juldat = julian (INTEGER)
   return c;
 }
@@ -119,7 +119,7 @@ void rrtmg_sw_column(
   ensure_workspace(ws, lay);
   const SwViews v = lay.views(ws.d.data(), ws.i.data(), 0, 1);
   std::vector<rr> zero;
-  if (!cldfra3d || config.icloud == 0) zero.assign(num_levels, rr(0.0));
+  if (!cldfra3d) zero.assign(num_levels, rr(0.0));
   SwColumnIn in{};
   in.coszen = coszen; in.albedo = albedo; in.xland = xland; in.xice = xice; in.snow = snow; in.xlat = xlat;
   in.dz8w = sd_const(dz8w);
