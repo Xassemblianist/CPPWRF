@@ -101,7 +101,8 @@ foreach(t "kessler;mp_kessler;${PHYS_BIN}"
           "bl_qnse;bl_qnse;${PHYS_BIN}/bl_qnse_test"
           "bl_mfshconv;bl_mfshconv;${PHYS_BIN}/bl_mfshconv_test"
           "sf_urban;sf_urban;${PHYS_BIN}/sf_urban_test"
-          "lsm_ruc;lsm_ruc;${PHYS_BIN}/lsm_ruc_test")
+          "lsm_ruc;lsm_ruc;${PHYS_BIN}/lsm_ruc_test"
+          "topo;topo;${PHYS_BIN}/topo_test")
   list(GET t 0 name)
   list(GET t 1 dir)
   list(GET t 2 work)

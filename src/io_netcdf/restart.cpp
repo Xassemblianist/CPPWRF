@@ -80,6 +80,10 @@ void write_restart(const std::string& path, const RestartMeta& meta,
     NC_CHECK(nc_put_att_text(ncid, NC_GLOBAL, "CPPWRF_COMMIT", meta.commit.size(), meta.commit.data()));
   if (!meta.options.empty())
     NC_CHECK(nc_put_att_text(ncid, NC_GLOBAL, "CPPWRF_OPTIONS", meta.options.size(), meta.options.data()));
+  for (const auto& [name, v] : meta.scalars) {
+    const std::string att = "SCALAR_" + name;
+    NC_CHECK(nc_put_att_double(ncid, NC_GLOBAL, att.c_str(), NC_DOUBLE, 1, &v));
+  }
 
   // Dimensions
   int dim_time = -1, dim_bt = -1, dim_bt_stag = -1;
@@ -200,6 +204,18 @@ void read_meta(int ncid, const std::string& path, RestartMeta& meta) {
   if (nc_inq_attlen(ncid, NC_GLOBAL, "CURRENT_DATE", &att_len) == NC_NOERR && att_len > 0) {
     meta.date_str.resize(att_len);
     nc_get_att_text(ncid, NC_GLOBAL, "CURRENT_DATE", meta.date_str.data());
+  }
+  int natts = 0;
+  NC_CHECK(nc_inq_natts(ncid, &natts));
+  meta.scalars.clear();
+  for (int a = 0; a < natts; ++a) {
+    char name[NC_MAX_NAME + 1] = {};
+    NC_CHECK(nc_inq_attname(ncid, NC_GLOBAL, a, name));
+    const std::string n(name);
+    if (n.rfind("SCALAR_", 0) != 0) continue;
+    double v = 0;
+    NC_CHECK(nc_get_att_double(ncid, NC_GLOBAL, name, &v));
+    meta.scalars.emplace_back(n.substr(7), v);
   }
 }
 

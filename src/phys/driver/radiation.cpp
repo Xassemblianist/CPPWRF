@@ -32,22 +32,6 @@
 namespace cppwrf::phys::driver {
 
 namespace {
-constexpr rr piconst = rr(3.1415926535897932384626433);
-constexpr rr degrad = piconst / rr(180.);
-constexpr rr dpd = rr(360.) / rr(365.);
-
-// radconst: declination (rad) and solar constant from the julian day
-void radconst(rr julian, rr& declin, rr& solcon) {
-  const rr obecl = rr(23.5) * degrad, sinob = libm::sin(obecl);
-  rr sxlong = julian >= rr(80.) ? dpd * (julian - rr(80.)) : dpd * (julian + rr(285.));
-  sxlong = sxlong * degrad;
-  const rr arg = sinob * libm::sin(sxlong);
-  declin = libm::asin(arg);
-  const rr djul = julian * rr(360.) / rr(365.), rjul = djul * degrad;
-  const rr eccfac = rr(1.000110) + rr(0.034221) * libm::cos(rjul) + rr(0.001280) * libm::sin(rjul) +
-                        rr(0.000719) * libm::cos(2 * rjul) + rr(0.000077) * libm::sin(2 * rjul);
-  solcon = rr(1370.) * eccfac;
-}
 
 
 #if defined(CPPWRF_USE_CUDA)

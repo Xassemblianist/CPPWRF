@@ -1359,7 +1359,7 @@ class TestValidationAndWarnings(unittest.TestCase):
             ("&physics ra_lw_physics = 4, ra_sw_physics = 4, cldovrlp = 9 /", "cldovrlp = 9"),
             ("&physics ra_lw_physics = 4, ra_sw_physics = 4, cldovrlp = -1 /", "cldovrlp = -1"),
             ("&physics shcu_physics = 2 /", "shcu_physics"),
-            ("&physics topo_wind = 1 /", "topo_wind"),
+            ("&physics topo_wind = 3 /", "topo_wind = [3]"),
             ("&dynamics moist_adv_opt = 5 /", "moist_adv_opt = 5"),
             ("&dynamics scalar_adv_opt = -1 /", "scalar_adv_opt = -1"),
             ("&dynamics diff_opt = 2, km_opt = 2, tke_adv_opt = 5 /", "tke_adv_opt = 5"),
@@ -1514,6 +1514,29 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         rst = noah.replace("&physics ", "&physics sf_urban_physics = 1, ").replace("&time_control /",
                                                                                   "&time_control restart = .true. /")
         self.assertTrue(any("restart = .true. with sf_urban_physics" in e for e in self.errors(complete(rst))))
+
+    def test_terrain_options(self):
+        # topo_wind 1 / 2, slope_rad 1, topo_shading 1 (with shadlen) on one real-data domain; other values, nests and
+        # slope_rad / topo_shading with the adaptive time step are errors
+        noah = self.FULL.replace("bl_pbl_physics = 0,", "bl_pbl_physics = 1,").replace(
+            "sf_sfclay_physics = 0, sf_surface_physics = 0", "sf_sfclay_physics = 1, sf_surface_physics = 2")
+        t, sec = self.translate(noah.replace("&physics ", "&physics topo_wind = 2, slope_rad = 1, topo_shading = 1, "
+                                                          "shadlen = 50000., "))
+        self.assertEqual(t.errors, [])
+        self.assertEqual((sec["phys"]["topo_wind"], sec["phys"]["slope_rad"], sec["phys"]["topo_shading"]), (2, 1, 1))
+        self.assertEqual(sec["phys"]["shadlen"], 50000.)
+        t, sec = self.translate(noah.replace("&physics ", "&physics topo_wind = 1, "))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["topo_wind"], 1)
+        self.assertNotIn("slope_rad", sec["phys"])
+        for extra, msg in (("topo_wind = 3", "topo_wind = [3]"), ("slope_rad = 2", "slope_rad = [2]"),
+                           ("topo_shading = 2", "topo_shading = [2]")):
+            errs = self.errors(complete(noah.replace("&physics ", "&physics " + extra + ", ")))
+            self.assertTrue(any(msg in e for e in errs), (extra, errs))
+        errs = self.errors(complete(self.NEST + "&physics topo_wind = 1, 1 /\n"))
+        self.assertTrue(any("with nests" in e for e in errs), errs)
+        ad = noah.replace("&physics ", "&physics slope_rad = 1, ").replace("&domains ", "&domains use_adaptive_time_step = .true., ")
+        self.assertTrue(any("use_adaptive_time_step are not" in e for e in self.errors(complete(ad))))
 
     def test_cu_rad_feedback_cldovrlp_0(self):
         # cldovrlp 0: RRTMG without clouds; cu_rad_feedback per domain (phy_init's icloud_cu); shallowcu_forced_ra

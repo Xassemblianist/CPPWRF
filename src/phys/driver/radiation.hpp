@@ -4,7 +4,8 @@
 // WRF phys/module_radiation_driver.F radiation_driver for ra_lw_physics = 4 (RRTMG) or 1 (RRTM, module_ra_rrtm.F)
 // with ra_sw_physics = 4 (RRTMG) or 1 (Dudhia, module_ra_sw.F) with o3input = 2 (CAM ozone), ghg_input = 1
 // (CAMtr_volume_mixing_ratio), aer_opt = 0, swint_opt = 0, icloud = 1, cldovrlp, idcor, cu_rad_feedback,
-// slope_rad = topo_shading = 0, single domain.
+// single domain; slope_rad / topo_shading: pre_radiation_driver's toposhad and the surface driver's
+// TOPO_RAD_ADJ_DRVR in src/phys/driver/topo.hpp (called from suite.cpp / surface_driver.cpp).
 // CPU builds: one column at a time per OpenMP thread (rrtmg_lw_column / rrtm_lw_column / rrtmg_sw_column).
 // CUDA builds: everything on the device: inputs staged column-fastest, coszen, CAM ozone and
 // cal_cldfra1 per column, the RRTMG stages as kernels (RrtmgLwBatch / RrtmgSwBatch); RRTM LW on the host
@@ -16,6 +17,7 @@
 #include <vector>
 
 #include "core/field.hpp"
+#include "core/libm.hpp"
 #include "core/grid.hpp"
 #include "core/wrf_time.hpp"
 #include "phys/ra_rrtmg_common/strided.hpp"
@@ -167,6 +169,20 @@ CPPWRF_HD inline void cal_cldfra1(int nz, SD qv, SD qc, SD qi, SD qs, SD t, SD p
   }
 }
 
+// radconst (module_radiation_driver.F): the solar declination (rad) and the solar constant of the julian day
+inline void radconst(rr julian, rr& declin, rr& solcon) {
+  constexpr rr piconst = rr(3.1415926535897932384626433), degrad = piconst / rr(180.), dpd = rr(360.) / rr(365.);
+  const rr obecl = rr(23.5) * degrad, sinob = libm::sin(obecl);
+  rr sxlong = julian >= rr(80.) ? dpd * (julian - rr(80.)) : dpd * (julian + rr(285.));
+  sxlong = sxlong * degrad;
+  const rr arg = sinob * libm::sin(sxlong);
+  declin = libm::asin(arg);
+  const rr djul = julian * rr(360.) / rr(365.), rjul = djul * degrad;
+  const rr eccfac = rr(1.000110) + rr(0.034221) * libm::cos(rjul) + rr(0.001280) * libm::sin(rjul) +
+                    rr(0.000719) * libm::cos(2 * rjul) + rr(0.000077) * libm::sin(2 * rjul);
+  solcon = rr(1370.) * eccfac;
+}
+
 class RadiationDriver {
  public:
   RadiationDriver(const Grid& g, const RadiationOptions& o, const std::vector<rr>& xlat,
@@ -182,6 +198,8 @@ class RadiationDriver {
            real* radtacttime = nullptr);
   rr declin() const { return declin_; }  // radconst of the last call (DECLINX, SOLCONX)
   rr solcon() const { return solcon_; }
+  // a restart: grid%declin and grid%solcon of the restart file (the values of the last call before it)
+  void set_solar(rr declin, rr solcon) { declin_ = declin; solcon_ = solcon; }
 
  private:
   struct Impl;

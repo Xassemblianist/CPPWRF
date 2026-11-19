@@ -23,6 +23,7 @@ is verified against WRF, and the current results. All numbers come from `tests/v
 | PBL | BouLac (8, Bougeault-Lacarrere TKE scheme, over the surface layer 1 or 2; without the BEP urban terms, as CPPWRF has no BEP urban model): module_bl_boulac.F bit for bit in the column driver tests/phys/bl_boulac; suite cases BL1, BL4, BL9 | verified |
 | PBL and surface layer | QNSE PBL (4) with the QNSE surface layer (sf_sfclay_physics 4), mfshconv = 0 or 1 (the EDKF mass-flux shallow convection, WRF's default), fractional_seaice 0: module_bl_qnsepbl.F and module_sf_qnsesfc.F (with QNSESFCINIT's tables) bit for bit in the column driver tests/phys/bl_qnse, module_bl_mfshconvpbl.F's MFSHCONVPBL in tests/phys/bl_mfshconv; suite cases Q1, Q4 (mfshconv 0) and Q1M, Q4M (mfshconv 1) | verified |
 | Radiation | RRTMG LW and SW (4), RRTM LW (1, with RRTMG or Dudhia SW), Dudhia SW (1, with RRTMG or RRTM LW; swrad_scat), CAM ozone and greenhouse gases, cal_cldfra1, McICA (cldovrlp 1-5) and clear sky only (cldovrlp 0), cumulus clouds in the radiation (cu_rad_feedback: Kain-Fritsch, Grell-Freitas; no effect with Tiedtke / New Tiedtke as in WRF) | verified |
+| Terrain options | YSU topographic wind correction (topo_wind 1: start_em's CTOPO / CTOPO2 from VAR_SSO and the terrain Laplacian, stops without VAR_SSO as WRF; 2: from VAR), slope-dependent surface shortwave (slope_rad 1, TOPO_RAD_ADJ_DRVR) and terrain shadows (topo_shading 1 with shadlen, toposhad); real data, one domain, fixed time step; topo_shading not with tiles or MPI ranks: column test tests/phys/topo (radconst, toposhad, TOPO_RAD_ADJ_DRVR bit for bit with WRF's objects); suite cases TW1, TW2, TW4 (1 h) and SR1-SR4 (5 h through sunrise), restarted at 30 / 150 min, tiles | verified |
 | Urban canopy | single-layer urban canopy model (sf_urban_physics = 1, module_sf_urban.F) with the Noah LSM: URBPARM.TBL (use_wudapt_lcz = 0) and URBPARM_LCZ.TBL (use_wudapt_lcz = 1) with their default options, one domain, no restart; column test tests/phys/sf_urban (urban_param_init and SUBROUTINE urban bit-identical to WRF) | verified |
 | Nudging | grid (analysis) nudging, grid_fdda = 1 (PSUFDDAGD: guv, gt, gq, if_no_pbl_nudging_uv / t / q, if_zfac_* / k_zfac_*, fgdt, fgdtzero, if_ramping / dtramp_min, gfdda_end_h, gfdda_interval_m, per domain; wrffdda_d0N from real.exe or cppwrf_real; restarts, nests) | verified |
 | Nesting | static one-way and two-way nests (interp_fcn_sint, bdy_interp1, copy_fcn feedback, sm121/smdsm smoothers, blend_terrain, adjust_tempqv) | verified |
@@ -189,6 +190,13 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | N18 | P4 with NSSL 2-moment (mp_physics 18: hail, CCN, graupel / hail volume) and KF; restarted at 30 min | 1 h |
 | N17 | P4 with WRF mp_physics 17 (= 18 with its defaults) | 3 steps |
 | N18V | V3 (3 km, Noah-MP, no cumulus) with NSSL 2-moment (mp_physics 18) | 30 min |
+| TW1 | P1 with YSU topo_wind = 1 (VAR_SSO = VAR**2); restarted at 30 min | 1 h |
+| TW2 | P1 with YSU topo_wind = 2; restarted at 30 min | 1 h |
+| TW4 | P4 with YSU topo_wind = 1 (VAR_SSO = VAR**2) | 1 h |
+| SR1 | P4 with slope_rad = 1 and topo_shading = 1 (radt 10, through sunrise); restarted at 150 min | 5 h |
+| SR2 | SR1 with shadlen = 100 km | 5 h |
+| SR3 | P4 with slope_rad = 1 alone (radt 1) | 5 h |
+| SR4 | SR1 with the Dudhia shortwave (ra_sw_physics 1) | 5 h |
 | HY1 | P1 with hypsometric_opt 1 (real.exe and wrf.exe) | 1 h |
 | SLAB1 / SLAB4 | P1 / P4 with the 5-layer thermal diffusion land surface (sf_surface_physics 1; inputs from real.exe) | 1 h |
 | NMP1 | P1 with Noah-MP | 1 h |

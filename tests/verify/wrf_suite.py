@@ -237,7 +237,7 @@ def wrfrst_case(refs, out, skip=()):
     return bad, f"{n} wrfrst files identical" if not bad else f"{n} wrfrst files"
 
 
-def restarted_case(b, cfg, sets, refs, t, mid, out):
+def restarted_case(b, cfg, sets, refs, t, mid, out, native=False):
     """A run to `t` s restarted at `mid` s from its own wrfrst files: the first run (to one step past mid, wrfrst files
     at mid only: written within the run, as WRF's, not at its last step, where WRF's history alarm is still ringing)
     and the resumed one (mid to t) together against WRF's uninterrupted run at tolerance 0 (every reference frame),
@@ -248,6 +248,21 @@ def restarted_case(b, cfg, sets, refs, t, mid, out):
     import exact
     first, resumed = os.path.join(out, "a_first"), os.path.join(out, "b_resumed")  # sorted: resumed frames win
     w0 = next(iter(refs.values()))
+    if native:  # suite.native_restart: resumed from CPPWRF's own restart_<step>.nc (mid need not be a frame time)
+        nl = os.path.join(os.path.dirname(w0), "namelist.input")
+        dt = float(re.search(r"^\s*time_step\s*=\s*(\d+)", open(nl).read(), re.M).group(1))
+        rc, log = run(b, cfg, sets + [f"run.run_time={mid + dt:g}", f"restart.interval={mid:g}", f"restart.end={mid:g}"],
+                      first)
+        if rc != 0:
+            return [f"run to the restart failed: {log[-200:]}"], ""
+        rf = os.path.join(first, f"restart_{round(mid / dt):06d}.nc")
+        if not os.path.exists(rf):
+            return [f"no {rf}"], ""
+        rc, log = run(b, cfg, sets + [f"run.restart_file={rf}"], resumed)
+        if rc != 0:
+            return [f"resumed run failed: {log[-200:]}"], ""
+        bad, what = exact_case(refs, [first, resumed], t, sets)
+        return bad, f"{what}, restarted at {mid:g}s from restart_{round(mid / dt):06d}.nc" if not bad else what
     with _NC, netCDF4.Dataset(w0) as ds:
         at = [exact.text(ds["Times"], i).decode() for i, x in enumerate(ds["XTIME"][:]) if abs(float(x) * 60.0 - mid) < 1e-6]
     if not at:
@@ -412,6 +427,7 @@ def main():
                              + (f"  [{'; '.join(x[:300] for x in bad[:6])}{' ...' if len(bad) > 6 else ''}]" if bad else ""))
         mid = restart_at(sets)
         rst_check = wrfrst_check(sets)
+        native = "suite.native_restart" in sets
         sets = [x for x in sets if not x.startswith("suite.")]
         exact = all(x == 0.0 for x in tol.values())
         if exact:  # WRF history output; with the reference's namelist.input CPPWRF writes WRF's global attributes
@@ -422,7 +438,7 @@ def main():
                     return False, f"FAIL  {name:22s} configuration differs from {nl}: {'; '.join(dif)}"
             sets = sets + ["output.format=wrfout"] + ([f"output.wrf_namelist={nl}"] if os.path.exists(nl) else [])
         if exact and mid:
-            bad, what = restarted_case(b, cfg, sets, refs, t, mid, out)
+            bad, what = restarted_case(b, cfg, sets, refs, t, mid, out, native)
             done(out, not bad)
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
                              + (f"  [{'; '.join(x[:300] for x in bad[:6])}{' ...' if len(bad) > 6 else ''}]" if bad else ""))

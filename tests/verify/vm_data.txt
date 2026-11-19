@@ -93,6 +93,9 @@ port_a14v2_data.tar
 # the WRF v4.8.0 real*4 references of the FP32 cases P4 and N1 (run_P4, run_N1: WRF's default real*4 build, the
 # rescued real*4 wrfinput / wrfbdy)
 port_fp32r4_data.tar
+# the terrain-option references (TW1/TW2/TW4: YSU topo_wind; SR1-SR4: slope_rad / topo_shading,
+# tests/verify/cases/49_terrain.py; TW1/TW4 on wrfinput files with VAR_SSO); links into run_P1_r8 / run_P4_r8
+port_a0204_data.tar
 # whole references (every frame and variable) of the tolerance-0 cases and the ideal namelists
 # (tools/colab/stage_data.py --whole --refs-only --no-steps): after the tars above, whose files they replace
 v05_suite_refs.tar

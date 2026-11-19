@@ -8,6 +8,16 @@ resumes across versions from WRF's wrfrst files.
 ## Unreleased
 
 ### Added
+- Terrain options, tier **verified**: YSU's topographic wind correction `topo_wind = 1 / 2` (start_em's CTOPO /
+  CTOPO2: 1 from VAR_SSO and the terrain Laplacian, a wrfinput without VAR_SSO (GOT_VAR_SSO = 0) stops as in WRF;
+  2 from VAR), the slope-dependent surface shortwave `slope_rad = 1` (TOPO_RAD_ADJ_DRVR: SWDOWN and GSW by the slope,
+  its azimuth and the shadow at each surface call, SWNORM, restored at the end of the surface driver) and the
+  terrain shadows `topo_shading = 1` with `shadlen` (pre_radiation_driver's toposhad at the radiation steps,
+  HT_SHAD). Real data, one domain, fixed time step; topo_shading not with tiles or MPI ranks. Suite cases TW1, TW2,
+  TW4 (1 h) and SR1-SR4 (5 h through sunrise) against WRF real*8, restarted at 30 / 150 min, CPU and CUDA FP64 at
+  tolerance 0; column test tests/phys/topo (radconst, toposhad and TOPO_RAD_ADJ_DRVR bit for bit with WRF's
+  compiled code, including the edge search over start_em's boundary copy of HGT beyond the domain). The translator
+  passes the options and stops on nests, ideal cases and adaptive time steps with them.
 - WDM6 and WDM5 microphysics, `mp_physics = 16` (`hail_opt` 0 / 1) and `14` (phys/module_mp_wdm6.F,
   module_mp_wdm5.F): double-moment warm rain with the CCN, cloud and rain numbers (scalars QNCCN, QNCLOUD, QNRAIN),
   `[phys] ccn_conc` (start_em's fill when the input has no CCN, the CCN reset of the first step, the inflow value of
@@ -176,6 +186,14 @@ resumes across versions from WRF's wrfrst files.
   `sf_lake_physics` /= 0, `sf_ocean_physics = 2`, `seaice_albedo_opt = 2`, `seaice_snowdepth_opt = 1` and
   `seaice_thickness_opt = 1` instead of writing real.exe's LAKE_DEPTH, OM_*, ALBSI, SNOWSI, ICEDEPTH fields as zeros.
   No verified configuration changes.
+- CPPWRF's own restart file (`restart_<step>.nc`, format version 3; files of version 2 are refused, the run's
+  wrfrst files still resume): it now holds the scalars of WRF's restart stream, NSTEPS (output_diagnostics' means)
+  and DECLIN / SOLCON of the last radiation call (read by slope_rad's TOPO_RAD_ADJ and the urban canopy model until
+  the next call: a run resumed between two radiation calls used 0), as global attributes SCALAR_<name>, and
+  topo_shading's SHADOWMASK (WRF's restart stream has none: computed again at the next radiation call);
+  tests/io_netcdf/test_restart.cpp checks the scalars round trip. Known open issue: a run resumed from that file
+  between two radiation calls is not yet identical to the uninterrupted run (resuming from the run's wrfrst files
+  is).
 - The restart alarm of a run resumed from a restart file (WRF's or CPPWRF's own) with a restart interval that is not
   a multiple of the time step: the first ring is at the restart time + WRF_ALARM_SECS_TIL_NEXT_RING_51 and the later
   ones are counted from that ring's step (share/input_wrf.F, ESMF_ClockAdvance), so the wrfrst files and their alarm

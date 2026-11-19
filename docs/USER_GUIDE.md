@@ -422,6 +422,7 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `sst_skin`, `tmn_update`, `lagday` | 0, 1 (skin SST over water, module_sf_sstskin.F); 0, 1 (TMN from the daily mean TSK, module_sf_tmnupdate.F); with `tmn_update = 1` any number of days but 1 (WRF stops there); one value for all domains, Noah (`sf_surface_physics = 2`) only |
 | `ra_lw_physics`, `ra_sw_physics`, `radt` | 0, 1 (RRTM LW / Dudhia SW, paired with each other or with RRTMG), 4 (RRTMG) |
 | `icloud`, `cldovrlp`, `idcor`, `o3input`, `ghg_input`, `aer_opt`, `swrad_scat` | 0, 1; 0-5; 0, 1; 0, 2; 0, 1; 0; any |
+| `topo_wind`, `slope_rad`, `topo_shading`, `shadlen` | 0, 1, 2 (YSU's wind correction; 1 needs VAR_SSO in wrfinput, GOT_VAR_SSO = 1); 0, 1 (with a LW scheme); 0, 1; any > 0: real data, one domain, fixed time step; `topo_shading` not with tiles or MPI ranks |
 | `bucket_mm`, `bucket_J`, `prec_acc_dt` | any (with column physics; `prec_acc_dt` per domain) |
 
 ### Rejected Options and Why
@@ -459,7 +460,7 @@ an error, never silently:
 | the Dudhia shortwave with Grell-Freitas and `cu_rad_feedback` | wrf.exe writes NaN cloud fractions there |
 | `ra_lw_physics` / `ra_sw_physics` other than 0, 1, 4; a longwave scheme without a shortwave scheme or the reverse; `aer_opt` != 0 | not ported; wrf.exe stops |
 | `nwp_diagnostics`, `do_avgflx_em`, `do_avgflx_cugd` and the other diagnostic packages | not ported (diagnostic_output_nwp, cal_helicity, the averaged fluxes) |
-| `iau`, `dyn_lightning_option`, `topo_wind`, `slope_rad`, `topo_shading`, `swint_opt`, `seaice_thickness_opt`, `seaice_snowdepth_opt`, `ra_call_offset`, `shalwater_z0`, `scm_force_flux`, spectral nudging (`grid_fdda = 2`), surface analysis nudging (`grid_sfdda`: OBSGRID's `wrfsfdda_d0N`), observation nudging (`obs_nudge_opt`), stochastic physics, chemistry | not ported |
+| `iau`, `dyn_lightning_option`, `swint_opt`, `seaice_thickness_opt`, `seaice_snowdepth_opt`, `ra_call_offset`, `shalwater_z0`, `scm_force_flux`, spectral nudging (`grid_fdda = 2`), surface analysis nudging (`grid_sfdda`: OBSGRID's `wrfsfdda_d0N`), observation nudging (`obs_nudge_opt`), stochastic physics, chemistry | not ported |
 | `sst_update = 1` without surface-layer, land-surface, PBL, cumulus or radiation physics | not ported (WRF still reads wrflowinp into SST, VEGFRA, LAI, ... of the history output; CPPWRF reads it with the column physics suite) |
 | cppwrf_real with `sf_lake_physics` /= 0, `sf_ocean_physics = 2`, `seaice_albedo_opt = 2`, `seaice_snowdepth_opt = 1` or `seaice_thickness_opt = 1` | not ported (real.exe's LAKE_DEPTH, the PWP ocean's OM_* profiles, ALBSI, SNOWSI, ICEDEPTH and their flags) |
 | the adaptive time step with nests, `sst_update`, `sst_skin`, `tmn_update`, `grid_fdda`, ideal cases or `output_diagnostics` | not ported |
@@ -659,6 +660,7 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[phys]` | `ra_lw_physics`, `ra_sw_physics` | integer | `0` | Longwave and shortwave radiation schemes (0 = off, 4 = RRTMG; `ra_lw_physics = 1`: RRTM longwave, `ra_sw_physics = 1`: Dudhia shortwave; RRTM and Dudhia pair with each other or with RRTMG) | `ra_lw_physics`, `ra_sw_physics` |
 | `[phys]` | `swrad_scat` | double | `1.0` | Dudhia clear-sky scattering factor (CSSCA = swrad_scat * 1e-5) | `swrad_scat` |
 | `[phys]` | `radt`, `icloud`, `cldovrlp`, `idcor`, `o3input`, `ghg_input`, `aer_opt` | int/double | `0.0`, `1`, `2`, `0`, `2`, `1`, `0` | Radiation call interval (min), cloud fraction, cloud overlap (`0..5`; 0 = clear sky only, the McICA clouds are left out), decorrelation, ozone (`0, 2`), GHG (`0, 1`), aerosols (`0`) | `radt`, `icloud`, `cldovrlp`, `idcor`, `o3input`, `ghg_input`, `aer_opt` |
+| `[phys]` | `topo_wind`, `slope_rad`, `topo_shading`, `shadlen` | int/double | `0`, `0`, `0`, `25000.` | YSU topographic wind correction (1: Jimenez-Dudhia from VAR_SSO, 2: from VAR), slope-dependent surface shortwave, terrain shadows and their search length (m); real data, one domain | `topo_wind`, `slope_rad`, `topo_shading`, `shadlen` |
 | `[phys]` | `cu_rad_feedback` | bool | `false` | Cumulus clouds in the radiation (WRF's icloud_cu): Kain-Fritsch's `CLDFRA_DP` + `CLDFRA_SH` over the resolved cloud fraction and `QC_CU` / `QI_CU` times that fraction, Grell-Freitas' averaged `QC_CU` / `QI_CU` added to qc / qi before `cal_cldfra1`; no effect with Tiedtke / New Tiedtke; per domain (`[d0N] phys_cu_rad_feedback`) | `cu_rad_feedback` |
 | `[phys]` | `cugd_avedx` | int | `1` | Grell-3D (cu_physics = 5): 1, or 3 for G3DRV's high-resolution branch (the forcing averaged over 3 x 3 columns, the subsidence spread to the neighbours, sub_spread 1/8) | `cugd_avedx` |
 | `[phys]` | `bmj_rad_feedback` | bool | `false` | BMJ (cu_physics = 2): its convective cloud fraction `CCLDFRA` and condensates `QCCONV` / `QICONV` (`CONVCLD`; module_cu_bmj.F BMJDRV), added to the radiation's qc / qi and combined with `CLDFRA` (module_radiation_driver.F); unverified tier; per domain (`[d0N] phys_bmj_rad_feedback`) | `bmj_rad_feedback` |
@@ -764,7 +766,8 @@ run_time = 7200
 restart_file = out/real/restart_000060.nc   # or .../wrfrst_d01_2026-10-12_01:00:00
 ```
 
-CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`), the commit of the sources
+CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 3: the scalars NSTEPS,
+DECLIN and SOLCON as `SCALAR_<name>` attributes), the commit of the sources
 (`CPPWRF_COMMIT`) and the run's options (`CPPWRF_OPTIONS`: every configuration key except `[run]`, `[restart]`,
 `[output]`, `[real]`, `time.history_interval_s`, `phys.auxhist3_interval` and `phys.table_dir`). A resumed run
 refuses a file of another format version, of another commit (unless `run.restart_any_commit = true`) or of a run with

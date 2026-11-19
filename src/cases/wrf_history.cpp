@@ -17,6 +17,7 @@
 #include "dyn/physics_coupling.hpp"
 #include "dyn/rk3.hpp"
 #include "phys/driver/suite.hpp"
+#include "phys/driver/topo.hpp"
 #include "wrf_io/global_atts.hpp"
 #include "wrf_io/nc_deflate.hpp"
 #include "wrf_io/namelist.hpp"
@@ -357,42 +358,15 @@ void WrfHistory::start_em_slopes() {  // start_em: slope-radiation arrays and th
     copy_base(b.sina, {std::size_t(ny), std::size_t(nx)}, nx, ny, 1, sa);
     copy_base(b.cosa, {std::size_t(ny), std::size_t(nx)}, nx, ny, 1, ca);
   }
-  const std::size_t n2 = std::size_t(nx) * ny;
-  std::vector<double> sx(n2), sy(n2), lap(n2), slope(n2), azi(n2);
   const bool px = wc_->logical("periodic_x"), py = wc_->logical("periodic_y");
-  const real rdx = real(1.) / real(g.dx), rdy = real(1.) / real(g.dy);
-  auto H = [&](int i, int j) { return real(ht[std::size_t(j) * nx + i]); };
-  for (int j = 0; j < ny; ++j)
-    for (int i = 0; i < nx; ++i) {
-      const int im1 = px ? (i - 1 + nx) % nx : std::max(i - 1, 0), ip1 = px ? (i + 1) % nx : std::min(i + 1, nx - 1);
-      const int jm1 = py ? (j - 1 + ny) % ny : std::max(j - 1, 0), jp1 = py ? (j + 1) % ny : std::min(j + 1, ny - 1);
-      const int di = px ? 2 : ip1 - im1, dj = py ? 2 : jp1 - jm1;
-      const std::size_t q = std::size_t(j) * nx + i;
-      const real msx = mapped ? real(mx[q]) : real(1), msy = mapped ? real(my[q]) : real(1);
-      const real hx = (H(ip1, j) - H(im1, j)) * msx * rdx / real(di);
-      const real hy = (H(i, jp1) - H(i, jm1)) * msy * rdy / real(dj);
-      sx[q] = double(hx);
-      sy[q] = double(hy);
-      lap[q] = double((H(ip1, j) + H(im1, j) + H(i, jp1) + H(i, jm1) - H(i, j) * real(4.)) / real(4.));
-      const real pi = real(4.) * libm::atan(real(1.));
-      real sl = libm::atan(libm::pow(hx * hx + hy * hy, real(.5)));
-      real az = 0;
-      if (sl < real(1.e-4)) {
-        sl = 0;
-      } else {
-        az = libm::atan2(hx, hy) + pi;
-        const real sina = mapped ? real(sa[q]) : real(0), cosa = mapped ? real(ca[q]) : real(1);
-        if (cosa >= 0) az = az - libm::asin(sina);
-        else az = az - (pi - libm::asin(sina));
-      }
-      slope[q] = double(sl);
-      azi[q] = double(az);
-    }
-  phy_init_["TOPOSLPX"] = sx;
-  phy_init_["TOPOSLPY"] = sy;
-  phy_init_["LAP_HGT"] = lap;
-  phy_init_["SLOPE"] = slope;
-  phy_init_["SLP_AZI"] = azi;
+  phys::driver::topo::Slopes t = phys::driver::topo::start_em_slopes(nx, ny, g.dx, g.dy, px, py, ht, mapped ? &mx : nullptr,
+                                                                     mapped ? &my : nullptr, mapped ? &sa : nullptr,
+                                                                     mapped ? &ca : nullptr);
+  phy_init_["TOPOSLPX"] = std::move(t.toposlpx);
+  phy_init_["TOPOSLPY"] = std::move(t.toposlpy);
+  phy_init_["LAP_HGT"] = std::move(t.lap_hgt);
+  phy_init_["SLOPE"] = std::move(t.slope);
+  phy_init_["SLP_AZI"] = std::move(t.slp_azi);
 }
 
 void WrfHistory::after_solve(long n) {

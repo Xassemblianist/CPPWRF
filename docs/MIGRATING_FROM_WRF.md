@@ -241,9 +241,6 @@ CPPWRF runs these features only at WRF's default value (another value is an erro
 |---|---|
 | `shcu_physics` | Separate shallow cumulus scheme |
 | `sf_lake_physics` | Lake physics model |
-| `topo_wind` | Topographic wind correction |
-| `slope_rad` | Slope-dependent radiation |
-| `topo_shading` | Topographic shading |
 | `swint_opt` | Shortwave radiation interpolation between radt calls |
 | `seaice_thickness_opt` | Variable sea-ice thickness option |
 | `seaice_snowdepth_opt` | Sea-ice snow depth option |

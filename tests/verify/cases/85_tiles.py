@@ -39,6 +39,9 @@ _TILED = [
     ("real_morr_r8_fp64_cpu_1h", "3x1"),
     ("real_skv_r8_fp64_cpu", "2x2"),
     ("real_skv_r8_fp64_cpu_1h", "1x3"),
+    # start_em's slopes and ctopo from the whole domain's HGT; TOPO_RAD_ADJ point by point (topo_shading: one patch)
+    ("real_tw1_r8_fp64_cpu", "2x2"),
+    ("real_sr3_r8_fp64_cpu_5h", "3x1"),
     # two-way nests: each domain on its own patches, whole copies between them (1x5: the couplings of the nest
     # forcing read mu_2 across the patches' edges), land-ice points (Noah's carried RC), Tiedtke's row flag
     ("real_n3_r8_fp64_cpu", "1x5"),

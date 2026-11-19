@@ -20,6 +20,7 @@
 #include "phys/sf_pxsfclay/pxsfclay.hpp"
 
 #include "phys/driver/suite_internal.hpp"
+#include "phys/driver/topo.hpp"
 
 namespace cppwrf::phys::driver {
 
@@ -1288,6 +1289,15 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
   const real dt = real(g_.dt);
   // DTBL (module_surface_driver.F:2015-2030): bldt*60 with the adaptive time step
   const real dtbl = o_.bldt == 0 ? dt : (adapt_step_flag ? real(o_.bldt) * real(60) : dt * real(stepbl));
+  // slope_rad = 1 with a longwave scheme (surface_driver's radiation flag): TOPO_RAD_ADJ_DRVR changes SWDOWN and GSW
+  // for the surface schemes, KTopoRadRestore puts them back at the end
+  const bool slope_rad = o_.slope_rad == 1 && o_.rad.ra_lw_physics > 0;
+  if (slope_rad) {
+    TopoFields& t = *topo_;
+    column_for(cols, topo::KTopoRadAdj{t.xlat.cview(), coszen.cview(), diffuse_frac.cview(), hrang.cview(),
+                                       t.slope.cview(), t.slp_azi.cview(), t.shadowmask.cview(), swdown.view(),
+                                       gsw.view(), t.swnorm.view(), t.gswsave.view(), real(rad_->declin())});
+  }
 
   column_for(cols, KSfcPrep{psfc.view(), prep.p_hyd_w.cview(), prep.u_phy.cview(), prep.v_phy.cview(),
                             uoce.cview(), voce.cview(), u_phytmp.view(), v_phytmp.view(), nz});
@@ -2067,6 +2077,10 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
     }
   }
   column_for(cols, KSfcEnd{rainbl.view(), q2.view(), xland.cview(), s.q_2[s.P_QV].cview()});
+  if (slope_rad) {
+    TopoFields& t = *topo_;
+    column_for(cols, topo::KTopoRadRestore{swdown.view(), gsw.view(), t.swnorm.view(), t.gswsave.cview()});
+  }
 }
 
 }  // namespace cppwrf::phys::driver

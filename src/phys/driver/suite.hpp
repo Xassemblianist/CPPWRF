@@ -162,6 +162,11 @@ struct SuiteOptions {
   int output_diagnostics = 0;
   int auxhist3_interval = 0;
   FddaOptions fdda;  // grid nudging (fddagd_driver)
+  // terrain options (src/phys/driver/topo.hpp): topo_wind 1 / 2 (start_em's CTOPO / CTOPO2, read by YSU), slope_rad 1
+  // (surface_driver: SWDOWN and GSW of the surface schemes over sloping terrain), topo_shading 1
+  // (pre_radiation_driver: the shadow mask, searched over shadlen metres)
+  int topo_wind = 0, slope_rad = 0, topo_shading = 0;
+  double shadlen = 25000.;
 };
 
 // The MYJ / QNSE family (MYJSFC or QNSESFC, MYJPBL or QNSEPBL): THZ0, QZ0, UZ0, VZ0, AKHS, AKMS, CT, the shelter
@@ -383,6 +388,25 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   void init_tmn_update();
   // Noah-MP initialization (NoahmpWRFinit -> NoahmpInitMain + NoahmpSnowInitMain)
   void init_noahmp(bool fndsnowh);
+  // slope_rad = 1 or topo_shading = 1 (allocated then): start_em's SLOPE and SLP_AZI, the terrain height with
+  // WRF's halo (pre_radiation_driver's HT_LOC: start_em's boundary copy of HGT, topo::ht_bc), XLAT, XLONG, SINALPHA,
+  // COSALPHA,
+  // HT_SHAD (Registry r: wrfrst HGT_SHAD), SWNORM (Registry rhd), surface_driver's GSWSAVE and SHADOWMASK (no I/O:
+  // 0 after a restart until pre_radiation_driver computes it again)
+  struct TopoFields {
+    explicit TopoFields(const Grid& g);
+    Field2 slope, slp_azi, ht_loc, xlat, xlong, sina, cosa, ht_shad, swnorm, gswsave;
+    IntField2 shadowmask;
+  };
+  std::unique_ptr<TopoFields> topo_;
+  // start_em's terrain arrays of a real-data run (not a restart; i + nx*j of the domain): CTOPO / CTOPO2 for
+  // topo_wind (xland after landuse_init, var_sso, var2d) and, with slope_rad or topo_shading, the fields above
+  void init_topo(const std::vector<double>& ht, const std::vector<double>& msftx, const std::vector<double>& msfty,
+                 const std::vector<double>& sina, const std::vector<double>& cosa, const std::vector<double>& xlat,
+                 const std::vector<double>& xlong, const std::vector<double>& xland,
+                 const std::vector<double>& var_sso, const std::vector<double>& var2d);
+  // pre_radiation_driver with topo_shading = 1 (every radiation call and the first step)
+  void topo_shading_step();
   // WSM6 effective radii (PhysicsCoupling, has_reqc = has_reqi = has_reqs = 1) seen by the radiation
   void set_effective_radii(Field3* re_cloud, Field3* re_ice, Field3* re_snow) {
     re_cloud_ = re_cloud; re_ice_ = re_ice; re_snow_ = re_snow;
@@ -411,7 +435,9 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // grid% fields above, R*BLTEN/RTHRATEN, EXCH_H/M, the soil state and the lagged t_1.
   std::vector<std::pair<std::string, Field2*>> carried2();
   std::vector<std::pair<std::string, Field3*>> carried3();
-  std::vector<std::pair<std::string, IntField2*>> carried_int();
+  // native: CPPWRF's own restart file, which also continues state WRF's restart stream leaves out (topo_shading's
+  // SHADOWMASK between two radiation calls), so that a resumed run is the uninterrupted one
+  std::vector<std::pair<std::string, IntField2*>> carried_int(bool native = false);
   void restarted(long step) {
     itimestep = step;
     run_start_step = step;

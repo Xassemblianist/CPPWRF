@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "phys/ra_rrtmg_common/rrtmg_real.hpp"
 #include "phys/driver/suite.hpp"
+#include "phys/driver/topo.hpp"
 
 #include "core/vm_dump.hpp"
 
@@ -429,6 +430,18 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     tsk_save = Field2(g, Stagger::M, "tsk_save");
   }
   if (o.fractional_seaice == 1) sea_ = std::make_unique<SeaIceFields>(g);
+  // terrain options (start_em, pre_radiation_driver, surface_driver: phys/driver/topo.hpp)
+  if (o.topo_wind < 0 || o.topo_wind > 2) throw std::runtime_error("PhysicsSuite: topo_wind must be 0, 1 or 2");
+  if (o.slope_rad != 0 && o.slope_rad != 1) throw std::runtime_error("PhysicsSuite: slope_rad must be 0 or 1");
+  if (o.topo_shading != 0 && o.topo_shading != 1) throw std::runtime_error("PhysicsSuite: topo_shading must be 0 or 1");
+  // toposhad searches shadlen metres around a point: WRF's result depends on its patches (niter, the shadow height
+  // passed between them); ported for one patch, the serial WRF run
+  if (o.topo_shading == 1 && g.patched())
+    throw std::runtime_error("PhysicsSuite: topo_shading = 1 with a decomposed domain (tiles or MPI ranks) is not "
+                             "supported");
+  if (o.topo_shading == 1 && !(o.shadlen > 0.0))
+    throw std::runtime_error("PhysicsSuite: topo_shading = 1 needs shadlen > 0");
+  if (o.slope_rad == 1 || o.topo_shading == 1) topo_ = std::make_unique<TopoFields>(g);
   if (o.sst_update == 1) xicem = Field2(g, Stagger::M, "xicem");
   // sst_skin / tmn_update: surface_driver every step (module_surface_driver.F:1855-1895). Ported with the Noah LSM
   // (the reference runs); check_a_mundo stops tmn_update = 1 with lagday = 1
@@ -789,6 +802,56 @@ void PhysicsSuite::init_radiation(const std::vector<double>& xlat, const std::ve
                                              std::vector<::cppwrf::phys::rr>(xlong.begin(), xlong.end()));
 }
 
+void PhysicsSuite::init_topo(const std::vector<double>& ht, const std::vector<double>& msftx,
+                             const std::vector<double>& msfty, const std::vector<double>& sina,
+                             const std::vector<double>& cosa, const std::vector<double>& xlat,
+                             const std::vector<double>& xlong, const std::vector<double>& xland,
+                             const std::vector<double>& var_sso, const std::vector<double>& var2d) {
+  const int nx = g_.nx, ny = g_.ny;
+  auto put = [&](Field2& f, const std::vector<double>& a) {
+    f.fill_host([&](int i, int j, int) { return a[i + std::size_t(nx) * j]; });
+  };
+  // start_em (not a restart): a real-data domain has specified boundaries (no periodic neighbours)
+  const topo::Slopes sl = topo::start_em_slopes(nx, ny, g_.dx, g_.dy, false, false, ht, &msftx, &msfty, &sina, &cosa);
+  std::vector<double> ct, ct2;
+  topo::start_em_ctopo(o_.topo_wind, xland, var_sso, var2d, sl.lap_hgt, ct, ct2);
+  put(ctopo, ct);
+  put(ctopo2, ct2);
+  if (!topo_) return;
+  TopoFields& t = *topo_;
+  put(t.slope, sl.slope);
+  put(t.slp_azi, sl.slp_azi);
+  {  // ht_loc with WRF's halo (topo::ht_bc) over the whole allocation
+    const Layout& L = t.ht_loc.layout();
+    std::vector<real> h(L.total, real(0));
+    for (int j = L.wj0; j < L.wj1; ++j)
+      for (int i = L.wi0; i < L.wi1; ++i) h[L.index(i, j, 0)] = real(topo::ht_bc(ht, nx, ny, i, j));
+    copy_to_dev(t.ht_loc.data() - L.offset, h.data(), L.total * sizeof(real));
+  }
+  put(t.xlat, xlat);
+  put(t.xlong, xlong);
+  put(t.sina, sina);
+  put(t.cosa, cosa);
+}
+
+void PhysicsSuite::topo_shading_step() {
+  // pre_radiation_driver: the first step and the steps of the radiation calls by the step count (STEPRA)
+  const int stepra = rad_ ? rad_->stepra()
+                          : (o_.rad.radt == 0 ? 1 : std::max(1, int(std::lround(o_.rad.radt * 60. / g_.dt))));
+  if (!(itimestep == 1 || itimestep % stepra == 1 + o_.rad.ra_call_offset)) return;
+  TopoFields& t = *topo_;
+  const rr julian = wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());
+  rr declin = 0, solcon = 0;
+  radconst(julian, declin, solcon);
+  const real xtime = real(clock_xtime()), radfrq = real(o_.rad.radt);
+  const real xt24 = std::fmod(xtime + radfrq * real(0.5), real(1440.));
+  const real dx = real(g_.dx), dy = real(g_.dy);
+  const int gpshad = int(real(o_.shadlen) / dx + real(1.));
+  column_for(g_.columns(), topo::KTopoShad{t.xlat.cview(), t.xlong.cview(), t.sina.cview(), t.cosa.cview(),
+                                           t.ht_loc.cview(), t.ht_shad.view(), t.shadowmask.view(), xt24,
+                                           real(o_.rad.gmt), real(declin), dx, dy, gpshad, g_.nx, g_.ny});
+}
+
 namespace {
 // phy_init (module_physics_init.F:1287-1301): the tmn_update state from TMN
 struct KTmnUpdateInit {
@@ -985,6 +1048,12 @@ PhysicsSuite::~PhysicsSuite() {
   if (d_mynn_psi_) dev_free(d_mynn_psi_);
 }
 
+PhysicsSuite::TopoFields::TopoFields(const Grid& g)
+    : slope(g, Stagger::M, "topo_slope"), slp_azi(g, Stagger::M, "topo_slp_azi"), ht_loc(g, Stagger::M, "topo_ht_loc"),
+      xlat(g, Stagger::M, "topo_xlat"), xlong(g, Stagger::M, "topo_xlong"), sina(g, Stagger::M, "topo_sina"),
+      cosa(g, Stagger::M, "topo_cosa"), ht_shad(g, Stagger::M, "ht_shad"), swnorm(g, Stagger::M, "swnorm"),
+      gswsave(g, Stagger::M, "topo_gswsave"), shadowmask(g, "shadowmask") {}
+
 PhysicsSuite::SeaIceFields::SeaIceFields(const Grid& g) {
   for (Field2* f : {&tsk_local, &tsk_sea, &xland_sea, &mavail_sea, &znt_sea, &z0base_sea, &br_sea, &chs_sea, &chs2_sea,
                     &cqs2_sea, &cpm_sea, &flhc_sea, &flqc_sea, &gz1oz0_sea, &hfx_sea, &qfx_sea, &lh_sea, &mol_sea,
@@ -1061,6 +1130,13 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
       v.emplace_back("sfc_" + f->name(), f);
   if (o_.prec_acc_opt)
     for (Field2* f : {&prec_acc_c, &prec_acc_nc, &snow_acc_nc}) v.emplace_back("sfc_" + f->name(), f);
+  // slope_rad: TOPO_RAD_ADJ reads HRANG (Registry r) until the next radiation call (DIFFUSE_FRAC: with the
+  // radiation diagnostics above); SWNORM (r); topo_shading: HT_SHAD (r; HGT_SHAD)
+  if (o_.slope_rad == 1) {
+    v.emplace_back("sfc_hrang", &hrang);
+    v.emplace_back("sfc_swnorm", &topo_->swnorm);
+  }
+  if (o_.topo_shading == 1) v.emplace_back("sfc_ht_shad", &topo_->ht_shad);
   for (Field2* f : clwrf_) v.emplace_back("sfc_" + f->name(), f);  // output_diagnostics (Registry rh3)
   if (o_.fdda.grid_fdda == 1)  // fdda2d members (Registry i{10}r)
     for (Field2* f : {&mu_ndg_old, &mu_ndg_new}) v.emplace_back("sfc_" + f->name(), f);
@@ -1150,8 +1226,9 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
   return v;
 }
 
-std::vector<std::pair<std::string, IntField2*>> PhysicsSuite::carried_int() {
+std::vector<std::pair<std::string, IntField2*>> PhysicsSuite::carried_int(bool native) {
   std::vector<std::pair<std::string, IntField2*>> v = {{"sfc_ivgtyp", &ivgtyp}, {"sfc_isltyp", &isltyp}, {"sfc_kpbl", &kpbl}};
+  if (native && o_.topo_shading == 1) v.emplace_back("shadowmask", &topo_->shadowmask);
   if (myj_family(o_)) v.emplace_back("sfc_lowlyr", &lowlyr);
   if (o_.sf_surface_physics == 4) {
     v.emplace_back("sfc_isnowxy", &isnowxy);
@@ -1179,6 +1256,7 @@ void PhysicsSuite::part1(dyn::State& s, const dyn::BaseState& b, dyn::Tendencies
   if (rainncv_mp_) rainncv.copy_from(*rainncv_mp_);  // the microphysics' grid%rainncv and grid%sr
   if (sr_mp_) sr.copy_from(*sr_mp_);
   run_phy_prep(s, b, prep, PhyPrepParams{o_.use_theta_m});
+  if (o_.topo_shading == 1) topo_shading_step();  // pre_radiation_driver
   if (rad_) {  // radiation_driver: xtime (minutes) and julian of the step start
     // WRF's clock (grid%xtime = minutesSinceSimulationStart, grid%julian = currentDayOfYearReal)
     const double xtime = clock_xtime();
@@ -1381,6 +1459,7 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
                        &u.ts_urb2d, &u.frc_urb2d, &u.flxhumr_urb2d, &u.flxhumb_urb2d, &u.flxhumg_urb2d, &u.cmr_sfcdif,
                        &u.chr_sfcdif, &u.cmc_sfcdif, &u.chc_sfcdif, &u.tgr_urb2d, &u.tvg_urb2d, &u.tt_urb2d});
   }
+  if (topo_) v.insert(v.end(), {&topo_->ht_shad, &topo_->swnorm});  // HGT_SHAD, SWNORM (0 without the option)
   return v;
 }
 

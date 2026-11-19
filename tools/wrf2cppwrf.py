@@ -601,9 +601,6 @@ SAME_ON_ALL_DOMAINS = (("physics", "kim_tofd"), ("physics", "tofd_factor"), ("dy
 UNSUPPORTED_PHYSICS_SWITCHES = {
     "shcu_physics": "Separate shallow cumulus scheme",
     "sf_lake_physics": "Lake physics model",
-    "topo_wind": "Topographic wind correction",
-    "slope_rad": "Slope-dependent radiation",
-    "topo_shading": "Topographic shading",
     "swint_opt": "Shortwave radiation interpolation between radt calls",
     "seaice_thickness_opt": "Variable sea-ice thickness option",
     "seaice_snowdepth_opt": "Sea-ice snow depth option",
@@ -2633,6 +2630,39 @@ class WrfTranslator:
                 sections.setdefault("phys", {})["sf_urban_physics"] = 1
                 if lcz == 1:
                     sections["phys"]["use_wudapt_lcz"] = 1
+
+        # terrain options (src/phys/driver/topo.hpp): topo_wind 1 / 2 (start_em's CTOPO / CTOPO2 for YSU), slope_rad
+        # = 1 (surface_driver's TOPO_RAD_ADJ_DRVR) and topo_shading = 1 (pre_radiation_driver's toposhad, shadlen) on
+        # a real-data domain without nests; slope_rad and topo_shading with a fixed time step
+        tw = self.get_opt_list("physics", "topo_wind")[:max(1, self._max_dom)] or [0]
+        sr = self.get_opt_list("physics", "slope_rad")[:max(1, self._max_dom)] or [0]
+        ts = self.get_opt_list("physics", "topo_shading")[:max(1, self._max_dom)] or [0]
+        terrain_ok = True
+        for key, vals, allowed in (("topo_wind", tw, (0, 1, 2)), ("slope_rad", sr, (0, 1)), ("topo_shading", ts, (0, 1))):
+            if any(v not in allowed for v in vals):
+                self.error(f"WRF {key} = {vals} is not supported; WRF's values are {', '.join(map(str, allowed))}.")
+                terrain_ok = False
+        if any(v != 0 for v in tw + sr + ts):
+            if max(1, self._max_dom) > 1:
+                self.error("WRF topo_wind / slope_rad / topo_shading with nests (max_dom > 1) are not supported by "
+                           "CPPWRF.")
+                terrain_ok = False
+            if case_name != "real":
+                self.error("WRF topo_wind / slope_rad / topo_shading are ported for real-data runs only.")
+                terrain_ok = False
+            if (sr[0] != 0 or ts[0] != 0) and self.get_opt("domains", "use_adaptive_time_step", False):
+                self.error("WRF slope_rad / topo_shading with use_adaptive_time_step are not supported by CPPWRF.")
+                terrain_ok = False
+            if terrain_ok:
+                ph = sections.setdefault("phys", {})
+                if tw[0] != 0:
+                    ph["topo_wind"] = tw[0]
+                if sr[0] != 0:
+                    ph["slope_rad"] = sr[0]
+                if ts[0] != 0:
+                    ph["topo_shading"] = ts[0]
+                    if self.has_opt("physics", "shadlen"):
+                        ph["shadlen"] = float(self.get_opt("physics", "shadlen", 25000.))
 
         for unsup_key, desc in UNSUPPORTED_DYNAMICS_SWITCHES.items():
             if self.has_opt("dynamics", unsup_key):

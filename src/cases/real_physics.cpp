@@ -8,7 +8,7 @@
 //   - bl_init: ACHFX = ACLHF = ACGRDFLX = SFCEVP = 0, LSMINIT (module_sf_noahdrv.F): SH2O from
 //     SMOIS/TSLB (FRH2O for frozen layers), SNOWH = 0.005*SNOW without input SNOWH, CANWAT = 0,
 //     SNOALB = MAXALB/100 when rdmaxalb = false,
-//   - start_em: CTOPO = CTOPO2 = 1 (topo_wind = 0).
+//   - start_em: CTOPO = CTOPO2 = 1 (topo_wind = 0; topo_wind 1 / 2, slope_rad, topo_shading: PhysicsSuite::init_topo).
 // Every other surface field starts at zero (WRF allocates grid fields zeroed).
 #include <cmath>
 #include <filesystem>
@@ -314,6 +314,16 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   if (o.sf_urban_physics != 0 && cfg.get_bool("real.nested", false))
     throw std::runtime_error("sf_urban_physics = " + std::to_string(o.sf_urban_physics) +
                              " on a nest is not supported");
+  // terrain options (start_em, pre_radiation_driver, surface_driver): one domain, a fixed time step
+  o.topo_wind = int(cfg.get_int("phys.topo_wind", 0));
+  o.slope_rad = int(cfg.get_int("phys.slope_rad", 0));
+  o.topo_shading = int(cfg.get_int("phys.topo_shading", 0));
+  o.shadlen = cfg.get_double("phys.shadlen", 25000.);
+  if ((o.topo_wind != 0 || o.slope_rad != 0 || o.topo_shading != 0) && cfg.get_bool("real.nested", false))
+    throw std::runtime_error("topo_wind / slope_rad / topo_shading on a nest are not supported");
+  if ((o.slope_rad != 0 || o.topo_shading != 0) && cfg.get_bool("time.adaptive", false))
+    throw std::runtime_error("slope_rad / topo_shading with the adaptive time step (use_adaptive_time_step) are not "
+                             "supported");
   o.ysu_topdown_pblmix = int(cfg.get_int("phys.ysu_topdown_pblmix", 1));
   o.kim_tofd = cfg.get_bool("phys.kim_tofd", false);
   o.isftcflx = int(cfg.get_int("phys.isftcflx", 0));  // sfclayrev: z0t / z0q and roughness over water
@@ -615,6 +625,14 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   }
   // CANWAT = 0 (lsminit / NoahmpInitMain; the slab's from wrfinput), the accumulations and fluxes stay zero
   su.init_radiation(m.xlat, m.xlong);
+  if (o.topo_wind != 0 || su.topo_) {
+    // start_em (not a restart): CTOPO / CTOPO2 and the slope-radiation arrays from the terrain and phy_init's XLAND
+    if (o.topo_wind == 1 && !(in.has("GOT_VAR_SSO") && in.var("GOT_VAR_SSO", 1)[0] != 0.0))
+      throw std::runtime_error("topo_wind requires VAR_SSO data");  // start_em.F:236-239 (grid%got_var_sso)
+    const std::vector<double> zero(n2, 0.0);
+    su.init_topo(rd2("HGT"), rd2("MAPFAC_MX"), rd2("MAPFAC_MY"), rd2("SINALPHA"), rd2("COSALPHA"), m.xlat, m.xlong,
+                 xland, in.has("VAR_SSO") ? rd2("VAR_SSO") : zero, in.has("VAR") ? rd2("VAR") : zero);
+  }
   if (auto* pc = m.rk->physics(); pc && pc->params().microp_re)
     su.set_effective_radii(&pc->re_cloud, &pc->re_ice, pc->p3() ? nullptr : &pc->re_snow);  // P3: has_reqs = 0
   if (auto* pc = m.rk->physics(); pc && pc->params().mp_physics != 0) {

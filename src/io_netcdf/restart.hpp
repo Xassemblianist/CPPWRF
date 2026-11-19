@@ -2,6 +2,7 @@
 #pragma once
 
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "io_netcdf/netcdf_common.hpp"
@@ -10,7 +11,7 @@ namespace cppwrf::io_netcdf {
 
 // the format of CPPWRF's own restart file (the global attribute CPPWRF_RESTART_VERSION): raise it when the file's
 // contents change; a file of another version is refused (WRF's wrfrst files are the cross-version restart)
-inline constexpr int kRestartVersion = 2;  // 2: WRF_ALARM_SECS_TIL_NEXT_RING_51
+inline constexpr int kRestartVersion = 3;  // 2: WRF_ALARM_SECS_TIL_NEXT_RING_51; 3: the scalars (SCALAR_*)
 
 struct RestartMeta {
   int version = kRestartVersion;  // read: 0 when the file has none (written before the version was recorded)
@@ -25,6 +26,14 @@ struct RestartMeta {
   // the restart alarm's seconds to its next ring, as WRF's wrfrst attribute WRF_ALARM_SECS_TIL_NEXT_RING_51 (a run
   // resumed from the file rings first at its time + these seconds); < 0: not written (no restart alarm)
   long restart_secs_to_ring = -1;
+  // the model's scalar state of WRF's restart stream (Registry r scalars: NSTEPS, DECLIN, SOLCON, ...), global
+  // attributes SCALAR_<name> (double)
+  std::vector<std::pair<std::string, double>> scalars;
+  double scalar(const std::string& name, double missing) const {
+    for (const auto& [n, v] : scalars)
+      if (n == name) return v;
+    return missing;
+  }
 };
 
 // CPPWRF's own restart file (restart_NNNNNN.nc; WRF's wrfrst_d0N files are WrfHistory::write_restart):

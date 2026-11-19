@@ -95,7 +95,8 @@ std::vector<std::string> wrf_names(const std::string& n) {
       {"sfc_xice", "SEAICE"}, {"sfc_sfcrunoff", "SFROFF"}, {"sfc_udrunoff", "UDROFF"},
       {"sfc_xlat_sfc", "XLAT"}, {"sfc_xlong_sfc", "XLONG"}, {"sfc_rthratenlw", "RTHRATLW"},
       {"sfc_rthratensw", "RTHRATSW"}, {"sfc_rthratenlwc", "RTHRATLWC"}, {"sfc_rthratenswc", "RTHRATSWC"},
-      {"sfc_t2mvxy", "T2V"}, {"sfc_t2mbxy", "T2B"}, {"sfc_q2mvxy", "Q2V"}, {"sfc_q2mbxy", "Q2B"}};
+      {"sfc_t2mvxy", "T2V"}, {"sfc_t2mbxy", "T2B"}, {"sfc_q2mvxy", "Q2V"}, {"sfc_q2mbxy", "Q2B"},
+      {"sfc_ht_shad", "HGT_SHAD"}};
   auto r = renamed.find(n);
   if (r != renamed.end()) return {r->second};
   if (n.rfind("sfc_", 0) == 0) {
@@ -280,6 +281,14 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   meta.commit = CPPWRF_COMMIT;
   meta.options = restart_options(cfg_);
   meta.restart_secs_to_ring = rst_secs_to_ring(step);
+  if (m_.suite) {  // Registry r scalars of WRF's restart stream: grid%nsteps; grid%declin, grid%solcon (DECLINX, SOLCONX
+    // of the last radiation call: the surface driver's TOPO_RAD_ADJ and urban read them until the next call)
+    meta.scalars.emplace_back("NSTEPS", double(m_.suite->nsteps));
+    if (m_.suite->rad_) {
+      meta.scalars.emplace_back("DECLIN", double(m_.suite->rad_->declin()));
+      meta.scalars.emplace_back("SOLCON", double(m_.suite->rad_->solcon()));
+    }
+  }
 
   const io_netcdf::DType dt = sizeof(real) == 8 ? io_netcdf::DType::F64 : io_netcdf::DType::F32;
   std::vector<std::vector<real>> bufs;
@@ -345,7 +354,7 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   if (m_.suite) {  // column physics state (soil, surface, PBL, lagged t_1)
     for (auto& [name, f] : m_.suite->carried2()) add_field2(name, *f);
     for (auto& [name, f] : m_.suite->carried3()) add_field3(name, *f);
-    for (auto& [name, f] : m_.suite->carried_int()) {  // integers stored as reals (exact)
+    for (auto& [name, f] : m_.suite->carried_int(true)) {  // integers stored as reals (exact)
       std::vector<int> hi;
       const Layout L = tile::download_any(*f, hi);
       bufs.emplace_back(hi.begin(), hi.end());
@@ -469,7 +478,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
   if (m_.suite) {
     for (auto& [name, f] : m_.suite->carried2()) reg_field2(name, *f);
     for (auto& [name, f] : m_.suite->carried3()) reg_field3(name, *f);
-    for (auto& [name, f] : m_.suite->carried_int()) {
+    for (auto& [name, f] : m_.suite->carried_int(!wrf_file)) {
       std::vector<int> hi;
       const Layout L = tile::local_whole(*f, hi);
       size_t idx = bufs.size();
@@ -489,6 +498,10 @@ void DomainRunner::load_restart_file(const std::string& path) {
   } else {
     check_native_restart(path, io_netcdf::read_restart_meta(path), cfg_);
     io_netcdf::read_restart(path, meta, vars);
+    if (m_.suite) {  // the scalars save_restart_file stores (WRF's wrfrst: NSTEPS, DECLIN, SOLCON below)
+      m_.suite->nsteps = int(std::lround(meta.scalar("NSTEPS", 0.0)));
+      if (m_.suite->rad_) m_.suite->rad_->set_solar(meta.scalar("DECLIN", 0.0), meta.scalar("SOLCON", 0.0));
+    }
   }
 
   if (meta.nx != g.nx || meta.ny != g.ny || meta.nz != g.nz) {
@@ -581,6 +594,10 @@ void DomainRunner::load_restart_file(const std::string& path) {
       aux3_ring_at_start_ = ring3 == 1 ? 1 : 0;
     }
     if (m_.suite) m_.suite->nsteps = int(wrf_scalar(path, "NSTEPS"));  // grid%nsteps (clwrf_output_calc)
+    // grid%declin, grid%solcon (Registry r) of the last radiation call: slope_rad's TOPO_RAD_ADJ reads DECLIN until
+    // the next one
+    if (m_.suite && m_.suite->options().slope_rad == 1 && m_.suite->rad_)
+      m_.suite->rad_->set_solar(wrf_scalar(path, "DECLIN"), wrf_scalar(path, "SOLCON"));
     if (m_.suite && m_.suite->options().tmn_update == 1) {  // tmnupdate's NYEAR and NDAY (Registry r)
       m_.suite->nyear = int(std::lround(wrf_scalar(path, "NYEAR")));
       m_.suite->nday = real(wrf_scalar(path, "NDAY"));

@@ -34,6 +34,7 @@ static void test_precision(DType dt) {
   meta_out.dy = 100.0;
   meta_out.dt = 1.0;
   meta_out.case_name = "straka";
+  meta_out.scalars = {{"NSTEPS", 37.0}, {"DECLIN", -0.12969871234567891}, {"SOLCON", 1386.25}};
   meta_out.date_str = "0001-01-01_00:05:00";
 
   // Lambda to fill test pattern
@@ -140,6 +141,10 @@ static void test_precision(DType dt) {
   const RestartMeta head = read_restart_meta(filename);
   assert(head.version == kRestartVersion && head.commit == meta_out.commit && head.options == meta_out.options);
   assert(head.step == meta_out.step && head.nx == nx);
+  // the scalars (SCALAR_* attributes), bit for bit
+  assert(meta_in.scalars.size() == 3 && meta_in.scalar("DECLIN", 0.0) == -0.12969871234567891 &&
+         meta_in.scalar("NSTEPS", 0.0) == 37.0 && meta_in.scalar("SOLCON", 0.0) == 1386.25 &&
+         meta_in.scalar("NYEAR", -1.0) == -1.0);
 
   // Validate bitwise exact identity using memcmp
   assert(std::memcmp(u1.data(), ru1.data(), u1.size()) == 0);
