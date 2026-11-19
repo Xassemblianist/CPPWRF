@@ -74,6 +74,14 @@ hy1|configs/real_p1_r8.ini|$R/run_HY1_r8/steps|-|--set real.dir=$R/run_HY1_r8/st
 fd1|configs/real_fd1_r8.ini|$R/run_FD1_r8/steps|$R/rst_FD1_r8|
 fdn|configs/real_fdn_r8.ini|$R/run_FDN_r8/steps|$R/rst_FDN_r8|
 g10sso|configs/real_p1_r8.ini|$R/rst_G10SSO|$R/rst_G10SSO|--set real.dir=$R/run_G10SSO_r8 --set phys.topo_wind=1
+g9f1|configs/real_n3_steps.ini|$R/run_G9F1_r8/steps|$R/rst_G9F1|--set real.dir=$R/run_G9F1_r8/steps --set d02.phys_cu_physics=0
+g9f5|configs/real_b01_r8.ini|$R/run_G9F5_r8|-|--set real.dir=$R/run_G9F5_r8 --set run.run_time=300 --set time.history_interval_s=3600 --set output.out_interval=1000000000 --set restart.interval=120
+g9f6a5|configs/real_p1_r8.ini|$R/run_G9F6A5_r8/steps|-|--set real.dir=$R/run_G9F6A5_r8/steps
+g9f6b|configs/real_mynn_r8.ini|$R/run_G9F6B_r8/steps|-|--set real.dir=$R/run_G9F6B_r8/steps
+g9f6c|configs/real_n3_steps.ini|$R/run_G9F6C_r8/steps|-|--set real.dir=$R/run_G9F6C_r8/steps --set phys.cu_physics=11 --set d02.phys_cu_physics=0
+g9f6d|configs/real_p1_r8.ini|$R/run_G9F6D_r8/steps|$R/rst_G9F6D|--set real.dir=$R/run_G9F6D_r8/steps
+g9f6e|configs/real_n3_steps.ini|$R/run_G9F6E_r8/steps|-|--set real.dir=$R/run_G9F6E_r8/steps
+g9f7|configs/real_p1_r8.ini|$R/run_G9F7_r8/steps|$R/rst_G9F7|--set real.dir=$R/run_G9F7_r8/steps
 "
 want=" $* "
 fail=0 n=0 skip=0
