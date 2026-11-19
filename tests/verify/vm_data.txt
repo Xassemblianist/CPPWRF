@@ -96,6 +96,10 @@ port_fp32r4_data.tar
 # the terrain-option references (TW1/TW2/TW4: YSU topo_wind; SR1-SR4: slope_rad / topo_shading,
 # tests/verify/cases/49_terrain.py; TW1/TW4 on wrfinput files with VAR_SSO); links into run_P1_r8 / run_P4_r8
 port_a0204_data.tar
+# WRF real.exe runs on run_P1_r8's met_em files (wrfref gem10-refs: run_G10REAL_r8, run_G10LAG1_r8 lagrange_order 1,
+# run_G10DST_r8 default_soiltype 14, run_G10SSO_r8 met_em with VAR_SSO / FLAG_VAR_SSO then topo_wind 1; base_G10MET /
+# base_G10SSO hold the met_em files): ctest real_vs_wrf_runs and the files test's g10sso
+port_gem10_data.tar
 # whole references (every frame and variable) of the tolerance-0 cases and the ideal namelists
 # (tools/colab/stage_data.py --whole --refs-only --no-steps): after the tars above, whose files they replace
 v05_suite_refs.tar

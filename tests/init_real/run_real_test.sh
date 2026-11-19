@@ -5,11 +5,12 @@
 # wrflowinp_d0N and (grid_fdda >= 1) wrffdda_d0N files.
 #   usage: run_real_test.sh [BUILD_DIR] [case ...]
 # A case with a '/' is a directory of its own (a WRF reference run made with real.exe: namelist.input, the met_em
-# files and real.exe's outputs; precision double without a precision file).
+# files and real.exe's outputs; precision double without a precision file); runs:NAME is the directory
+# ${CPPWRF_WRF_RUNS}/NAME (a wrfref run made with run.real; a missing one is a SKIP, exit 77 when every case is).
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-if [ -z "${CPPWRF_WRF_RUNS:-}" ] || { [ ! -d "${CPPWRF_WRF_RUNS}/real" ] && [[ "${2:-}" != */* ]]; }; then
+if [ -z "${CPPWRF_WRF_RUNS:-}" ] || { [ ! -d "${CPPWRF_WRF_RUNS}/real" ] && [[ "${2:-}" != */* ]] && [[ "${2:-}" != runs:* ]]; }; then
   echo "SKIP: \${CPPWRF_WRF_RUNS}/real not found"; exit 77
 fi
 BUILD_DIR=${1:-${REPO_ROOT}/build}; shift || true
@@ -18,10 +19,12 @@ SCHEMA=${REPO_ROOT}/data/wrf_schema/wrf-4.8.0.tsv
 WORK=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}/real_test
 cases=("$@")
 [ ${#cases[@]} -eq 0 ] && for d in "${CPPWRF_WRF_RUNS}"/real/*/; do cases+=("$(basename "$d")"); done
-fail=0
+fail=0 skip=0
 for c in "${cases[@]}"; do
   ref=${CPPWRF_WRF_RUNS}/real/$c
   [[ "$c" == */* ]] && ref=$c
+  [[ "$c" == runs:* ]] && ref=${CPPWRF_WRF_RUNS}/${c#runs:}
+  [ -d "$ref" ] || { echo "SKIP $c: $ref not found"; skip=$((skip + 1)); continue; }
   prec=double; [ -f "$ref/precision" ] && prec=$(cat "$ref/precision")
   rm -rf "$WORK"; mkdir -p "$WORK"
   if ! "$EXE" --namelist "$ref/namelist.input" --met-dir "$ref" --out-dir "$WORK" \
@@ -37,4 +40,5 @@ for c in "${cases[@]}"; do
   if [ $ok = 1 ]; then echo "PASS $c"; else echo "FAIL $c"; fail=1; fi
 done
 rm -rf "$WORK"
+[ "$fail" = 0 ] && [ "$skip" -gt 0 ] && [ "$skip" = "${#cases[@]}" ] && exit 77
 exit $fail

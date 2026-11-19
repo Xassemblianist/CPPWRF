@@ -230,6 +230,12 @@ if(TARGET netCDF::netcdf OR NETCDF_FOUND OR NETCDF_INCDIR)
   add_test(NAME real_vs_wrf COMMAND bash ${CMAKE_SOURCE_DIR}/tests/init_real/run_real_test.sh ${CMAKE_BINARY_DIR}
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(real_vs_wrf PROPERTIES SKIP_RETURN_CODE 77)
+  # WRF real.exe runs of the wrfref workflow (port_gem10_data.tar): lagrange_order 1, default_soiltype 14, met_em
+  # files with VAR_SSO / FLAG_VAR_SSO, and the plain P1 met_em (skipped, exit 77, without them)
+  add_test(NAME real_vs_wrf_runs COMMAND bash ${CMAKE_SOURCE_DIR}/tests/init_real/run_real_test.sh ${CMAKE_BINARY_DIR}
+           runs:run_G10REAL_r8 runs:run_G10LAG1_r8 runs:run_G10DST_r8 runs:run_G10SSO_r8
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(real_vs_wrf_runs PROPERTIES SKIP_RETURN_CODE 77)
   # wrfout/wrfrst files identical to WRF v4.8.0's (CPU FP64 builds; skipped, exit 77, without ${CPPWRF_WRF_RUNS})
   if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA)
     add_test(NAME wrf_files_vs_wrf COMMAND bash ${CMAKE_SOURCE_DIR}/tests/verify/run_wrf_files_test.sh ${CMAKE_BINARY_DIR}
