@@ -33,6 +33,9 @@ CASES = [
     ("real_p3nc_r8_fp64_cpu_1h", "cpu_dp", "configs/real_p3nc_r8.ini", ["real.dir=" + f"{WR}/run_P3NC_r8"] + _1H,
      f"{WR}/run_P3NC_r8/wrfout_d01_{_D}", 3600, _TNC),
 ]
+# CUDA FP64 twins (tolerance 0) of P3NC's CPU cases: the same configuration, reference and variables, kind cuda_dp
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].startswith("real_p3nc_")]
 
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
 # duration
