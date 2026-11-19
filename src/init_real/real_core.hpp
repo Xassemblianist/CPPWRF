@@ -683,6 +683,21 @@ void integ_moist(const F3<T>& q_in, const F3<T>& p_in, F3<T>& pd_out, const F3<T
 }
 
 // sfcprs3 over metgrid levels (kte = nlev)
+// module_initialize_real.F:8457-8515 sfcprs2 (ez_method = we_have_tavgsfc: TAVGSFC is refused, so .false.):
+// psfc = psfc_in * exp(g del_z / (Rd Tv_sfc)), del_z = input surface height - model terrain
+template <typename T>
+void sfcprs2(const F3<T>& t, const F3<T>& q, const F3<T>& height, const F2<T>& psfc_in, const F2<T>& ter,
+             F2<T>& psfc, const Dims& d, const SkipCtx& sk) {
+  const T Rd = Const<T>::r_d, g = Const<T>::g;
+  for (int j = d.jts(); j <= std::min(d.jde - 1, d.jte()); ++j)
+    for (int i = d.its(); i <= std::min(d.ide - 1, d.ite()); ++i) {
+      if (skip_middle(d, i, j, sk.width, sk.hold_ups)) continue;
+      const T tv_sfc = t(i, 1, j) * (T(1.) + T(0.608) * q(i, 1, j));
+      const T del_z = height(i, 1, j) - ter(i, j);
+      psfc(i, j) = psfc_in(i, j) * std::exp(g * del_z / (Rd * tv_sfc));
+    }
+}
+
 template <typename T>
 void sfcprs3(const F3<T>& height, const F3<T>& p, const F2<T>& ter, const F2<T>& slp, F2<T>& psfc, int nlev,
              const Dims& d, const SkipCtx& sk) {

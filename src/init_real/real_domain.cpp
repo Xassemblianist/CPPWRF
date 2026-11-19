@@ -301,7 +301,9 @@ void RealDomain<T>::read_input(const MetEm& m) {
   while (!mminlu.empty() && (mminlu.back() == ' ' || mminlu.back() == '\0')) mminlu.pop_back();
   // 3-D metgrid fields
   put3(m, "PRES", p_gc); put3(m, "TT", t_gc); put3(m, "UU", u_gc); put3(m, "VV", v_gc);
-  put3(m, "GHT", ght_gc);
+  // GHT: a met_em set without it (ERA5 model levels) leaves ght_gc as it was (zero at the first time, as WRF's
+  // grid array), and module_initialize_real.F:1202-1213 rebuilds it hypsometrically where it is below 1 m
+  if (m.has("GHT")) put3(m, "GHT", ght_gc);
   // moisture: RH, or SPECHUMD with FLAG_SH = 1 / QV with FLAG_QV = 1 (module_initialize_real.F:1113-1197 derives
   // RH from them); without any of them WRF would run on RH = 0
   const bool fl_sh = flags.count("SH") && flags["SH"] == 1, fl_qv = flags.count("QV") && flags["QV"] == 1;
@@ -313,7 +315,12 @@ void RealDomain<T>::read_input(const MetEm& m) {
   if (m.has("SPECHUMD")) put3(m, "SPECHUMD", sh_gc);
   else if (fl_sh) throw std::runtime_error("real: FLAG_SH = 1 but met_em has no SPECHUMD: " + m.path);
   // 2-D fields (Registry i1 names)
-  put2(m, "PSFC", psfc); put2(m, "PMSL", pslv_gc); put2(m, "HGT_M", ht_gc); put2(m, "SKINTEMP", tsk_gc);
+  if (m.has("PSFC")) put2(m, "PSFC", psfc);
+  if (m.has("PMSL")) put2(m, "PMSL", pslv_gc);
+  for (auto [fl, n] : {std::pair<const char*, const char*>{"PSFC", "PSFC"}, {"SLP", "PMSL"}, {"SOILHGT", "SOILHGT"}})
+    if (flags.count(fl) && flags[fl] == 1 && !m.has(n))
+      throw std::runtime_error(std::string("real: FLAG_") + fl + " = 1 but met_em has no " + n + ": " + m.path);
+  put2(m, "HGT_M", ht_gc); put2(m, "SKINTEMP", tsk_gc);
   put2(m, "SOILTEMP", tmn_gc); put2(m, "XLAT_M", xlat_gc); put2(m, "XLONG_M", xlong_gc);
   put2(m, "XLAT_U", xlat_u); put2(m, "XLONG_U", xlong_u); put2(m, "XLAT_V", xlat_v); put2(m, "XLONG_V", xlong_v);
   put2(m, "CLAT", clat); put2(m, "CLONG", clong);
@@ -545,7 +552,19 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
             rh_from_qv(i, kk, j);
           }
     }
-    if (ght_gc(i_valid, nlev / 2, j_valid) < T(1)) throw std::runtime_error("real: GHT reconstruction is not ported");
+    if (ght_gc(i_valid, nlev / 2, j_valid) < T(1)) {  // module_initialize_real.F:1202-1213
+      const T R_d = Const<T>::r_d, g = Const<T>::g;
+      for (int j = jts; j <= j1; ++j)
+        for (int kk = 2; kk <= nlev; ++kk)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            ght_gc(i, kk, j) = ght_gc(i, kk - 1, j) -
+                               R_d / g * T(0.5) *
+                                   (t_gc(i, kk, j) * (T(1) + T(0.608) * qv_gc(i, kk, j)) +
+                                    t_gc(i, kk - 1, j) * (T(1) + T(0.608) * qv_gc(i, kk - 1, j))) *
+                                   std::log(p_gc(i, kk, j) / p_gc(i, kk - 1, j));
+          }
+    }
     if (p_gc(i_valid, nlev / 2, j_valid) < p_gc(i_valid, nlev / 2 + 1, j_valid)) sfcp_to_sfcp = true;
   }
   for (int j = jts; j <= std::min(jde - 1, jte); ++j)
@@ -645,10 +664,19 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     }
   {
     Dims dm{ids, ide, jds, jde, 1, nlev};
+    // module_initialize_real.F:1398-1434
     if (flag("PSFC") == 1 && flag("SOILHGT") == 1 && flag("SLP") == 1 && !sfcp_to_sfcp) {
       sfcprs3(ght_gc, p_gc, ht, pslv_gc, psfc, nlev, dm, sk);
+    } else if (flag("PSFC") == 1 && flag("SOILHGT") == 1 && sfcp_to_sfcp) {
+      sfcprs2(t_gc, qv_gc, ght_gc, psfc_gc, ht, psfc, dm, sk);
+    } else if (flag("SLP") == 1) {
+      throw std::runtime_error("real: met_em without surface pressure (FLAG_PSFC = " + std::to_string(flag("PSFC")) +
+                               ") or soil height (FLAG_SOILHGT = " + std::to_string(flag("SOILHGT")) +
+                               "): WRF's sfcprs path (from PMSL) is not ported");
     } else {
-      throw std::runtime_error("real: only the sfcprs3 surface pressure path is ported");
+      throw std::runtime_error("real: not enough info for a p sfc computation (FLAG_PSFC = " +
+                               std::to_string(flag("PSFC")) + ", FLAG_SOILHGT = " + std::to_string(flag("SOILHGT")) +
+                               ", FLAG_SLP = 0)");
     }
     integ_moist(qv_gc, p_gc, pd_gc, t_gc, ght_gc, intq_gc, nlev, dm, sk);
   }
