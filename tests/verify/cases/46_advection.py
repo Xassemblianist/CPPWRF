@@ -65,6 +65,10 @@ CASES += [
     ("real_wm4_fp32_1h", "cuda", "configs/real_wm4_r8.ini", [f"real.dir={WR}/run_WM4_r8"] + _1H,
      f"{WR}/run_WM4_r8/wrfout_d01_{_D}", 3600, {"U": 9.0e-4, "W": 2.4e-2, "THM": 2.6e-5, "QV": 8.0e-4}),
 ]
+# CUDA FP64 twins (tolerance 0) of the CPU cases of MOMY, MON3, WP4, WK4, WMY and WN3: the same configuration,
+# overrides, WRF reference and variables, kind cuda_dp
+CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
+          if c[1] == "cpu_dp" and c[0].split("_")[1] in ("momy", "mon3", "wp4", "wk4", "wmy", "wn3")]
 
 STATUS = [
     ('MO4', 'P4 with monotonic moist / scalar advection (moist_adv_opt 2, scalar_adv_opt 2)', '1 h'),
