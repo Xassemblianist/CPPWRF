@@ -671,21 +671,35 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   vert_interp(v_gc, pd_gc, v_2, pb, nlev, 'V', vo, d, sk);
   // ================================ end of the vertical interpolation part
 
-  if (islake < 0) throw std::runtime_error("real: input without inland lake information is not ported");
-  lakeflag = 1;
-  if (we_have_tavgsfc) throw std::runtime_error("real: TAVGSFC with inland lakes is not ported");
-  for (int j = jts; j <= j1; ++j)
-    for (int i = its; i <= i1; ++i) {
-      if (skip(i, j)) continue;
-      landusef(i, iswater, j) = landusef(i, iswater, j) + landusef(i, islake, j);
-      landusef(i, islake, j) = T(0.);
-    }
-  if (o.surface_input_source == 3)
+  // module_initialize_real.F:2822-2884
+  if (islake < 0) {  // land use without an inland-lake category (USGS 24, MODIS 20, NLCD40: ISLAKE = -1)
+    lakeflag = 0;
+    if (we_have_tavgsfc) throw std::runtime_error("real: TAVGSFC (FLAG_TAVGSFC = 1) is not ported");
     for (int j = jts; j <= j1; ++j)
       for (int i = its; i <= i1; ++i) {
         if (skip(i, j)) continue;
-        if (lu_index(i, j) == T(islake)) lu_index(i, j) = T(iswater);
+        if ((landusef(i, iswater, j) >= T(0.5) || lu_index(i, j) == T(iswater)) &&
+            (sst(i, j) < T(150) || sst(i, j) > T(400))) {
+          if (sst(i, j) < T(150) || sst(i, j) > T(400)) sst(i, j) = tsk(i, j);
+          if (sst(i, j) < T(150) || sst(i, j) > T(400)) sst(i, j) = t2(i, j);
+        }
       }
+  } else {
+    lakeflag = 1;
+    if (we_have_tavgsfc) throw std::runtime_error("real: TAVGSFC with inland lakes is not ported");
+    for (int j = jts; j <= j1; ++j)
+      for (int i = its; i <= i1; ++i) {
+        if (skip(i, j)) continue;
+        landusef(i, iswater, j) = landusef(i, iswater, j) + landusef(i, islake, j);
+        landusef(i, islake, j) = T(0.);
+      }
+    if (o.surface_input_source == 3)
+      for (int j = jts; j <= j1; ++j)
+        for (int i = its; i <= i1; ++i) {
+          if (skip(i, j)) continue;
+          if (lu_index(i, j) == T(islake)) lu_index(i, j) = T(iswater);
+        }
+  }
   for (int j = jts; j <= j1; ++j)
     for (int i = its; i <= i1; ++i) {
       if (skip(i, j)) continue;
