@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Changed path -> suite cases, for tools/ci/affected_cases.py (development runs only: every merge to main is proven by
+# the full suite, CONTRIBUTING.md "Development runs on the CI").
+#
+#   PATTERN   SELECTOR [SELECTOR ...]
+#
+# PATTERN: a path glob relative to the repository root (* within a path component, ** across components); the first
+# line whose pattern matches a changed file decides that file. SELECTORs (their union is selected):
+#   KEY=V[,V]  KEY!=V[,V]  KEY>=N   cases whose effective configuration (config file, then the case's --set list;
+#                                    unset keys are 0) has that value; KEY without a section is phys.KEY
+#   cases:REGEX                      cases whose name matches REGEX (re.search)
+#   config                           the changed file is a configuration: the cases that run it
+#   group                            the changed file is a group of tests/verify/cases: the cases it defines
+#   each:KEY                         one short case for each value of KEY other than 0 (the first in suite order)
+#   core                             the core sample (@core below)
+#   checks                           no case; the run's translator tests and comparators' self-test only
+#   docs                             nothing (documentation)
+# A selector prefixed with short: keeps only the short versions (simulated time <= 1200 s: the 3-step, 5-step, 10 and
+# 20 min cases); without it the 1 h and longer versions are selected too (the slow 24 h / 72 h cases only with --slow;
+# an option selector of more than 40 cases, as WSM6 or YSU, keeps 6 of its long cases unless --all-long).
+# A file whose changed lines (git diff) are all comments or blank (# lines in Python, shell, CMake, .ini and .txt
+# files; // lines in C++ and CUDA) counts as documentation. A changed file under src/phys/<scheme>/ also selects the
+# cases of every scheme directory whose files include it (directly or through other scheme files; #include lines).
+# tests/tools/test_affected_cases.py checks that every src/phys/* directory has its own line, that every option
+# selector of a scheme selects at least one case and that @core names existing cases.
+
+# the core sample: dycore R1 / T1 / R1D6, P4 3 steps + 1 h + 2x2 tiles, the two-way nest N3, the physics restart
+# check, an ideal case (quarter_ss, Kessler) and the Straka density current
+# (several @core lines add up)
+@core real_r1_fp64_cpu,real_t1_fp64_cpu,real_r1d6_fp64_cpu
+@core real_p4_r8_fp64_cpu,real_p4_r8_fp64_cpu_1h,real_p4_r8_fp64_cpu_t2x2
+@core real_n3_r8_fp64_cpu,restart_p1_fp64,ideal_quarter_ss_k2_fp64_cpu,straka_wrf
+
+# --- documentation and project files: nothing
+docs/**                              docs
+*.md                                 docs
+**/*.md                              docs
+LICENSE                              docs
+licenses/**                          docs
+.github/ISSUE_TEMPLATE/**            docs
+.gitignore                           docs
+.gitattributes                       docs
+
+# --- microphysics (dyn/physics_coupling.cpp dispatch)
+src/phys/mp_kessler/**               mp_physics=1
+src/phys/mp_wsm3/**                  mp_physics=3
+src/phys/mp_wsm5/**                  mp_physics=4
+src/phys/mp_wsm6/**                  mp_physics=6
+src/phys/mp_thompson/**              mp_physics=8,28
+src/phys/mp_morrison/**              mp_physics=10
+src/phys/mp_wdm5/**                  mp_physics=14
+src/phys/mp_wdm6/**                  mp_physics=16
+src/phys/mp_nssl/**                  mp_physics=17,18
+src/phys/mp_p3/**                    mp_physics=50,51,52,53
+src/phys/mp_radar/**                 do_radar_ref=1 mp_physics=18
+# --- cumulus (driver/cumulus_driver.cpp)
+src/phys/cu_kf/**                    cu_physics=1
+src/phys/cu_bmj/**                   cu_physics=2
+src/phys/cu_gfl/**                   cu_physics=3
+src/phys/cu_g3/**                    cu_physics=5
+src/phys/cu_tiedtke/**               cu_physics=6
+src/phys/cu_mskf/**                  cu_physics=11
+src/phys/cu_ntiedtke/**              cu_physics=16
+# --- planetary boundary layer, gravity wave drag, fog deposition (driver/pbl_driver.cpp)
+src/phys/bl_ysu/**                   bl_pbl_physics=1
+src/phys/bl_myj/**                   bl_pbl_physics=2
+src/phys/bl_qnse/**                  bl_pbl_physics=4
+src/phys/bl_mynn/**                  bl_pbl_physics=5
+src/phys/bl_acm/**                   bl_pbl_physics=7
+src/phys/bl_boulac/**                bl_pbl_physics=8
+src/phys/bl_gwdo/**                  dyn.gwd_opt=1
+src/phys/fogdes/**                   grav_settling>=1
+# --- surface layer (driver/surface_driver.cpp)
+src/phys/sf_sfclayrev/**             sf_sfclay_physics=1
+src/phys/sf_myjsfc/**                sf_sfclay_physics=2
+src/phys/sf_qnsesfc/**               sf_sfclay_physics=4
+src/phys/sf_mynn/**                  sf_sfclay_physics=5
+src/phys/sf_pxsfclay/**              sf_sfclay_physics=7
+src/phys/sf_urban/**                 sf_urban_physics=1
+# --- land surface
+src/phys/lsm_slab/**                 sf_surface_physics=1
+src/phys/lsm_noah/**                 sf_surface_physics=2
+src/phys/lsm_ruc/**                  sf_surface_physics=3
+src/phys/lsm_noahmp/**               sf_surface_physics=4
+# --- radiation (driver/radiation.cpp)
+src/phys/ra_rrtm_lw/**               ra_lw_physics=1
+src/phys/ra_sw_dudhia/**             ra_sw_physics=1
+src/phys/ra_rrtmg_lw/**              ra_lw_physics=4
+src/phys/ra_rrtmg_sw/**              ra_sw_physics=4
+src/phys/ra_rrtmg_common/**          ra_lw_physics=4 ra_sw_physics=4
+data/rrtmg/**                        ra_lw_physics=4 ra_sw_physics=4
+# --- the physics driver: the core sample and the short cases of the option class it drives
+src/phys/driver/radiation.*          core each:ra_lw_physics each:ra_sw_physics
+src/phys/driver/cumulus_driver.*     core each:cu_physics
+src/phys/driver/pbl_driver.*         core each:bl_pbl_physics each:dyn.gwd_opt each:grav_settling
+src/phys/driver/surface_driver.*     core each:sf_sfclay_physics each:sf_surface_physics each:sf_urban_physics
+src/phys/driver/landuse_tables.*     core each:sf_surface_physics
+src/phys/driver/noah_ice.hpp         core each:sf_surface_physics
+src/phys/driver/fdda_driver.*        core short:fdda.grid_fdda>=1
+src/phys/driver/**                   core
+src/phys/*                           core
+
+# --- dynamics, core, I/O, model driver, build: the core sample (+ the cases of what they serve)
+src/nest/**                          core short:domains.max_dom>=2
+src/cases/nest_driver.*              core short:domains.max_dom>=2
+src/cases/wrf_ideal.*                core cases:^ideal_
+src/cases/adapt_timestep.*           core time.adaptive=true
+src/dyn/**                           core
+src/core/**                          core
+src/io/**                            core
+src/io_netcdf/**                     core
+src/wrf_io/**                        core
+src/cases/**                         core
+src/init_real/**                     core
+src/main.cpp                         core
+src/CMakeLists.txt                   core
+CMakeLists.txt                       core
+cmake/**                             core
+data/wrf_schema/**                   core
+data/option_tiers.txt                core
+
+# --- the suite's case definitions and configurations
+configs/*.ini                        config
+tests/verify/cases/restarts.py       cases:^restart_
+tests/verify/cases/[0-9][0-9]_*.py   group
+tests/verify/cases/**                core
+tests/verify/selftest.py             checks
+tests/verify/case_data.py            checks
+tests/verify/vm_data.txt             checks
+tests/verify/**                      core
+# the drop-in tools
+tools/cppwrf-wrf                     cases:^dropin_
+python/cppwrf/dropin.py              cases:^dropin_
+
+# --- tools, tests outside the suite, packaging, CI scripts: the translator tests and self-test only
+tools/**                             checks
+python/**                            checks
+tests/**                             checks
+scripts/**                           checks
+examples/**                          checks
+packaging/**                         checks
+.github/**                           checks

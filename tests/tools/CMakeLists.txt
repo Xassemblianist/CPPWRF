@@ -40,3 +40,8 @@ set_tests_properties(post_diagnostics post_output PROPERTIES LABELS unit ENVIRON
 add_test(NAME verify_obs COMMAND python3 -m unittest discover -s python/tests -p "test_verify_obs.py"
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(verify_obs PROPERTIES LABELS unit ENVIRONMENT "CPPWRF_TEST_DIR=${CMAKE_BINARY_DIR}")
+# tools/ci/affected_cases.py (changed files -> suite cases for development CI runs) and tools/ci/affected_map.txt: every
+# src/phys directory mapped, every selector selecting cases, synthetic changes (this checkout's cases; no data)
+add_test(NAME affected_cases COMMAND python3 -m unittest discover -s tests/tools -p test_affected_cases.py
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(affected_cases PROPERTIES LABELS unit)

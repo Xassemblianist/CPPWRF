@@ -5,15 +5,19 @@
 # (release assets). Works for any local commit: a commit that is not on origin/main travels as a git bundle (only the
 # objects that origin/main lacks) uploaded to its `jobs` release and deleted again after the run.
 #
-#   tools/ci/ci_submit.sh [COMMIT] [--cases NAME,...] [--full] [--data TAR,...] [--slow] [--suite-jobs N]
-#       [--data-tag TAG] [--out DIR] [--hours H] [--no-wait]
+#   tools/ci/ci_submit.sh [COMMIT] [--cases NAME,... | --affected BASE] [--full] [--data TAR,...] [--slow]
+#       [--suite-jobs N] [--data-tag TAG] [--out DIR] [--hours H] [--no-wait]
 #
 # COMMIT: default HEAD. Without --cases the full suite: every CPU FP64 case of wrf_suite.py but the slow ones (packed
 # into --suite-jobs jobs, default 26, by their recorded times), the output files tests (run_wrf_files_test.sh), the
 # ideal files test, the differential and ctest tests (tools/gcp/run_diff_tests.sh), the translator tests and the
 # comparators' self-test. --cases: only these suite cases (exact names) and the translator tests and self-test;
-# --full adds the other jobs. --data: the data tars instead of the cases' own (wrf_suite.py --data-for).
-# --slow: the slow cases too (their tars must be in the data release). --data-tag: the cppwrf-data release
+# --full adds the other jobs. --affected BASE (development runs only; merges are proven with the full suite,
+# CONTRIBUTING.md): --cases from tools/ci/affected_cases.py BASE COMMIT (the cases the change BASE..COMMIT affects; with
+# --slow the slow ones too); when no case is affected, the one 5-step case real_r1_fp64_cpu carries the translator
+# tests and the self-test (the workflow has no run without cases). --data: the data tars instead of the cases' own
+# (wrf_suite.py --data-for). --slow: the slow cases too (their tars must be in the data release). --data-tag: the
+# cppwrf-data release
 # (default data-v1). The script waits for the run (--hours, default 8; --no-wait: print the run's URL and exit),
 # downloads the result files (no data) to --out (default ~/cppwrf_scratch/ci/<run id>) and prints the summary of
 # tools/gcp/suite_status.sh (SUITE PASS n FAIL n SKIP n, files:, idealfiles:, diff:, ctest:); exit 0 only for a run
@@ -22,17 +26,31 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CI=${CPPWRF_CI_REPO:-Xassemblianist/cppwrf-data}
-COMMIT=HEAD CASES= FULL=0 DATA= SLOW=0 NJ=26 DTAG=data-v1 OUT= HOURS=8 WAIT=1
+COMMIT=HEAD CASES= FULL=0 DATA= SLOW=0 NJ=26 DTAG=data-v1 OUT= HOURS=8 WAIT=1 AFFECTED=
 while [ $# -gt 0 ]; do
   case $1 in
     --cases) CASES=$2; shift 2 ;; --full) FULL=1; shift ;; --data) DATA=$2; shift 2 ;; --slow) SLOW=1; shift ;;
+    --affected) AFFECTED=$2; shift 2 ;;
     --suite-jobs) NJ=$2; shift 2 ;; --data-tag) DTAG=$2; shift 2 ;; --out) OUT=$2; shift 2 ;;
     --hours) HOURS=$2; shift 2 ;; --no-wait) WAIT=0; shift ;;
-    -*) sed -n '3,25p' "$0"; exit 2 ;;
+    -*) sed -n '3,26p' "$0"; exit 2 ;;
     *) COMMIT=$1; shift ;;
   esac
 done
 SHA=$(git -C "$REPO" rev-parse --verify "$COMMIT^{commit}")
+if [ -n "$AFFECTED" ]; then  # development feedback: the cases BASE..COMMIT affects
+  [ -z "$CASES" ] || { echo "[ci_submit] --affected and --cases exclude each other"; exit 2; }
+  sel=(python3 "$REPO/tools/ci/affected_cases.py" "$AFFECTED" "$SHA")
+  [ "$SLOW" = 1 ] && sel+=(--slow)
+  CASES=$("${sel[@]}") || { echo "[ci_submit] tools/ci/affected_cases.py failed"; exit 2; }
+  if [ -z "$CASES" ]; then
+    CASES=real_r1_fp64_cpu
+    echo "[ci_submit] --affected $AFFECTED: no suite case affected; $CASES carries the translator tests and self-test"
+  else
+    echo "[ci_submit] --affected $AFFECTED: $(tr ',' '\n' <<< "$CASES" | wc -l) cases" \
+         "(a development run; merges need the full suite)"
+  fi
+fi
 git -C "$REPO" fetch -q origin main 2> /dev/null || echo "[ci_submit] note: git fetch origin failed; origin/main as known locally"
 BASE=$(git -C "$REPO" rev-parse origin/main)
 TAG="ci-$(date +%Y%m%d-%H%M%S)-${SHA:0:8}"

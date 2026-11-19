@@ -31,6 +31,28 @@ identity suite, `tests/verify/wrf_suite.py`. It compares CPPWRF with WRF v4.8.0 
 FP64. The reference data are large, and the maintainers run the suite on every pull request that touches the model;
 say in the pull request which cases you ran.
 
+### Development runs on the CI
+
+The CPU suite runs on GitHub-hosted runners (`tools/ci/ci_submit.sh`), a pool shared by everyone. While a change is
+being developed, run only the cases it can affect:
+
+```bash
+tools/ci/affected_cases.py origin/main HEAD            # which cases, and why (stderr)
+tools/ci/ci_submit.sh HEAD --affected origin/main       # submit just those
+```
+
+`affected_cases.py` maps each changed file through `tools/ci/affected_map.txt`. A physics scheme's files select the
+cases that use that scheme, including their 1 h versions. A scheme that most cases use, such as WSM6 or YSU, keeps
+all its short cases but only 6 of its long ones. The dynamics, core, I/O, driver and build files select a
+fixed core sample: the R1/T1 dycore, P4 for 3 steps and 1 h, the N3 nest, a restart, an ideal case and Straka.
+Documentation selects nothing. Tools and tests outside the suite select only the translator tests and the self-test.
+A file the table does not cover selects the core sample and prints a warning. When you add a scheme directory under
+src/phys, give it a line in that table (`ctest -R affected_cases` checks this).
+
+**`--affected` is for development feedback only. It never proves a merge.** Every merge to main is proven by the full
+suite, `tools/ci/ci_submit.sh <commit> --full`, before it lands, and again by main's suite run on every push.
+Nothing reaches main on an affected-only run.
+
 ## Rules for model code
 
 - **FP64 results must not change.** `cpu-fp64` and `gpu-fp64` give WRF real*8's values bit for bit, and a change
