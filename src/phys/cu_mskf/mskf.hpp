@@ -56,20 +56,20 @@ using cu_kf::prof5;
 // the momentum transport: MSKF_eta_PARA's inputs of MSKF_CMT (index JK = KTE-KQ+1, 1-based, as the CAM column) and
 // MSKF_CMT's work arrays (1-based J; ZF and the J+1 neighbours up to ILEV+1)
 #define CPPWRF_MSKF_CMT(X) \
-    X(T, zfw, MaxLevels + 2) X(T, cdp, MaxLevels + 2) X(T, ced, MaxLevels + 2) X(T, ceu, MaxLevels + 2) \
-    X(T, cmc, MaxLevels + 2) X(T, cmd, MaxLevels + 2) X(T, cmu, MaxLevels + 2) X(T, cpru, MaxLevels + 2) \
-    X(T, cqd, MaxLevels + 2) X(T, cqu, MaxLevels + 2) X(T, cqhat, MaxLevels + 2) X(T, csd, MaxLevels + 2) \
-    X(T, csu, MaxLevels + 2) X(T, cshat, MaxLevels + 2) X(T, ct, MaxLevels + 2) X(T, cu, MaxLevels + 2) \
-    X(T, cv, MaxLevels + 2) X(T, cz, MaxLevels + 2) X(T, czf, MaxLevels + 2) X(T, cdudt, MaxLevels + 2) \
-    X(T, cdvdt, MaxLevels + 2) X(T, bu, MaxLevels + 2) X(T, bd, MaxLevels + 2) X(T, crho, MaxLevels + 2) \
-    X(T, rhohat, MaxLevels + 2) X(T, dzf, MaxLevels + 2) X(T, uhat, MaxLevels + 2) X(T, vhat, MaxLevels + 2) \
-    X(T, uc, MaxLevels + 2) X(T, vc, MaxLevels + 2) X(T, cdz, MaxLevels + 2) X(T, au, MaxLevels + 2) \
-    X(T, ad, MaxLevels + 2) X(T, ac, MaxLevels + 2) X(T, cw0, MaxLevels + 2) X(T, acfl, MaxLevels + 2) \
-    X(T, aufl, MaxLevels + 2) X(T, adfl, MaxLevels + 2) X(T, w0fl, MaxLevels + 2) X(T, d0, MaxLevels + 2) \
-    X(T, ce, MaxLevels + 2) X(T, d0hat, MaxLevels + 2) X(T, ehat, MaxLevels + 2) X(T, w1, MaxLevels + 2) \
-    X(T, b1, MaxLevels + 2) X(T, w1fl, MaxLevels + 2) X(T, delpx, MaxLevels + 2) \
-    X(T, delpy, MaxLevels + 2) X(T, caa, MaxLevels + 2) X(T, cbb, MaxLevels + 2) X(T, ccc, MaxLevels + 2) \
-    X(T, cdx, MaxLevels + 2) X(T, cdy, MaxLevels + 2) X(T, cfx, MaxLevels + 2) X(T, cfy, MaxLevels + 2)
+    X(double, zfw, MaxLevels + 2) X(double, cdp, MaxLevels + 2) X(double, ced, MaxLevels + 2) X(double, ceu, MaxLevels + 2) \
+    X(double, cmc, MaxLevels + 2) X(double, cmd, MaxLevels + 2) X(double, cmu, MaxLevels + 2) X(double, cpru, MaxLevels + 2) \
+    X(double, cqd, MaxLevels + 2) X(double, cqu, MaxLevels + 2) X(double, cqhat, MaxLevels + 2) X(double, csd, MaxLevels + 2) \
+    X(double, csu, MaxLevels + 2) X(double, cshat, MaxLevels + 2) X(double, ct, MaxLevels + 2) X(double, cu, MaxLevels + 2) \
+    X(double, cv, MaxLevels + 2) X(double, cz, MaxLevels + 2) X(double, czf, MaxLevels + 2) X(double, cdudt, MaxLevels + 2) \
+    X(double, cdvdt, MaxLevels + 2) X(double, bu, MaxLevels + 2) X(double, bd, MaxLevels + 2) X(double, crho, MaxLevels + 2) \
+    X(double, rhohat, MaxLevels + 2) X(double, dzf, MaxLevels + 2) X(double, uhat, MaxLevels + 2) X(double, vhat, MaxLevels + 2) \
+    X(double, uc, MaxLevels + 2) X(double, vc, MaxLevels + 2) X(double, cdz, MaxLevels + 2) X(double, au, MaxLevels + 2) \
+    X(double, ad, MaxLevels + 2) X(double, ac, MaxLevels + 2) X(double, cw0, MaxLevels + 2) X(double, acfl, MaxLevels + 2) \
+    X(double, aufl, MaxLevels + 2) X(double, adfl, MaxLevels + 2) X(double, w0fl, MaxLevels + 2) X(double, d0, MaxLevels + 2) \
+    X(double, ce, MaxLevels + 2) X(double, d0hat, MaxLevels + 2) X(double, ehat, MaxLevels + 2) X(double, w1, MaxLevels + 2) \
+    X(double, b1, MaxLevels + 2) X(double, w1fl, MaxLevels + 2) X(double, delpx, MaxLevels + 2) \
+    X(double, delpy, MaxLevels + 2) X(double, caa, MaxLevels + 2) X(double, cbb, MaxLevels + 2) X(double, ccc, MaxLevels + 2) \
+    X(double, cdx, MaxLevels + 2) X(double, cdy, MaxLevels + 2) X(double, cfx, MaxLevels + 2) X(double, cfy, MaxLevels + 2)
 
 // the bytes of one column's arrays (all in the column work buffer, core/column_work.hpp)
 template <typename T, int MaxLevels>
@@ -1530,16 +1530,19 @@ struct MSKFKernel {
         }
 
         // ---- the momentum transport (cmt_opt_flag = .TRUE.): MSKF_eta_PARA's inputs, then MSKF_CMT ----
-        // CAM's column (J = KTE-KQ+1 from the top; MSG = 0, one column); GRAV = 9.8 there, G (9.81) in the inputs
+        // CAM's column (J = KTE-KQ+1 from the top; MSG = 0, one column); GRAV = 9.8 there, G (9.81) in the inputs.
+        // MSKF_CMT's arguments and work arrays are REAL(r8) (r8 = 8: double in WRF real*4 too, D here), the
+        // expressions that fill them from MSKF_eta_PARA's REAL variables are REAL (T) unless an operand is REAL(r8)
+        using D = double;
         CPPWRF_MSKF_CMT(CPPWRF_COLUMN_ARRAY)
         {
             const int kte = kx;
             const int ilev = kte;
-            const T grav = static_cast<T>(9.8);
-            const T cpin = cp;
-            const T rdry = r;
+            const D grav = static_cast<D>(static_cast<T>(9.8));  // grav = 9.8: a REAL literal
+            const D cpin = cp;
+            const D rdry = r;
             czf[kte + 1] = static_cast<T>(0.0);
-            const T dsubcld = zlcl;
+            const D dsubcld = zlcl;
             int jbb = kte - (klcl + 1) + 1;  // updraft base (Fortran KLCL = klcl + 1)
             int jdd = kte - (lfs + 1) + 1;
             int jtt = kte - (ltop + 1) + 1;
@@ -1552,15 +1555,17 @@ struct MSKFKernel {
                 cdudt[jk] = static_cast<T>(0.0);
                 cdvdt[jk] = static_cast<T>(0.0);
                 czf[jk] = zfw[kq];
-                const T se = cp * (t0[k] * (static_cast<T>(1.0) + static_cast<T>(0.622) * q0[k])) + g * zfw[kq];
+                // stat_energy (REAL) = CP*(T0*(1.0+0.622*Q0)) + G*zf_wrf, zf_wrf REAL(r8)
+                const T se =
+                    static_cast<T>(cp * (t0[k] * (static_cast<T>(1.0) + static_cast<T>(0.622) * q0[k])) + g * zfw[kq]);
                 if (kq == kte) {
                     cqhat[jk] = q0[k];
                     cshat[jk] = se;
                 } else {
                     cqhat[jk] = static_cast<T>(0.5) * (q0[k] / (static_cast<T>(1.) + q0[k]) +
                                                        q0[k + 1] / (static_cast<T>(1.) + q0[k + 1]));
-                    const T se1 = cp * (t0[k + 1] * (static_cast<T>(1.0) + static_cast<T>(0.622) * q0[k + 1])) +
-                                  g * zfw[kq + 1];
+                    const T se1 = static_cast<T>(
+                        cp * (t0[k + 1] * (static_cast<T>(1.0) + static_cast<T>(0.622) * q0[k + 1])) + g * zfw[kq + 1]);
                     cshat[jk] = static_cast<T>(0.5) * (se + se1);
                 }
                 if (k < klcl || k > ltop) {  // subcloud or above-cloud layer
@@ -1591,55 +1596,55 @@ struct MSKFKernel {
 
             // MSKF_CMT(DUDT, DVDT, ..., DP, ED, EU, MC, MD, MU, ..., P, QD, QU, QHAT, SD, SU, SHAT, T, U, V, Z, ZF,
             // DSUBCLD, JB, JD, JT, ...): ALPHA = 0.5, RNU = 0, NBF = 10 Bessel modes
-            const T alfa1[10] = {static_cast<T>(4.33675e-05), static_cast<T>(7.88429e-05), static_cast<T>(1.13065e-04),
-                                 static_cast<T>(1.45836e-04), static_cast<T>(1.76823e-04), static_cast<T>(2.05660e-04),
-                                 static_cast<T>(2.32101e-04), static_cast<T>(2.55829e-04), static_cast<T>(2.76672e-04),
-                                 static_cast<T>(2.94347e-04)};
-            const T alfa2[10] = {static_cast<T>(-8.64731e-05), static_cast<T>(-1.56092e-04), static_cast<T>(-2.21315e-04),
-                                 static_cast<T>(-2.80995e-04), static_cast<T>(-3.33799e-04), static_cast<T>(-3.78455e-04),
-                                 static_cast<T>(-4.14020e-04), static_cast<T>(-4.39600e-04), static_cast<T>(-4.54652e-04),
-                                 static_cast<T>(-4.58761e-04)};
-            const T bsj0[10] = {static_cast<T>(-4.02759e-01), static_cast<T>(3.00116e-01), static_cast<T>(-2.49705e-01),
-                                static_cast<T>(2.18359e-01), static_cast<T>(-1.96465e-01), static_cast<T>(1.80062e-01),
-                                static_cast<T>(-1.67183e-01), static_cast<T>(1.56722e-01), static_cast<T>(-1.48011e-01),
-                                static_cast<T>(1.40605e-01)};
-            const T bsj1[10] = {static_cast<T>(1.14193e-01), static_cast<T>(2.05841e-01), static_cast<T>(2.91209e-01),
-                                static_cast<T>(3.68619e-01), static_cast<T>(4.36201e-01), static_cast<T>(4.92233e-01),
-                                static_cast<T>(5.35486e-01), static_cast<T>(5.64886e-01), static_cast<T>(5.79879e-01),
-                                static_cast<T>(5.80195e-01)};
-            const T tau[10] = {static_cast<T>(3.83170e+00), static_cast<T>(7.01560e+00), static_cast<T>(1.01735e+01),
-                               static_cast<T>(1.33237e+01), static_cast<T>(1.64705e+01), static_cast<T>(1.96120e+01),
-                               static_cast<T>(2.27560e+01), static_cast<T>(2.58980e+01), static_cast<T>(2.90480e+01),
-                               static_cast<T>(3.21926e+01)};
-            const T bsj0chi = static_cast<T>(-0.402759);
-            const T factor = static_cast<T>(0.179503);
-            const T rc = static_cast<T>(3000.);
-            const T rmax = static_cast<T>(50000.);
-            const T chi = static_cast<T>(3.8317) / rc;
-            const T shape = static_cast<T>(0.8);
-            const T alpha = static_cast<T>(0.5);
-            const T one = static_cast<T>(1.);
-            const T c100 = static_cast<T>(100.);
+            const D alfa1[10] = {static_cast<D>(4.33675e-05), static_cast<D>(7.88429e-05), static_cast<D>(1.13065e-04),
+                                 static_cast<D>(1.45836e-04), static_cast<D>(1.76823e-04), static_cast<D>(2.05660e-04),
+                                 static_cast<D>(2.32101e-04), static_cast<D>(2.55829e-04), static_cast<D>(2.76672e-04),
+                                 static_cast<D>(2.94347e-04)};
+            const D alfa2[10] = {static_cast<D>(-8.64731e-05), static_cast<D>(-1.56092e-04), static_cast<D>(-2.21315e-04),
+                                 static_cast<D>(-2.80995e-04), static_cast<D>(-3.33799e-04), static_cast<D>(-3.78455e-04),
+                                 static_cast<D>(-4.14020e-04), static_cast<D>(-4.39600e-04), static_cast<D>(-4.54652e-04),
+                                 static_cast<D>(-4.58761e-04)};
+            const D bsj0[10] = {static_cast<D>(-4.02759e-01), static_cast<D>(3.00116e-01), static_cast<D>(-2.49705e-01),
+                                static_cast<D>(2.18359e-01), static_cast<D>(-1.96465e-01), static_cast<D>(1.80062e-01),
+                                static_cast<D>(-1.67183e-01), static_cast<D>(1.56722e-01), static_cast<D>(-1.48011e-01),
+                                static_cast<D>(1.40605e-01)};
+            const D bsj1[10] = {static_cast<D>(1.14193e-01), static_cast<D>(2.05841e-01), static_cast<D>(2.91209e-01),
+                                static_cast<D>(3.68619e-01), static_cast<D>(4.36201e-01), static_cast<D>(4.92233e-01),
+                                static_cast<D>(5.35486e-01), static_cast<D>(5.64886e-01), static_cast<D>(5.79879e-01),
+                                static_cast<D>(5.80195e-01)};
+            const D tau[10] = {static_cast<D>(3.83170e+00), static_cast<D>(7.01560e+00), static_cast<D>(1.01735e+01),
+                               static_cast<D>(1.33237e+01), static_cast<D>(1.64705e+01), static_cast<D>(1.96120e+01),
+                               static_cast<D>(2.27560e+01), static_cast<D>(2.58980e+01), static_cast<D>(2.90480e+01),
+                               static_cast<D>(3.21926e+01)};
+            const D bsj0chi = static_cast<D>(-0.402759);
+            const D factor = static_cast<D>(0.179503);
+            const D rc = static_cast<D>(3000.);
+            const D rmax = static_cast<D>(50000.);
+            const D chi = static_cast<D>(3.8317) / rc;
+            const D shape = static_cast<D>(0.8);
+            const D alpha = static_cast<D>(0.5);
+            const D one = static_cast<D>(1.);
+            const D c100 = static_cast<D>(100.);
             const int jb = jbb, jd = jdd, jt = jtt;
             // index 0 (J - 1 of J = JT = 1): outside WRF's arrays, read only into results that are not used
-            cdudt[0] = static_cast<T>(0.);
-            cdvdt[0] = static_cast<T>(0.);
-            crho[0] = static_cast<T>(1.);
+            cdudt[0] = static_cast<D>(0.);
+            cdvdt[0] = static_cast<D>(0.);
+            crho[0] = static_cast<D>(1.);
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 5
-                bu[jj] = static_cast<T>(0.);
-                bd[jj] = static_cast<T>(0.);
-                delpx[jj] = static_cast<T>(0.);
-                delpy[jj] = static_cast<T>(0.);
-                if (ct[jj] > static_cast<T>(0.)) crho[jj] = c100 * cpru[jj] / (rdry * ct[jj]);
+                bu[jj] = static_cast<D>(0.);
+                bd[jj] = static_cast<D>(0.);
+                delpx[jj] = static_cast<D>(0.);
+                delpy[jj] = static_cast<D>(0.);
+                if (ct[jj] > static_cast<D>(0.)) crho[jj] = c100 * cpru[jj] / (rdry * ct[jj]);
             }
             for (int jj = 2; jj <= ilev; ++jj) {  // DO 15
-                const T gz = grav / cpin * czf[jj];
-                bu[jj] = (csu[jj] - cshat[jj] + static_cast<T>(0.608) * (cqu[jj] * (csu[jj] - gz) - cqhat[jj] * (cshat[jj] - gz))) /
-                         ((cshat[jj] - gz) * (one + static_cast<T>(.608) * cqhat[jj])) * grav;
-                bd[jj] = (csd[jj] - cshat[jj] + static_cast<T>(0.608) * (cqd[jj] * (csd[jj] - gz) - cqhat[jj] * (cshat[jj] - gz))) /
-                         ((cshat[jj] - gz) * (one + static_cast<T>(.608) * cqhat[jj])) * grav;
+                const D gz = grav / cpin * czf[jj];
+                bu[jj] = (csu[jj] - cshat[jj] + static_cast<D>(0.608) * (cqu[jj] * (csu[jj] - gz) - cqhat[jj] * (cshat[jj] - gz))) /
+                         ((cshat[jj] - gz) * (one + static_cast<D>(.608) * cqhat[jj])) * grav;
+                bd[jj] = (csd[jj] - cshat[jj] + static_cast<D>(0.608) * (cqd[jj] * (csd[jj] - gz) - cqhat[jj] * (cshat[jj] - gz))) /
+                         ((cshat[jj] - gz) * (one + static_cast<D>(.608) * cqhat[jj])) * grav;
             }
-            T umn = static_cast<T>(0.), vmn = static_cast<T>(0.), cosa = static_cast<T>(0.), sina = static_cast<T>(0.);
+            D umn = static_cast<D>(0.), vmn = static_cast<D>(0.), cosa = static_cast<D>(0.), sina = static_cast<D>(0.);
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 25
                 if (jj >= jt && jj < jb) {
                     umn = umn + cu[jj] * cpru[jj] / ct[jj] * (czf[jj] - czf[jj + 1]);
@@ -1647,8 +1652,8 @@ struct MSKFKernel {
                 }
             }
             {  // DO 30
-                const T windmag = sqrt(umn * umn + vmn * vmn);
-                if (windmag != static_cast<T>(0.)) {
+                const D windmag = sqrt(umn * umn + vmn * vmn);
+                if (windmag != static_cast<D>(0.)) {
                     cosa = umn / windmag;
                     sina = vmn / windmag;
                 }
@@ -1671,10 +1676,10 @@ struct MSKFKernel {
             for (int jj = 1; jj <= ilev; ++jj)  // DO 40
                 cdz[jj] = jj < ilev ? czf[jj] - czf[jj + 1] : cdp[ilev] * c100 / (crho[ilev] * grav);
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 75: fractional cloud areas times GRAV
-                au[jj] = jj >= jt ? cmu[jb] * c100 / grav / rhohat[jb] : static_cast<T>(0.);
-                ad[jj] = jj >= jd ? -(cmd[jd] * c100 / grav / rhohat[jd]) : static_cast<T>(0.);
+                au[jj] = jj >= jt ? cmu[jb] * c100 / grav / rhohat[jb] : static_cast<D>(0.);
+                ad[jj] = jj >= jd ? -(cmd[jd] * c100 / grav / rhohat[jd]) : static_cast<D>(0.);
                 ac[jj] = au[jj] + ad[jj];
-                cw0[jj] = ac[jj] > static_cast<T>(0.) ? cmc[jj] * c100 / grav / (rhohat[jj] * ac[jj]) : static_cast<T>(0.);
+                cw0[jj] = ac[jj] > static_cast<D>(0.) ? cmc[jj] * c100 / grav / (rhohat[jj] * ac[jj]) : static_cast<D>(0.);
             }
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 80
                 if (jj < ilev) {
@@ -1690,21 +1695,21 @@ struct MSKFKernel {
                 }
             }
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 250
-                if (jj < jb && jj >= jt && acfl[jj] > static_cast<T>(0.)) {
+                if (jj < jb && jj >= jt && acfl[jj] > static_cast<D>(0.)) {
                     d0[jj] = (cmc[jj + 1] - cmc[jj]) * c100 / grav / (crho[jj] * cdz[jj] * acfl[jj]);
-                } else if (jj == jb && acfl[jj] > static_cast<T>(0.)) {
+                } else if (jj == jb && acfl[jj] > static_cast<D>(0.)) {
                     d0[jj] = -(cmc[jj] * c100 / grav / (crho[jj] * cdz[jj] * acfl[jj]));
                 } else {
-                    d0[jj] = static_cast<T>(0.);
+                    d0[jj] = static_cast<D>(0.);
                 }
-                if (jj < jb && jj >= jt && acfl[jj] > static_cast<T>(0.) && adfl[jj] > static_cast<T>(0.) &&
-                    aufl[jj] > static_cast<T>(0.)) {
+                if (jj < jb && jj >= jt && acfl[jj] > static_cast<D>(0.) && adfl[jj] > static_cast<D>(0.) &&
+                    aufl[jj] > static_cast<D>(0.)) {
                     ce[jj] = one / (chi * chi) * adfl[jj] / (acfl[jj] * crho[jj]) *
                              (one / (aufl[jj] * cdz[jj]) * (cmu[jj] - cmu[jj + 1]) * c100 / grav -
                               one / (adfl[jj] * cdz[jj]) * (cmd[jj] - cmd[jj + 1]) * c100 / grav) *
                              shape / factor;
                 } else {
-                    ce[jj] = static_cast<T>(0.);
+                    ce[jj] = static_cast<D>(0.);
                 }
             }
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 275
@@ -1717,14 +1722,14 @@ struct MSKFKernel {
                 }
             }
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 325: first harmonics in the thermodynamics
-                if (jj >= jd && jj <= jb && au[jj] > static_cast<T>(0.) && ad[jj] > static_cast<T>(0.) &&
-                    ac[jj] > static_cast<T>(0.)) {
+                if (jj >= jd && jj <= jb && au[jj] > static_cast<D>(0.) && ad[jj] > static_cast<D>(0.) &&
+                    ac[jj] > static_cast<D>(0.)) {
                     w1[jj] = shape / factor * (cmu[jj] / au[jj] - cmd[jj] / ad[jj]) * c100 / grav * ad[jj] /
                              (ac[jj] * rhohat[jj]);
                     b1[jj] = shape / factor * (bu[jj] - bd[jj]) * ad[jj] / ac[jj];
                 } else {
-                    w1[jj] = static_cast<T>(0.);
-                    b1[jj] = static_cast<T>(0.);
+                    w1[jj] = static_cast<D>(0.);
+                    b1[jj] = static_cast<D>(0.);
                 }
             }
             for (int jj = 1; jj <= ilev; ++jj)  // DO 350 (B1FL: not used)
@@ -1733,43 +1738,43 @@ struct MSKFKernel {
             // order at each level as WRF's DO 700 N, J)
             for (int n = 0; n < 10; ++n) {
                 for (int jj = 1; jj <= ilev; ++jj) {  // DO 10, DO 500
-                    cfx[jj] = static_cast<T>(0.);
-                    cfy[jj] = static_cast<T>(0.);
-                    if (jj < jb && jj >= jt && cmc[jj] > static_cast<T>(0.) && cmc[jj + 1] > static_cast<T>(0.)) {
-                        const T lrm = libm::log(crho[jj - 1]), lr = libm::log(crho[jj]), lrp = libm::log(crho[jj + 1]);
-                        const T zt = lrm / (cdz[jj] * dzf[jj]) - (one / dzf[jj] + one / dzf[jj + 1]) / cdz[jj] * lr +
+                    cfx[jj] = static_cast<D>(0.);
+                    cfy[jj] = static_cast<D>(0.);
+                    if (jj < jb && jj >= jt && cmc[jj] > static_cast<D>(0.) && cmc[jj + 1] > static_cast<D>(0.)) {
+                        const D lrm = libm::log(crho[jj - 1]), lr = libm::log(crho[jj]), lrp = libm::log(crho[jj + 1]);
+                        const D zt = lrm / (cdz[jj] * dzf[jj]) - (one / dzf[jj] + one / dzf[jj + 1]) / cdz[jj] * lr +
                                      lrp / (cdz[jj] * dzf[jj + 1]);
-                        const T y = (cw0[jj] - cw0[jj + 1]) * (w1[jj] - w1[jj + 1]) / (cdz[jj] * cdz[jj]) -
+                        const D y = (cw0[jj] - cw0[jj + 1]) * (w1[jj] - w1[jj + 1]) / (cdz[jj] * cdz[jj]) -
                                     w0fl[jj] * w1fl[jj] * zt;
-                        cfx[jj] = static_cast<T>(2.) * crho[jj] / (bsj0[n] * bsj0[n]) *
+                        cfx[jj] = static_cast<D>(2.) * crho[jj] / (bsj0[n] * bsj0[n]) *
                                   (d0[jj] * ce[jj] * (chi * chi) * cosa * alfa1[n] +
-                                   static_cast<T>(2.) * w0fl[jj] * rc / (rmax * rmax) * bsj1[n] *
+                                   static_cast<D>(2.) * w0fl[jj] * rc / (rmax * rmax) * bsj1[n] *
                                        ((ehat[jj] - ehat[jj + 1]) / cdz[jj] * chi * cosa * bsj0chi +
                                         (uhat[jj] - uhat[jj + 1]) / cdz[jj]) -
                                    (d0hat[jj] - d0hat[jj + 1]) / cdz[jj] * w1fl[jj] * cosa * (alfa2[n] - alfa1[n]) -
-                                   static_cast<T>(2.) * y * cosa * alfa1[n] +
+                                   static_cast<D>(2.) * y * cosa * alfa1[n] +
                                    (rhohat[jj] * b1[jj] - rhohat[jj + 1] * b1[jj + 1]) / (cdz[jj] * crho[jj]) * cosa * alfa1[n]);
-                        cfy[jj] = static_cast<T>(2.) * crho[jj] / (bsj0[n] * bsj0[n]) *
+                        cfy[jj] = static_cast<D>(2.) * crho[jj] / (bsj0[n] * bsj0[n]) *
                                   (d0[jj] * ce[jj] * (chi * chi) * sina * alfa1[n] +
-                                   static_cast<T>(2.) * w0fl[jj] * rc / (rmax * rmax) * bsj1[n] *
+                                   static_cast<D>(2.) * w0fl[jj] * rc / (rmax * rmax) * bsj1[n] *
                                        ((ehat[jj] - ehat[jj + 1]) / cdz[jj] * chi * sina * bsj0chi +
                                         (vhat[jj] - vhat[jj + 1]) / cdz[jj]) -
                                    (d0hat[jj] - d0hat[jj + 1]) / cdz[jj] * w1fl[jj] * sina * (alfa2[n] - alfa1[n]) -
-                                   static_cast<T>(2.) * y * sina * alfa1[n] +
+                                   static_cast<D>(2.) * y * sina * alfa1[n] +
                                    (rhohat[jj] * b1[jj] - rhohat[jj + 1] * b1[jj + 1]) / (cdz[jj] * crho[jj]) * sina * alfa1[n]);
                     }
                 }
                 // DO 525
-                caa[1] = static_cast<T>(0.);
+                caa[1] = static_cast<D>(0.);
                 cbb[1] = one / dzf[2];
                 ccc[1] = -(one / dzf[2]);
                 caa[ilev] = one / dzf[ilev];
                 cbb[ilev] = -(one / dzf[ilev]);
-                ccc[ilev] = static_cast<T>(0.);
-                cdx[1] = b1[2] * alfa1[n] * static_cast<T>(2.) * cosa / (bsj0[n] * bsj0[n]);
-                cdx[ilev] = b1[ilev] * alfa1[n] * static_cast<T>(2.) * cosa / (bsj0[n] * bsj0[n]);
-                cdy[1] = b1[2] * alfa1[n] * static_cast<T>(2.) * sina / (bsj0[n] * bsj0[n]);
-                cdy[ilev] = b1[ilev] * alfa1[n] * static_cast<T>(2.) * sina / (bsj0[n] * bsj0[n]);
+                ccc[ilev] = static_cast<D>(0.);
+                cdx[1] = b1[2] * alfa1[n] * static_cast<D>(2.) * cosa / (bsj0[n] * bsj0[n]);
+                cdx[ilev] = b1[ilev] * alfa1[n] * static_cast<D>(2.) * cosa / (bsj0[n] * bsj0[n]);
+                cdy[1] = b1[2] * alfa1[n] * static_cast<D>(2.) * sina / (bsj0[n] * bsj0[n]);
+                cdy[ilev] = b1[ilev] * alfa1[n] * static_cast<D>(2.) * sina / (bsj0[n] * bsj0[n]);
                 for (int jj = 2; jj <= ilev - 1; ++jj) {  // DO 550
                     caa[jj] = one / (cdz[jj] * dzf[jj]);
                     cbb[jj] = -(one / cdz[jj] * (one / dzf[jj] + one / dzf[jj + 1]) + (tau[n] / rmax) * (tau[n] / rmax));
@@ -1801,15 +1806,15 @@ struct MSKFKernel {
                 delpy[jj] = acfl[jj] * delpy[jj] / crho[jj];
             }
             for (int jj = ilev - 1; jj >= 1; --jj) {  // DO 875: the cloud mean wind
-                if (cmc[jj] > static_cast<T>(0.) && cmc[jj + 1] > static_cast<T>(0.) && jj > jt && jj < jb) {
-                    const T ec = ceu[jj] + ced[jj];
-                    uc[jj] = uc[jj + 1] + crho[jj] * cdz[jj] / ((cmc[jj] + cmc[jj + 1]) * static_cast<T>(0.5) * c100 / grav) *
+                if (cmc[jj] > static_cast<D>(0.) && cmc[jj + 1] > static_cast<D>(0.) && jj > jt && jj < jb) {
+                    const D ec = ceu[jj] + ced[jj];
+                    uc[jj] = uc[jj + 1] + crho[jj] * cdz[jj] / ((cmc[jj] + cmc[jj + 1]) * static_cast<D>(0.5) * c100 / grav) *
                                               (ec * (cu[jj] - uc[jj + 1]) - delpx[jj]);
-                    vc[jj] = vc[jj + 1] + crho[jj] * cdz[jj] / ((cmc[jj] + cmc[jj + 1]) * static_cast<T>(0.5) * c100 / grav) *
+                    vc[jj] = vc[jj + 1] + crho[jj] * cdz[jj] / ((cmc[jj] + cmc[jj + 1]) * static_cast<D>(0.5) * c100 / grav) *
                                               (ec * (cv[jj] - vc[jj + 1]) - delpy[jj]);
                 }
             }
-            const T rnu = static_cast<T>(0.);
+            const D rnu = static_cast<D>(0.);
             for (int jj = 1; jj <= ilev; ++jj) {  // DO 950
                 if (jj >= jt && jj <= jb) {
                     // RNU = 0 (the term only adds a signed zero); DUDT(J-1) of J = JT = 1 (LTOP = KTE) is outside
@@ -1817,11 +1822,11 @@ struct MSKFKernel {
                     uhat[jj] = uhat[jj] + rnu * alpha * dt * cdudt[jj - 1];
                     vhat[jj] = vhat[jj] + rnu * alpha * dt * cdvdt[jj - 1];
                     if (jj == jt) {
-                        const T den = one / (one + rnu * alpha * cmc[jj + 1] * dt / cdp[jj]);
+                        const D den = one / (one + rnu * alpha * cmc[jj + 1] * dt / cdp[jj]);
                         cdudt[jj] = den * cmc[jj + 1] * (uc[jj + 1] - uhat[jj + 1]) / cdp[jj];
                         cdvdt[jj] = den * cmc[jj + 1] * (vc[jj + 1] - vhat[jj + 1]) / cdp[jj];
                     } else if (jj < jb) {
-                        const T den = one / (one + rnu * alpha * cmc[jj + 1] * dt / cdp[jj]);
+                        const D den = one / (one + rnu * alpha * cmc[jj + 1] * dt / cdp[jj]);
                         cdudt[jj] = den * (cmc[jj + 1] * (uc[jj + 1] - uhat[jj + 1]) - cmc[jj] * (uc[jj] - uhat[jj])) / cdp[jj];
                         cdvdt[jj] = den * (cmc[jj + 1] * (vc[jj + 1] - vhat[jj + 1]) - cmc[jj] * (vc[jj] - vhat[jj])) / cdp[jj];
                     } else {
@@ -1831,8 +1836,8 @@ struct MSKFKernel {
                 }
             }
             for (int kq = 1; kq <= kte; ++kq) {
-                rucuten(i, j, kq - 1) = cdudt[kte - kq + 1];
-                rvcuten(i, j, kq - 1) = cdvdt[kte - kq + 1];
+                rucuten(i, j, kq - 1) = static_cast<T>(cdudt[kte - kq + 1]);  // DUDT(KQ) = DUDTnew(1,JK)
+                rvcuten(i, j, kq - 1) = static_cast<T>(cdvdt[kte - kq + 1]);
             }
         }
     }
