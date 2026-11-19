@@ -71,6 +71,10 @@ void write_wrfinput(const RealDomain<T>& dm, const MetEm& m, const WrfSchema& sc
     if (it != values.end()) {
       data = it->second(v);
       if (data.size() != n) throw std::runtime_error("wrfinput: size mismatch for " + v.name);
+    } else if (m.has(v.name) && ((v.var ? v.var->s1 : v.member ? v.member->s1 : 0u) >> 26 & 1u)) {
+      // an auxinput1 (i1) field of wrfinput: real.exe reads it from met_em and writes it (input_wrf / output_wrf);
+      // cppwrf_real would write zeros (ELVMAX, the GSL drag fields, Noah-MP's FDEPTH ... SOILCOMP, H0ML, ...)
+      throw std::runtime_error("real: met_em field " + v.name + " (copied into wrfinput by real.exe) is not ported");
     }
     if (v.type == 'i' || v.type == 'l') nc.put_int(v.name, std::vector<int>(data.begin(), data.end()));
     else nc.put(v.name, data);

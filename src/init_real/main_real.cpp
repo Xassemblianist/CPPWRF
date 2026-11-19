@@ -6,6 +6,7 @@
 #include <cstring>
 #include <filesystem>
 #include <memory>
+#include <set>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -36,10 +37,10 @@ static int run(const RealOptions& o, const Namelist& nl, const WrfSchema& sc, co
     std::snprintf(b, sizeof b, "%.17g", v);
     cfg.set(k, b);
   }
-  {  // iofields_filename (input_wrf / output_wrf: modify_io_masks): met_em (i:1), wrfinput (i:0) and wrflowinp
-     // (i:4) are read and written whole
+  {  // iofields_filename (input_wrf / output_wrf: modify_io_masks): met_em (i:1), wrfinput (i:0), wrflowinp (i:4)
+     // and wrffdda (i:10) are read and written whole
     WrfSchema io = sc;
-    cppwrf::wrf_io::apply_iofields_option(io, cfg, nml_dir, {25, 26, 29});
+    cppwrf::wrf_io::apply_iofields_option(io, cfg, nml_dir, {25, 26, 29, 35});
   }
   const Dims& d = dom.d;
   // compute_si_start_and_end (real_em.F): the times start, start + interval, ... up to end
@@ -90,7 +91,21 @@ static int run(const RealOptions& o, const Namelist& nl, const WrfSchema& sc, co
     }
     const MetEm m = MetEm::read(met_dir + "/met_em." + dn + "." + date + ".nc");
     dom.read_input(m);
-    if (loop == 1) cfg.set("num_land_cat", std::to_string(m.att_int("NUM_LAND_CAT", 21)));
+    {  // input_wrf.F:635-731 (auxinput1): the namelist must match the metgrid file's dimensions (count_fatal_error)
+      int nlc = m.att_int("NUM_LAND_CAT", -1);
+      if (nlc < 1 || nlc > 1000) nlc = dom.mminlu == "MODIFIED_IGBP_MODIS_NOAH" ? 20 : 24;  // old WPS data
+      if (cfg.integer("num_land_cat") != nlc)
+        throw std::runtime_error("real: mismatch between namelist and wrf input files for dimension NUM_LAND_CAT "
+                                 "(namelist " + std::to_string(cfg.integer("num_land_cat")) + ", " + m.path + " " +
+                                 std::to_string(nlc) + ")");
+      const int nsl = m.att_int("NUM_METGRID_SOIL_LEVELS", -1);
+      if (loop == 1 && nsl == 1) throw std::runtime_error("real: NUM_METGRID_SOIL_LEVELS must be greater than 1");
+      if (loop == 1 && nsl != -1 && nsl != cfg.integer("num_metgrid_soil_levels"))
+        throw std::runtime_error("real: mismatch between namelist and global attribute NUM_METGRID_SOIL_LEVELS");
+      const int ed = m.att_int("EROSION_DIM", -1);
+      if (ed != -1 && ed != cfg.integer("erosion_dim"))
+        throw std::runtime_error("real: mismatch between namelist and global attribute EROSION_DIM");
+    }
     dom.init_domain(loop, date);
     if (cfg.integer("sst_update") == 1 && time_loop_max != 1) {  // assemble_output: wrflowinp with several times
       if (!lowinp)
@@ -164,9 +179,19 @@ int main(int argc, char** argv) {
   try {
     const Namelist nl = Namelist::read(nml);
     const WrfSchema sc = WrfSchema::load(schema);
-    // WRF's namelist read stops on more values than a single-entry option holds
+    // WRF's namelist read (inc/config_reads.inc) stops on a name its group does not have, and on more values
+    // than a single-entry option holds; groups WRF does not read (&cppwrf, ...) are skipped
+    std::set<std::string> wrf_groups;
+    for (const auto& [name, gd] : sc.defaults())
+      if (gd.first != "derived") wrf_groups.insert(gd.first);
     for (const auto& [grp, keys] : nl.groups())
       for (const auto& [key, vals] : keys) {
+        if (wrf_groups.count(grp)) {
+          auto d = sc.defaults().find(key);
+          if (d == sc.defaults().end() || d->second.first != grp)
+            throw std::runtime_error("real: error while reading namelist " + grp + ": " + key +
+                                     " is not a WRF 4.8.0 option of &" + grp);
+        }
         auto e = sc.entries().find(key);
         if (e != sc.entries().end() && e->second == "1" && vals.size() > 1)
           throw std::runtime_error("real: error while reading namelist " + grp + ": " + key + " takes one value");
@@ -184,6 +209,20 @@ int main(int argc, char** argv) {
               return nl.raw(g, k, id).value_or("");
             }),
             allow, tag, "&cppwrf allow_unverified = .true.");
+      }
+    }
+    {  // check_a_mundo / real_em.F checks over every domain (also those real.exe gives no input file)
+      WrfConfig c1(nl, sc.defaults(), 1, &sc.entries());
+      if (c1.integer("vert_refine_fact") != 1)
+        throw std::runtime_error("real: vert_refine_fact (ndown) is not ported");
+      for (int id = 1; id <= o1.max_dom; ++id) {
+        for (const char* opt : {"vert_refine_method", "tracer_opt", "chem_opt"})
+          if (c1.integer(opt, id) != 0)
+            throw std::runtime_error(std::string("real: ") + opt + " is not ported (domain " + std::to_string(id) + ")");
+        // real_em.F:250-258: without vertical nesting a nest's e_vert is its parent's
+        const int pid = c1.integer("parent_id", id);
+        if (id > 1 && pid >= 1 && pid < id && c1.integer("e_vert", id) != c1.integer("e_vert", pid))
+          throw std::runtime_error("real: e_vert must be the same for each domain");
       }
     }
     for (int id = 1; id <= o1.max_dom; ++id) {

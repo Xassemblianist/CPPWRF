@@ -767,7 +767,7 @@ template <typename T>
 void compute_eta(F1<T>& znw, const EtaOpts& eo, T p_top, int kde) {
   const int kds = 1, kte = kde;
   if (!eo.eta_levels.empty()) {
-    std::vector<T> el(static_cast<std::size_t>(kde + 1));
+    std::vector<T> el(static_cast<std::size_t>(kde + 1), T(-1.));  // entries not given: the Registry default -1
     for (int k = 1; k <= kde && k <= int(eo.eta_levels.size()); ++k) el[std::size_t(k)] = T(eo.eta_levels[std::size_t(k - 1)]);
     if (std::abs(el[1] - T(1.)) < T(0.0000001) && std::abs(el[std::size_t(kde)] - T(0.)) < T(0.0000001)) {
       for (int k = kds + 1; k <= kde - 1; ++k) znw(k) = el[std::size_t(k)];

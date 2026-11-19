@@ -39,7 +39,12 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
   o.dx = c.num("dx", 1) / double(factor);
   o.dy = c.num("dy", 1) / double(factor);
   o.p_top_requested = c.num("p_top_requested");
-  for (const std::string& v : nl.values("domains", "eta_levels")) o.eta_levels.push_back(std::strtod(v.c_str(), nullptr));
+  // Fortran list-directed read: d / D exponents; a null value keeps the Registry default -1
+  for (std::string v : nl.values("domains", "eta_levels")) {
+    for (char& ch : v)
+      if (ch == 'd' || ch == 'D') ch = 'e';
+    o.eta_levels.push_back(v.empty() ? -1.0 : std::strtod(v.c_str(), nullptr));
+  }
   o.auto_levels_opt = c.integer("auto_levels_opt");
   o.max_dz = c.num("max_dz");
   o.dzbot = c.num("dzbot");
@@ -47,6 +52,8 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
   o.dzstretch_u = c.num("dzstretch_u");
   o.interp_type = c.integer("interp_type");
   o.lagrange_order = c.integer("lagrange_order");
+  // check_a_mundo (module_check_a_mundo.F:1053-1057): coarse input levels -> linear vertical interpolation
+  if (o.num_metgrid_levels <= 20) o.lagrange_order = 1;
   o.linear_interp = c.integer("linear_interp");
   o.extrap_type = c.integer("extrap_type");
   o.t_extrap_type = c.integer("t_extrap_type");
@@ -96,14 +103,18 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
                                 " is not supported (WRF: unknown or not ported land surface scheme)");
   if (o.mp_physics < 0) throw std::runtime_error("real: mp_physics = -1 needs a physics_suite (CONUS or tropical)");
   o.surface_input_source = c.integer("surface_input_source");
-  o.sf_urban_physics = c.integer("sf_urban_physics");
+  // check_a_mundo (module_check_a_mundo.F:1062-1076): every allowed domain takes the innermost domain's value
+  o.sf_urban_physics = c.integer("sf_urban_physics", c.logical("grid_allowed") ? std::max(1, o.max_dom) : dom);
   o.fractional_seaice = c.integer("fractional_seaice");
   if (o.fractional_seaice == 1 && lsm1 == 1)  // check_nml_consistency (module_check_a_mundo.F:1024)
     throw std::runtime_error("real: fractional seaice does not work with simple slab thermal diffusion land model");
   o.default_soiltype = c.integer("default_soiltype");
+  // check_a_mundo (module_check_a_mundo.F:492-500): an invalid category or water becomes 8 (silty clay loam)
+  if (o.default_soiltype < 1 || o.default_soiltype > 19 || o.default_soiltype == 14) o.default_soiltype = 8;
   o.sst_update = c.integer("sst_update");
   o.grid_fdda = c.integer("grid_fdda");
   o.qna_update = c.integer("qna_update");
+  o.topo_wind = c.integer("topo_wind");
   o.all_ic_times = c.logical("all_ic_times");
   o.polar = c.logical("polar");
   o.seaice_threshold = c.num("seaice_threshold");
@@ -118,8 +129,34 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
   if (o.e_we <= 0 || o.e_sn <= 0 || o.e_vert <= 0 || o.num_metgrid_levels <= 0)
     throw std::runtime_error("real: e_we, e_sn, e_vert and num_metgrid_levels are required in &domains");
   // options of real.exe that are not ported
-  for (const char* k : {"use_maxw_level", "use_trop_level", "madwrf_opt", "madwrf_cldinit"})
+  // nest_interp_coord = 1: MAX_P, T_MAX_P, GHT_MAX_P, MIN_P, ... (module_initialize_real.F:642-673)
+  for (const char* k : {"use_maxw_level", "use_trop_level", "madwrf_opt", "madwrf_cldinit", "nest_interp_coord"})
     if (c.integer(k) != 0) throw std::runtime_error(std::string("real: ") + k + " is not ported");
+  // real_em.F: met_em names (auxinput1_inname, construct_filename4a), the wrfbdy name (bdy_inname), colons in the
+  // dates (nocolons) and the formats of the files: cppwrf_real reads met_em.dNN.<date>.nc and writes NetCDF
+  // wrfinput_dNN / wrfbdy_d01 / wrflowinp_dNN / wrffdda_dNN
+  for (auto [k, def] : {std::pair<const char*, const char*>{"auxinput1_inname", "met_em.d<domain>.<date>"},
+                        {"bdy_inname", "wrfbdy_d<domain>"}}) {
+    std::string v = c.get(k);
+    if (v.size() >= 2 && (v.front() == '"' || v.front() == '\'') && v.back() == v.front()) v = v.substr(1, v.size() - 2);
+    while (!v.empty() && v.back() == ' ') v.pop_back();
+    if (v != def) throw std::runtime_error(std::string("real: ") + k + " = '" + v + "' is not ported (only '" + def + "')");
+  }
+  if (c.logical("nocolons")) throw std::runtime_error("real: nocolons = .true. is not ported");
+  for (const char* k : {"s_we", "s_sn", "s_vert"})  // the domain start index (ids = s_we)
+    if (c.integer(k) != 1) throw std::runtime_error(std::string("real: ") + k + " other than 1 is not ported");
+  for (const char* k : {"io_form_auxinput1", "io_form_input", "io_form_boundary"})
+    if (c.integer(k) != 2) throw std::runtime_error(std::string("real: ") + k + " other than 2 (NetCDF) is not ported");
+  if (o.sst_update == 1 && c.integer("io_form_auxinput4") != 2)
+    throw std::runtime_error("real: sst_update = 1 needs io_form_auxinput4 = 2 (NetCDF) in cppwrf_real");
+  if (o.grid_fdda != 0 && c.integer("io_form_gfdda") != 2)
+    throw std::runtime_error("real: grid_fdda needs io_form_gfdda = 2 (NetCDF) in cppwrf_real");
+  // polar (global domains): no wrfbdy, polar map factors and the FFT topography filter (real_em.F,
+  // module_initialize_real.F:558-934); check_a_mundo keeps it on domain 1 only
+  if (c.logical("polar", 1)) throw std::runtime_error("real: polar = .true. is not ported");
+  // module_check_a_mundo.F:1082-1099
+  if (c.integer("seaice_albedo_opt") == 1 && lsm1 != 2 && lsm1 != 4)
+    throw std::runtime_error("real: seaice_albedo_opt == 1 works only with sf_surface_physics == 2 (Noah) or 4 (Noah-MP)");
   for (const char* k : {"insert_init_cloud", "all_ic_times", "multi_bdy_files", "slucm_distributed_drag"})
     if (c.logical(k)) throw std::runtime_error(std::string("real: ") + k + " = .true. is not ported");
   // options whose wrfinput fields real.exe fills (module_initialize_real.F) and cppwrf_real does not: LAKE_DEPTH /
@@ -139,16 +176,23 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
   if (c.integer("seaice_thickness_opt") != 0)
     throw std::runtime_error("real: seaice_thickness_opt = " + std::to_string(c.integer("seaice_thickness_opt")) +
                              " (ICEDEPTH, FNDICEDEPTH) is not ported");
+  // real_em.F:999: qna_update = 1 writes wrfqnainp_d0N (auxinput17) whatever mp_physics
+  if (o.qna_update != 0) throw std::runtime_error("real: qna_update = 1 (wrfqnainp, auxinput17) is not ported");
+  // registry.new3d_wif: wif_input_opt = 2 adds QNBCA / QNBCA2D for any mp_physics
+  if (c.integer("wif_input_opt") == 2)
+    throw std::runtime_error("real: wif_input_opt = 2 (black-carbon aerosols QNBCA) is not ported");
+  // the other aerosol-aware schemes of module_initialize_real.F:2334-2749 (RCON, TEMPO with tempo_aerosolaware)
+  if (o.mp_physics == 29 || (o.mp_physics == 88 && c.integer("tempo_aerosolaware") == 1))
+    throw std::runtime_error("real: mp_physics = " + std::to_string(o.mp_physics) + " (aerosol-aware) is not ported");
   if (o.mp_physics == 28) {  // aerosol-aware Thompson: aer_init_opt = 0 (QNWFA, QNIFA, QNWFA2D, QNIFA2D zero)
     // module_initialize_real.F:2743-2748
     if (c.integer("wif_input_opt") == 0) throw std::runtime_error("real: wif_input_opt=0 but mp_physics=28, 29, or 88");
-    if (c.integer("wif_input_opt") == 2)
-      throw std::runtime_error("real: wif_input_opt = 2 (black-carbon aerosols QNBCA) is not ported");
     // check_a_mundo: use_aero_icbc / use_rap_aero_icbc set aer_init_opt = 1 / 2 (the aerosol climatology)
     if (c.logical("use_aero_icbc") || c.logical("use_rap_aero_icbc"))
       throw std::runtime_error("real: use_aero_icbc / use_rap_aero_icbc (aer_init_opt 1 / 2) are not ported");
-    if (o.qna_update != 0) throw std::runtime_error("real: qna_update = 1 with mp_physics = 28 is not ported");
     if (c.integer("dust_emis") != 0) throw std::runtime_error("real: dust_emis = 1 is not ported");
+    // module_check_a_mundo.F:2576-2591: fire emissions need aer_init_opt 2 (fatal with 0)
+    if (c.logical("wif_fire_emit")) throw std::runtime_error("real: wif_fire_emit = .true. is not ported");
   }
   return o;
 }
@@ -274,8 +318,10 @@ void RealDomain<T>::read_input(const MetEm& m) {
   if (m.has("SEAICE")) put2(m, "SEAICE", xice);
   if (m.has("SST")) put2(m, "SST", sst);  // Registry SST: input stream i1 (used with FLAG_SST)
   // optional input-stream fields WRF passes from met_em to wrfinput, not carried by cppwrf_real
+  // (Registry DataNames are upper case in the I/O: allocs_*.F DataName = 'O3_GFS_DU'; write_wrfinput refuses any
+  // other auxinput1 field of wrfinput that the met_em file has and cppwrf_real does not read)
   for (const char* n : {"UOCE", "VOCE", "TOPOSLPX", "TOPOSLPY", "EROD", "ICEDEPTH", "ALBSI", "SNOWSI", "LANDUSEF2",
-                        "SOILT1", "o3_gfs_du"})
+                        "SOILT1", "O3_GFS_DU", "CANWAT"})
     if (m.has(n)) throw std::runtime_error(std::string("real: met_em field ") + n + " is not ported");
   if (m.has("SNOALB")) put2(m, "SNOALB", snoalb);
   if (m.has("SCT_DOM")) put2(m, "SCT_DOM", sct_dom_gc);
@@ -285,8 +331,12 @@ void RealDomain<T>::read_input(const MetEm& m) {
   for (auto [n, fp] : {std::pair<const char*, F2<T>*>{"OA1", &oa1}, {"OA2", &oa2}, {"OA3", &oa3}, {"OA4", &oa4},
                        {"OL1", &ol1}, {"OL2", &ol2}, {"OL3", &ol3}, {"OL4", &ol4}})
     if (m.has(n)) put2(m, n, *fp);
-  // Registry dataname "var_sso" (lower case; NetCDF names are case-sensitive, so WRF does not read VAR_SSO)
-  if (m.has("var_sso")) put2(m, "var_sso", var_sso);
+  // Registry var_sso: the generated I/O names it 'VAR_SSO' (inc/allocs_0.F DataName), as metgrid writes it
+  if (m.has("VAR_SSO")) put2(m, "VAR_SSO", var_sso);
+  // module_initialize_real.F:216-262: v4 metgrid input (TITLE with ' V4.') checks the geogrid flags
+  if (m.att_str("TITLE", "").find(" V4.") != std::string::npos && o.topo_wind == 1 && flag("VAR_SSO") == 0)
+    throw std::runtime_error("real: topo_wind = 1 AND flag_var_sso = 0: either modify the namelist settings, or "
+                             "rebuild the geogrid/metgrid data");
   // optional_input: soil levels (module_optional_input.F optional_lsm_levels, FLAG_SOIL_LAYERS path)
   num_st_levels_input = num_sm_levels_input = num_sw_levels_input = 0;
   if (flags.count("SOIL_LEVELS") && flags["SOIL_LEVELS"] == 1)
