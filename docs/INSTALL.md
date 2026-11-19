@@ -35,7 +35,8 @@ What CPPWRF needs:
 - **NetCDF-C with its headers** (`libnetcdf-dev`). NetCDF-4/HDF5 support is needed for compressed output.
 - **Python 3 with `numpy` and `netCDF4`** for the tools. The namelist translator itself needs only the standard
   library.
-- **For the GPU builds: the CUDA Toolkit 12 or later and an NVIDIA GPU.**
+- **For the GPU builds: the CUDA Toolkit 12.1 or later and an NVIDIA GPU of compute capability 7.0 (Volta) or
+  later.** The batched launches pass up to 32 KB of kernel parameters, which older toolkits and GPUs (4 KB) reject.
   - The whole CUDA build is known to compile with CUDA 12.4 and with CUDA 13.0.
   - The proofs ran on sm_80 (A100), sm_89 (L4) and sm_120 (RTX PRO 6000 Blackwell).
   - sm_120 needs CUDA 12.8 or later.

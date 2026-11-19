@@ -26,6 +26,11 @@ if(CPPWRF_ENABLE_CUDA)
   set(CMAKE_CUDA_STANDARD 20)
   set(CMAKE_CUDA_STANDARD_REQUIRED ON)
   find_package(CUDAToolkit REQUIRED)
+  # kernel parameters above 4 KB (LaunchBatch / parallel_fused pack up to 8 kernels per launch, up to 32 KB): CUDA 12.1
+  # and compute capability 7.0 or later
+  if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.1)
+    message(FATAL_ERROR "CPPWRF's CUDA build needs CUDA 12.1 or later (kernel parameters above 4 KB); found ${CMAKE_CUDA_COMPILER_VERSION}")
+  endif()
 else()
   find_package(OpenMP REQUIRED COMPONENTS CXX)
 endif()
