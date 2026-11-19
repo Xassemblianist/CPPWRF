@@ -33,7 +33,7 @@ CASES = [
     # P4BMJFI0 = P4BMJF with icloud = 0: WRF's RRTMG reads CLDFRA3D only with icloud /= 0, so BMJ's clouds stay out of
     # the radiation (CLDFRA keeps BMJ's fraction)
     ("real_p4bmjfi0_r8_fp64_cpu_1h", "cpu_dp", "configs/real_p4_r8.ini",
-     ["real.dir=" + f"{WR}/run_P4BMJF_r8", "phys.bmj_rad_feedback=true", "phys.icloud=0"] + _P4 + _1H,
+     ["real.dir=" + f"{WR}/run_P4BMJFI0_r8", "phys.bmj_rad_feedback=true", "phys.icloud=0"] + _P4 + _1H,
      f"{WR}/run_P4BMJFI0_r8/wrfout_d01_{_D}", 3600, dict(_T, QCLOUD=0.0, QICE=0.0)),
     # CUDA FP64 (tolerance 0, G4 2026-11-15; SKIP without a GPU) and FP32 (measured on the G4 2026-11-15: U 5.3e-4,
     # W 3.3e-2, THM 1.1e-5, QV 1.4e-3; tolerances about 3x)
@@ -43,7 +43,7 @@ CASES = [
      ["real.dir=" + f"{WR}/run_P4BMJF_r8", "phys.bmj_rad_feedback=true"] + _P4 + _1H,
      f"{WR}/run_P4BMJF_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_p4bmjfi0_r8_fp64_cuda_1h", "cuda_dp", "configs/real_p4_r8.ini",
-     ["real.dir=" + f"{WR}/run_P4BMJF_r8", "phys.bmj_rad_feedback=true", "phys.icloud=0"] + _P4 + _1H,
+     ["real.dir=" + f"{WR}/run_P4BMJFI0_r8", "phys.bmj_rad_feedback=true", "phys.icloud=0"] + _P4 + _1H,
      f"{WR}/run_P4BMJFI0_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_p9bmj_fp32_1h", "cuda", "configs/real_p9bmj_r8.ini", ["real.dir=" + f"{WR}/run_P9BMJ_r8"] + _1H,
      f"{WR}/run_P9BMJ_r8/wrfout_d01_{_D}", 3600, {"U": 1.6e-3, "W": 0.1, "THM": 3.4e-5, "QV": 4.2e-3}),

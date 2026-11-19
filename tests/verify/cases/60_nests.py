@@ -61,7 +61,7 @@ CASES = [
      {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "ALBEDO", "EMISS", "ZNT", "MAVAIL")}),
     # N3M = N3 with MYNN (bl_pbl / sf_sfclay 5, tke advection) and km_opt 4 / 2: the domains' scalars paired by name
     ("real_n3m_r8_fp64_cpu", "cpu_dp", "configs/real_n3_steps.ini",
-     ["phys.bl_pbl_physics=5", "phys.sf_sfclay_physics=5", "phys.bl_mynn_tkeadvect=true", "d02.km_opt=2"],
+     ["real.dir=" + f"{WR}/run_N3M_r8", "phys.table_dir=" + f"{WR}/run_N3M_r8", "phys.bl_pbl_physics=5", "phys.sf_sfclay_physics=5", "phys.bl_mynn_tkeadvect=true", "d02.km_opt=2"],
      {d: f"{WR}/run_N3M_r8/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 180,
      {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "QKE")}),
     ("real_n3_r8_fp64_cpu_1h", "cpu_dp", "configs/real_n3.ini", [],

@@ -136,6 +136,9 @@ def config_vs_namelist(cfg, sets, nml):
     # input directory
     skip = {("run", "run_time")} | (set() if os.path.exists(os.path.join(os.path.dirname(nml), "wrfinput_d01"))
                                     else {("real", "dir")})
+    # nor does one without its own tables (a wrfref run on a base_* directory, whose links the data tar drops)
+    if not os.path.exists(os.path.join(os.path.dirname(nml), "LANDUSE.TBL")):
+        skip |= {("phys", "table_dir")}
     def same(a, b):  # files by their content (a reference directory's copy of a linked input_sounding)
         a, b = norm(a), norm(b)
         return a == b or (a.startswith("/") and os.path.isfile(a) and os.path.isfile(b) and filecmp.cmp(a, b, False))
