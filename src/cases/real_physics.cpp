@@ -111,6 +111,7 @@ LanduseInit landuse_init(const std::string& table_dir, const std::string& mminlu
 
 #ifndef CPPWRF_HAVE_NETCDF
 void init_real_physics(const io::Config&, Model&) { throw std::runtime_error("column physics needs NetCDF"); }
+void phy_init_after_feedback(const io::Config&, Model&) {}
 void read_wrflowinp(const std::string&, const std::string&, phys::driver::PhysicsSuite&) {
   throw std::runtime_error("sst_update needs NetCDF");
 }
@@ -643,6 +644,75 @@ void init_real_physics(const io::Config& cfg, Model& m) {
                                has_ice_precip ? &pc->graupelncv : nullptr, pc->nssl() ? &pc->hailncv : nullptr);
   }
   m.rk->set_column_physics(m.suite.get());
+}
+
+// share/mediation_integrate.F:791-856: med_nest_initial feeds the nest back (feedback /= 0), then calls
+// start_domain(parent); the parent's itimestep is 0 at its first step, so start_em runs phy_init again
+// (start_em.F:246-247, 1033) on the fed-back LU_INDEX, XICE, SNOWC, TSK and IVGTYP: landuse_init's ALBBCK, ALBEDO,
+// Z0, ZNT, EMBCK, EMISS, MAVAIL, XLAND (and the slab's THC), which have no Registry feedback function, TSK_SAVE
+// (fractional_seaice), XICEM (sst_update) and Noah's LSMINIT SNOALB (rdmaxalb = .false.). LSMINIT's SH2O is a
+// function of the point's ISLTYP, TSLB and SMOIS, which are fed back from the same nest point as SH2O (copy_fcni /
+// copy_fcnm): it is the nest's value already. Pointwise: each worker its patch.
+void phy_init_after_feedback(const io::Config& cfg, Model& m) {
+  if (!m.suite) return;
+  phys::driver::PhysicsSuite& su = *m.suite;
+  const phys::driver::SuiteOptions& o = su.options();
+  if (o.sf_surface_physics == 3 || o.sf_surface_physics == 4 || su.urb_)  // not ported for nests (refused)
+    throw std::runtime_error("phy_init after the nest feedback: RUC, Noah-MP and the UCM are not ported for nests");
+  const Grid& g = m.g;
+  const int nx = g.nx;
+  const std::size_t n2 = std::size_t(nx) * g.ny;
+  const std::string dir = cfg.get_string("real.dir");
+  const NcIn in(dir + "/" + cfg.get_string("real.wrfinput", "wrfinput_d01"));
+  // the patch's points of a field (the other points stay 0: landuse_init takes category 0 as water)
+  auto get2 = [&](const Field2& f) {
+    std::vector<real> h;
+    f.download(h);
+    const Layout& L = f.layout();
+    std::vector<double> a(n2, 0.0);
+    for (int j = L.j0(); j < L.j1(); ++j)
+      for (int i = L.i0(); i < L.i1(); ++i) a[i + std::size_t(nx) * j] = double(h[L.index(i, j, 0)]);
+    return a;
+  };
+  std::vector<double> lu(n2, 0.0);
+  {
+    std::vector<int> h;
+    su.ivgtyp.download(h);
+    const Layout& L = su.ivgtyp.layout();
+    for (int j = L.j0(); j < L.j1(); ++j)
+      for (int i = L.i0(); i < L.i1(); ++i) lu[i + std::size_t(nx) * j] = double(h[L.index(i, j, 0)]);
+  }
+  auto put2 = [&](Field2& f, const std::vector<double>& a) {  // the patch's points; the halo points as they are
+    std::vector<real> h;
+    f.download(h);
+    const Layout& L = f.layout();
+    for (int j = L.j0(); j < L.j1(); ++j)
+      for (int i = L.i0(); i < L.i1(); ++i) h[L.index(i, j, 0)] = real(a[i + std::size_t(nx) * j]);
+    copy_to_dev(f.data() - L.offset, h.data(), f.bytes());
+  };
+  // the model's IVGTYP is LU_INDEX (init_real_physics), fed back from the same nest point
+  const LanduseInit li = landuse_init(o.table_dir, o.mminlu, int(in.att_num("JULDAY", 0)), in.att_num("CEN_LAT", 0.0),
+                                      o.iswater, o.isice, lu, get2(su.xice), get2(su.snowc), o.fractional_seaice,
+                                      o.usemonalb, o.usemonalb ? get2(su.albbck) : std::vector<double>(),
+                                      o.usemonalb ? get2(su.snoalb) : std::vector<double>());
+  put2(su.albbck, li.albbck); put2(su.albedo, li.albedo); put2(su.z0, li.z0); put2(su.znt, li.z0);
+  put2(su.embck, li.embck); put2(su.emiss, li.emiss); put2(su.mavail, li.mavail); put2(su.xland, li.xland);
+  if (o.sf_surface_physics == 1) put2(su.thc, li.thc);
+  if (o.fractional_seaice == 1) su.tsk_save.copy_from(su.tsk);  // phy_init: TSK_SAVE = TSK
+  if (o.sst_update == 1) su.xicem.copy_from(su.xice);           // landuse_init: XICEM = XICE
+  if (o.sf_surface_physics == 2 && !cfg.get_bool("phys.rdmaxalb", true)) {  // LSMINIT: SNOALB = MAXALB(IVGTYP) / 100
+    phys::noah::NoahTables nt;
+    if (!phys::noah::read_noah_tables(o.table_dir, o.mminlu, o.mminsl, nt))
+      throw std::runtime_error("real physics: cannot read the Noah tables from " + o.table_dir);
+    std::vector<double> snoalb = get2(su.snoalb);
+    const Layout& L = su.snoalb.layout();
+    for (int j = L.j0(); j < L.j1(); ++j)
+      for (int i = L.i0(); i < L.i1(); ++i) {
+        const std::size_t p = i + std::size_t(nx) * j;
+        snoalb[p] = nt.maxalb[int(std::lround(lu[p])) - 1] * 0.01;
+      }
+    put2(su.snoalb, snoalb);
+  }
 }
 #endif
 

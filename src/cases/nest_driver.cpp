@@ -867,6 +867,15 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       doms[i].runner->history()->feedback_from(*doms[c_idx].runner->history(), cs.i_parent_start,
                                                cs.j_parent_start, cs.parent_grid_ratio);
     }
+    // start_domain(parent) at the parent's first step (itimestep = 0): phy_init again on the fed-back fields
+    // (a resumed run reads them from its restart files)
+    if (!resumed) {
+      {
+        const tile::Use use(doms[i].model.g);
+        phy_init_after_feedback(doms[i].spec.cfg, doms[i].model);
+      }
+      if (doms[i].runner->history()) doms[i].runner->history()->phy_init_after_feedback();
+    }
 #endif
     if (doms[i].model.suite) {
       doms[i].model.suite->ctopo.fill_host([](int, int, int) { return 1.0; });

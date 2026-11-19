@@ -275,30 +275,18 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
       }
       const std::string tables = cfg.get_string("phys.table_dir", real_dir);
       if (std::filesystem::exists(tables + "/LANDUSE.TBL")) {
-        const bool usemonalb = cfg.get_bool("phys.usemonalb", false);
+        lu_.tables = tables;
+        lu_.mminlu = mminlu;
+        lu_.julday = att_i("JULDAY", 0);
+        lu_.cen_lat = cen_lat;
+        lu_.iswater = att_i("ISWATER", 17);
+        lu_.isice = att_i("ISICE", 15);
+        lu_.fractional_seaice = int(cfg.get_int("phys.fractional_seaice", 0));
+        lu_.usemonalb = cfg.get_bool("phys.usemonalb", false);
         std::vector<double> albbck_in, snoalb_in;
-        if (usemonalb && !(from_wrfinput("ALBBCK", n2, albbck_in) && from_wrfinput("SNOALB", n2, snoalb_in)))
+        if (lu_.usemonalb && !(from_wrfinput("ALBBCK", n2, albbck_in) && from_wrfinput("SNOALB", n2, snoalb_in)))
           throw std::runtime_error("usemonalb: " + wrfinput_ + " lacks ALBBCK or SNOALB");
-        const LanduseInit li = landuse_init(tables, mminlu, att_i("JULDAY", 0), cen_lat, att_i("ISWATER", 17),
-                                            att_i("ISICE", 15), lu, xice, snowc,
-                                            int(cfg.get_int("phys.fractional_seaice", 0)), usemonalb, albbck_in,
-                                            snoalb_in);
-        auto rl = [](const std::vector<double>& v) {  // WRF REAL
-          std::vector<double> r(v.size());
-          for (std::size_t p = 0; p < v.size(); ++p) r[p] = double(real(v[p]));
-          return r;
-        };
-        if (!m_.suite) {
-          phy_init_["ALBBCK"] = rl(li.albbck); phy_init_["ALBEDO"] = rl(li.albedo); phy_init_["ZNT"] = rl(li.z0);
-          phy_init_["EMISS"] = rl(li.emiss); phy_init_["Z0"] = rl(li.z0); phy_init_["EMBCK"] = rl(li.embck);
-          phy_init_["MAVAIL"] = rl(li.mavail);
-        }
-        phy_init_["THC"] = rl(li.thc);
-        phy_init_["LU_STATE"] = rl(li.lu_state);
-        phy_init_["LANDUSE_ISICE"] = {double(att_i("ISICE", 15))};
-        phy_init_["LANDUSE_LUCATS"] = {double(li.lucats)};
-        phy_init_["LANDUSE_LUSEAS"] = {double(li.luseas)};
-        phy_init_["LANDUSE_ISN"] = {double(li.isn)};
+        landuse_phy_init(lu, xice, snowc, albbck_in, snoalb_in);
       }
       if (!m_.suite) phy_init_["UST"] = std::vector<double>(n2, double(real(0.0001)));
     }
@@ -1082,6 +1070,45 @@ void WrfHistory::feedback_physics(WrfHistory& child, int ipos, int jpos, int rat
       parallel_for(r, K{e.p3->view(), e.c3->cview(), ipos, jpos, ratio, ratio, e.fnk, e.point, e.xs, e.ys});
     }
   }
+}
+
+void WrfHistory::landuse_phy_init(const std::vector<double>& lu, const std::vector<double>& xice,
+                                  const std::vector<double>& snowc, const std::vector<double>& albbck_in,
+                                  const std::vector<double>& snoalb_in) {
+  const LanduseInit li = landuse_init(lu_.tables, lu_.mminlu, lu_.julday, lu_.cen_lat, lu_.iswater, lu_.isice, lu, xice,
+                                      snowc, lu_.fractional_seaice, lu_.usemonalb, albbck_in, snoalb_in);
+  auto rl = [](const std::vector<double>& v) {  // WRF REAL
+    std::vector<double> r(v.size());
+    for (std::size_t p = 0; p < v.size(); ++p) r[p] = double(real(v[p]));
+    return r;
+  };
+  if (!m_.suite) {
+    phy_init_["ALBBCK"] = rl(li.albbck); phy_init_["ALBEDO"] = rl(li.albedo); phy_init_["ZNT"] = rl(li.z0);
+    phy_init_["EMISS"] = rl(li.emiss); phy_init_["Z0"] = rl(li.z0); phy_init_["EMBCK"] = rl(li.embck);
+    phy_init_["MAVAIL"] = rl(li.mavail);
+  }
+  phy_init_["THC"] = rl(li.thc);
+  phy_init_["LU_STATE"] = rl(li.lu_state);
+  phy_init_["LANDUSE_ISICE"] = {double(lu_.isice)};
+  phy_init_["LANDUSE_LUCATS"] = {double(li.lucats)};
+  phy_init_["LANDUSE_LUSEAS"] = {double(li.luseas)};
+  phy_init_["LANDUSE_ISN"] = {double(li.isn)};
+}
+
+void WrfHistory::phy_init_after_feedback() {
+  // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
+  const tile::Service svc;
+  if (svc.served() || lu_.tables.empty()) return;
+  const Grid& g = m_.g;
+  const std::size_t n2 = std::size_t(g.nx) * g.ny;
+  const std::vector<std::size_t> d2 = {std::size_t(g.ny), std::size_t(g.nx)};
+  // the fed-back LU_INDEX, SEAICE and SNOWC (the model's fields or the history's fed_)
+  std::vector<double> lu, xice, snowc, albbck_in, snoalb_in;
+  if (!value("LU_INDEX", "lu_index", d2, lu) || !value("SEAICE", "xice", d2, xice)) return;
+  if (!value("SNOWC", "snowc", d2, snowc)) snowc.assign(n2, 0.0);
+  if (lu_.usemonalb && !(value("ALBBCK", "albbck", d2, albbck_in) && value("SNOALB", "snoalb", d2, snoalb_in)))
+    throw std::runtime_error("usemonalb: the nest's parent lacks ALBBCK or SNOALB");
+  landuse_phy_init(lu, xice, snowc, albbck_in, snoalb_in);
 }
 
 void WrfHistory::restart_slopes() {
