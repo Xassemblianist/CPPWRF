@@ -145,6 +145,11 @@ extern "C" __m128d _ZGVbN2v_log10(__m128d);
 #endif
 // log and log10: glibc's SSE4 variants with Intel's rcpps (core/libmvec_x86.hpp), the same on any x86-64 CPU
 #include "core/libmvec_x86.hpp"
+// float expf / logf / powf as libmvec's 4-lane SSE4 variants (CPU builds on x86-64)
+#if defined(__x86_64__) && !defined(CPPWRF_USE_CUDA) && !defined(__CUDACC__) && !defined(CPPWRF_NO_LIBMVEC)
+#define CPPWRF_HAVE_MVEC_F4 1
+#include "core/libmvec_f4.hpp"
+#endif
 namespace cppwrf {
 // x**n for a variable INTEGER n as gfortran computes it: libgcc's __powidf2 (square-and-multiply,
 // 1/y for n < 0); differs from pow(x, double(n)) in the last bit for some arguments.
@@ -259,9 +264,30 @@ CPPWRF_HD inline double log10(double a, int i, int n) {
 #endif
 }
 #endif
-CPPWRF_HD inline float pow(float a, float b, int, int) { return rpow(a, b); }
-CPPWRF_HD inline float log(float a, int, int) { return rlog(a); }
-CPPWRF_HD inline float exp(float a, int, int) {
+// float (FP32 builds): WRF's real*4 build vectorises the same loops with 4 floats per call (_ZGVbN4v_expf,
+// _ZGVbN4v_logf, _ZGVbN4vv_powf): iterations 0 ... 4*(n/4)-1 of an n-trip loop through the vector function, the
+// remaining n mod 4 (and a loop of fewer than 4 trips) through the scalar libm. The CPU build computes those lanes
+// as libmvec does (core/libmvec_f4.hpp); the CUDA build keeps the scalar functions on the device and the host.
+CPPWRF_HD inline bool lane4(int i, int n) { return i < (n & ~3); }
+CPPWRF_HD inline float pow(float a, float b, int i, int n) {
+#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+  if (lane4(i, n)) return mvec4::powf(a, b);
+#endif
+  (void)i; (void)n;
+  return rpow(a, b);
+}
+CPPWRF_HD inline float log(float a, int i, int n) {
+#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+  if (lane4(i, n)) return mvec4::logf(a);
+#endif
+  (void)i; (void)n;
+  return rlog(a);
+}
+CPPWRF_HD inline float exp(float a, int i, int n) {
+#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+  if (lane4(i, n)) return mvec4::expf(a);
+#endif
+  (void)i; (void)n;
 #if defined(__CUDA_ARCH__)
   return expf(a);
 #else
