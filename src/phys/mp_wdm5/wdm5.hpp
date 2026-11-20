@@ -301,7 +301,7 @@ struct Wdm5Kernel {
         // mean-volume drop diameter of rain [LH A10] ((24.)**(.3333333), folded by gfortran) and of cloud [LH A7];
         // the slope_wdm5 after the update reads the same (not refreshed) qrs_tmp / ncr_tmp: its avedia(i,k,2) is
         // this one
-        avedia2[k] = rslope[0] * Real(2.884498835045048);
+        avedia2[k] = rslope[0] * wdm6::avedia_24p<Real>();
         Real rslopec, rslopec2, rslopec3k;
         if (qci1[k] <= c.qmin || ncr2[k] <= Real(c.ncmin)) {
           rslopec = c.rslopecmax;
@@ -646,8 +646,10 @@ struct Wdm5Kernel {
                                         ncr2[k])) /
                        dtcld;
           ncact = c_min(ncact, c_max(ncr1[k], Real(0.)) / dtcld);
-          // (actr*1.E-6)**3, folded by gfortran: the correctly rounded cube 3.375e-18
-          const Real pcact = c_min(Real(4.) * pi * c.denr * Real(3.375e-18) * ncact / (Real(3.) * dn[k]),
+          // (actr*1.E-6)**3, folded by gfortran: the correctly rounded cube of actr*1.E-6 in the build's REAL
+          // (3.375e-18; real*4: 1.5e-6f cubed = 3.3750003e-18f, 1 ulp above 3.375e-18 rounded to float)
+          const Real actr3 = std::is_same_v<Real, float> ? Real(3.3750003e-18f) : Real(3.375e-18);
+          const Real pcact = c_min(Real(4.) * pi * c.denr * actr3 * ncact / (Real(3.) * dn[k]),
                                    c_max(qv[k], Real(0.)) / dtcld);
           qv[k] = c_max(qv[k] - pcact * dtcld, Real(0.));
           qci1[k] = c_max(qci1[k] + pcact * dtcld, Real(0.));

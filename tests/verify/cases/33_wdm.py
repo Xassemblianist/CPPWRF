@@ -47,6 +47,20 @@ CASES += [
 CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
           if c[1] == "cpu_dp" and c[0].startswith("real_p4d6c_")]
 
+# CPU FP32 against WRF real*4, bit for bit: run_D6_cpu_sp / run_D5_cpu_sp (fp32id4_data.tar) are WRF real*4's D6 / D5
+# runs on the workstation from run_P4_cpu_sp's real*4 inputs; steps/: 3 minutes, history every step; 1 h, history
+# every 10 minutes
+_T6S = dict(_T6)
+_T5S = {v: 0.0 for v in _T6 if v not in ("QGRAUP", "GRAUPELNC")}
+for _n, _t in (("d6", _T6S), ("d5", _T5S)):
+    _run = f"{WR}/run_{_n.upper()}_cpu_sp"
+    CASES += [
+        (f"real_p4{_n}_fp32_cpu", "cpu_sp", f"configs/real_p4{_n}_r8.ini", ["real.dir=" + f"{_run}/steps"],
+         f"{_run}/steps/wrfout_d01_{_D}", 180, _t),
+        (f"real_p4{_n}_fp32_cpu_1h", "cpu_sp", f"configs/real_p4{_n}_r8.ini", ["real.dir=" + _run] + _1H,
+         f"{_run}/wrfout_d01_{_D}", 3600, _t),
+    ]
+
 STATUS = [
     ('D6', 'P4 with WDM6 (mp_physics 16) instead of WSM6; restarted at 30 min', '1 h'),
     ('D6H', 'D6 with hail_opt 1', '1 h'),
@@ -54,4 +68,4 @@ STATUS = [
     ('D5', 'P4 with WDM5 (mp_physics 14) instead of WSM6', '1 h'),
 ]
 
-DATA = {c[0]: 'suite_data.tar,port_c03_data.tar' for c in CASES}
+DATA = {c[0]: 'fp32id4_data.tar' if c[1] == 'cpu_sp' else 'suite_data.tar,port_c03_data.tar' for c in CASES}
