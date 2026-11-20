@@ -35,7 +35,8 @@ using V3 = View3<real>;
 using C3 = View3<const real>;
 using V2 = View2<real>;
 using B3 = BView3<const real>;
-constexpr real RVRD = real(cst::rvovrd);
+// WRF's R_v/R_d, folded in REAL (real*4: 1 ulp below the rounded double quotient; FP64 the same value)
+constexpr real RVRD = real(cst::r_v) / real(cst::r_d);
 constexpr real T0 = real(cst::t0);
 
 // moist_physics_prep_em: z_at_w, dz8w, th_phy (dry theta), h_diabatic = th_phy, qv_diabatic,

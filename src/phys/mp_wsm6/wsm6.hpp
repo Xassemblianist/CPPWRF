@@ -207,6 +207,32 @@ struct Wsm6Params {
         rsloper3max = rsloper2max * rslopermax;
         rslopes3max = rslopes2max * rslopesmax;
         rslopeg3max = rslopeg2max * rslopegmax;
+        if constexpr (std::is_same_v<Real, float>) {
+            // mp_wsm6_init in WRF real*4: the products above in REAL from left to right (the double evaluation
+            // rounds qck1, roqimax and precg2, with hail_opt 1 precg1, to other floats); products of literals and
+            // parameters folded in REAL, parameter**.5 and dimax**8 folded correctly rounded, avtg**.5 a runtime powf
+            const float sqavtr = std::sqrt(avtr), sqavts = std::sqrt(avts);
+            qc0 = 4.f / 3.f * pi * denr * (r0 * r0 * r0) * xncr / den0;
+            qck1 = 0.104f * 9.8f * peaut / libm::pow(xncr * denr, 1.f / 3.f) / xmyu * libm::pow(den0, 4.f / 3.f);
+            pidnc = pi * denr / 6.f;
+            pvtr = avtr * g4pbr / 6.f;
+            pacrr = pi * n0r * avtr * g3pbr * .25f * eacrr;
+            precr1 = 2.f * pi * n0r * .78f;
+            precr2 = 2.f * pi * n0r * .31f * sqavtr * g5pbro2;
+            roqimax = 2.08e22f * static_cast<float>(libm::pow(static_cast<double>(dimax), 8.0));
+            pvts = avts * g4pbs / 6.f;
+            pacrs = pi * n0s * avts * g3pbs * .25f;
+            precs1 = 4.f * n0s * .65f;
+            precs2 = 4.f * n0s * .44f * sqavts * g5pbso2;
+            pidn0r = pi * denr * n0r;
+            pidn0s = pi * dens * n0s;
+            pacrc = pi * n0s * avts * g3pbs * .25f * eacrc;
+            pacrg = pi * n0g * avtg * g3pbg * .25f;
+            pvtg = avtg * g4pbg / 6.f;
+            precg1 = 2.f * pi * n0g * .78f;
+            precg2 = 2.f * pi * n0g * .31f * libm::pow(avtg, .5f) * g5pbgo2;
+            pidn0g = pi * deng * n0g;
+        }
     }
 
     CPPWRF_HD inline Real cpmcal(Real x) const {
