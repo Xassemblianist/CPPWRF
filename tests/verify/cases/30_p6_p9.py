@@ -17,6 +17,17 @@ CASES = [
     ("real_p6_fp32_1h", "cuda", "configs/real_p6_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P6", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P6/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 5e-4, "W": 1e-2, "THM": 1e-5, "QV": 5e-4}),
+    # CPU FP32 against WRF real*4, bit for bit: run_P6_cpu_sp (fp32id2_data.tar) is WRF real*4's P6 run on the
+    # workstation, its Thompson tables computed by thompson_init (no qr_acr_qg / qr_acr_qs / freezeH2O files: CPPWRF
+    # computes them as WRF real*4 does); steps/: 3 minutes, history every step; 1 h, history at 0 and 1 h
+    ("real_p6_fp32_cpu", "cpu_sp", "configs/real_p6_r8.ini", ["real.dir=" + f"{WR}/run_P6_cpu_sp/steps"],
+     f"{WR}/run_P6_cpu_sp/steps/wrfout_d01_2026-10-12_00:00:00", 180,
+     {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "QCLOUD": 0.0}),
+    ("real_p6_fp32_cpu_1h", "cpu_sp", "configs/real_p6_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_P6_cpu_sp", "output.out_interval=60", "output.diag_interval=60"],
+     f"{WR}/run_P6_cpu_sp/wrfout_d01_2026-10-12_00:00:00", 3600,
+     {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "QCLOUD": 0.0, "QRAIN": 0.0, "QICE": 0.0, "QNICE": 0.0,
+      "QNRAIN": 0.0}),
     ("real_p6_r8_fp64_cuda_1h", "cuda_dp", "configs/real_p6_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P6_r8", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P6_r8/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
@@ -80,6 +91,8 @@ DATA = {
     'real_p6_r8_fp64_cpu': 'port_a06_data.tar,port_c01_data.tar,v05_files_data.tar,v05_files_links.tar',
     'real_p6_r8_fp64_cpu_1h': 'port_a06_data.tar,port_c01_data.tar,v05_suite_refs.tar',
     'real_p6_fp32_1h': 'suite_data.tar',
+    'real_p6_fp32_cpu': 'fp32id2_data.tar',
+    'real_p6_fp32_cpu_1h': 'fp32id2_data.tar',
     'real_p6_r8_fp64_cuda_1h': 'port_a06_data.tar,port_c01_data.tar,v05_suite_refs.tar',
     'real_p7_r8_fp64_cpu': 'v05_files_data.tar,v05_files_links.tar',
     'real_p7_r8_fp64_cuda_1h': 'suite_data.tar,v05_suite_refs.tar',

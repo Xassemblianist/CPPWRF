@@ -25,6 +25,14 @@ namespace cppwrf::phys::wdm6 {
 
 constexpr int kMaxLevels = 128;
 
+// (24.)**(.3333333), folded by gfortran in the build's REAL: the correctly rounded power (real*4: 24.f**.3333333f =
+// 2.884499f; the real*8 value rounded to float is 1 ulp below)
+template <typename Real>
+CPPWRF_HD constexpr Real avedia_24p() {
+  if constexpr (std::is_same_v<Real, float>) return 2.884499f;
+  else return Real(2.884498835045048);
+}
+
 template <typename Real>
 struct Wdm6Params {
   // the microphysics_driver arguments (module_model_constants) and the namelist's ccn_conc
@@ -69,10 +77,15 @@ struct Wdm6Params {
     }
     pi = Real(4. * std::atan(1.));
     xlv1 = cl - p_cpv;
+    // gfortran folds the constant subexpressions in the build's REAL, each operation rounded (powers correctly
+    // rounded): r0**3. is the cube of r0 rounded to REAL (real*4: 5.1199997e-16f, not 5.12e-16 rounded to float),
+    // .104*9.8*peaut two REAL products
     constexpr double r03 = r0 * r0 * r0;  // r0**3., folded: the correctly rounded cube (= r0*r0*r0 here)
-    qc0 = Real(4. / 3.) * pi * denr * Real(r03) * Real(xncr0) / den0;
-    qc1 = Real(4. / 3.) * pi * denr * Real(r03) * Real(xncr1) / den0;
-    qck1 = Real(.104 * 9.8 * peaut) / libm::pow(denr, Real(1. / 3.)) / Real(xmyu) * libm::pow(den0, Real(4. / 3.));
+    const Real r03r = std::is_same_v<Real, float> ? Real(5.1199997e-16f) : Real(r03);
+    qc0 = Real(4. / 3.) * pi * denr * r03r * Real(xncr0) / den0;
+    qc1 = Real(4. / 3.) * pi * denr * r03r * Real(xncr1) / den0;
+    qck1 = Real(.104) * Real(9.8) * Real(peaut) / libm::pow(denr, Real(1. / 3.)) / Real(xmyu) *
+           libm::pow(den0, Real(4. / 3.));
     pidnc = pi * denr / Real(6.);
     bvtr1 = Real(1. + bvtr);
     bvtr2 = Real(2. + bvtr);
@@ -100,8 +113,16 @@ struct Wdm6Params {
     precr2 = Real(2.) * pi * Real(.31) * Real(std::sqrt(avtr)) * g7pbro2;
     pidn0r = pi * denr * Real(n0r);
     pidnr = Real(4.) * pi * denr;
-    xmmax = Real((dimax / dicon) * (dimax / dicon));
-    roqimax = Real(2.08e22 * std::pow(dimax, 8.));
+    // (dimax/dicon)**2 and 2.08e22*dimax**8 folded in REAL (real*4: dimax**8 = 3.9062516e-27f, the correctly
+    // rounded 8th power of dimax rounded to float)
+    if constexpr (std::is_same_v<Real, float>) {
+      const Real q = Real(dimax) / Real(dicon);
+      xmmax = q * q;
+      roqimax = Real(2.08e22) * Real(3.9062516e-27f);
+    } else {
+      xmmax = Real((dimax / dicon) * (dimax / dicon));
+      roqimax = Real(2.08e22 * std::pow(dimax, 8.));
+    }
     bvts1 = Real(1. + bvts);
     bvts2 = Real(2.5 + .5 * bvts);
     bvts3 = Real(3. + bvts);
@@ -724,7 +745,7 @@ struct Wdm6Kernel {
         const WdmSlope<Real> s = wdm6_slope(c, qrs1[k], qrs2[k], qrs3[k], ncr3[k], dn[k], denfac[k], t[k]);
         const Real *rslope = s.rs, *rslopeb = s.rb, *rslope2 = s.r2, *rslope3 = s.r3;
         // mean-volume drop diameter of rain [LH A10] ((24.)**(.3333333), folded by gfortran) and of cloud [LH A7]
-        const Real avedia2 = rslope[0] * Real(2.884498835045048);
+        const Real avedia2 = rslope[0] * avedia_24p<Real>();
         Real rslopec, rslopec2, rslopec3k;
         if (qci1[k] <= c.qmin || ncr2[k] <= Real(c.ncmin)) {
           rslopec = c.rslopecmax;
@@ -1251,7 +1272,7 @@ struct Wdm6Kernel {
         // re-compute the mean-volume drop diameter [LH A10] (slope_wdm6 of the updated profile)
         Real rs, rb, r2, r3, vt, vtn;
         wdm_slope_rain(c, qrs1[k], ncr3[k], dn[k], denfac[k], rs, rb, r2, r3, vt, vtn);
-        const Real avedia2 = rs * Real(2.884498835045048);
+        const Real avedia2 = rs * avedia_24p<Real>();
         // Nrevp_s / Prevp_s: evaporation / condensation of rain [LH A14] [LH A15] [KK 23] (NR -> NC, QR -> QC)
         if (avedia2 <= Real(c.di82)) {
           ncr2[k] = ncr2[k] + ncr3[k];
@@ -1266,8 +1287,10 @@ struct Wdm6Kernel {
                                         ncr2[k])) /
                        dtcld;
           ncact = c_min(ncact, c_max(ncr1[k], Real(0.)) / dtcld);
-          // (actr*1.E-6)**3, folded by gfortran: the correctly rounded cube 3.375e-18
-          const Real pcact = c_min(Real(4.) * pi * c.denr * Real(3.375e-18) * ncact / (Real(3.) * dn[k]),
+          // (actr*1.E-6)**3, folded by gfortran: the correctly rounded cube of actr*1.E-6 in the build's REAL
+          // (3.375e-18; real*4: 1.5e-6f cubed = 3.3750003e-18f, 1 ulp above 3.375e-18 rounded to float)
+          const Real actr3 = std::is_same_v<Real, float> ? Real(3.3750003e-18f) : Real(3.375e-18);
+          const Real pcact = c_min(Real(4.) * pi * c.denr * actr3 * ncact / (Real(3.) * dn[k]),
                                    c_max(qv[k], Real(0.)) / dtcld);
           qv[k] = c_max(qv[k] - pcact * dtcld, Real(0.));
           qci1[k] = c_max(qci1[k] + pcact * dtcld, Real(0.));

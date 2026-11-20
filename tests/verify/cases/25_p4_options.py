@@ -84,6 +84,17 @@ CASES = [
     ("real_c01_r8_fp64_cuda_1h", "cuda_dp", "configs/real_c01_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P6_r8", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_C01_r8/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),  # G4: U 3.6e-7 W 7.3e-5 THM 1.1e-8 QV 1.6e-7
+    # CPU FP32 against WRF real*4, bit for bit: run_C01_cpu_sp (fp32id3_data.tar) is WRF real*4's C01 run on the
+    # workstation from the P6 real*4 inputs (CCN_ACTIVATE.BIN in the run directory, the Thompson tables computed);
+    # steps/: 3 minutes, history every step; 1 h, history every 10 minutes
+    ("real_c01_fp32_cpu", "cpu_sp", "configs/real_c01_r8.ini", ["real.dir=" + f"{WR}/run_C01_cpu_sp/steps"],
+     f"{WR}/run_C01_cpu_sp/steps/wrfout_d01_2026-10-12_00:00:00", 180,
+     {v: 0.0 for v in ("U", "W", "PH", "MU", "THM", "QV", "QCLOUD", "QNCLOUD", "QNWFA", "QNIFA", "QNWFA2D")}),
+    ("real_c01_fp32_cpu_1h", "cpu_sp", "configs/real_c01_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_C01_cpu_sp", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_C01_cpu_sp/wrfout_d01_2026-10-12_00:00:00", 3600,
+     {v: 0.0 for v in ("U", "W", "THM", "QV", "QCLOUD", "QRAIN", "QICE", "QNICE", "QNRAIN", "QNCLOUD", "QNWFA",
+                       "QNIFA", "RAINNC")}),
     # RADW / RADT = P4 (WSM6) / P6 (Thompson) with do_radar_ref = 1 (REFL_10CM at the history times; WRF r8d8):
     # bit-identical for 3 minutes (history every minute) and 1 h
     ("real_radw_r8_fp64_cpu", "cpu_dp", "configs/real_radw_r8.ini", [],
@@ -204,6 +215,8 @@ DATA = {
     'real_c01_r8_fp64_cpu': 'port_a06_data.tar,port_c01_data.tar',
     'real_c01_r8_fp64_cpu_1h': 'port_a06_data.tar,port_c01_data.tar',
     'real_c01_r8_fp64_cuda_1h': 'port_a06_data.tar,port_c01_data.tar',
+    'real_c01_fp32_cpu': 'fp32id3_data.tar',
+    'real_c01_fp32_cpu_1h': 'fp32id3_data.tar',
     'real_radw_r8_fp64_cpu': 'suite_data.tar,port_a10_data.tar,v05_files_links.tar',
     'real_radw_r8_fp64_cpu_1h': 'suite_data.tar,port_a10_data.tar',
     'real_radw_r8_fp64_cuda_1h': 'suite_data.tar,port_a10_data.tar',

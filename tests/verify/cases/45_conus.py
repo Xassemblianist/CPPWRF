@@ -94,6 +94,18 @@ CASES = [
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_SU1_r8", "output.out_interval=30", "output.diag_interval=30"],
      f"{WR}/run_SU1_r8/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
 ]
+# CPU FP32 against WRF real*4, bit for bit: run_G2_cpu_sp (fp32id4_data.tar) is WRF real*4's G2 run on the workstation
+# from run_P2's real*4 inputs (the wrfinput with ELVMAX = HGT + 3 VAR in REAL and the global attribute GWD_OPT = 1);
+# steps/: 3 minutes, history every step; 1 h, history every 10 minutes
+CASES += [
+    ("real_g2_fp32_cpu", "cpu_sp", "configs/real_g2_r8.ini", ["real.dir=" + f"{WR}/run_G2_cpu_sp/steps"],
+     f"{WR}/run_G2_cpu_sp/steps/wrfout_d01_2026-10-12_00:00:00", 180,
+     {"U": 0.0, "V": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0}),
+    ("real_g2_fp32_cpu_1h", "cpu_sp", "configs/real_g2_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_G2_cpu_sp", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_G2_cpu_sp/wrfout_d01_2026-10-12_00:00:00", 3600,
+     {"U": 0.0, "V": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0}),
+]
 
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
 # duration
@@ -120,6 +132,8 @@ DATA = {
     'real_g2_r8_fp64_cpu': 'v05_files_data.tar,v05_files_links.tar',
     'real_g2_r8_fp64_cpu_3h': 'suite_data.tar,v05_suite_refs.tar',
     'real_g2_r8_fp64_cuda_1h': 'suite_data.tar,v05_suite_refs.tar',
+    'real_g2_fp32_cpu': 'fp32id4_data.tar',
+    'real_g2_fp32_cpu_1h': 'fp32id4_data.tar',
     'real_f1_r8_fp64_cpu': 'v05_files_data.tar,v05_files_links.tar',
     'real_f1_r8_fp64_cpu_3h': 'suite_data.tar,v05_suite_refs.tar',
     'real_f2_r8_fp64_cpu': 'v05_files_data.tar,v05_files_links.tar',

@@ -102,7 +102,7 @@ the GPU FP64 output of the example equals the CPU FP64 output bit for bit.
 - *(GPU builds)* the NVIDIA CUDA Toolkit >= 12.1 and an NVIDIA GPU of compute capability 7.0 or later (tested: sm_80, sm_89, sm_120)
 
 ### Builds
-One source tree gives four builds; build directories are independent.
+One source tree gives five builds; build directories are independent.
 
 ```bash
 # CPU, FP64: the configuration that is bit-identical to WRF real*8
@@ -117,9 +117,13 @@ cmake --build build -j "$(nproc)"
 cmake -S . -B build-gpu-dp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON
 cmake --build build-gpu-dp -j "$(nproc)"
 
-# CPU, FP32 (not part of the verification suite)
+# CPU, FP32: bit-identical to WRF real*4 on the cases of docs/FP32_IDENTITY.md
 cmake -S . -B build-cpu-sp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF
 cmake --build build-cpu-sp -j "$(nproc)"
+
+# GPU, FP32 identity mode: the CPU FP32 build's results on the GPU, bit for bit (slower than the fast mode)
+cmake -S . -B build-gpu-sp-id -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON
+cmake --build build-gpu-sp-id -j "$(nproc)"
 ```
 
 Each build makes `cppwrf` (the model), `src/init_real/cppwrf_real` (real.exe) and the unit tests. A build tree
@@ -137,6 +141,7 @@ environment variable `CPPWRF_DATA_DIR` overrides both.
 | `CPPWRF_NATIVE` | `ON` | Release builds: `-march=native`; `OFF` for portable binaries (same values either way) |
 | `CPPWRF_PORTABLE_LIBMVEC` | `ON` | glibc's vector `log` / `log10` as on Intel CPUs, on every x86-64 CPU (the WRF references are Intel-made) |
 | `CPPWRF_CUDA_GLIBC_MATH` | `ON` | CUDA FP64: glibc's math functions on the device (bit-identical to WRF); `OFF`: CUDA's math library |
+| `CPPWRF_CUDA_FP32_IDENTITY` | `OFF` | CUDA FP32 only: `ON` gives the CPU FP32 build's results bit for bit (WRF real*4's on docs/FP32_IDENTITY.md's cases): no FMA contraction, glibc's float and double math on the device; slower than the default fast FP32 build |
 | `CPPWRF_MPI` | `OFF` | `ON`: the program runs as MPI ranks under `mpirun` (needs an MPI library with its C API, e.g. MPICH or Open MPI; section 7, "Tiles and MPI ranks"); `OFF`: no MPI header or library is used |
 | `CPPWRF_DIFF_TESTS` | `OFF` | Register the differential tests against WRF's compiled Fortran (need a WRF build, `WRF_DIR`) |
 
@@ -176,7 +181,9 @@ enforce them:
   kernel and glibc's libm / libmvec algorithms on the device (`CPPWRF_CUDA_GLIBC_MATH`, default ON; OFF uses
   CUDA's math library, which agrees with WRF to roundoff). It costs 0 to 7 % of the FP64 stepping time. The FP32
   build contracts FMAs (`--fmad=true`) except RRTMG's batch kernels, Thompson and the physics drivers, and uses
-  CUDA's math library: it agrees with WRF's single-precision run to roundoff.
+  CUDA's math library: it agrees with WRF's single-precision run to roundoff. The FP32 identity build
+  (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) has `--fmad=false` everywhere and glibc's float and double functions on the
+  device: the CPU FP32 build's results, bit for bit (docs/FP32_IDENTITY.md).
 
 ---
 

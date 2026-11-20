@@ -171,6 +171,9 @@ template <typename Real>
 MorrisonParams<Real> morrison_init(int morr_rimed_ice) {
   const bool hail = morr_rimed_ice == 1;
   const Real PI = Real(3.1415926535897932384626434);
+  // a power of literals folded in the build's REAL: the real*8 value, or the real*4 one (the correctly rounded power
+  // of the float operands; e.g. (10.E-6)**3 = 9.999999e-16f, 1 ulp below 1e-15 rounded to float)
+  auto folded = [](double r8, float r4) { return std::is_same_v<Real, float> ? Real(r4) : Real(r8); };
   MorrisonParams<Real> c{};
   c.ndcnst = Real(250.);
   c.ai = Real(700.);
@@ -193,7 +196,7 @@ MorrisonParams<Real> morrison_init(int morr_rimed_ice) {
   c.ecr = Real(1.);
   c.dcs = Real(125.E-6);
   // (10.E-6)**3, (5.E-6)**3, (25.E-6)**3 of literals: gfortran's correctly rounded powers
-  c.mi0 = Real(4.) / Real(3.) * PI * c.rhoi * Real(0x1.203af9ee75617p-50);
+  c.mi0 = Real(4.) / Real(3.) * PI * c.rhoi * folded(0x1.203af9ee75617p-50, 0x1.203af8p-50f);
   c.mg0 = Real(1.6E-10);
   c.f1s = Real(0.86);
   c.f2s = Real(0.28);
@@ -210,7 +213,7 @@ MorrisonParams<Real> morrison_init(int morr_rimed_ice) {
   c.cg = c.rhog * PI / Real(6.);
   c.dg = Real(3.);
   c.rin = Real(0.1E-6);
-  c.mmult = Real(4.) / Real(3.) * PI * c.rhoi * Real(0x1.203af9ee75617p-53);
+  c.mmult = Real(4.) / Real(3.) * PI * c.rhoi * folded(0x1.203af9ee75617p-53, 0x1.203af8p-53f);
   c.lammaxi = Real(1.) / Real(1.E-6);
   c.lammini = Real(1.) / (Real(2.) * c.dcs + Real(100.E-6));
   c.lammaxr = Real(1.) / Real(20.E-6);
@@ -234,8 +237,9 @@ MorrisonParams<Real> morrison_init(int morr_rimed_ice) {
   c.cons12 = G(Real(1.) + c.di) * c.ci;
   c.cons13 = G(c.bs + Real(3.)) * PI / Real(4.) * c.eci;
   c.cons14 = G(c.bg + Real(3.)) * PI / Real(4.) * c.eci;
-  // PI**((1.-BS)/3.) and RHOSN**((-2.-BS)/3.) with BS = 0.41, RHOSN = 100: folded, correctly rounded
-  c.cons15 = Real(-1108.) * c.eii * Real(0x1.40a2e8af05d65p+0) * Real(0x1.954739e4529e6p-6) / (Real(4.) * Real(720.));
+  // PI**((1.-BS)/3.) and RHOSN**((-2.-BS)/3.) with BS = 0.41, RHOSN = 100: folded, correctly rounded (in REAL)
+  c.cons15 = Real(-1108.) * c.eii * folded(0x1.40a2e8af05d65p+0, 0x1.40a2e8p+0f) *
+             folded(0x1.954739e4529e6p-6, 0x1.954738p-6f) / (Real(4.) * Real(720.));
   c.cons16 = G(c.bi + Real(3.)) * PI / Real(4.) * c.eci;
   c.cons17 = Real(4.) * Real(2.) * Real(3.) * c.rhosu * PI * c.eci * c.eci * G(Real(2.) * c.bs + Real(2.)) /
              (Real(8.) * (c.rhog - c.rhosn));
@@ -250,7 +254,7 @@ MorrisonParams<Real> morrison_init(int morr_rimed_ice) {
   c.cons26 = PI / Real(6.) * c.rhow;
   c.cons27 = G(Real(1.) + c.bi);
   c.cons28 = G(Real(4.) + c.bi) / Real(6.);
-  c.cons29 = Real(4.) / Real(3.) * PI * c.rhow * Real(0x1.19799812dea12p-46);
+  c.cons29 = Real(4.) / Real(3.) * PI * c.rhow * folded(0x1.19799812dea12p-46, 0x1.197996p-46f);
   c.cons30 = Real(4.) / Real(3.) * PI * c.rhow;
   c.cons31 = PI * PI * c.ecr * c.rhosn;
   c.cons32 = PI / Real(2.) * c.ecr;

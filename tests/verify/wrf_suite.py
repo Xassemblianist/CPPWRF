@@ -5,6 +5,7 @@ reference run, with the tolerance that the current code meets. Run after every c
 dycore, boundaries, diffusion or physics coupling.
 
   wrf_suite.py --cpu-dp <build>/cppwrf --cuda <build>/cppwrf [--cuda-dp <build>/cppwrf] [--cpu-sp <build>/cppwrf]
+               [--cuda-sp-id <build>/cppwrf]
                [--out DIR] [--only NAME[,NAME]]
                [--exact] [--jobs N]   (N CPU cases at once, each with OMP_NUM_THREADS threads) [--allow-skip] [--slow]
   wrf_suite.py --list   (every case with all its fields, then the special and restart checks)
@@ -15,7 +16,8 @@ The cases are defined in tests/verify/cases/ (one file per group, see its __init
 
 Binaries: --cpu-dp the CPU FP64 build (cases cpu_dp, against WRF's real*8 build), --cpu-sp the CPU FP32 build
 (-DCPPWRF_DOUBLE=OFF; cases cpu_sp, against WRF's real*4 build, also at tolerance 0), --cuda / --cuda-dp the CUDA
-FP32 / FP64 builds.
+FP32 / FP64 builds, --cuda-sp-id the CUDA FP32 identity build (-DCPPWRF_CUDA_FP32_IDENTITY=ON; cases cuda_sp_id: the
+cpu_sp cases on the GPU, against the same WRF real*4 references at tolerance 0).
 Cases with tolerance 0 (CPU FP64, CPU FP32) run with WRF history output and their wrfout files are compared with WRF's at
 tolerance 0 (exact.py: NaN equals only NaN, -0 differs from +0): every variable of the reference file, every
 reference frame up to the case's time (the final one must be there), types and variable attributes, and the
@@ -568,6 +570,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cpu-dp")
     ap.add_argument("--cpu-sp", help="the CPU FP32 build (-DCPPWRF_DOUBLE=OFF): the cpu_sp cases")
+    ap.add_argument("--cuda-sp-id", help="the CUDA FP32 identity build (-DCPPWRF_CUDA_FP32_IDENTITY=ON): the cuda_sp_id "
+                    "cases (the cpu_sp cases on the GPU)")
     ap.add_argument("--cuda")
     ap.add_argument("--cuda-dp")
     ap.add_argument("--out", default=os.path.expanduser("~/cppwrf_scratch/wrf_suite"))
@@ -686,7 +690,7 @@ def main():
         done(path, good)
         return good, f"{'PASS' if good else 'FAIL'}  {name:22s} {msg}"
 
-    bins = {"cpu_dp": a.cpu_dp, "cpu_sp": a.cpu_sp, "cuda": a.cuda, "cuda_dp": a.cuda_dp}
+    bins = {"cpu_dp": a.cpu_dp, "cpu_sp": a.cpu_sp, "cuda": a.cuda, "cuda_dp": a.cuda_dp, "cuda_sp_id": a.cuda_sp_id}
     for k, b in bins.items():  # a binary that was asked for and is not there (a failed build) is no SKIP
         if b and not os.path.exists(b):
             print(f"ERROR --{k.replace('_', '-')} {b}: no such file (build failed?)", flush=True)

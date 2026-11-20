@@ -113,7 +113,57 @@ void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* h
 
   std::vector<double> pb(std::size_t(nx) * ny * nz), alb(pb.size()), t_init(pb.size());
   std::vector<double> mub(std::size_t(nx) * ny), phb(std::size_t(nx) * ny * (nz + 1));
-  {
+  if constexpr (std::is_same_v<real, float>) {
+    // WRF real*4: start_em's locals and the base-state fields are REAL (every operation rounded to binary32, each
+    // stored value read back as stored; the vectors hold the binary32 values exactly), as real_case.cpp's start.
+    // With max_dom > 1 start_em recomputes pb, t_init and alb from MUB (rebalance = 0: phb is the first pass's);
+    // in REAL c3h*MUB + c4h + p_top is c3h*(p_surf - p_top) + c4h + p_top, so the values are the first pass's.
+    constexpr float g = 9.81f, r_d = 287.f, cp = 7.f * r_d / 2.f, cv = cp - r_d, cvpm = -cv / cp, rcp = r_d / cp;
+    constexpr float p1000mb = 100000.f, t0 = 300.f;
+    const float t00 = float(bp.t00), p00 = float(bp.p00), a = float(bp.a), tiso = float(bp.tiso),
+                a_strat = float(bp.a_strat), p_strat = float(bp.p_strat), p_top = float(b.p_top);
+    auto f = [](double x) { return float(x); };
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const std::size_t ij = std::size_t(j) * nx + i;
+        const float ht = f(ht_2d[ij]);
+        const float p_surf = p00 * libm::exp(-t00 / a + libm::pow((t00 / a) * (t00 / a) - 2.f * g * ht / a / r_d, 0.5f));
+        for (int k = 0; k < nz; ++k) {
+          const std::size_t n = (std::size_t(k) * ny + j) * nx + i;
+          const float pbk = f(b.c3h[k]) * (p_surf - p_top) + f(b.c4h[k]) + p_top;
+          float temp = std::max(tiso, t00 + a * libm::log(pbk / p00));
+          if (pbk < p_strat) temp = tiso + a_strat * libm::log(pbk / p_strat);
+          const float ti = temp * libm::pow(p00 / pbk, rcp) - t0;
+          pb[n] = pbk;
+          t_init[n] = ti;
+          alb[n] = (r_d / p1000mb) * (ti + t0) * libm::pow(pbk / p1000mb, cvpm);
+        }
+        const float mb = p_surf - p_top;
+        mub[ij] = mb;
+        phb[ij] = ht * g;
+        for (int k = 1; k <= nz; ++k) {
+          const std::size_t n = (std::size_t(k) * ny + j) * nx + i, nm = (std::size_t(k - 1) * ny + j) * nx + i;
+          if (hypso == 1) {
+            phb[n] = f(phb[nm]) - f(b.dnw[k - 1]) * (f(b.c1h[k - 1]) * mb + f(b.c2h[k - 1])) * f(alb[nm]);
+          } else {
+            const float pfu = f(b.c3f[k]) * mb + f(b.c4f[k]) + p_top;
+            const float pfd = f(b.c3f[k - 1]) * mb + f(b.c4f[k - 1]) + p_top;
+            const float phm = f(b.c3h[k - 1]) * mb + f(b.c4h[k - 1]) + p_top;
+            phb[n] = f(phb[nm]) + f(alb[nm]) * phm * libm::log(pfd / pfu);
+          }
+        }
+        for (int k = 0; k < nz; ++k) {
+          const std::size_t n = (std::size_t(k) * ny + j) * nx + i;
+          const float pbk = f(b.c3h[k]) * mb + f(b.c4h[k]) + p_top;
+          float temp = std::max(tiso, t00 + a * libm::log(pbk / p00));
+          if (pbk < p_strat) temp = tiso + a_strat * libm::log(pbk / p_strat);
+          const float ti = temp * libm::pow(p00 / pbk, rcp) - t0;
+          pb[n] = pbk;
+          t_init[n] = ti;
+          alb[n] = (r_d / p1000mb) * (ti + t0) * libm::pow(pbk / p1000mb, cvpm);
+        }
+      }
+  } else {
     const double t00 = bp.t00, p00 = bp.p00, a = bp.a, tiso = bp.tiso, a_strat = bp.a_strat, p_strat = bp.p_strat;
     for (int j = 0; j < ny; ++j)
       for (int i = 0; i < nx; ++i) {
@@ -175,6 +225,31 @@ void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* h
 
   auto idx3 = [&](int i, int j, int k) { return (std::size_t(k) * ny + j) * nx + i; };
   std::vector<double> al(pb.size()), p(pb.size());
+  if constexpr (std::is_same_v<real, float>) {  // start_em.F 808-853 in REAL, as real_case.cpp
+    constexpr float r_d = 287.f, cp = 7.f * r_d / 2.f, cpovcv = cp / (cp - r_d), p1000mb = 100000.f, t0 = 300.f;
+    const float p_top = float(b.p_top);
+    auto f = [](double x) { return float(x); };
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t n = idx3(i, j, k), n1 = idx3(i, j, k + 1);
+          const float mu = h_mu[Lmu.index(i, j, 0)], mb = f(mub[std::size_t(j) * nx + i]);
+          const float ph0 = h_ph[Lph.index(i, j, k)], ph1 = h_ph[Lph.index(i, j, k + 1)];
+          const float thm = h_thm[Lm.index(i, j, k)], albk = f(alb[n]);
+          float a;
+          if (hypso == 2) {
+            const float pfu = f(b.c3f[k + 1]) * (mb + mu) + f(b.c4f[k + 1]) + p_top;
+            const float pfd = f(b.c3f[k]) * (mb + mu) + f(b.c4f[k]) + p_top;
+            const float phm = f(b.c3h[k]) * (mb + mu) + f(b.c4h[k]) + p_top;
+            a = (ph1 - ph0 + f(phb[n1]) - f(phb[n])) / phm / libm::log(pfd / pfu) - albk;
+          } else {
+            const float c1 = f(b.c1h[k]);
+            a = -1.f / ((c1 * mb + f(b.c2h[k])) + c1 * mu) * (albk * (c1 * mu) + f(b.rdnw[k]) * (ph1 - ph0));
+          }
+          al[n] = a;
+          p[n] = p1000mb * libm::pow((r_d * (t0 + thm)) / (p1000mb * (a + albk)), cpovcv) - f(pb[n]);
+        }
+  } else
   for (int k = 0; k < nz; ++k)
     for (int j = 0; j < ny; ++j)
       for (int i = 0; i < nx; ++i) {
@@ -216,7 +291,12 @@ void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* h
         const double mu = static_cast<double>(h_mu[Lmu.index(i, j, 0)]);
         const double htf = static_cast<double>(h_ht_fine[Lhf.index(i, j, 0)]);
         const double alt0 = al[n0] + alb[n0];
-        mu_adj[ij] = mu + al[n0] / (alt0 * alb[n0]) * cst::g * (ht_2d[ij] - htf);
+        if constexpr (std::is_same_v<real, float>) {  // REAL: alt = al + alb rounded, g = 9.81
+          const float a0 = float(al[n0]), b0 = float(alb[n0]), alt0f = a0 + b0;
+          mu_adj[ij] = float(mu) + a0 / (alt0f * b0) * 9.81f * (float(ht_2d[ij]) - float(htf));
+        } else {
+          mu_adj[ij] = mu + al[n0] / (alt0 * alb[n0]) * cst::g * (ht_2d[ij] - htf);
+        }
       }
     s.mu_2.fill_host([&](int i, int j, int) { return mu_adj[std::size_t(j) * nx + i]; });
   }

@@ -35,23 +35,36 @@
 // CUDA FP64 build: glibc's libm and libmvec algorithms on the device and the host (core/glibc_math.hpp), the
 // results of WRF's real*8 build and of the CPU build; CMake option CPPWRF_CUDA_GLIBC_MATH (default ON; OFF:
 // CPPWRF_CUDA_LIBM, CUDA's math library). The kernels call the math library as cppwrf::libm (core/libm.hpp).
-#if defined(CPPWRF_USE_CUDA) && defined(CPPWRF_DOUBLE) && !defined(CPPWRF_CUDA_LIBM)
+// CUDA FP32 identity build (CMake option CPPWRF_CUDA_FP32_IDENTITY, CPPWRF_FP32_IDENTITY): the CPU FP32 build's
+// arithmetic and math on the device, bit for bit: glibc's double functions as in the FP64 build, glibc's float
+// functions (core/glibc_mathf.hpp) and libmvec's 4-lane float functions (core/libmvec_f4.hpp) on the device.
+#if defined(CPPWRF_FP32_IDENTITY) && (!defined(CPPWRF_USE_CUDA) || defined(CPPWRF_DOUBLE) || defined(CPPWRF_CUDA_LIBM))
+#error "CPPWRF_FP32_IDENTITY: CUDA FP32 builds with glibc's math only"
+#endif
+#if defined(CPPWRF_USE_CUDA) && (defined(CPPWRF_DOUBLE) || defined(CPPWRF_FP32_IDENTITY)) && !defined(CPPWRF_CUDA_LIBM)
 #define CPPWRF_GLIBC_MATH 1
 #endif
 #include "core/libm.hpp"
+// the device's float functions: CUDA's, or glibc's in the identity build (CPPWRF_GF(expf) ...)
+#if defined(CPPWRF_FP32_IDENTITY)
+#include "core/glibc_mathf.hpp"
+#define CPPWRF_GF(f) ::cppwrf::glibcf::f
+#else
+#define CPPWRF_GF(f) ::f
+#endif
 
 // pow in the working precision on host and device (powf for float, as Fortran REAL ** REAL);
 // unqualified pow(float, float) would resolve to the double C function on the host.
 CPPWRF_HD inline float rpow(float a, float b) {
 #if defined(__CUDA_ARCH__)
-  return powf(a, b);
+  return CPPWRF_GF(powf)(a, b);
 #else
   return std::pow(a, b);
 #endif
 }
 CPPWRF_HD inline float rlog(float a) {
 #if defined(__CUDA_ARCH__)
-  return logf(a);
+  return CPPWRF_GF(logf)(a);
 #else
   return std::log(a);
 #endif
@@ -104,7 +117,7 @@ CPPWRF_HD inline T rpow2c(T a) {
 }
 CPPWRF_HD inline float rexp(float a) {
 #if defined(__CUDA_ARCH__)
-  return expf(a);
+  return CPPWRF_GF(expf)(a);
 #else
   return std::exp(a);
 #endif
@@ -145,10 +158,16 @@ extern "C" __m128d _ZGVbN2v_log10(__m128d);
 #endif
 // log and log10: glibc's SSE4 variants with Intel's rcpps (core/libmvec_x86.hpp), the same on any x86-64 CPU
 #include "core/libmvec_x86.hpp"
-// float expf / logf / powf as libmvec's 4-lane SSE4 variants (CPU builds on x86-64)
-#if defined(__x86_64__) && !defined(CPPWRF_USE_CUDA) && !defined(__CUDACC__) && !defined(CPPWRF_NO_LIBMVEC)
+// float expf / logf / powf / sinf / cosf as libmvec's 4-lane SSE4 variants (CPU builds on x86-64; the CUDA FP32
+// identity build on the device and the host)
+#if (defined(__x86_64__) && !defined(CPPWRF_USE_CUDA) && !defined(__CUDACC__) && !defined(CPPWRF_NO_LIBMVEC)) || \
+    defined(CPPWRF_FP32_IDENTITY)
 #define CPPWRF_HAVE_MVEC_F4 1
 #include "core/libmvec_f4.hpp"
+#endif
+// the 4-lane functions in this compilation pass (CPU builds; the identity build's host and device passes)
+#if defined(CPPWRF_HAVE_MVEC_F4) && (!defined(__CUDA_ARCH__) || defined(CPPWRF_FP32_IDENTITY))
+#define CPPWRF_MVEC_F4_PASS 1
 #endif
 namespace cppwrf {
 // x**n for a variable INTEGER n as gfortran computes it: libgcc's __powidf2 (square-and-multiply,
@@ -267,67 +286,73 @@ CPPWRF_HD inline double log10(double a, int i, int n) {
 // float (FP32 builds): WRF's real*4 build vectorises the same loops with 4 floats per call (_ZGVbN4v_expf,
 // _ZGVbN4v_logf, _ZGVbN4vv_powf; sin / cos below: _ZGVbN4v_sinf, _ZGVbN4v_cosf): iterations 0 ... 4*(n/4)-1 of an n-trip loop through the vector function, the
 // remaining n mod 4 (and a loop of fewer than 4 trips) through the scalar libm. The CPU build computes those lanes
-// as libmvec does (core/libmvec_f4.hpp); the CUDA build keeps the scalar functions on the device and the host.
+// as libmvec does (core/libmvec_f4.hpp), and so does the CUDA FP32 identity build; the fast CUDA FP32 build keeps
+// the scalar functions (CUDA's on the device).
 CPPWRF_HD inline bool lane4(int i, int n) { return i < (n & ~3); }
 CPPWRF_HD inline float pow(float a, float b, int i, int n) {
-#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+#if defined(CPPWRF_MVEC_F4_PASS)
   if (lane4(i, n)) return mvec4::powf(a, b);
 #endif
   (void)i; (void)n;
   return rpow(a, b);
 }
 CPPWRF_HD inline float log(float a, int i, int n) {
-#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+#if defined(CPPWRF_MVEC_F4_PASS)
   if (lane4(i, n)) return mvec4::logf(a);
 #endif
   (void)i; (void)n;
   return rlog(a);
 }
 CPPWRF_HD inline float exp(float a, int i, int n) {
-#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+#if defined(CPPWRF_MVEC_F4_PASS)
   if (lane4(i, n)) return mvec4::expf(a);
 #endif
   (void)i; (void)n;
 #if defined(__CUDA_ARCH__)
-  return expf(a);
+  return CPPWRF_GF(expf)(a);
 #else
   return std::exp(a);
 #endif
 }
 // float overloads (reached only in the FP32 builds), so that a float argument is not promoted to the double function:
-// WRF real*4 calls the single-precision function (atanf, sinf, cosf, log10f), on the CPU and the GPU alike.
-CPPWRF_HD inline float atan(float a, int, int) {
+// WRF real*4 calls the single-precision function (atanf, sinf, cosf, log10f), on the CPU and the GPU alike; atan
+// in a vectorised loop _ZGVbN4v_atanf (MYNN surface layer's psi tables).
+CPPWRF_HD inline float atan(float a, int i, int n) {
+#if defined(CPPWRF_MVEC_F4_PASS)
+  if (lane4(i, n)) return mvec4::atanf(a);
+#endif
+  (void)i; (void)n;
 #if defined(__CUDA_ARCH__)
-  return atanf(a);
+  return CPPWRF_GF(atanf)(a);
 #else
   return std::atan(a);
 #endif
 }
 CPPWRF_HD inline float sin(float a, int i, int n) {
-#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+#if defined(CPPWRF_MVEC_F4_PASS)
   if (lane4(i, n)) return mvec4::sinf(a);
 #endif
   (void)i; (void)n;
 #if defined(__CUDA_ARCH__)
-  return sinf(a);
+  return CPPWRF_GF(sinf)(a);
 #else
   return std::sin(a);
 #endif
 }
 CPPWRF_HD inline float cos(float a, int i, int n) {
-#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+#if defined(CPPWRF_MVEC_F4_PASS)
   if (lane4(i, n)) return mvec4::cosf(a);
 #endif
   (void)i; (void)n;
 #if defined(__CUDA_ARCH__)
-  return cosf(a);
+  return CPPWRF_GF(cosf)(a);
 #else
   return std::cos(a);
 #endif
 }
 CPPWRF_HD inline float log10(float a, int, int) {
 #if defined(__CUDA_ARCH__)
-  return log10f(a);
+  return CPPWRF_GF(log10f)(a);
 #else
   return std::log10(a);
 #endif
@@ -542,6 +567,14 @@ template <class F, bool MAX> __global__ void kred(F f, Range3D r, double* part) 
     __syncthreads();
   }
   if (threadIdx.x == 0) part[blockIdx.x] = sh[0];
+}
+// The CUDA FP32 identity build's sums: one thread per k plane adds its values in the CPU build's (j, i) order
+template <class F> __global__ void kred_seq(F f, Range3D r, double* part) {
+  const int kk = r.k0 + blockIdx.x;
+  double acc = 0.0;
+  for (int j = r.j0; j < r.j1; ++j)
+    for (int i = r.i0; i < r.i1; ++i) acc = acc + f(i, j, kk);
+  part[blockIdx.x] = acc;
 }
 }  // namespace detail
 
@@ -926,7 +959,12 @@ class Reducer {
     if (nk > max_k_) throw std::runtime_error("Reducer: k range exceeds max_k");
 #if defined(CPPWRF_USE_CUDA)
 #if defined(__CUDACC__)
+#if defined(CPPWRF_FP32_IDENTITY)
+    if constexpr (!MAX) detail::kred_seq<F><<<nk, 1, 0, cuda_launch_stream()>>>(f, r, dpart_);
+    else detail::kred<F, MAX><<<nk, 256, 0, cuda_launch_stream()>>>(f, r, dpart_);
+#else
     detail::kred<F, MAX><<<nk, 256, 0, cuda_launch_stream()>>>(f, r, dpart_);
+#endif
     cuda_check_launch("Reducer");
     copy_to_host(hpart_.data(), dpart_, sizeof(double) * nk);
 #endif

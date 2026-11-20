@@ -530,13 +530,13 @@ double max_hook(double v) {
 
 // Reducer::sum of a run with one patch over the range r of the values v (k slowest, i fastest): the CPU build adds
 // each level's values in (j, i) order and then the levels; the CUDA build each level's values in 256 strided
-// partial sums combined by a tree (core/backend.hpp kred), then the levels
+// partial sums combined by a tree (core/backend.hpp kred), then the levels; the CUDA FP32 identity build as the CPU
 double ordered_sum(const Range3D& r, const std::vector<double>& v) {
   const std::size_t ni = std::size_t(r.i1 - r.i0), nj = std::size_t(r.j1 - r.j0), n = ni * nj;
   double acc = 0.0;
   for (int k = r.k0; k < r.k1; ++k) {
     const double* p = v.data() + std::size_t(k - r.k0) * n;
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_CUDA) && !defined(CPPWRF_FP32_IDENTITY)
     double sh[256];
     for (std::size_t t = 0; t < 256; ++t) {
       double a = 0.0;

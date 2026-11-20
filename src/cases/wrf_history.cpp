@@ -776,18 +776,18 @@ void feedback(const std::string& fn, std::vector<double>& c, int cnx, int cny, c
           if (nrj % 2 != 0) C(ci, k, cj) = F((ci - ipos) * nri + istag + 1, k, (cj - jpos) * nrj + jstag + 1);
           else C(ci, k, cj) = F((ci - ipos) * nri + 1 + nri / 2 - 1, k, (cj - jpos) * nrj + 1 + nrj / 2 - 1);
         } else {  // copy_fcn: average of the fine points of the coarse cell / face
-          double sum = 0.0;
+          real sum = 0;  // REAL in WRF (cfld += 1./REAL(n) * nfld)
           if (!xstag && !ystag) {
             const double inv = double(real(1.0) / real(nri * nrj));
             for (int dj = 0; dj < nrj; ++dj)
               for (int di = 0; di < nri; ++di)
-                sum += double(real(inv) * real(F((ci - ipos) * nri + 1 + di, k, (cj - jpos) * nrj + 1 + dj)));
+                sum += (real(inv) * real(F((ci - ipos) * nri + 1 + di, k, (cj - jpos) * nrj + 1 + dj)));
           } else if (xstag) {
             const double inv = double(real(1.0) / real(nrj));
-            for (int dj = 0; dj < nrj; ++dj) sum += double(real(inv) * real(F((ci - ipos) * nri + 1, k, (cj - jpos) * nrj + 1 + dj)));
+            for (int dj = 0; dj < nrj; ++dj) sum += (real(inv) * real(F((ci - ipos) * nri + 1, k, (cj - jpos) * nrj + 1 + dj)));
           } else {
             const double inv = double(real(1.0) / real(nri));
-            for (int di = 0; di < nri; ++di) sum += double(real(inv) * real(F((ci - ipos) * nri + 1 + di, k, (cj - jpos) * nrj + 1)));
+            for (int di = 0; di < nri; ++di) sum += (real(inv) * real(F((ci - ipos) * nri + 1 + di, k, (cj - jpos) * nrj + 1)));
           }
           C(ci, k, cj) = sum;
         }
@@ -832,8 +832,8 @@ CPPWRF_HD inline void fb_put(const View3<real>& v, int i, int j, int k, real x) 
 CPPWRF_HD inline void fb_put(const View2<real>& v, int i, int j, int, real x) { v(i, j) = x; }
 
 // feedback() above on the device, in place on the parent field: (i0, j0, k) = 0-based parent point inside the nest,
-// fine levels at or above fnk read 0 (copy_field's padded level). copy_fcn sums real(1/n) * f in real and the
-// terms in double, as feedback() of the copy_field values; store_field's real() of the result.
+// fine levels at or above fnk read 0 (copy_field's padded level). copy_fcn sums real(1/n) * f in real (WRF's
+// REAL cfld), as feedback() of the copy_field values; store_field's real() of the result.
 template <class CV, class FV>
 struct KFeedbackReal {
   CV c;
@@ -849,17 +849,17 @@ struct KFeedbackReal {
       else fb_put(c, i0, j0, k, F((ci - ipos) * nri + nri / 2 - 1, (cj - jpos) * nrj + nrj / 2 - 1));
       return;
     }
-    double sum = 0.0;
+    real sum = 0;  // REAL in WRF (cfld += 1./REAL(n) * nfld)
     if (!xstag && !ystag) {
       const real inv = real(1.0) / real(nri * nrj);
       for (int dj = 0; dj < nrj; ++dj)
-        for (int di = 0; di < nri; ++di) sum += double(inv * F((ci - ipos) * nri + di, (cj - jpos) * nrj + dj));
+        for (int di = 0; di < nri; ++di) sum += (inv * F((ci - ipos) * nri + di, (cj - jpos) * nrj + dj));
     } else if (xstag) {
       const real inv = real(1.0) / real(nrj);
-      for (int dj = 0; dj < nrj; ++dj) sum += double(inv * F((ci - ipos) * nri, (cj - jpos) * nrj + dj));
+      for (int dj = 0; dj < nrj; ++dj) sum += (inv * F((ci - ipos) * nri, (cj - jpos) * nrj + dj));
     } else {
       const real inv = real(1.0) / real(nri);
-      for (int di = 0; di < nri; ++di) sum += double(inv * F((ci - ipos) * nri + di, (cj - jpos) * nrj));
+      for (int di = 0; di < nri; ++di) sum += (inv * F((ci - ipos) * nri + di, (cj - jpos) * nrj));
     }
     fb_put(c, i0, j0, k, real(sum));
   }

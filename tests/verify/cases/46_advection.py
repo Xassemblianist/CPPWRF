@@ -35,6 +35,15 @@ CASES += [
      {d: f"{WR}/run_MON3_r8/steps/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 180, _N3),
     ("real_mon3_r8_fp64_cpu_1h", "cpu_dp", "configs/real_mon3_r8.ini", [],
      {"d01": f"{WR}/run_MON3_r8/wrfout_d01_{_D}"}, 3600, {k: v for k, v in _N3.items() if k.startswith("d01")}),
+    # CPU FP32 against WRF real*4, bit for bit: run_MON3_cpu_sp (fp32id4_data.tar) is WRF real*4's MON3 run on the
+    # workstation from run_N3_cpu_sp's real*4 inputs; steps/: 3 minutes, history every minute on both domains; 1 h
+    ("real_mon3_fp32_cpu", "cpu_sp", "configs/real_mon3_r8.ini", [f"real.dir={WR}/run_MON3_cpu_sp/steps",
+     f"phys.table_dir={WR}/run_MON3_cpu_sp/steps", "run.run_time=180", "output.out_interval=1",
+     "output.diag_interval=1", "d02.out_interval=3", "d02.diag_interval=3"],
+     {d: f"{WR}/run_MON3_cpu_sp/steps/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 180, _N3),
+    ("real_mon3_fp32_cpu_1h", "cpu_sp", "configs/real_mon3_r8.ini",
+     [f"real.dir={WR}/run_MON3_cpu_sp", f"phys.table_dir={WR}/run_MON3_cpu_sp"],
+     {d: f"{WR}/run_MON3_cpu_sp/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 3600, _N3),
     # CUDA FP64 (exact) and FP32 (about 3x the G4 measurement at 37213be: MO4 U 3.2e-4 W 9.4e-3 THM 6.5e-6 QV 3.2e-4;
     # WM4 U 2.9e-4 W 7.8e-3 THM 8.7e-6 QV 2.6e-4)
     ("real_mo4_r8_fp64_cuda_1h", "cuda_dp", "configs/real_mo4_r8.ini", [f"real.dir={WR}/run_MO4_r8"] + _1H,
@@ -85,6 +94,8 @@ STATUS = [
 ]
 
 def _data(name):
+    if '_fp32_cpu' in name:
+        return 'fp32id4_data.tar'
     tar = 'port_b05w_data.tar' if name.startswith('real_w') else 'port_b05_data.tar'
     return f'suite_data.tar,n3_data.tar,{tar}' if '_mon3_' in name or '_wn3_' in name else f'suite_data.tar,{tar}'
 

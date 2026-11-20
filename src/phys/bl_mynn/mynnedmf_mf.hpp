@@ -207,7 +207,10 @@ CPPWRF_HD inline void dmp_mf_a(int kte, real dt, A zw1, A dz1, A pres1, A rho1,
     const real dl = (maxwidth - minwidth) / real(nup - 1);
     for (int ip = 1; ip <= nup; ++ip) {
       const real l = minwidth + dl * real(ip - 1);
-      cn = cn + rpow(l, d) * (l * l) / (dx * dx) * dl;  // a reduction: not vectorised by gfortran
+      // a reduction: the -r8 build calls pow per term; the real*4 build vectorises the powers (2 x _ZGVbN4vv_powf
+      // for the 8 plumes) and adds the terms in order
+      if constexpr (sizeof(real) == 4) cn = cn + vm::pow(l, d, ip - 1, nup) * (l * l) / (dx * dx) * dl;
+      else cn = cn + rpow(l, d) * (l * l) / (dx * dx) * dl;
     }
     const real C = Atot / cn;
     real acfac;

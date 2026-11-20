@@ -65,6 +65,19 @@ if(CPPWRF_ENABLE_CUDA AND CPPWRF_DOUBLE)
     add_compile_definitions(CPPWRF_CUDA_LIBM)
   endif()
 endif()
+# CUDA FP32 identity mode: the CPU FP32 build's results (WRF real*4's on the verified configurations) on the GPU, bit
+# for bit, at a cost in speed. --fmad=false in every kernel, IEEE division / sqrt and gradual underflow stated
+# explicitly, glibc's float and double math functions and libmvec's 4-lane float functions on the device
+# (CPPWRF_FP32_IDENTITY: src/core/backend.hpp, glibc_mathf.hpp, libmvec_f4.hpp). OFF (default): the fast CUDA FP32
+# build (FMA contraction, CUDA's math library; docs/FP32_ACCURACY.md).
+option(CPPWRF_CUDA_FP32_IDENTITY "CUDA FP32 build: bit-identical to the CPU FP32 build (strict arithmetic, glibc's math on the device)" OFF)
+if(CPPWRF_CUDA_FP32_IDENTITY)
+  if(NOT CPPWRF_ENABLE_CUDA OR CPPWRF_DOUBLE OR NOT CPPWRF_CUDA_GLIBC_MATH)
+    message(FATAL_ERROR "CPPWRF_CUDA_FP32_IDENTITY needs CPPWRF_ENABLE_CUDA=ON, CPPWRF_DOUBLE=OFF and CPPWRF_CUDA_GLIBC_MATH=ON")
+  endif()
+  string(APPEND CMAKE_CUDA_FLAGS " --fmad=false --ftz=false --prec-div=true --prec-sqrt=true")
+  add_compile_definitions(CPPWRF_FP32_IDENTITY)
+endif()
 # flags that change results: reassociation, reciprocals, flush-to-zero, approximate division / sqrt
 string(TOUPPER "${CMAKE_BUILD_TYPE}" _cppwrf_bt)
 if("${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_cppwrf_bt}}" MATCHES
