@@ -15,8 +15,10 @@ resumes across versions from WRF's wrfrst files.
   (src/core/libmvec_f4.hpp, test_libmvec_f4; sinf / cosf for radiation_driver's COSZEN). The suite's CPU FP32 backend
   `cpu_sp` (`--cpu-sp`) compares them at tolerance 0: `real_p1_fp32_cpu`, `real_p1_fp32_cpu_1h`,
   `real_p2_fp32_cpu_1h`, `real_p3_fp32_cpu_1h`, `real_p9_fp32_cpu_1h`, `real_p4_fp32_cpu`, `real_p4_fp32_cpu_1h`
-  (new data tar fp32id_data.tar).
-  docs/FP32_IDENTITY.md. FP64 and CUDA results unchanged.
+  (new data tar fp32id_data.tar), and Noah-MP NMP1 (1 h, `real_nmp1_fp32_cpu_1h`: the MOST resistances' four logarithms
+  through the 4-lane logf) and Thompson P6 (3 minutes and 1 h, `real_p6_fp32_cpu`, `real_p6_fp32_cpu_1h`, new data tar
+  fp32id2_data.tar: thompson_init's constants, coefficients and table builders in REAL where WRF real*4 has them,
+  the runtime's rain slope and sedimentation powers scalar). docs/FP32_IDENTITY.md. FP64 and CUDA results unchanged.
 
 ## 1.1.0 (2026-11-20)
 

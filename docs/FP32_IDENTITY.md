@@ -16,8 +16,15 @@ the GPU FP32 build, which is not identical to anything and is measured against W
 | `real_p3_fp32_cpu_1h` | P3: P1 + RRTMG LW/SW (radt 1 min) | WRF real*4 run_P3 (1 h) | 13 variables at 1 h | identical |
 | `real_p4_fp32_cpu` | P4: P1 + Kain-Fritsch + WSM6 + RRTMG LW/SW (radt 1 min, clouds, WSM6 effective radii), diff_opt 1 / km_opt 4 | WRF real*4 run_P4_cpu_sp/steps (3 minutes, history every step) | 4 frames x 197 variables | identical |
 | `real_p4_fp32_cpu_1h` | P4 | WRF real*4 run_P4_cpu_sp (1 h, history every 10 minutes) | 7 frames x 219 variables | identical |
+| `real_nmp1_fp32_cpu_1h` | NMP1: Noah-MP | WRF real*4 run_NMP1 (1 h) | 13 variables at 1 h | identical |
+| `real_p6_fp32_cpu` | P6: P1 + Thompson (mp_physics 8) | WRF real*4 run_P6_cpu_sp/steps (3 minutes, history every step) | 4 frames x 167 variables | identical |
+| `real_p6_fp32_cpu_1h` | P6 | WRF real*4 run_P6_cpu_sp (1 h, history at 0 and 1 h) | 2 frames x 167 variables | identical |
 
-The P4 references are WRF real*4 runs made on the workstation, as run_P1/steps (both in fp32id_data.tar).
+The P4 references are WRF real*4 runs made on the workstation, as run_P1/steps (both in fp32id_data.tar), and so
+are the P6 references (fp32id2_data.tar). The P6 run directories hold no Thompson table files (qr_acr_qg_V4.dat,
+qr_acr_qsV2.dat, freezeH2O.dat): CPPWRF computes the tables as WRF real*4 does, about three minutes at start. All 89
+tables and coefficients of thompson_init were compared with WRF real*4's in a dump; WRF v4.8.0 does not compute
+t1_qg_qc, t2_qg_sd and t2_qg_me there, scheme 8 does not read them.
 The older WRF real*4 run_P4 of port_fp32r4_data.tar, the reference of the CUDA FP32 case `real_p4_fp32_1h`,
 differs from a rerun of the same `wrf.exe` with the same inputs and namelist here from the first 10 minutes on
 (U at 176903 of 469920 points), with or without glibc's FMA variants; it was made by another run of WRF real*4 and
@@ -46,7 +53,8 @@ the references (made on Intel) on either vendor's runners.
   the system libmvec (expf and logf over all 2^32 inputs). `vm::exp / log / pow / sin / cos (float, i, n)` choose the
   vector or the scalar function by the loop index as WRF's loop does.
 - Values WRF real*4 stores in REAL are rounded where WRF rounds them (base state, lateral boundary coefficients,
-  Noah init, history T, WSM6's mp_wsm6_init products, R_v/R_d of moist_physics_prep_em, ...): a constant WRF folds
+  Noah init, history T, WSM6's mp_wsm6_init products, R_v/R_d of moist_physics_prep_em, Thompson's REAL constants,
+  gamma coefficients and the REAL subexpressions of its table builders, ...): a constant WRF folds
   in REAL (r_v/r_d is 1 ulp below the double quotient rounded to float) or a product it evaluates in REAL from left
   to right; the FP64 build keeps its code path unchanged (`if constexpr` on the real type), and
   FP64 results are checked byte for byte against main.
@@ -56,7 +64,7 @@ the references (made on Intel) on either vendor's runners.
 - GPU FP32: device code has no port of glibc's scalar float functions nor of the libmvec lanes; CUDA's `expf` /
   `powf` / `sinf` differ in the last bits, and FMA contraction differs. The CUDA FP32 build stays measured in
   docs/FP32_ACCURACY.md.
-- Schemes other than those of the cases above are not checked against WRF real*4: Noah-MP (NMP1 differs within
-  the first hour), Thompson, MYNN, the other microphysics, cumulus, PBL, surface and radiation schemes, nests,
+- Schemes other than those of the cases above are not checked against WRF real*4: aerosol-aware Thompson
+  (mp_physics 28), MYNN, the other microphysics, cumulus, PBL, surface and radiation schemes, nests,
   restarts. Each needs the same work: its WRF real*4 reference, the dumps, its vectorised loops, its REAL constants.
 - Other compilers or libm versions for WRF real*4 (Intel, AVX2 builds use the 8-lane functions): not covered.
