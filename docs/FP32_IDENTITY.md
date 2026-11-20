@@ -2,8 +2,10 @@
 
 CPPWRF's FP64 builds are bit-identical to WRF v4.8.0 real*8 (docs/STATUS.md). This page covers the CPU FP32 build
 (`-DCPPWRF_DOUBLE=OFF`, no CUDA): on the configurations below it is bit-identical to stock WRF v4.8.0 real*4, every
-history variable and every bit, so a CPU FP32 run can stand in for a WRF real*4 run. docs/FP32_ACCURACY.md covers
-the GPU FP32 build, which is not identical to anything and is measured against WRF real*8 instead.
+history variable and every bit, so a CPU FP32 run can stand in for a WRF real*4 run; and the CUDA FP32 identity build
+(`-DCPPWRF_CUDA_FP32_IDENTITY=ON`, section [GPU: the identity build](#gpu-the-identity-build)), which gives the same
+bits on the GPU. docs/FP32_ACCURACY.md covers the fast CUDA FP32 build (the default), which is not identical to
+anything and is measured against WRF real*8 instead.
 
 ## What is identical
 
@@ -37,6 +39,40 @@ IEEE operations (expf, logf, sinf, cosf); glibc's powf starts from the SSE `rcpp
 Intel and AMD, and the port reads Intel's values from a table instead of executing `rcpps`, so CPPWRF reproduces
 the references (made on Intel) on either vendor's runners.
 
+## GPU: the identity build
+
+`cmake -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON` builds a CUDA FP32 binary whose
+results are the CPU FP32 build's, bit for bit (and so WRF real*4's on the cases above). It differs from the fast CUDA
+FP32 build (the default) in:
+
+- arithmetic: `--fmad=false` in every kernel (no fused multiply-add contraction), `--ftz=false --prec-div=true
+  --prec-sqrt=true` stated explicitly;
+- math functions on the device: glibc's scalar float functions as Debian's glibc 2.41 computes them on CPUs with
+  FMA (src/core/glibc_mathf.hpp: expf, logf, powf, sinf, cosf transcribed from libm's FMA variants with their
+  fused multiply-adds as fma(); atanf, tanhf, log10f from CORE-MATH's correctly rounded sources), glibc's double
+  functions and libmvec's 2-lane double functions as in the CUDA FP64 build (src/core/glibc_math.hpp), and
+  libmvec's 4-lane float functions (src/core/libmvec_f4.hpp) with the CPU build's lane rule (iterations 0 ..
+  4*(n/4)-1 of the loop vectorised, the rest scalar);
+- sums: `Reducer::sum` (the `diag.csv` masses and energy) adds each level in the CPU build's (j, i) order, one
+  thread per level.
+
+The kernels, launches and their order are the fast build's. Proof:
+
+- tools/glibc_mathf_proof.cpp: the ports against the system libm, every float input of expf, logf, sinf, cosf,
+  atanf, tanhf and log10f and 2^32 pseudo-random powf pairs plus special values: 0 differ.
+- tools/glibc_mathf_proof_cuda.cu: the device against the host for the same functions and the 4-lane ones.
+- The suite's backend `cuda_sp_id` (`tests/verify/wrf_suite.py --cuda-sp-id BIN`) runs every `cpu_sp` case on the
+  GPU (names `..._cuda_id...`, e.g. `real_p4_fp32_cuda_id_1h`) against the same WRF real*4 references at tolerance 0.
+  On an RTX 2060 (sm_75) all of them pass: P1 and P4 (3 minutes with history every step, and 1 h), P2, P3, P9, NMP1
+  (1 h), P6 (3 minutes and 1 h).
+
+Cost (RTX 2060 laptop GPU, sm_75, P4 10 steps, `CPPWRF_KTIME=1`; one machine, indicative only): kernel time 0.98 s
+fast, 1.00 s identity (+3 %); the stepping time without KTIME 0.98-1.06 s against 1.01 s, within the run-to-run
+spread. By kernel group (fast -> identity, ms over the 10 steps): RRTMG LW 626 -> 634 (its batch kernels have
+`--fmad=false` in the fast build already), dynamics 178 -> 185, WSM6 45 -> 50, Kain-Fritsch 23 -> 27, YSU 26.6 ->
+27.1, Noah and the surface layer 2.8 -> 4.5. GPUs with a larger share of time in FMA-heavy kernels, or with slow
+FP64 (the glibc ports compute in double), will pay more; the fast build stays the default.
+
 ## How it is proven
 
 - The suite's backend `cpu_sp` (`tests/verify/wrf_suite.py --cpu-sp BIN`) runs these cases at tolerance 0 against
@@ -61,9 +97,10 @@ the references (made on Intel) on either vendor's runners.
 
 ## What is not identical yet
 
-- GPU FP32: device code has no port of glibc's scalar float functions nor of the libmvec lanes; CUDA's `expf` /
-  `powf` / `sinf` differ in the last bits, and FMA contraction differs. The CUDA FP32 build stays measured in
-  docs/FP32_ACCURACY.md.
+- The fast CUDA FP32 build (the default): FMA contraction and CUDA's math library; it stays measured in
+  docs/FP32_ACCURACY.md. The identity build covers the cases above only; a float function other than expf, logf,
+  powf, sinf, cosf, atanf, tanhf and log10f (asinf, acosf, atan2f, tanf, sinhf, erff, tgammaf, hypotf) is still
+  CUDA's on its device, and the optional radar reflectivity's complex logarithm is CUDA's.
 - Schemes other than those of the cases above are not checked against WRF real*4: aerosol-aware Thompson
   (mp_physics 28), MYNN, the other microphysics, cumulus, PBL, surface and radiation schemes, nests,
   restarts. Each needs the same work: its WRF real*4 reference, the dumps, its vectorised loops, its REAL constants.

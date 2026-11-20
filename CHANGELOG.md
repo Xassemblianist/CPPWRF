@@ -19,6 +19,15 @@ resumes across versions from WRF's wrfrst files.
   through the 4-lane logf) and Thompson P6 (3 minutes and 1 h, `real_p6_fp32_cpu`, `real_p6_fp32_cpu_1h`, new data tar
   fp32id2_data.tar: thompson_init's constants, coefficients and table builders in REAL where WRF real*4 has them,
   the runtime's rain slope and sedimentation powers scalar). docs/FP32_IDENTITY.md. FP64 and CUDA results unchanged.
+- CUDA FP32 identity mode, CMake option `CPPWRF_CUDA_FP32_IDENTITY` (CUDA, FP32; default OFF): the CPU FP32 build's
+  results on the GPU, bit for bit. `--fmad=false` in every kernel; on the device glibc 2.41's scalar float functions
+  (src/core/glibc_mathf.hpp: expf, logf, powf, sinf, cosf from libm's FMA variants, atanf, tanhf, log10f from
+  CORE-MATH; proven against the system libm over every float input, tools/glibc_mathf_proof.cpp, and device against
+  host, tools/glibc_mathf_proof_cuda.cu), glibc's double functions as in the CUDA FP64 build, and libmvec's 4-lane
+  float functions with the CPU build's lane rule; `Reducer::sum` in the CPU build's order. The suite's backend
+  `cuda_sp_id` (`--cuda-sp-id`) runs every `cpu_sp` case on the GPU against the same WRF real*4 references at
+  tolerance 0 (`real_p1_fp32_cuda_id`, ..., `real_p6_fp32_cuda_id_1h`). The default fast CUDA FP32 build, FP64 and
+  the CPU builds are unchanged.
 
 ## 1.1.1 (2026-11-20)
 
