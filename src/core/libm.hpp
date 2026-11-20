@@ -16,6 +16,9 @@
 #if defined(CPPWRF_GLIBC_MATH)
 #include "core/glibc_math.hpp"
 #endif
+#if defined(CPPWRF_FP32_IDENTITY)
+#include "core/glibc_mathf.hpp"
+#endif
 
 namespace cppwrf::libm {
 #if !defined(CPPWRF_GLIBC_MATH)
@@ -46,7 +49,23 @@ using std::tgamma;
 #else
 #define CPPWRF_LM_CONST(x) __builtin_constant_p(x)
 #endif
-// one argument: float -> std:: (as before), double -> glibc (a host constant: std::, folded), integral -> double
+// one argument: float -> std:: (as before; the CUDA FP32 identity build: glibc's float function on the device for
+// the ported ones, Gf), double -> glibc (a host constant: std::, folded), integral -> double
+#if defined(CPPWRF_FP32_IDENTITY) && defined(__CUDA_ARCH__)
+#define CPPWRF_LM_FLOAT(F, Gf) return Gf(a);
+#else
+#define CPPWRF_LM_FLOAT(F, Gf) return std::F(a);
+#endif
+#define CPPWRF_LM_FUNC1F(F, G, Gf)                                     \
+  CPPWRF_LM float F(float a) { CPPWRF_LM_FLOAT(F, Gf) }                \
+  CPPWRF_LM double F(double a) {                                        \
+    if (CPPWRF_LM_CONST(a)) return std::F(a);                           \
+    return G(a);                                                        \
+  }                                                                     \
+  template <class T, std::enable_if_t<std::is_integral_v<T>, int> = 0> \
+  CPPWRF_LM double F(T a) {                                             \
+    return F(double(a));                                                \
+  }
 #define CPPWRF_LM_FUNC1(F, G)                                          \
   CPPWRF_LM float F(float a) { return std::F(a); }                     \
   CPPWRF_LM double F(double a) {                                        \
@@ -57,13 +76,13 @@ using std::tgamma;
   CPPWRF_LM double F(T a) {                                             \
     return F(double(a));                                                \
   }
-CPPWRF_LM_FUNC1(exp, glibc::exp)
-CPPWRF_LM_FUNC1(log, glibc::log)
-CPPWRF_LM_FUNC1(log10, glibc::log10)
-CPPWRF_LM_FUNC1(atan, glibc::atan)
-CPPWRF_LM_FUNC1(tanh, glibc::tanh)
-CPPWRF_LM_FUNC1(sin, glibc::sin)
-CPPWRF_LM_FUNC1(cos, glibc::cos)
+CPPWRF_LM_FUNC1F(exp, glibc::exp, glibcf::expf)
+CPPWRF_LM_FUNC1F(log, glibc::log, glibcf::logf)
+CPPWRF_LM_FUNC1F(log10, glibc::log10, glibcf::log10f)
+CPPWRF_LM_FUNC1F(atan, glibc::atan, glibcf::atanf)
+CPPWRF_LM_FUNC1F(tanh, glibc::tanh, glibcf::tanhf)
+CPPWRF_LM_FUNC1F(sin, glibc::sin, glibcf::sinf)
+CPPWRF_LM_FUNC1F(cos, glibc::cos, glibcf::cosf)
 CPPWRF_LM_FUNC1(sinh, glibc::sinh)
 CPPWRF_LM_FUNC1(erf, glibc::erf)
 CPPWRF_LM_FUNC1(asin, glibc::asin)
@@ -71,6 +90,8 @@ CPPWRF_LM_FUNC1(acos, glibc::acos)
 CPPWRF_LM_FUNC1(tan, glibc::tan)
 CPPWRF_LM_FUNC1(tgamma, glibc::tgamma)
 #undef CPPWRF_LM_FUNC1
+#undef CPPWRF_LM_FUNC1F
+#undef CPPWRF_LM_FLOAT
 // atan2: two arguments as std:: (float, float) -> float, otherwise double
 CPPWRF_LM double atan2_d(double a, double b) {
   if (CPPWRF_LM_CONST(a) && CPPWRF_LM_CONST(b)) return std::atan2(a, b);
@@ -101,8 +122,15 @@ CPPWRF_LM double pow_d(double a, double b) {
 }
 template <class A, class B, std::enable_if_t<std::is_arithmetic_v<A> && std::is_arithmetic_v<B>, int> = 0>
 CPPWRF_LM auto pow(A a, B b) {
-  if constexpr (std::is_same_v<A, float> && std::is_same_v<B, float>) return std::pow(a, b);
-  else return pow_d(double(a), double(b));
+  if constexpr (std::is_same_v<A, float> && std::is_same_v<B, float>) {
+#if defined(CPPWRF_FP32_IDENTITY) && defined(__CUDA_ARCH__)
+    return glibcf::powf(a, b);
+#else
+    return std::pow(a, b);
+#endif
+  } else {
+    return pow_d(double(a), double(b));
+  }
 }
 #endif
 }  // namespace cppwrf::libm

@@ -10,35 +10,68 @@
 // WRF's references are made on Intel), so the results are Intel libmvec's on any x86-64 CPU. Every other operation
 // is an IEEE operation in the assembly's order (the build has -ffp-contract=off: no FMA contraction). Lanes the
 // assembly sends to the scalar libm (its range masks) call the scalar function here too.
-// Host only: the FP32 CUDA build keeps CUDA's float functions on the device (a port of these to the device, with
-// glibc's scalar expf / logf / powf for the masked lanes, is open).
+// CPU FP32 builds on x86-64, and the CUDA FP32 identity build (CPPWRF_FP32_IDENTITY) on the device and the host: one
+// lane per call (a thread computes its lane as the SSE4 code does), kPowfT and kLogLA read from device copies, the
+// masked lanes through glibc's scalar functions (core/glibc_mathf.hpp on the device).
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 
 #include "core/libmvec_f4_tables.hpp"
 #include "core/libmvec_x86.hpp"
+#if defined(CPPWRF_FP32_IDENTITY)
+#include "core/glibc_mathf.hpp"
+#endif
+
+#if defined(__CUDACC__)
+namespace cppwrf::mvec::detail {
+static __device__ const DevTable<std::uint64_t, 2048> kPowfTDev = dev_table(::cppwrf::mvec_tables::kPowfT);
+}  // namespace cppwrf::mvec::detail
+#endif
 
 namespace cppwrf::mvec4 {
 namespace detail {
-inline float f(std::uint32_t b) {
+CPPWRF_MV float f(std::uint32_t b) {
+#if defined(__CUDA_ARCH__)
+  return __uint_as_float(b);
+#else
   float v;
   std::memcpy(&v, &b, sizeof v);
   return v;
+#endif
 }
-inline std::uint32_t fb(float v) {
+CPPWRF_MV std::uint32_t fb(float v) {
+#if defined(__CUDA_ARCH__)
+  return __float_as_uint(v);
+#else
   std::uint32_t b;
   std::memcpy(&b, &v, sizeof b);
   return b;
+#endif
 }
-inline std::int32_t s32(std::uint32_t b) { return static_cast<std::int32_t>(b); }
+CPPWRF_MV std::int32_t s32(std::uint32_t b) { return static_cast<std::int32_t>(b); }
+// the scalar functions of the masked lanes: glibc's (the system libm on the host, its port on the device)
+#if defined(__CUDA_ARCH__)
+CPPWRF_MV float sc_exp(float x) { return ::cppwrf::glibcf::expf(x); }
+CPPWRF_MV float sc_log(float x) { return ::cppwrf::glibcf::logf(x); }
+CPPWRF_MV float sc_pow(float x, float y) { return ::cppwrf::glibcf::powf(x, y); }
+CPPWRF_MV float sc_sin(float x) { return ::cppwrf::glibcf::sinf(x); }
+CPPWRF_MV float sc_cos(float x) { return ::cppwrf::glibcf::cosf(x); }
+#else
+inline float sc_exp(float x) { return detail::sc_exp(x); }
+inline float sc_log(float x) { return detail::sc_log(x); }
+inline float sc_pow(float x, float y) { return detail::sc_pow(x, y); }
+inline float sc_sin(float x) { return detail::sc_sin(x); }
+inline float sc_cos(float x) { return detail::sc_cos(x); }
+#endif
 }  // namespace detail
 
 // _ZGVbN4v_expf_sse4: exp(x) = 2^N * exp(r), N = rint(x/ln2), r = x - N*ln2 (hi + lo), degree-5 polynomial
-inline float expf(float x) {
+CPPWRF_MV float expf(float x) {
   using namespace mvec_tables;
   using detail::f;
   const std::uint32_t ix = detail::fb(x);
-  if (detail::s32(ix & kExpf_iAbsMask) > detail::s32(kExpf_iDomainRange)) return std::exp(x);
+  if (detail::s32(ix & kExpf_iAbsMask) > detail::s32(kExpf_iDomainRange)) return detail::sc_exp(x);
   const float m = x * f(kExpf_sInvLn2) + f(kExpf_sShifter);  // mulps; addps
   const float n = m - f(kExpf_sShifter);
   float r = x - n * f(kExpf_sLn2hi);
@@ -53,12 +86,12 @@ inline float expf(float x) {
 }
 
 // _ZGVbN4v_logf_sse4: log(x) = k*ln2 + log(1+R), R = mantissa (in [2/3, 4/3)) - 1, degree-9 polynomial
-inline float logf(float x) {
+CPPWRF_MV float logf(float x) {
   using namespace mvec_tables;
   using detail::f;
   const std::uint32_t ix = detail::fb(x);
   // denormals, zero, negatives, Inf, NaN: pcmpgtd (LoRange > x + HiDelta, signed)
-  if (detail::s32(kLogf_iLoRange) > detail::s32(ix + kLogf_iHiDelta)) return std::log(x);
+  if (detail::s32(kLogf_iLoRange) > detail::s32(ix + kLogf_iHiDelta)) return detail::sc_log(x);
   const std::uint32_t t = ix - kLogf_iBrkValue;
   const float r = f((t & kLogf_iOffExpoMask) + kLogf_iBrkValue) - f(kLogf_sOne);
   const float k = static_cast<float>(detail::s32(t) >> 23) * f(kLogf_sLn2);  // psrad $23; cvtdq2ps; mulps
@@ -75,7 +108,7 @@ inline float logf(float x) {
 
 // _ZGVbN4vv_powf_sse4: pow(x, y) = exp(y * log(x)) in double: log(x) = k*ln2 - log(Rcp) + log1p(q) with Rcp an
 // integer reciprocal of x's mantissa scaled to [2^-10, 2^-9) (rcpps), then 2^(t / 2048) = 2^N * T[j] * (1 + r)
-inline float powf(float x, float y) {
+CPPWRF_MV float powf(float x, float y) {
   using namespace mvec_tables;
   using mvec::detail::d;
   using mvec::detail::bits;
@@ -95,31 +128,31 @@ inline float powf(float x, float y) {
   double p = d(kPowf_poly_coeff_3) * q + d(kPowf_poly_coeff_4);
   p = p * q2;
   const double lq = q + p;
-  const double l = d(kLogLA[int(rcp) - 512]) + lq;
+  const double l = d(CPPWRF_MVT(kLogLA, kLogLADev)[int(rcp) - 512]) + lq;
   const double lx = ke + l;
   const double yl = lx * yd;
   // iRangeMask: |hi word of y*log(x)| > DomainRange
   const bool special_r = detail::s32(std::uint32_t(bits(yl) >> 32) & kPowf_iAbsMask) > detail::s32(kPowf_iDomainRange);
-  if (special_x || special_y || special_r) return std::pow(x, y);
+  if (special_x || special_y || special_r) return detail::sc_pow(x, y);
   const double t = d(kPowf_dbInvLn2) * yl;
   const double s = (t - d(kPowf_dbHALF)) + d(kPowf_dbShifter);
   const double n = s - d(kPowf_dbShifter);
   const double r = (t - n) * d(kPowf_dbC1);
   const std::uint64_t sb = bits(s);
-  const double tj = d(kPowfT[sb & kPowf_lbLOWKBITS]);
+  const double tj = d(CPPWRF_MVT(kPowfT, kPowfTDev)[sb & kPowf_lbLOWKBITS]);
   const double res = tj + r * tj;
   return static_cast<float>(d(bits(res) + ((sb >> 11) << 52)));  // paddq of the exponent; cvtpd2ps
 }
 
 // _ZGVbN4v_sinf_sse4: x = N*pi + r (pi in 4 parts), sin(x) = (-1)^N sin(r), odd degree-9 polynomial; |x| > 10000
 // (and NaN, Inf) through the scalar sinf
-inline float sinf(float x) {
+CPPWRF_MV float sinf(float x) {
   using namespace mvec_tables;
   using detail::f;
   using detail::fb;
   const std::uint32_t ix = fb(x), sgn = ix & ~kTrigf_sAbsMask;
   const float ax = f(ix & kTrigf_sAbsMask);
-  if (!(ax <= f(kTrigf_sRangeReductionVal))) return std::sin(x);  // cmpnleps
+  if (!(ax <= f(kTrigf_sRangeReductionVal))) return detail::sc_sin(x);  // cmpnleps
   const float y = ax * f(kTrigf_sInvPI) + f(kTrigf_sRShifter);
   const std::uint32_t s = fb(y) << 31;
   const float n = y - f(kTrigf_sRShifter);
@@ -137,11 +170,11 @@ inline float sinf(float x) {
 }
 
 // _ZGVbN4v_cosf_sse4: cos(x) = sin(x + pi/2) with N = rint((x + pi/2)/pi) - 1/2 and the same polynomial
-inline float cosf(float x) {
+CPPWRF_MV float cosf(float x) {
   using namespace mvec_tables;
   using detail::f;
   using detail::fb;
-  if (!(f(fb(x) & kTrigf_sAbsMask) <= f(kTrigf_sRangeReductionVal))) return std::cos(x);
+  if (!(f(fb(x) & kTrigf_sAbsMask) <= f(kTrigf_sRangeReductionVal))) return detail::sc_cos(x);
   const float y = (f(kTrigf_sHalfPI) + x) * f(kTrigf_sInvPI) + f(kTrigf_sRShifter);
   const std::uint32_t s = fb(y) << 31;
   const float n = (y - f(kTrigf_sRShifter)) - f(kTrigf_sOneHalf);

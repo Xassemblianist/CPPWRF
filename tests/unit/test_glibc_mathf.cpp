@@ -1,0 +1,133 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// src/core/glibc_mathf.hpp (glibc 2.41's scalar expf, logf, powf, sinf, cosf, atanf, tanhf, log10f) against the
+// system libm, bit for bit (two NaNs count as equal): every 61st float bit pattern of the unary functions and 2^20
+// pseudo-random powf pairs plus special values. The ports reproduce Debian's glibc 2.41 (FMA variants): with another
+// glibc version the differences are reported, not failed (tools/glibc_mathf_proof.cpp checks every input).
+// CUDA builds: also the device against the host on the same inputs, and in the FP32 identity build
+// (CPPWRF_FP32_IDENTITY) the 4-lane functions of src/core/libmvec_f4.hpp.
+#include <gnu/libc-version.h>
+
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <vector>
+
+#include "core/backend.hpp"
+#include "core/glibc_mathf.hpp"
+
+namespace {
+constexpr int kNFn = 13;  // 0-6 unary scalar, 7 powf, 8-12 the 4-lane expf, logf, powf, sinf, cosf
+const char* kName[kNFn] = {"expf", "logf", "sinf", "cosf", "atanf", "tanhf", "log10f", "powf",
+                           "v4 expf", "v4 logf", "v4 powf", "v4 sinf", "v4 cosf"};
+CPPWRF_HD inline std::uint64_t mix(std::uint64_t z) {
+  z += 0x9e3779b97f4a7c15ull;
+  z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+  z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+  return z ^ (z >> 31);
+}
+CPPWRF_HD inline float input(int fn, long long i, float* y) {
+  using cppwrf::glibcf::detail::asf;
+  if (fn == 7 || fn == 10) {
+    const std::uint64_t r = mix(std::uint64_t(i));
+    float x = asf(std::uint32_t(r));
+    *y = asf(std::uint32_t(r >> 32));
+    if (i & 1) {  // x in (0, 8), |y| in [2^-7, 2^5): the arguments of a model
+      x = asf(0x3f800000u + std::uint32_t(r % 0x1800000u) - 0x800000u);
+      *y = asf((std::uint32_t(r >> 32) & 0x80000000u) | (0x3c000000u + std::uint32_t((r >> 32) % 0x6000000u)));
+    }
+    return x;
+  }
+  *y = 0.0f;
+  return asf(std::uint32_t(i * 61));
+}
+CPPWRF_HD inline float port(int fn, float x, float y) {
+  namespace g = cppwrf::glibcf;
+  switch (fn) {
+    case 0: return g::expf(x);
+    case 1: return g::logf(x);
+    case 2: return g::sinf(x);
+    case 3: return g::cosf(x);
+    case 4: return g::atanf(x);
+    case 5: return g::tanhf(x);
+    case 6: return g::log10f(x);
+    case 7: return g::powf(x, y);
+#if defined(CPPWRF_HAVE_MVEC_F4)
+    case 8: return cppwrf::mvec4::expf(x);
+    case 9: return cppwrf::mvec4::logf(x);
+    case 10: return cppwrf::mvec4::powf(x, y);
+    case 11: return cppwrf::mvec4::sinf(x);
+    case 12: return cppwrf::mvec4::cosf(x);
+#endif
+    default: return 0.0f;
+  }
+}
+// the system libm through volatile pointers (no folding)
+float (*volatile sys1[7])(float) = {::expf, ::logf, ::sinf, ::cosf, ::atanf, ::tanhf, ::log10f};
+float (*volatile sys_powf)(float, float) = ::powf;
+std::uint32_t bits(float v) {
+  std::uint32_t b;
+  std::memcpy(&b, &v, 4);
+  return b;
+}
+bool same(float a, float b) { return (std::isnan(a) && std::isnan(b)) || bits(a) == bits(b); }
+long long count(int fn) { return (fn == 7 || fn == 10) ? (1ll << 20) : (1ll << 32) / 61 + 1; }
+#if defined(__CUDACC__)
+__global__ void kport(int fn, long long n, float* out) {
+  const long long t = blockIdx.x * (long long)blockDim.x + threadIdx.x;
+  if (t >= n) return;
+  float y;
+  const float x = input(fn, t, &y);
+  out[t] = port(fn, x, y);
+}
+#endif
+}  // namespace
+
+int main() {
+  const bool strict = std::strcmp(gnu_get_libc_version(), "2.41") == 0;
+  long long fails = 0;
+  for (int fn = 0; fn < 8; ++fn) {  // host ports against the system libm
+    long long bad = 0;
+    const long long n = count(fn);
+    for (long long i = 0; i < n; ++i) {
+      float y;
+      const float x = input(fn, i, &y);
+      const float s = fn == 7 ? sys_powf(x, y) : sys1[fn](x);
+      if (!same(port(fn, x, y), s)) ++bad;
+    }
+    std::printf("%-8s host vs libm %s: %lld of %lld differ\n", kName[fn], gnu_get_libc_version(), bad, n);
+    if (strict) fails += bad;
+  }
+#if defined(__CUDACC__)
+  int nfn = 8;
+#if defined(CPPWRF_HAVE_MVEC_F4)
+  nfn = kNFn;
+#endif
+  for (int fn = 0; fn < nfn; ++fn) {  // the device against the host
+    const long long n = count(fn);
+    float* d = nullptr;
+    if (cudaMalloc(&d, n * sizeof(float)) != cudaSuccess) {
+      std::printf("no CUDA device: the device check is skipped\n");
+      break;
+    }
+    kport<<<unsigned((n + 255) / 256), 256>>>(fn, n, d);
+    std::vector<float> h(std::size_t(n));
+    cudaMemcpy(h.data(), d, n * sizeof(float), cudaMemcpyDeviceToHost);
+    cudaFree(d);
+    if (cudaGetLastError() != cudaSuccess) {
+      std::printf("CUDA error: the device check fails\n");
+      return 1;
+    }
+    long long bad = 0;
+    for (long long i = 0; i < n; ++i) {
+      float y;
+      const float x = input(fn, i, &y);
+      if (!same(port(fn, x, y), h[std::size_t(i)])) ++bad;
+    }
+    std::printf("%-8s device vs host: %lld of %lld differ\n", kName[fn], bad, n);
+    fails += bad;
+  }
+#endif
+  std::printf(fails ? "test_glibc_mathf FAILED\n" : "test_glibc_mathf passed\n");
+  return fails ? 1 : 0;
+}
