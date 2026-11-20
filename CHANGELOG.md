@@ -7,6 +7,34 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+### Added
+- `cppwrf_real`: TAVGSFC input (`FLAG_TAVGSFC = 1`), as real.exe uses it: the surface pressure of sfcprs2 with
+  `sfcp_to_sfcp` (ez_method, Tv from TAVGSFC; module_initialize_real.F:1409-1418, 8457-8515), the SST and skin
+  temperature of the inland-lake points (`ISLAKE` >= 0) and the SST repair of water points without lake information
+  (`ISLAKE = -1`; :2814-2861), the slab's TMN and its terrain adjustment (module_soil_pre.F:650-686, 1043-1055).
+  `use_tavg_for_tsk` stops only when neither TSK nor TAVGSFC is in the input (:607-612); its TSK = TAVGSFC is
+  overwritten with SKINTEMP in the metgrid branch (:704-713), as in WRF. Tier: unverified (no WRF real.exe reference
+  yet): `cppwrf_real` stops on FLAG_TAVGSFC = 1 unless the namelist has `&cppwrf allow_unverified = .true.`.
+- `cppwrf_real`: the surface pressure from PMSL (sfcprs, module_initialize_real.F:1419-1426, 8147-8453) when the
+  input has no PSFC or no SOILHGT, with the 850 / 700 / 500 hPa lapse rates, the lapse-rate formula over the lowest
+  level without those levels, or TAVGSFC (ez_method); without PSFC the computed surface pressure goes into the lowest
+  input level (:1436-1446). Tier: unverified (no WRF real.exe reference yet), behind `&cppwrf allow_unverified =
+  .true.` as TAVGSFC. The error without enough input names FLAG_PSFC, FLAG_SOILHGT, FLAG_SLP and sfcp_to_sfcp, as
+  real.exe's message.
+
+### Fixed
+- Translator: cumulus (`cu_physics`) or radiation (`ra_lw_physics` / `ra_sw_physics`) without a surface layer and a
+  land surface model was translated, and `cppwrf` then stopped at its start. It is now an error at translation time
+  with the model's message (PhysicsSuite's with a cumulus scheme, model.cpp's with radiation only). wrf.exe runs these
+  namelists (module_physics_init.F:3316-3409 and 3414-3851 do nothing for `sf_sfclay_physics` /
+  `sf_surface_physics = 0`); CPPWRF's column physics needs both schemes. Unit tests in tests/tools.
+
+### Verification
+- tests/unit/test_fatal: a land-use category beyond the VEGPARM.TBL dataset of MMINLU (a synthetic table read by
+  read_noah_tables) stops the Noah LSM with REDPRM's "Warning: too many input landuse types"
+  (module_sf_noahlsm.F:2436-2438), as wrf.exe stops on MODIS input whose lake category 21 stays land with
+  `ISLAKE = -1` (VEGPARM.TBL lists 20 MODIS categories). The check was already in the model (src/phys/lsm_noah).
+
 ## 1.1.0 (2026-11-20)
 
 208 commits (not counting merges) after 1.0.0, release candidate main 78e46c2; docs/RELEASE_NOTES.md has the
