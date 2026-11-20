@@ -315,8 +315,13 @@ CPPWRF_HD inline float exp(float a, int i, int n) {
 #endif
 }
 // float overloads (reached only in the FP32 builds), so that a float argument is not promoted to the double function:
-// WRF real*4 calls the single-precision function (atanf, sinf, cosf, log10f), on the CPU and the GPU alike.
-CPPWRF_HD inline float atan(float a, int, int) {
+// WRF real*4 calls the single-precision function (atanf, sinf, cosf, log10f), on the CPU and the GPU alike; atan
+// in a vectorised loop _ZGVbN4v_atanf (MYNN surface layer's psi tables).
+CPPWRF_HD inline float atan(float a, int i, int n) {
+#if defined(CPPWRF_MVEC_F4_PASS)
+  if (lane4(i, n)) return mvec4::atanf(a);
+#endif
+  (void)i; (void)n;
 #if defined(__CUDA_ARCH__)
   return CPPWRF_GF(atanf)(a);
 #else

@@ -58,7 +58,11 @@ CPPWRF_HD inline real psim_unstable_full(real zolf, int i = 0, int n = 1, int ne
   return (psimk + zolf * zolf * (psimc)) / (1 + zolf * zolf);
 }
 CPPWRF_HD inline real psih_unstable_full(real zolf, int i = 0, int n = 1) {
-  const real y = std::sqrt(one - real(16.) * zolf);  // gfortran: x**.5 is sqrt(x)
+  // gfortran: x**.5 is sqrt(x) in psi_init's loop (sqrtpd / sqrtps); the real*4 build's scalar copy of the
+  // land / water / ice modules (the lookup's fallback beyond the table) calls powf(x, 0.5)
+  real y;
+  if constexpr (sizeof(real) == 4) y = n == 1 ? rpow(one - real(16.) * zolf, real(.5)) : std::sqrt(one - real(16.) * zolf);
+  else y = std::sqrt(one - real(16.) * zolf);
   const real psihk = two * vm::log((one + y) * real(0.5), i, n);
   const real yh = vm::pow(one - real(34.) * zolf, p333, i, n);
   const real psihc = real(1.5) * vm::log((yh * yh + yh + one) * p333, i, n) -
@@ -66,8 +70,24 @@ CPPWRF_HD inline real psih_unstable_full(real zolf, int i = 0, int n = 1) {
   return (psihk + zolf * zolf * (psihc)) / (one + zolf * zolf);
 }
 
-// psi_init (psi_opt = 0): n = 0..1000, one vectorised loop of 1001 trips
+// psi_init (psi_opt = 0): n = 0..1000, one vectorised loop of 1001 trips. The real*4 build stores entry 0 as a
+// constant (-0. for the stable tables, +0. for the unstable ones) and vectorises n = 1..1000 four by four
+// (250 vector iterations, no scalar remainder): every call through libmvec.
 inline void psi_init(PsiTables& t) {
+  if constexpr (sizeof(real) == 4) {
+    t.psim_stab[0] = t.psih_stab[0] = real(-0.);
+    t.psim_unstab[0] = t.psih_unstab[0] = real(0.);
+    for (int n = 1; n <= 1000; ++n) {
+      constexpr int nt = 1000;
+      real zolf = real(n) * real(0.01);
+      t.psim_stab[n] = psim_stable_full(zolf, n - 1, nt);
+      t.psih_stab[n] = psih_stable_full(zolf, n - 1, nt, nt);
+      zolf = -real(n) * real(0.01);
+      t.psim_unstab[n] = psim_unstable_full(zolf, n - 1, nt, nt);
+      t.psih_unstab[n] = psih_unstable_full(zolf, n - 1, nt);
+    }
+    return;
+  }
   constexpr int nt = 1001;  // odd: the last iteration is scalar, except two call sites (nt + 1: always libmvec)
   for (int n = 0; n <= 1000; ++n) {
     real zolf = real(n) * real(0.01);

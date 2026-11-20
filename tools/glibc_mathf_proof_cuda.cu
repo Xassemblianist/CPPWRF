@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Proof of src/core/glibc_mathf.hpp and src/core/libmvec_f4.hpp on the device: every float input of the scalar
-// expf, logf, sinf, cosf, atanf, tanhf, log10f and of the 4-lane expf, logf, sinf, cosf, and powf (scalar and
+// expf, logf, sinf, cosf, atanf, tanhf, log10f and of the 4-lane expf, logf, sinf, cosf, atanf, and powf (scalar and
 // 4-lane) on 2^N pseudo-random pairs, device against host, bit for bit (two NaNs count as equal). The host functions
 // are proven against the system libm / libmvec by tools/glibc_mathf_proof.cpp and tests/unit/test_libmvec_f4.cpp.
 //   nvcc -std=c++20 -O3 --fmad=false -arch=native -DCPPWRF_GLIBC_MATH -DCPPWRF_FP32_IDENTITY -Isrc \
@@ -18,9 +18,9 @@
 
 namespace {
 constexpr long long kBatch = 1ll << 26;
-enum Fn { kExp, kLog, kSin, kCos, kAtan, kTanh, kLog10, kVExp, kVLog, kVSin, kVCos, kPow, kVPow, kNFn };
+enum Fn { kExp, kLog, kSin, kCos, kAtan, kTanh, kLog10, kVExp, kVLog, kVSin, kVCos, kVAtan, kPow, kVPow, kNFn };
 const char* kName[kNFn] = {"expf", "logf", "sinf", "cosf", "atanf", "tanhf", "log10f",
-                           "v4 expf", "v4 logf", "v4 sinf", "v4 cosf", "powf", "v4 powf"};
+                           "v4 expf", "v4 logf", "v4 sinf", "v4 cosf", "v4 atanf", "powf", "v4 powf"};
 __host__ __device__ inline std::uint64_t mix(std::uint64_t z) {
   z += 0x9e3779b97f4a7c15ull;
   z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
@@ -57,6 +57,7 @@ __host__ __device__ inline float eval(int fn, long long i) {
     case kVExp: return v::expf(x);
     case kVLog: return v::logf(x);
     case kVSin: return v::sinf(x);
+    case kVAtan: return v::atanf(x);
     default: return v::cosf(x);
   }
 }

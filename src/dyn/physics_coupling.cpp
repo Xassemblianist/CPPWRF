@@ -653,6 +653,53 @@ void PhysicsCoupling::init_aerosols(State& s, const BaseState& b) {
     s.q_1[n].copy_from(f);
     if (emission) qnwfa2d.fill_host([&](int i, int j, int) { return w2d[L2.index(i, j, 0)]; });
   };
+  // the real*4 build: hgt, h_01, the decay and the profile in REAL (g = 9.81 REAL), -1.0*ALOG(na1/na0) folded to
+  // REAL constants, scalar cosf / expf at level 1 and libmvec expf (4 lanes from k = 2) in the k loop
+  auto profile_f = [&](int n, float na0, float na1, float lna, bool emission) {
+    Field3& f = s.q_2[n];
+    f.download(nw);
+    float max_test = -std::numeric_limits<float>::infinity();
+    for (int k = 0; k < nz; ++k)
+      for (int j = LM.j0(); j < LM.j1(); ++j)
+        for (int i = LM.i0(); i < LM.i1(); ++i) max_test = std::max(max_test, float(nw[LM.index(i, j, k)]));
+    max_test = float(tile::max(double(max_test)));
+    if (!(max_test < float(phys::mp_thompson::eps_val))) return;
+    if (emission) qnwfa2d.download(w2d);
+    const float gf = float(cst::g);
+    auto hgtf = [&](int i, int k, int j) {
+      return (float(ph[LW.index(i, j, k)]) + float(phb[LB.index(i, j, k)])) / gf;
+    };
+    for (int j = LM.j0(); j < LM.j1(); ++j)
+      for (int i = LM.i0(); i < LM.i1(); ++i) {
+        const float h1 = hgtf(i, 0, j);
+        float h_01;
+        if (h1 <= 1000.0f) h_01 = 0.8f;
+        else if (h1 >= 2500.0f) h_01 = 0.01f;
+        else h_01 = 0.8f * libm::cos(h1 * 0.001f - 1.0f);
+        const float ni3 = lna / h_01;
+        const float v1 = na1 + na0 * libm::exp(-((hgtf(i, 1, j) - h1) / 1000.f) * ni3);
+        nw[LM.index(i, j, 0)] = real(v1);
+        if (emission) {
+          const float z1 = hgtf(i, 1, j) - h1;
+          w2d[L2.index(i, j, 0)] = real(v1 * 0.000196f * (50.f / z1));
+        }
+        for (int k = 1; k <= nz; ++k) {  // Fortran k = 2..kde
+          const float v = na1 + na0 * vm::exp(real(-((hgtf(i, k, j) - h1) / 1000.f) * ni3), k - 1, nz);
+          if (k < nz) nw[LM.index(i, j, k)] = real(v);
+        }
+      }
+    f.fill_host([&](int i, int j, int k) { return nw[LM.index(i, j, k)]; });
+    fill_halo(f, g);
+    s.q_1[n].copy_from(f);
+    if (emission) qnwfa2d.fill_host([&](int i, int j, int) { return w2d[L2.index(i, j, 0)]; });
+  };
+  if constexpr (sizeof(real) == 4) {
+    // -1.0*ALOG(naCCN1/naCCN0), -1.0*ALOG(naIN1/naIN0) as gfortran folds them in REAL
+    profile_f(s.P_QNWFA, float(phys::mp_thompson::naCCN0), float(phys::mp_thompson::naCCN1), 0x1.cab0c0p+0f, true);
+    profile_f(s.P_QNIFA, float(phys::mp_thompson::naIN0), float(phys::mp_thompson::naIN1), 0x1.193ea8p+0f, false);
+    (void)profile; (void)lccn; (void)lin;
+    return;
+  }
   profile(s.P_QNWFA, phys::mp_thompson::naCCN0, phys::mp_thompson::naCCN1, lccn, true);
   profile(s.P_QNIFA, phys::mp_thompson::naIN0, phys::mp_thompson::naIN1, lin, false);
 }

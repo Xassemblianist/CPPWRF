@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The 4-lane float expf / logf / powf / sinf / cosf of src/core/libmvec_f4.hpp (glibc 2.41 libmvec's SSE4 variants, powf with
-// Intel's rcpps) against glibc's libmvec (_ZGVbN4v_expf, _ZGVbN4v_logf, _ZGVbN4vv_powf, _ZGVbN4v_sinf, _ZGVbN4v_cosf),
-// bit for bit:
-//  expf, logf, sinf, cosf: every 61st float bit pattern (about 7*10^7, all signs, exponents, NaN / Inf / denormal classes) and
+// The 4-lane float expf / logf / powf / sinf / cosf / atanf of src/core/libmvec_f4.hpp (glibc 2.41 libmvec's SSE4
+// variants, powf with Intel's rcpps) against glibc's libmvec (_ZGVbN4v_expf, _ZGVbN4v_logf, _ZGVbN4vv_powf,
+// _ZGVbN4v_sinf, _ZGVbN4v_cosf, _ZGVbN4v_atanf), bit for bit (`test_libmvec_f4 all`: every 2^32 input of the
+// unary functions):
+//  expf, logf, sinf, cosf, atanf: every 61st float bit pattern (about 7*10^7, all signs, exponents, NaN / Inf / denormal classes) and
 //              the edges of the range masks; four different arguments per vector call (lanes independent);
 //  powf:       x over every 4099th positive bit pattern and the edges, each with 8 exponents y (0, +-1, +-0.5,
 //              WRF's rcp = 2/7, cvpm, cpovcv), and 2^22 random (x, y) pairs with x in [1e-3, 1e6) and |y| < 4;
 //              special x / y (0, negatives, denormals, Inf, NaN) with random partners.
-// sinf / cosf also every 97th bit pattern with |x| <= 2 pi. expf, logf, sinf and cosf use IEEE operations only (any
-// x86-64 CPU); powf's results equal libmvec's only on Intel (rcpps):
+// sinf / cosf also every 97th bit pattern with |x| <= 2 pi. expf, logf, sinf, cosf and atanf use IEEE operations only
+// (any x86-64 CPU); powf's results equal libmvec's only on Intel (rcpps):
 // elsewhere the powf differences are reported, not failed.
 #include <cpuid.h>
 
@@ -27,6 +28,7 @@ extern "C" __m128 _ZGVbN4v_logf(__m128);
 extern "C" __m128 _ZGVbN4vv_powf(__m128, __m128);
 extern "C" __m128 _ZGVbN4v_sinf(__m128);
 extern "C" __m128 _ZGVbN4v_cosf(__m128);
+extern "C" __m128 _ZGVbN4v_atanf(__m128);
 
 static std::uint32_t fbits(float v) {
   std::uint32_t b;
@@ -66,8 +68,33 @@ static long check1(const char* name, const std::vector<std::uint32_t>& in, Port 
   return diff;
 }
 
-int main() {
+template <class Port, class Vec>
+static long check_all(const char* name, Port port, Vec vec) {  // every float bit pattern, in parallel chunks
+  long diff = 0;
+#pragma omp parallel for schedule(dynamic, 1) reduction(+ : diff)
+  for (std::int64_t c = 0; c < (std::int64_t(1) << 16); ++c)
+    for (std::uint32_t k = 0; k < (1u << 16); k += 4) {
+      alignas(16) float x[4], y[4];
+      for (std::uint32_t l = 0; l < 4; ++l) x[l] = ffrom(std::uint32_t(c << 16) + k + l);
+      _mm_store_ps(y, vec(_mm_load_ps(x)));
+      for (int l = 0; l < 4; ++l)
+        if (!same(port(x[l]), y[l])) ++diff;
+    }
+  std::printf("%s: all 2^32 inputs, %ld differ\n", name, diff);
+  return diff;
+}
+
+int main(int argc, char** argv) {
   const bool intel = is_intel();
+  if (argc > 1 && std::strcmp(argv[1], "all") == 0) {
+    long d = check_all("expf", [](float x) { return cppwrf::mvec4::expf(x); }, [](__m128 x) { return _ZGVbN4v_expf(x); });
+    d += check_all("logf", [](float x) { return cppwrf::mvec4::logf(x); }, [](__m128 x) { return _ZGVbN4v_logf(x); });
+    d += check_all("sinf", [](float x) { return cppwrf::mvec4::sinf(x); }, [](__m128 x) { return _ZGVbN4v_sinf(x); });
+    d += check_all("cosf", [](float x) { return cppwrf::mvec4::cosf(x); }, [](__m128 x) { return _ZGVbN4v_cosf(x); });
+    d += check_all("atanf", [](float x) { return cppwrf::mvec4::atanf(x); }, [](__m128 x) { return _ZGVbN4v_atanf(x); });
+    std::printf("%s\n", d ? "test_libmvec_f4 all FAILED" : "test_libmvec_f4 all passed");
+    return d ? 1 : 0;
+  }
   std::vector<std::uint32_t> in;
   for (std::uint64_t b = 0; b < (1ull << 32); b += 61) in.push_back(std::uint32_t(b));
   for (std::uint32_t c : {0x00000000u, 0x80000000u, 0x00000001u, 0x007fffffu, 0x00800000u, 0x7f7fffffu, 0x7f800000u,
@@ -79,6 +106,7 @@ int main() {
   fails += check1("logf", in, [](float x) { return cppwrf::mvec4::logf(x); }, [](__m128 x) { return _ZGVbN4v_logf(x); });
   fails += check1("sinf", in, [](float x) { return cppwrf::mvec4::sinf(x); }, [](__m128 x) { return _ZGVbN4v_sinf(x); });
   fails += check1("cosf", in, [](float x) { return cppwrf::mvec4::cosf(x); }, [](__m128 x) { return _ZGVbN4v_cosf(x); });
+  fails += check1("atanf", in, [](float x) { return cppwrf::mvec4::atanf(x); }, [](__m128 x) { return _ZGVbN4v_atanf(x); });
   {  // sin / cos: the arguments of WRF's loops (|x| <= 2 pi: latitudes, hour angles) more densely
     std::vector<std::uint32_t> t;
     for (std::uint32_t b = 0; b <= 0x40c90fdbu; b += 97) { t.push_back(b); t.push_back(b | 0x80000000u); }

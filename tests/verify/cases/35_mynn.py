@@ -76,6 +76,18 @@ CASES = [
     ("real_mynnx2_r8_fp64_cuda_1h", "cuda_dp", "configs/real_mynnx2_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P6_r8", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_MYNNX2_r8/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
+    # CPU FP32 against WRF real*4, bit for bit: run_MYNN_cpu_sp (fp32id3_data.tar) is WRF real*4's MYNN run on the
+    # workstation from the P6 real*4 inputs, the Thompson tables computed by thompson_init; steps/: 3 minutes,
+    # history every step; 1 h, history every 10 minutes
+    ("real_mynn_fp32_cpu", "cpu_sp", "configs/real_mynn_r8.ini", ["real.dir=" + f"{WR}/run_MYNN_cpu_sp/steps"],
+     f"{WR}/run_MYNN_cpu_sp/steps/wrfout_d01_2026-10-12_00:00:00", 180,
+     {v: 0.0 for v in ("U", "V", "W", "PH", "MU", "P", "THM", "QV", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP",
+                       "QNICE", "QNRAIN", "RAINNC")}),
+    ("real_mynn_fp32_cpu_1h", "cpu_sp", "configs/real_mynn_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_MYNN_cpu_sp", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_MYNN_cpu_sp/wrfout_d01_2026-10-12_00:00:00", 3600,
+     {v: 0.0 for v in ("U", "V", "W", "PH", "MU", "P", "THM", "QV", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP",
+                       "QNICE", "QNRAIN", "RAINNC")}),
 ]
 
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
@@ -109,4 +121,6 @@ DATA = {
     'real_mynnx2_r8_fp64_cpu': 'port_a06_data.tar,port_c01_data.tar,v05_suite_refs2.tar,v05_iofields.tar',
     'real_mynnx2_r8_fp64_cpu_1h': 'port_a06_data.tar,port_c01_data.tar,v05_suite_refs2.tar,v05_iofields.tar',
     'real_mynnx2_r8_fp64_cuda_1h': 'port_a06_data.tar,port_c01_data.tar,v05_suite_refs2.tar,v05_iofields.tar',
+    'real_mynn_fp32_cpu': 'fp32id3_data.tar',
+    'real_mynn_fp32_cpu_1h': 'fp32id3_data.tar',
 }

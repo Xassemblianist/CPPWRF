@@ -19,6 +19,14 @@ resumes across versions from WRF's wrfrst files.
   through the 4-lane logf) and Thompson P6 (3 minutes and 1 h, `real_p6_fp32_cpu`, `real_p6_fp32_cpu_1h`, new data tar
   fp32id2_data.tar: thompson_init's constants, coefficients and table builders in REAL where WRF real*4 has them,
   the runtime's rain slope and sedimentation powers scalar). docs/FP32_IDENTITY.md. FP64 and CUDA results unchanged.
+- CPU FP32 bit-identical to WRF v4.8.0 real*4 on MYNN (MYNN surface layer + MYNN-EDMF PBL + RRTMG; 3 minutes with
+  history every step and 1 h: `real_mynn_fp32_cpu`, `real_mynn_fp32_cpu_1h`) and on the aerosol-aware Thompson C01
+  (mp_physics 28: `real_c01_fp32_cpu`, `real_c01_fp32_cpu_1h`), new data tar fp32id3_data.tar. glibc libmvec's
+  4-lane atanf (`_ZGVbN4v_atanf`) ported (test_libmvec_f4 `all`: expf, logf, sinf, cosf, atanf over every float input,
+  0 differ; the device proof covers it too); the MYNN psi tables as the real*4 build vectorises them (entry 0 a
+  constant, entries 1 .. 1000 four lanes at a time), powf(x, 0.5) in their scalar fallback, MYNN-EDMF's plume powers
+  through the 4-lane powf; thompson_init's QNWFA / QNIFA profiles and QNWFA2D emission in REAL (heights, folded
+  -ALOG constants, 4-lane expf from k = 2). FP64 results unchanged.
 - CUDA FP32 identity mode, CMake option `CPPWRF_CUDA_FP32_IDENTITY` (CUDA, FP32; default OFF): the CPU FP32 build's
   results on the GPU, bit for bit. `--fmad=false` in every kernel; on the device glibc 2.41's scalar float functions
   (src/core/glibc_mathf.hpp: expf, logf, powf, sinf, cosf from libm's FMA variants, atanf, tanhf, log10f from

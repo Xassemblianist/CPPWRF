@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// glibc 2.41 libmvec's 4-lane float expf, logf, powf, sinf and cosf (_ZGVbN4v_expf, _ZGVbN4v_logf, _ZGVbN4vv_powf,
-// _ZGVbN4v_sinf, _ZGVbN4v_cosf; the SSE4
+// glibc 2.41 libmvec's 4-lane float expf, logf, powf, sinf, cosf and atanf (_ZGVbN4v_expf, _ZGVbN4v_logf,
+// _ZGVbN4vv_powf, _ZGVbN4v_sinf, _ZGVbN4v_cosf, _ZGVbN4v_atanf; the SSE4
 // variants that glibc selects on every CPU with SSE4.1) re-implemented statement by statement, one lane, from
-// sysdeps/x86_64/fpu/multiarch/svml_s_{exp,log,pow,sin,cos}f4_core_sse4.S.
+// sysdeps/x86_64/fpu/multiarch/svml_s_{exp,log,pow,sin,cos,atan}f4_core_sse4.S.
 // WRF's real*4 build (gfortran -O2 -ftree-vectorize, SSE2 ABI: 4 floats per call) calls them in its vectorised loops.
-// expf and logf are IEEE single-precision operations only; powf works in double and takes an approximate reciprocal
+// expf, logf, sinf, cosf and atanf are IEEE single-precision operations only; powf works in double and takes an approximate reciprocal
 // with `rcpps`, whose result the hardware defines: here Intel's (mvec::detail::kRcp, the table the double log uses;
 // WRF's references are made on Intel), so the results are Intel libmvec's on any x86-64 CPU. Every other operation
 // is an IEEE operation in the assembly's order (the build has -ffp-contract=off: no FMA contraction). Lanes the
@@ -189,5 +189,38 @@ CPPWRF_MV float cosf(float x) {
   p = p * r2 + f(kTrigf_sA3);
   const float t = (r2 * p) * r;
   return r + t;
+}
+// _ZGVbN4v_atanf_sse4: s = |x| <= 1 ? x : -1/x (minps / maxps / divps, the sign of x applied), atan(x) = c + s*P(s^2)
+// with c = 0 or +-pi/2, two interleaved polynomial halves in s^4 (the assembly's order); no scalar fallback lanes
+// (NaN propagates through the polynomial)
+CPPWRF_MV float atanf(float x) {
+  using detail::f;
+  using detail::fb;
+  const std::uint32_t ix = fb(x), sgn = ix & 0x80000000u;
+  const float ax = f(ix & 0x7fffffffu), one = f(0x3f800000u);
+  const bool le = ax <= one;                // cmpleps (false for NaN)
+  const float mx = one > ax ? one : ax;     // maxps %xmm2(|x|), %xmm3(1): NaN gives |x|
+  const float mn = one < ax ? one : ax;     // minps %xmm2(|x|), %xmm1(1)
+  const float q = mn / mx;                  // divps
+  const float s = f(fb(q) ^ ((le ? 0u : 0x80000000u) ^ sgn));
+  const float x2 = s * s, x4 = x2 * x2;
+  float p6 = f(0x3B322CC0u) * x4;          // PC8
+  float p5 = f(0xBC7F2631u) * x4;          // PC7
+  p6 = p6 + f(0x3D2BC384u);                // PC6
+  p6 = p6 * x4;
+  p5 = p5 + f(0xBD987629u);                // PC5
+  p5 = p5 * x4;
+  p6 = p6 + f(0x3DD96474u);                // PC4
+  p6 = p6 * x4;
+  p5 = p5 + f(0xBE1161F8u);                // PC3
+  float p7 = x4 * p5;
+  p6 = p6 + f(0x3E4CB79Fu);                // PC2
+  p6 = p6 * x2;
+  p7 = p7 + f(0xBEAAAA49u);                // PC1
+  const float c = f((le ? 0u : 0x3FC90FDBu) ^ sgn);  // andnps PIO2; pxor sign
+  p7 = p7 + p6;
+  float pp = x2 * p7;
+  pp = pp + f(0x3f800000u);                // PC0
+  return c + s * pp;
 }
 }  // namespace cppwrf::mvec4
