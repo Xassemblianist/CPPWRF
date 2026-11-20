@@ -58,11 +58,11 @@ CPPWRF_MV float sc_pow(float x, float y) { return ::cppwrf::glibcf::powf(x, y); 
 CPPWRF_MV float sc_sin(float x) { return ::cppwrf::glibcf::sinf(x); }
 CPPWRF_MV float sc_cos(float x) { return ::cppwrf::glibcf::cosf(x); }
 #else
-inline float sc_exp(float x) { return detail::sc_exp(x); }
-inline float sc_log(float x) { return detail::sc_log(x); }
-inline float sc_pow(float x, float y) { return detail::sc_pow(x, y); }
-inline float sc_sin(float x) { return detail::sc_sin(x); }
-inline float sc_cos(float x) { return detail::sc_cos(x); }
+inline float sc_exp(float x) { return std::exp(x); }
+inline float sc_log(float x) { return std::log(x); }
+inline float sc_pow(float x, float y) { return std::pow(x, y); }
+inline float sc_sin(float x) { return std::sin(x); }
+inline float sc_cos(float x) { return std::cos(x); }
 #endif
 }  // namespace detail
 

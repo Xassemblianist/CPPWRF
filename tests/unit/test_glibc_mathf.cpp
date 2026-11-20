@@ -111,7 +111,7 @@ int main() {
       break;
     }
     kport<<<unsigned((n + 255) / 256), 256>>>(fn, n, d);
-    std::vector<float> h(std::size_t(n));
+    std::vector<float> h(static_cast<std::size_t>(n));
     cudaMemcpy(h.data(), d, n * sizeof(float), cudaMemcpyDeviceToHost);
     cudaFree(d);
     if (cudaGetLastError() != cudaSuccess) {
