@@ -528,19 +528,6 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   // module_initialize_real.F:595-622: use_tavg_for_tsk needs TSK or TAVGSFC; its TSK = TAVGSFC is overwritten by
   // grid%tsk = grid%tsk_gc (SKINTEMP) in the metgrid part (:704-713), so it changes no field
   const bool we_have_tavgsfc = flag("TAVGSFC") == 1;
-  // input paths ported without a WRF real.exe reference yet: the verification-tier gate (io/option_tiers.hpp)
-  auto unverified_input = [&](const char* what, const char* value, const char* note) {
-    io::TierHit h;
-    h.option = h.key = what;
-    h.value = value;
-    h.tier = io::Tier::unverified;
-    h.note = note;
-    if (o.allow_unverified && loop != 1) return;  // the warning once per domain
-    io::enforce_option_tiers({h}, o.allow_unverified, "real: d0" + std::to_string(o.dom) + ": ",
-                         "&cppwrf allow_unverified = .true.");
-  };
-  if (we_have_tavgsfc)
-    unverified_input("met_em FLAG_TAVGSFC", "1", "TAVGSFC input: no WRF real.exe reference yet");
   if (o.use_tavg_for_tsk && flag("TSK") != 1 && !we_have_tavgsfc)
     throw std::runtime_error("real: We either need TSK or TAVGSFC, verify these fields are coming from WPS "
                              "(use_tavg_for_tsk = .true.; module_initialize_real.F:607-612)");
@@ -729,8 +716,6 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     } else if (flag("PSFC") == 1 && flag("SOILHGT") == 1 && sfcp_to_sfcp) {
       sfcprs2(t_gc, qv_gc, ght_gc, psfc_gc, ht, tavgsfc, psfc, we_have_tavgsfc, dm, sk);
     } else if (flag("SLP") == 1) {  // from PMSL (module_initialize_real.F:1419-1426)
-      unverified_input("met_em FLAG_PSFC / FLAG_SOILHGT", "0", "surface pressure from PMSL (sfcprs): no WRF real.exe "
-                       "reference yet");
       sfcprs(t_gc, qv_gc, ght_gc, pslv_gc, ht, tavgsfc, p_gc, psfc, we_have_tavgsfc, nlev, dm, sk);
     } else {
       throw std::runtime_error("real: not enough info for a p sfc computation (FLAG_PSFC = " +

@@ -13,13 +13,14 @@ resumes across versions from WRF's wrfrst files.
   temperature of the inland-lake points (`ISLAKE` >= 0) and the SST repair of water points without lake information
   (`ISLAKE = -1`; :2814-2861), the slab's TMN and its terrain adjustment (module_soil_pre.F:650-686, 1043-1055).
   `use_tavg_for_tsk` stops only when neither TSK nor TAVGSFC is in the input (:607-612); its TSK = TAVGSFC is
-  overwritten with SKINTEMP in the metgrid branch (:704-713), as in WRF. Tier: unverified (no WRF real.exe reference
-  yet): `cppwrf_real` stops on FLAG_TAVGSFC = 1 unless the namelist has `&cppwrf allow_unverified = .true.`.
+  overwritten with SKINTEMP in the metgrid branch (:704-713), as in WRF. Verified: wrfinput / wrfbdy identical to WRF
+  real.exe's (ctest real_vs_wrf_runs: V111TAV, V111TAVT with use_tavg_for_tsk, V111TS2P with sfcp_to_sfcp, V111TSLAB
+  with the slab, V111TNL with ISLAKE = -1).
 - `cppwrf_real`: the surface pressure from PMSL (sfcprs, module_initialize_real.F:1419-1426, 8147-8453) when the
   input has no PSFC or no SOILHGT, with the 850 / 700 / 500 hPa lapse rates, the lapse-rate formula over the lowest
   level without those levels, or TAVGSFC (ez_method); without PSFC the computed surface pressure goes into the lowest
-  input level (:1436-1446). Tier: unverified (no WRF real.exe reference yet), behind `&cppwrf allow_unverified =
-  .true.` as TAVGSFC. The error without enough input names FLAG_PSFC, FLAG_SOILHGT, FLAG_SLP and sfcp_to_sfcp, as
+  input level (:1436-1446). Verified: identical to WRF real.exe's (ctest real_vs_wrf_runs: V111PMS without PSFC,
+  V111PMT without PSFC with TAVGSFC, V111NSH without SOILHGT). The error without enough input names FLAG_PSFC, FLAG_SOILHGT, FLAG_SLP and sfcp_to_sfcp, as
   real.exe's message.
 
 ### Fixed
