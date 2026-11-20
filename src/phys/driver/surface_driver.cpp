@@ -29,17 +29,13 @@ using namespace suite_detail;
 namespace {
 
 // ---------------------------------------------------------------- surface_driver, every call
-// RAINBL accumulation (RAINCV + RAINNCV [+ RAINSHV]), zeroed locals QGH, CHS, CPM, CHS2.
+// RAINBL accumulation (RAINCV + RAINNCV [+ RAINSHV]), zeroed locals QGH, CHS, CPM, CHS2. WRF also zeroes
+// u_phytmp / v_phytmp here; no one reads those zeros: KSfcPrep sets the levels the surface layer schemes read before
+// they run, KPblPrep every level before the PBL schemes (u_phytmp is read nowhere else).
 struct KSfcAlways {
   V2 rainbl, qgh, chs, cpm, chs2, cqs2;
   C2 raincv, rainncv, rainshv;
-  V3 u_phytmp, v_phytmp;
-  int nz;
   CPPWRF_HD void operator()(int i, int j) const {
-    for (int k = 0; k < nz; ++k) {
-      v_phytmp(i, j, k) = real(0.);
-      u_phytmp(i, j, k) = real(0.);
-    }
     qgh(i, j) = real(0.);
     chs(i, j) = real(0.);
     cpm(i, j) = real(0.);
@@ -51,7 +47,8 @@ struct KSfcAlways {
   }
 };
 
-// PSFC = p8w(kts) (p8w = grid%p_hyd_w); u_phytmp = u_phy + u_frame, surface currents removed.
+// PSFC = p8w(kts) (p8w = grid%p_hyd_w); u_phytmp = u_phy + u_frame, surface currents removed. nz: the levels the
+// surface layer schemes read (k = 0; MYNNSFC also k = 1); KPblPrep sets every level again before the PBL schemes.
 struct KSfcPrep {
   V2 psfc;
   C3 p8w, u_phy, v_phy;
@@ -1251,7 +1248,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
   const int nz = g_.nz;
   const real xice_threshold = o_.fractional_seaice == 0 ? real(0.5) : real(0.02);
   column_for(cols, KSfcAlways{rainbl.view(), qgh.view(), chs.view(), cpm.view(), chs2.view(), cqs2.view(),
-                              raincv.cview(), rainncv.cview(), rainshv.cview(), u_phytmp.view(), v_phytmp.view(), nz});
+                              raincv.cview(), rainncv.cview(), rainshv.cview()});
   if (o_.sst_update == 1)
     column_for(cols, KSstUpdate{sst.cview(), xice.cview(), xicem.view(), tsk_save.view(), tsk.view(), xland.view(),
                                 vegfra.view(), tmn.view(), albedo.view(), albbck.view(), emiss.view(), embck.view(),
@@ -1300,7 +1297,8 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
   }
 
   column_for(cols, KSfcPrep{psfc.view(), prep.p_hyd_w.cview(), prep.u_phy.cview(), prep.v_phy.cview(),
-                            uoce.cview(), voce.cview(), u_phytmp.view(), v_phytmp.view(), nz});
+                            uoce.cview(), voce.cview(), u_phytmp.view(), v_phytmp.view(),
+                            o_.sf_sfclay_physics == 5 ? std::min(nz, 2) : std::min(nz, 1)});
   const bool frac = o_.fractional_seaice == 1;
   if (o_.sf_sfclay_physics == 1) {
     // SFCLAYREV (module_sf_sfclayrev.F wrapper: level kts of u_phytmp, v_phytmp, t_phy, qv,
