@@ -143,6 +143,10 @@ fp32id2_data.tar
 # made on the workstation (steps/ 3 minutes, history every step; 1 h, history every 10 minutes; no Thompson .dat
 # tables): the CPU FP32 MYNN and C01 cases
 fp32id3_data.tar
+# WRF v4.8.0 real*4's run_<NAME>_cpu_sp for D6, D5, MORR, MORG, G2, N1, N3, MON3, KESSKF, ACM7, Q4, T6, P7, DUD, SLAB1,
+# made on the workstation (steps/ 3 minutes, history every step; 1 h); G2, SLAB1, N3 and MON3 with real*4 real.exe
+# inputs: the CPU FP32 cases of WDM, Morrison, GWDO, the nests, monotonic advection and the S-effort schemes
+fp32id4_data.tar
 # the WRF v4.8.0 objects (-r8, -r8 -fdefault-double-8 builds) and input subsets of the differential tests
 # (ctest -L diff; tools/gcp/stage_diff_data.sh, tools/gcp/run_diff_tests.sh)
 diff_data.tar
