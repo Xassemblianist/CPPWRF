@@ -7,6 +7,21 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+## 1.1.0 (2026-11-20)
+
+208 commits (not counting merges) after 1.0.0, release candidate main 78e46c2; docs/RELEASE_NOTES.md has the
+verified scope. New microphysics (WSM3, WSM5, WDM5, WDM6, NSSL 2-moment, P3), cumulus (BMJ, Grell-3D, multi-scale
+Kain-Fritsch), PBL and surface layers (QNSE with EDKF, BouLac), the RUC land surface model, the single-layer urban
+canopy model, skin SST and deep soil temperature update, monotonic and WENO advection, Noah-MP option values and
+terrain options, all verified against WRF v4.8.0 real*8 at tolerance 0 in CPU FP64 and CUDA FP64. Domain
+decomposition with tiles and MPI ranks; drop-in `cppwrf-wrf` / `cppwrf-realexe` / `cppwrf-check`; packaging, the
+Python package and user tools. The fixes of an independent code review (dropped namelist options, GPU paths,
+decomposed runs, restart state, `cppwrf_real` inputs, namelist checks, nests); FP32 builds follow WRF real*4's
+single-precision arithmetic more closely; RRTMG computes in single precision in CUDA FP32 builds. Verified FP64
+results are unchanged. Release checks: full CPU CI on 78e46c2 (suite PASS 342, WRF output files 42, ideal files 14,
+`ctest -L diff` 32/32, ctest 33/33, all exact) and the Colab G4 GPU proof at fb158f3 (CUDA FP64 suite PASS 338 at
+tolerance 0, CUDA FP32 suite 44 runs within their measured tolerances, ctest 35/35 in both CUDA builds).
+
 ### Added
 - Terrain options, tier **verified**: YSU's topographic wind correction `topo_wind = 1 / 2` (start_em's CTOPO /
   CTOPO2: 1 from VAR_SSO and the terrain Laplacian, a wrfinput without VAR_SSO (GOT_VAR_SSO = 0) stops as in WRF;
@@ -50,7 +65,7 @@ resumes across versions from WRF's wrfrst files.
   it): QHAIL, QNDROP, QNHAIL, QNCCN, QVGRAUPEL, QVHAIL, HAILNC / HAILNCV (also Noah-MP's MP_HAIL), REFL_10CM, the
   effective radii to RRTMG, the cumulus tendencies of the rain / snow / ice / cloud water, one row per thread over
   WRF's tile i-range. Tier: verified (suite cases 48_nssl: N18, N17, N18V against WRF real*8 of the -r8
-  -fdefault-double-8 build, CPU FP64 at tolerance 0; the CUDA cases await the G4 run). 19, 21, 22, non-default nssl_* options, nests, the ideal
+  -fdefault-double-8 build, CPU FP64 and CUDA FP64 at tolerance 0). 19, 21, 22, non-default nssl_* options, nests, the ideal
   cases and a decomposition in x stay errors.
 - Noah-MP option values of WRF 4.8.0 (v5.1.2) beyond the defaults: dveg 1-9 (dveg 2 / 5 / 6 with the dynamic
   vegetation carbon of BiochemNatureVegMain / CarbonFluxNatureVeg), opt_crs 2, opt_btr 2 / 3, opt_runsrf / opt_runsub
@@ -207,9 +222,8 @@ resumes across versions from WRF's wrfrst files.
   and DECLIN / SOLCON of the last radiation call (read by slope_rad's TOPO_RAD_ADJ and the urban canopy model until
   the next call: a run resumed between two radiation calls used 0), as global attributes SCALAR_<name>, and
   topo_shading's SHADOWMASK (WRF's restart stream has none: computed again at the next radiation call);
-  tests/io_netcdf/test_restart.cpp checks the scalars round trip. Known open issue: a run resumed from that file
-  between two radiation calls is not yet identical to the uninterrupted run (resuming from the run's wrfrst files
-  is).
+  tests/io_netcdf/test_restart.cpp checks the scalars round trip. A run resumed from that file between two
+  radiation calls was not yet identical to the uninterrupted run; format version 4 (entry above) resolves it.
 - The restart alarm of a run resumed from a restart file (WRF's or CPPWRF's own) with a restart interval that is not
   a multiple of the time step: the first ring is at the restart time + WRF_ALARM_SECS_TIL_NEXT_RING_51 and the later
   ones are counted from that ring's step (share/input_wrf.F, ESMF_ClockAdvance), so the wrfrst files and their alarm
@@ -241,13 +255,60 @@ resumes across versions from WRF's wrfrst files.
 - Python test fixtures and the self-test read the Times characters with numpy 2.3.
 - The translator names CAM radiation (`ra_lw_physics` / `ra_sw_physics = 3`, module_ra_cam.F not ported) in its
   error.
+- `cppwrf_real` with met_em input from other sources than the suite's GFS sets, each as module_initialize_real.F /
+  input_wrf.F do it: sea ice together with an SST field (adjust_for_seaice_post took grid%tsk / grid%tsk_save the
+  other way round; TSK and TSLB at the ice points differed by up to 16.4 K); land use without an inland-lake category
+  (`ISLAKE = -1`: USGS 24, MODIS 20, NLCD40; lakeflag 0 and the SST repair at water points); specific humidity
+  (`FLAG_SH`, SPECHUMD) and mixing ratio (`FLAG_QV`) instead of RH, and `use_sh_qv`; sfcprs2 (`sfcp_to_sfcp`, top-down
+  level input) and GHT rebuilt hypsometrically where it is missing; PSFC / PMSL read only when present; the met_em
+  fields real.exe copies through unchanged (CANWAT, LAKE_DEPTH, FRC_URB2D, ELVMAX, the gwd_opt 3 fields, Noah-MP's
+  static fields, ...); liquid soil water SW. Checks real.exe makes: BOTTOM-TOP / WEST-EAST / SOUTH-NORTH_GRID_DIMENSION
+  against the namelist (the level check read an attribute metgrid does not write and always passed), DX / DY,
+  MMINLU and its category defaults, one time per met_em file, the land use and soil category counts,
+  num_land_cat / num_metgrid_soil_levels, keys a namelist group does not have, a reference pressure that does not
+  decrease in a column on the hybrid coordinate; met_em reads are bounds-checked. check_a_mundo's rewrites
+  (`lagrange_order` 1 for few levels, `default_soiltype`, `hypsometric_opt = 2`). Existing references are identical;
+  the new inputs have WRF real.exe references (ctest real_vs_wrf_runs, below). Still refused: surface pressure from
+  PMSL alone (WRF's sfcprs path) and TAVGSFC.
+- Namelist checks, translator and model: values `wrf.exe` runs differently are refused (`use_theta_m` other than 1,
+  `km_opt = 0` with `diff_opt` /= 0, `wif_input_opt` 2 with any `mp_physics`, `spec_bdy_width` other than 5 with
+  nests, `s_we` / `s_sn` / `s_vert` other than 1, a tslist file, `shadlen <= 0`, `io_form_restart` other than 2 and
+  `sf_urban_physics` with `restart = .true.`); check_a_mundo's derivations are applied (`num_soil_layers` from domain
+  1's land surface model, `icloud = 1` on every domain when one runs MSKF, `cu_diag`, Registry defaults of
+  `interval_seconds`, `e_vert` and the start date); `sf_surface_physics = 0` with a surface layer or PBL scheme is an
+  error, as the model stops there. wrfout / wrfrst global attributes as WRF writes them (d01's PARENT_ID /
+  PARENT_GRID_RATIO, MMINLU, WRF_ALARM_SECS_TIL_NEXT_RING_55 by whole clock seconds, the Noah-MP OPT_* of INI runs)
+  and the stream contents of `iofields` files and auxiliary streams; WRF references for these namelists (files test
+  cases g9f*, suite cases G9F2 and G9F6C).
+- Nests: the parent's phy_init runs again after the feedback at its first step, as start_em does (landuse_init,
+  TSK_SAVE, XICEM, SNOALB from the fed-back land use; suite case N3F1); the parent's and the nest's scalars are paired
+  by name in med_nest_force / med_nest_feedback (tke and MYNN's qke_adv with per-domain `km_opt`; suite case N3M);
+  per-domain physics WRF does not run are refused by the model and the translator.
+- Decomposed runs (tiles, MPI ranks): the scalars' halo exchanged after spec_bdy_final, as solve_em; the periodic
+  wrap of a direction of 6 or 7 points in two patches (ctest tiles_wrap); `diff_opt = 2` stresses at the halo point
+  beyond a symmetric side; the base state's halos after a start from a wrfrst file filled as start_em does.
+- GPU and kernel paths: MSKF's out-of-range levels and `NINT` (gfortran's on x86-64, also on the device); WENO
+  weights, eps and fluxes in double as WRF's DOUBLE PRECISION locals; NSSL over the worker's rows with a bounded work
+  space; RRTMG LW / SW with `icloud = 0` take a clear column also when `bmj_rad_feedback` set CLDFRA (suite case
+  P4BMJFI0); the radiation's boundary-layer clouds without QI (CPU and CUDA as WRF); Thompson's ice fall speed folded
+  as gfortran folds it on the device too; MYNN's ktop_plume initialised; coherent loads for the arrays an RRTMG batch
+  kernel writes before it reads them; BouLac's and the TKE kernels' column arrays sized and checked by the level
+  count; WSM5's and the urban table's set-up through the model's libm on the host.
+- FP32 builds follow WRF real*4 more closely: the RRTMG LW / SW tables as WRF real*4 builds them, Thompson's
+  REAL(KIND=R8SIZE) tables and DOUBLE PRECISION process rates in double, MSKF's momentum transport in REAL(r8), P3's
+  double temporaries, WSM / WDM rgmma in single precision, grid%julian from the double day of year and the CLWRF trace
+  gases in double, and WRF real*4's single-precision constants and products (small_step's cof, sfclayrev's 1./1.1,
+  x**2.0, NSSL's dgam, Noah-MP groundwater, RRTMG SW heatfac). RRTMG (`rr`), WSM6's literals, the nest SINT and the
+  `vm` atan / sin / cos / log10 are single precision in CPU FP32 builds too. FP64 output is unchanged; the GPU FP32
+  values of the suite moved (docs/FP32_ACCURACY.md, section 1.1.0).
 
 ### Performance
 - RRTMG LW / SW (and the radiation driver's RRTMG paths, Dudhia SW) compute in single precision in CUDA FP32 builds:
   the type `rr` (src/phys/ra_rrtmg_common/rrtmg_real.hpp) is float there, as RRTMG's `rb` in WRF real*4, and double
   in CUDA FP64 and in every CPU build, whose results are unchanged (CUDA FP64 at tolerance 0, CPU FP32
   byte-identical). RRTM LW stays double. GPU FP32 output bytes change; its distance from WRF real*8 stays at WRF
-  real*4's (P4 72 h, N3 24 h). GPU FP32 on the Colab G4: P4 72 h 2.0x, N3 24 h 1.65x faster.
+  real*4's (P4 72 h, N3 24 h). GPU FP32 on the Colab G4: P4 72 h 2.0x, N3 24 h 1.65x faster than the GPU FP32
+  build with RRTMG in double precision (the commit before this change).
 - GPU memory: the column arrays of Tiedtke, New Tiedtke, Grell-Freitas-Li and GWDO (FP32 and FP64) and of
   Kain-Fritsch and MYJ (FP64) live in the column work buffer instead of the kernels' stack frames, which CUDA
   reserves for every thread the GPU can hold. The frames of 20-80 KB per thread are gone; the largest left is
@@ -263,6 +324,8 @@ resumes across versions from WRF's wrfrst files.
 ### Changed
 - Tiles no longer write `output.dir.tileN` copies: tile 0 writes the run's files from gathered fields.
 - An MPI run prints the peak host memory of the writer, of the largest other rank and of all ranks.
+- The CUDA build needs CUDA 12.1 or later and a GPU of compute capability 7.0 or later: the batched launches pass
+  kernel parameters above 4 KB. CMake stops on an older CUDA with that reason.
 
 ### Verification
 - New suite cases against WRF v4.8.0 real*8 (tests/verify/cases/69_coverage.py, data port_cov1_data.tar and
@@ -306,6 +369,19 @@ resumes across versions from WRF's wrfrst files.
   (1 h; 24 h and 72 h from the suite's long reference inputs), statistics on the runtime.
 - The FP32 cases real_acm7_fp32_1h, real_morr_fp32_1h and real_skv_fp32_1h have measured tolerances (about 3x the
   values of the study); real_skv_fp32_1h no longer lists TSK, which tests/verify/compare_real.py does not compare.
+- FP32 tolerances of ACM7 (W) and Q4 (U, QV) re-measured on the Colab G4 at fb158f3, after the FP32 fixes above, and
+  set to about 3x the measured values (W 3.0e-2; U 6.5e-4, QV 5.6e-4).
+- Suite cases for the nest and radiation fixes against WRF v4.8.0 real*8: P4BMJFI0 (P4BMJF with `icloud = 0`, CPU
+  and CUDA FP64), N3F1 (d02 land use differing at the fed-back points) and N3M (MYNN on the two-way nest with
+  `km_opt` 4 / 2). N3M's reference is from WRF-4.8.0-r8d8 (`-fdefault-real-8 -fdefault-double-8`), as every MYNN
+  case: the stock `-r8` build computes MYNN's DOUBLE PRECISION locals in real*16.
+- CUDA FP64 twins of the CPU FP64 cases (tolerance 0): the Noah-MP option cases, the terrain cases TW2, SR2, SR3,
+  NSSL's N17, the advection, P3, urban, Morrison, Grell-3D, FDDA, skin SST, ACM2 and BouLac cases added since 1.0.0.
+- ctest real_vs_wrf_runs: `cppwrf_real` against WRF real.exe on 14 runs (plain P1 met_em, `lagrange_order` 1,
+  `default_soiltype`, VAR_SSO input, and ten met_em input variants: sea ice with SST, `ISLAKE = -1`, specific
+  humidity with `use_sh_qv` false and true, no GHT, top-down levels, `sfcp_to_sfcp`, pass-through fields, soil
+  water). For `ISLAKE = -1` WRF's wrf.exe stops on that artificial input ("too many input landuse types"), so only
+  real.exe's output is compared. tests/verify/ctest_data.txt names the data tars of the ctest tests.
 
 ## 1.0.0
 
