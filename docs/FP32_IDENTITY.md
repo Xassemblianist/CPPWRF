@@ -60,11 +60,19 @@ The kernels, launches and their order are the fast build's. Proof:
 
 - tools/glibc_mathf_proof.cpp: the ports against the system libm, every float input of expf, logf, sinf, cosf,
   atanf, tanhf and log10f and 2^32 pseudo-random powf pairs plus special values: 0 differ.
-- tools/glibc_mathf_proof_cuda.cu: the device against the host for the same functions and the 4-lane ones.
+- tools/glibc_mathf_proof_cuda.cu: the device against the host, every float input of the same functions and of the
+  4-lane expf, logf, sinf, cosf, and 2^32 pairs of the scalar and the 4-lane powf: 0 differ (RTX 2060, sm_75).
+  tests/unit/test_glibc_mathf.cpp repeats both checks on a sample in every build (the device part in CUDA builds).
 - The suite's backend `cuda_sp_id` (`tests/verify/wrf_suite.py --cuda-sp-id BIN`) runs every `cpu_sp` case on the
   GPU (names `..._cuda_id...`, e.g. `real_p4_fp32_cuda_id_1h`) against the same WRF real*4 references at tolerance 0.
   On an RTX 2060 (sm_75) all of them pass: P1 and P4 (3 minutes with history every step, and 1 h), P2, P3, P9, NMP1
   (1 h), P6 (3 minutes and 1 h).
+- Without a WRF real*4 reference, the identity build against the CPU FP32 build (P4's inputs, 3 minutes, every
+  model state variable of every step and the `diag.csv` sums): identical for P5 (WSM6), MYNN (Thompson, MYNN surface
+  layer and PBL), Morrison, WSM5, Kessler + Kain-Fritsch, ACM2 with the Pleim-Xiu surface layer, multi-scale
+  Kain-Fritsch, Dudhia shortwave, BouLac and MYJ / Eta surface layer configurations (configs/real_p5_r8.ini,
+  real_mynn_r8, real_morr_r8, real_p4w5_r8, real_kesskf_r8, real_acm7_r8, real_m4_r8, real_dud_r8, real_bl4_r8,
+  real_f2_r8).
 
 Cost (RTX 2060 laptop GPU, sm_75, P4 10 steps, `CPPWRF_KTIME=1`; one machine, indicative only): kernel time 0.98 s
 fast, 1.00 s identity (+3 %); the stepping time without KTIME 0.98-1.06 s against 1.01 s, within the run-to-run
