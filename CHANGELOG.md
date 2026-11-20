@@ -7,6 +7,17 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+### Added
+- CPU FP32 builds bit-identical to WRF v4.8.0 real*4 on P1 and P4 (Kain-Fritsch, WSM6, RRTMG; 3 minutes with
+  history every step, and 1 h) and P2, P3, P9 (1 h): base state, boundary coefficients, Noah init, history T, WSM6's init
+  products and moist_physics_prep_em's R_v/R_d rounded where WRF real*4 rounds them, and glibc libmvec's 4-lane SSE4
+  expf / logf / powf / sinf / cosf ported lane by lane for the iterations WRF's vectorised loops give them
+  (src/core/libmvec_f4.hpp, test_libmvec_f4; sinf / cosf for radiation_driver's COSZEN). The suite's CPU FP32 backend
+  `cpu_sp` (`--cpu-sp`) compares them at tolerance 0: `real_p1_fp32_cpu`, `real_p1_fp32_cpu_1h`,
+  `real_p2_fp32_cpu_1h`, `real_p3_fp32_cpu_1h`, `real_p9_fp32_cpu_1h`, `real_p4_fp32_cpu`, `real_p4_fp32_cpu_1h`
+  (new data tar fp32id_data.tar).
+  docs/FP32_IDENTITY.md. FP64 and CUDA results unchanged.
+
 ## 1.1.0 (2026-11-20)
 
 208 commits (not counting merges) after 1.0.0, release candidate main 78e46c2; docs/RELEASE_NOTES.md has the

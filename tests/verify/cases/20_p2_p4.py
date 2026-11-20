@@ -25,12 +25,18 @@ CASES = [
     ("real_p2_fp32_1h", "cuda", "configs/real_p2_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P2", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P2/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 2e-3, "W": 8e-2, "THM": 3e-5, "QV": 8e-4}),
+    ("real_p2_fp32_cpu_1h", "cpu_sp", "configs/real_p2_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_P2", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_P2/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     # P3 = P1 + RRTMG LW/SW every step (radt 1, o3input 2, ghg_input 1); tables in ${CPPWRF_WRF_RUNS}/rrtmg_tables
     ("real_p3_r8_fp64_cpu", "cpu_dp", "configs/real_p3_r8.ini", [], f"{WR}/run_P3_r8/steps/wrfout_d01_2026-10-12_00:00:00", 180,
      {"U": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0}),
     ("real_p3_fp32_1h", "cuda", "configs/real_p3_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P3", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P3/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 3e-4, "W": 1e-2, "THM": 2e-6, "QV": 1e-4}),
+    ("real_p3_fp32_cpu_1h", "cpu_sp", "configs/real_p3_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_P3", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_P3/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_p3_r8_fp64_cuda_1h", "cuda_dp", "configs/real_p3_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P3_r8", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P3_r8/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
@@ -49,6 +55,16 @@ CASES = [
     ("real_p4_fp32_1h", "cuda", "configs/real_p4_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P4", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P4/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 3e-3, "W": 7e-2, "THM": 3e-5, "QV": 2e-3}),
+    # CPU FP32 against WRF real*4, bit for bit: run_P4_cpu_sp (fp32id_data.tar) is WRF real*4's P4 rerun on the
+    # workstation (steps/: 3 minutes, history every step; 1 h, history every 10 minutes); run_P4 above, made by an
+    # earlier WRF real*4 run, differs from it from the first 10 minutes on
+    ("real_p4_fp32_cpu", "cpu_sp", "configs/real_p4_r8.ini", ["real.dir=" + f"{WR}/run_P4_cpu_sp/steps"],
+     f"{WR}/run_P4_cpu_sp/steps/wrfout_d01_2026-10-12_00:00:00", 180,
+     {"U": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0}),
+    ("real_p4_fp32_cpu_1h", "cpu_sp", "configs/real_p4_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_P4_cpu_sp", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_P4_cpu_sp/wrfout_d01_2026-10-12_00:00:00", 3600,
+     {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0, "QCLOUD": 0.0, "QRAIN": 0.0, "QICE": 0.0}),
 ]
 
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
@@ -69,11 +85,15 @@ DATA = {
     'real_p2_r8_fp64_cpu': 'v05_files_data.tar,v05_files_links.tar',
     'real_p2_r8_fp64_cuda_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_p2_fp32_1h': 'suite_data.tar',
+    'real_p2_fp32_cpu_1h': 'suite_data.tar',
     'real_p3_r8_fp64_cpu': 'v05_files_data.tar,v05_files_links.tar',
     'real_p3_fp32_1h': 'suite_data.tar',
+    'real_p3_fp32_cpu_1h': 'suite_data.tar',
     'real_p3_r8_fp64_cuda_1h': 'port_g01_data.tar',
     'real_p4_r8_fp64_cpu': 'v05_files_data.tar,v05_files_links.tar',
     'real_p4_r8_fp64_cpu_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_p4_r8_fp64_cuda_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_p4_fp32_1h': 'port_fp32r4_data.tar',
+    'real_p4_fp32_cpu': 'fp32id_data.tar',
+    'real_p4_fp32_cpu_1h': 'fp32id_data.tar',
 }

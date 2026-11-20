@@ -129,7 +129,8 @@ v05_iofields.tar
 v05_files_data.tar
 # its files that are links on the reference machine, as files (stage_files_data.py --links-only)
 v05_files_links.tar
-# WRF v4.8.0 real*4's run_P1/steps (3 minutes, history every step): the CPU FP32 cases (cpu_sp)
+# WRF v4.8.0 real*4's run_P1/steps (3 minutes, history every step) and run_P4_cpu_sp (P4 rerun on the workstation:
+# steps/ 3 minutes, history every step; 1 h, history every 10 minutes): the CPU FP32 cases (cpu_sp)
 fp32id_data.tar
 # the WRF v4.8.0 objects (-r8, -r8 -fdefault-double-8 builds) and input subsets of the differential tests
 # (ctest -L diff; tools/gcp/stage_diff_data.sh, tools/gcp/run_diff_tests.sh)
