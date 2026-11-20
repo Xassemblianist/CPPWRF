@@ -265,7 +265,7 @@ CPPWRF_HD inline double log10(double a, int i, int n) {
 }
 #endif
 // float (FP32 builds): WRF's real*4 build vectorises the same loops with 4 floats per call (_ZGVbN4v_expf,
-// _ZGVbN4v_logf, _ZGVbN4vv_powf): iterations 0 ... 4*(n/4)-1 of an n-trip loop through the vector function, the
+// _ZGVbN4v_logf, _ZGVbN4vv_powf; sin / cos below: _ZGVbN4v_sinf, _ZGVbN4v_cosf): iterations 0 ... 4*(n/4)-1 of an n-trip loop through the vector function, the
 // remaining n mod 4 (and a loop of fewer than 4 trips) through the scalar libm. The CPU build computes those lanes
 // as libmvec does (core/libmvec_f4.hpp); the CUDA build keeps the scalar functions on the device and the host.
 CPPWRF_HD inline bool lane4(int i, int n) { return i < (n & ~3); }
@@ -303,14 +303,22 @@ CPPWRF_HD inline float atan(float a, int, int) {
   return std::atan(a);
 #endif
 }
-CPPWRF_HD inline float sin(float a, int, int) {
+CPPWRF_HD inline float sin(float a, int i, int n) {
+#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+  if (lane4(i, n)) return mvec4::sinf(a);
+#endif
+  (void)i; (void)n;
 #if defined(__CUDA_ARCH__)
   return sinf(a);
 #else
   return std::sin(a);
 #endif
 }
-CPPWRF_HD inline float cos(float a, int, int) {
+CPPWRF_HD inline float cos(float a, int i, int n) {
+#if defined(CPPWRF_HAVE_MVEC_F4) && !defined(__CUDA_ARCH__)
+  if (lane4(i, n)) return mvec4::cosf(a);
+#endif
+  (void)i; (void)n;
 #if defined(__CUDA_ARCH__)
   return cosf(a);
 #else

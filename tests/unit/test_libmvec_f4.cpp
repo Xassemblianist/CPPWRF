@@ -1,12 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// The 4-lane float expf / logf / powf of src/core/libmvec_f4.hpp (glibc 2.41 libmvec's SSE4 variants, powf with
-// Intel's rcpps) against glibc's libmvec (_ZGVbN4v_expf, _ZGVbN4v_logf, _ZGVbN4vv_powf), bit for bit:
-//  expf, logf: every 61st float bit pattern (about 7*10^7, all signs, exponents, NaN / Inf / denormal classes) and
+// The 4-lane float expf / logf / powf / sinf / cosf of src/core/libmvec_f4.hpp (glibc 2.41 libmvec's SSE4 variants, powf with
+// Intel's rcpps) against glibc's libmvec (_ZGVbN4v_expf, _ZGVbN4v_logf, _ZGVbN4vv_powf, _ZGVbN4v_sinf, _ZGVbN4v_cosf),
+// bit for bit:
+//  expf, logf, sinf, cosf: every 61st float bit pattern (about 7*10^7, all signs, exponents, NaN / Inf / denormal classes) and
 //              the edges of the range masks; four different arguments per vector call (lanes independent);
 //  powf:       x over every 4099th positive bit pattern and the edges, each with 8 exponents y (0, +-1, +-0.5,
 //              WRF's rcp = 2/7, cvpm, cpovcv), and 2^22 random (x, y) pairs with x in [1e-3, 1e6) and |y| < 4;
 //              special x / y (0, negatives, denormals, Inf, NaN) with random partners.
-// expf and logf use IEEE operations only (any x86-64 CPU); powf's results equal libmvec's only on Intel (rcpps):
+// sinf / cosf also every 97th bit pattern with |x| <= 2 pi. expf, logf, sinf and cosf use IEEE operations only (any
+// x86-64 CPU); powf's results equal libmvec's only on Intel (rcpps):
 // elsewhere the powf differences are reported, not failed.
 #include <cpuid.h>
 
@@ -23,6 +25,8 @@
 extern "C" __m128 _ZGVbN4v_expf(__m128);
 extern "C" __m128 _ZGVbN4v_logf(__m128);
 extern "C" __m128 _ZGVbN4vv_powf(__m128, __m128);
+extern "C" __m128 _ZGVbN4v_sinf(__m128);
+extern "C" __m128 _ZGVbN4v_cosf(__m128);
 
 static std::uint32_t fbits(float v) {
   std::uint32_t b;
@@ -73,6 +77,14 @@ int main() {
   long fails = 0;
   fails += check1("expf", in, [](float x) { return cppwrf::mvec4::expf(x); }, [](__m128 x) { return _ZGVbN4v_expf(x); });
   fails += check1("logf", in, [](float x) { return cppwrf::mvec4::logf(x); }, [](__m128 x) { return _ZGVbN4v_logf(x); });
+  fails += check1("sinf", in, [](float x) { return cppwrf::mvec4::sinf(x); }, [](__m128 x) { return _ZGVbN4v_sinf(x); });
+  fails += check1("cosf", in, [](float x) { return cppwrf::mvec4::cosf(x); }, [](__m128 x) { return _ZGVbN4v_cosf(x); });
+  {  // sin / cos: the arguments of WRF's loops (|x| <= 2 pi: latitudes, hour angles) more densely
+    std::vector<std::uint32_t> t;
+    for (std::uint32_t b = 0; b <= 0x40c90fdbu; b += 97) { t.push_back(b); t.push_back(b | 0x80000000u); }
+    fails += check1("sinf |x|<=2pi", t, [](float x) { return cppwrf::mvec4::sinf(x); }, [](__m128 x) { return _ZGVbN4v_sinf(x); });
+    fails += check1("cosf |x|<=2pi", t, [](float x) { return cppwrf::mvec4::cosf(x); }, [](__m128 x) { return _ZGVbN4v_cosf(x); });
+  }
 
   std::uint64_t s = 0;
   auto sm = [&s] {  // splitmix64

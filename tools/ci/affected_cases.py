@@ -144,7 +144,7 @@ def load_cases(tree):
     for g in mod.GROUPS:
         gfile = "tests/verify/cases/" + g.__name__.split("._", 1)[1] + ".py"
         for name, key, cfg, sets, _wo, t, _tol in g.CASES:
-            if key == "cpu_dp":
+            if key in ("cpu_dp", "cpu_sp"):  # the CPU cases (FP64, FP32 against WRF real*4)
                 out.append(Case(name, cfg, list(sets), t, gfile, "suite.slow" in sets))
     out.append(Case("straka_wrf", "configs/straka_wrf.ini", [], 0, "tests/verify/wrf_suite.py", False))
     for tag, cfg, _rd in mod.RESTARTS:

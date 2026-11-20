@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-// glibc 2.41 libmvec's 4-lane float expf, logf and powf (_ZGVbN4v_expf, _ZGVbN4v_logf, _ZGVbN4vv_powf; the SSE4
+// glibc 2.41 libmvec's 4-lane float expf, logf, powf, sinf and cosf (_ZGVbN4v_expf, _ZGVbN4v_logf, _ZGVbN4vv_powf,
+// _ZGVbN4v_sinf, _ZGVbN4v_cosf; the SSE4
 // variants that glibc selects on every CPU with SSE4.1) re-implemented statement by statement, one lane, from
-// sysdeps/x86_64/fpu/multiarch/svml_s_expf4_core_sse4.S, svml_s_logf4_core_sse4.S and svml_s_powf4_core_sse4.S.
+// sysdeps/x86_64/fpu/multiarch/svml_s_{exp,log,pow,sin,cos}f4_core_sse4.S.
 // WRF's real*4 build (gfortran -O2 -ftree-vectorize, SSE2 ABI: 4 floats per call) calls them in its vectorised loops.
 // expf and logf are IEEE single-precision operations only; powf works in double and takes an approximate reciprocal
 // with `rcpps`, whose result the hardware defines: here Intel's (mvec::detail::kRcp, the table the double log uses;
@@ -108,5 +109,52 @@ inline float powf(float x, float y) {
   const double tj = d(kPowfT[sb & kPowf_lbLOWKBITS]);
   const double res = tj + r * tj;
   return static_cast<float>(d(bits(res) + ((sb >> 11) << 52)));  // paddq of the exponent; cvtpd2ps
+}
+
+// _ZGVbN4v_sinf_sse4: x = N*pi + r (pi in 4 parts), sin(x) = (-1)^N sin(r), odd degree-9 polynomial; |x| > 10000
+// (and NaN, Inf) through the scalar sinf
+inline float sinf(float x) {
+  using namespace mvec_tables;
+  using detail::f;
+  using detail::fb;
+  const std::uint32_t ix = fb(x), sgn = ix & ~kTrigf_sAbsMask;
+  const float ax = f(ix & kTrigf_sAbsMask);
+  if (!(ax <= f(kTrigf_sRangeReductionVal))) return std::sin(x);  // cmpnleps
+  const float y = ax * f(kTrigf_sInvPI) + f(kTrigf_sRShifter);
+  const std::uint32_t s = fb(y) << 31;
+  const float n = y - f(kTrigf_sRShifter);
+  float r = ax - n * f(kTrigf_sPI1);
+  r = r - n * f(kTrigf_sPI2);
+  r = r - n * f(kTrigf_sPI3);
+  r = r - n * f(kTrigf_sPI4);
+  const float r2 = r * r;
+  r = f(fb(r) ^ s);
+  float p = f(kTrigf_sA9) * r2 + f(kTrigf_sA7);
+  p = p * r2 + f(kTrigf_sA5);
+  p = p * r2 + f(kTrigf_sA3);
+  const float t = (r2 * p) * r;
+  return f(fb(r + t) ^ sgn);
+}
+
+// _ZGVbN4v_cosf_sse4: cos(x) = sin(x + pi/2) with N = rint((x + pi/2)/pi) - 1/2 and the same polynomial
+inline float cosf(float x) {
+  using namespace mvec_tables;
+  using detail::f;
+  using detail::fb;
+  if (!(f(fb(x) & kTrigf_sAbsMask) <= f(kTrigf_sRangeReductionVal))) return std::cos(x);
+  const float y = (f(kTrigf_sHalfPI) + x) * f(kTrigf_sInvPI) + f(kTrigf_sRShifter);
+  const std::uint32_t s = fb(y) << 31;
+  const float n = (y - f(kTrigf_sRShifter)) - f(kTrigf_sOneHalf);
+  float r = x - n * f(kTrigf_sPI1);
+  r = r - n * f(kTrigf_sPI2);
+  r = r - n * f(kTrigf_sPI3);
+  r = r - n * f(kTrigf_sPI4);
+  const float r2 = r * r;
+  r = f(fb(r) ^ s);
+  float p = f(kTrigf_sA9) * r2 + f(kTrigf_sA7);
+  p = p * r2 + f(kTrigf_sA5);
+  p = p * r2 + f(kTrigf_sA3);
+  const float t = (r2 * p) * r;
+  return r + t;
 }
 }  // namespace cppwrf::mvec4
