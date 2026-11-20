@@ -384,15 +384,25 @@ struct KWExpl {
 // phase 2 (columns): tridiagonal solve (calc_coef_w coefficients), damp_opt = 3, phi'' = R + implicit w part
 struct KWSolve {
   V3 w, ph; C3 R, a, alpha, gamma, phs, ws; C2 mut, muts; B3 phb; B2 msfty; VCoef c;
-  real dts, epssm, dampmag, hdepth; int nz; Edge ed;
+  real dts, epssm, dampmag, hdepth;
+  real pi;  // 4 atan(1), computed once on the host (the same correctly rounded value as on the device)
+  int nz; Edge ed;
   CPPWRF_HD real mf(int k, real m) const { return c.c1f(k) * m + c.c2f(k); }
   CPPWRF_HD void operator()(int i, int j) const {
     if (ed.mass(i, j)) return;  // spec zone: spec_bdyupdate_ph
     const real m = mut(i, j), mts = muts(i, j), ope = real(1) + epssm;
-    for (int k = 1; k <= nz; ++k) w(i, j, k) = (w(i, j, k) - a(i, j, k) * w(i, j, k - 1)) * alpha(i, j, k);
-    for (int k = nz - 1; k >= 1; --k) w(i, j, k) = w(i, j, k) - gamma(i, j, k) * w(i, j, k + 1);
+    // Thomas sweeps with the neighbour level carried in a register (the same operations in the same order; the views
+    // may alias, so the compiler reloads w(k - 1) / w(k + 1) from memory otherwise)
+    real wk = w(i, j, 0);
+    for (int k = 1; k <= nz; ++k) {
+      wk = (w(i, j, k) - a(i, j, k) * wk) * alpha(i, j, k);
+      w(i, j, k) = wk;
+    }
+    for (int k = nz - 1; k >= 1; --k) {
+      wk = w(i, j, k) - gamma(i, j, k) * wk;
+      w(i, j, k) = wk;
+    }
     if (dampmag != real(0)) {  // damp_opt = 3: implicit Rayleigh damping toward w = 0 near the top
-      const real pi = real(4) * libm::atan(real(1));
       const real htop = (phs(i, j, nz) + phb(i, j, nz)) / Gr, hbot = htop - hdepth;
       for (int k = nz; k >= 1; --k) {
         const real hk = (phs(i, j, k) + phb(i, j, k)) / Gr;
@@ -592,7 +602,8 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
       column_for(g.columns(), KWSolve{s.w_2.view(), s.ph_2.view(), w_rhs.cview(), a.cview(), alpha.cview(),
                                       gamma.cview(), ph_save.cview(), w_save.cview(), s.mut.cview(), s.muts.cview(),
                                       b.phb.view(), b.msfty.view(), c, dts, p_.epssm,
-                                      p_.damp_opt == 3 ? dts * p_.dampcoef : real(0), p_.zdamp, nz, ed});
+                                      p_.damp_opt == 3 ? dts * p_.dampcoef : real(0), p_.zdamp,
+                                      real(4) * libm::atan(real(1)), nz, ed});
       if (bc_) bc_->update_ph_w(s, ph_save, tend, b, dts);  // spec_bdyupdate_ph, zero_grad_bdy(w)
       parallel_for(g.mass_cells(), KWPRho{s.al.view(), s.p.view(), pm1.view(), s.ph_2.cview(), s.alt.cview(),
                                           s.t_2.cview(), t_save.cview(), c2a.cview(), s.mu_2.cview(), s.muts.cview(),
