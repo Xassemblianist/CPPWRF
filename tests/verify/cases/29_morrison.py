@@ -41,6 +41,17 @@ CASES = [
       "output.out_interval=10", "output.diag_interval=10", "d02.out_interval=30", "d02.diag_interval=30"],
      {d: f"{WR}/run_MORN_r8/wrfout_{d}_{_D}" for d in ("d01", "d02")}, 3600, _TN),
 ]
+# CPU FP32 against WRF real*4, bit for bit: run_MORR_cpu_sp / run_MORG_cpu_sp (fp32id4_data.tar) are WRF real*4's
+# MORR / MORG runs on the workstation from run_P4_cpu_sp's real*4 inputs; steps/: 3 minutes, history every step; 1 h,
+# history every 10 minutes
+for _n in ("morr", "morg"):
+    _run = f"{WR}/run_{_n.upper()}_cpu_sp"
+    CASES += [
+        (f"real_{_n}_fp32_cpu", "cpu_sp", f"configs/real_{_n}_r8.ini", ["real.dir=" + f"{_run}/steps"],
+         f"{_run}/steps/wrfout_d01_{_D}", 180, _T),
+        (f"real_{_n}_fp32_cpu_1h", "cpu_sp", f"configs/real_{_n}_r8.ini", ["real.dir=" + _run] + _1H,
+         f"{_run}/wrfout_d01_{_D}", 3600, _T),
+    ]
 # CUDA FP64 twins (tolerance 0) of MORG's and MORN's CPU cases: the same configuration, reference and variables
 CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) for c in list(CASES)
           if c[1] == "cpu_dp" and c[0].split("_")[1] in ("morg", "morn")]
@@ -55,4 +66,4 @@ STATUS = [
 
 # the data tars (tests/verify/vm_data.txt) each case reads, in that file's order (tests/verify/case_data.py
 # derives them from the tars' file lists; tools/colab/colab_suite.sh --cases fetches only these)
-DATA = {c[0]: 'port_c04_data.tar' for c in CASES}
+DATA = {c[0]: 'fp32id4_data.tar' if c[1] == 'cpu_sp' else 'port_c04_data.tar' for c in CASES}
