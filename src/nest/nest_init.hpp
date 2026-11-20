@@ -217,18 +217,21 @@ struct KBlendTerrain2D {
   View2<real> in_v;
   int ide, jde, spec_bdy_width, blend_width;
   double r_blend_zones;
+  // blend_terrain in the build's REAL (real*4: each product, the sum and r_blend_zones = 1./(blend_width+1) in
+  // binary32)
+  using A = real;
 
   CPPWRF_HD void operator()(int i0, int j0, int /*k*/) const {
     const int i = i0 + 1;
     const int j = j0 + 1;
-    const double v_in = static_cast<double>(in_v(i0, j0));
-    const double v_int = static_cast<double>(interp_v(i0, j0));
-    double v_out = v_in;
+    const A v_in = static_cast<A>(in_v(i0, j0));
+    const A v_int = static_cast<A>(interp_v(i0, j0));
+    A v_out = v_in;
     for (int blend_cell = blend_width; blend_cell >= 1; --blend_cell) {
       if ((i == spec_bdy_width + blend_cell) || (j == spec_bdy_width + blend_cell) ||
           (i == ide - spec_bdy_width - blend_cell) || (j == jde - spec_bdy_width - blend_cell)) {
-        v_out = (static_cast<double>(blend_cell) * v_in +
-                 static_cast<double>(blend_width + 1 - blend_cell) * v_int) * r_blend_zones;
+        v_out = (static_cast<A>(blend_cell) * v_in + static_cast<A>(blend_width + 1 - blend_cell) * v_int) *
+                static_cast<A>(r_blend_zones);
       }
     }
     if ((i <= spec_bdy_width) || (j <= spec_bdy_width) ||
@@ -262,18 +265,21 @@ struct KBlendTerrain3D {
   View3<real> in_v;
   int ide, jde, spec_bdy_width, blend_width;
   double r_blend_zones;
+  // blend_terrain in the build's REAL (real*4: each product, the sum and r_blend_zones = 1./(blend_width+1) in
+  // binary32)
+  using A = real;
 
   CPPWRF_HD void operator()(int i0, int j0, int k) const {
     const int i = i0 + 1;
     const int j = j0 + 1;
-    const double v_in = static_cast<double>(in_v(i0, j0, k));
-    const double v_int = static_cast<double>(interp_v(i0, j0, k));
-    double v_out = v_in;
+    const A v_in = static_cast<A>(in_v(i0, j0, k));
+    const A v_int = static_cast<A>(interp_v(i0, j0, k));
+    A v_out = v_in;
     for (int blend_cell = blend_width; blend_cell >= 1; --blend_cell) {
       if ((i == spec_bdy_width + blend_cell) || (j == spec_bdy_width + blend_cell) ||
           (i == ide - spec_bdy_width - blend_cell) || (j == jde - spec_bdy_width - blend_cell)) {
-        v_out = (static_cast<double>(blend_cell) * v_in +
-                 static_cast<double>(blend_width + 1 - blend_cell) * v_int) * r_blend_zones;
+        v_out = (static_cast<A>(blend_cell) * v_in + static_cast<A>(blend_width + 1 - blend_cell) * v_int) *
+                static_cast<A>(r_blend_zones);
       }
     }
     if ((i <= spec_bdy_width) || (j <= spec_bdy_width) ||
@@ -317,6 +323,30 @@ struct KAdjustTempQv {
   int use_theta_m;
 
   CPPWRF_HD void operator()(int i, int j, int k) const {
+    if constexpr (std::is_same_v<real, float>) {
+      // WRF real*4: adjust_tempqv in REAL (p_old, p_new, rh REAL arrays; R_v/R_d folded in REAL; scalar expf and
+      // powf: nest_init_utils.o has no vectorised loop calling them)
+      constexpr float R_ratio = 461.6f / 287.f;
+      const float c4 = c4h_v(k), c3 = c3h_v(k), ptop = float(p_top), pp = pp_v(i, j, k);
+      const float th_in = th_v(i, j, k), qv_in = qv_v(i, j, k);
+      const float p_old = c4 + c3 * smub_v(i, j) + ptop + pp;
+      const float tc_old = use_theta_m == 1
+                               ? (th_in + 300.f) * libm::pow(p_old / 1.e5f, 2.f / 7.f) / (1.f + R_ratio * qv_in) - 273.15f
+                               : (th_in + 300.f) * libm::pow(p_old / 1.e5f, 2.f / 7.f) - 273.15f;
+      const float es_old = 610.78f * libm::exp(17.0809f * tc_old / (234.175f + tc_old));
+      const float e_old = qv_in * p_old / (0.622f + qv_in);
+      const float rh = e_old / es_old;
+      const float p_new = c4 + c3 * mub_v(i, j) + ptop + pp;
+      const float thloc = use_theta_m == 1 ? (th_in + 300.f) / (1.f + R_ratio * qv_in) : (th_in + 300.f);
+      const float dth1 = -191.86e-3f * (thloc) / (p_new + p_old) * (p_new - p_old);
+      const float dth = -191.86e-3f * (thloc + 0.5f * dth1) / (p_new + p_old) * (p_new - p_old);
+      th_v(i, j, k) = use_theta_m == 1 ? (thloc + dth) * (1.f + R_ratio * qv_in) - 300.f : (thloc + dth) - 300.f;
+      const float tc_new = (thloc + dth) * libm::pow(p_new / 1.e5f, 2.f / 7.f) - 273.15f;
+      const float es_new = 610.78f * libm::exp(17.0809f * tc_new / (234.175f + tc_new));
+      const float e_new = rh * es_new;
+      qv_v(i, j, k) = 0.622f * e_new / (p_new - e_new);
+      return;
+    }
     constexpr double R_d = 287.0;
     constexpr double R_v = 461.6;
     constexpr double R_ratio = R_v / R_d;

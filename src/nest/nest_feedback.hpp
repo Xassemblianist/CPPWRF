@@ -194,26 +194,26 @@ struct KCopyFcnView3D {
     const int nj0_base = (cj - jpos) * nrj;
 
     if (!xstag && !ystag) {
-      const double inv_pts = 1.0 / static_cast<double>(nri * nrj);
-      double sum = 0.0;
+      const real inv_pts = real(1.0) / static_cast<real>(nri * nrj);
+      real sum = 0;
       for (int dj = 0; dj < nrj; ++dj) {
         for (int di = 0; di < nri; ++di) {
-          sum += inv_pts * static_cast<double>(nfld(ni0_base + di, nj0_base + dj, k));
+          sum += inv_pts * static_cast<real>(nfld(ni0_base + di, nj0_base + dj, k));
         }
       }
       cfld(ci0, cj0, k) = static_cast<real>(sum);
     } else if (xstag && !ystag) {
-      const double inv_pts = 1.0 / static_cast<double>(nrj);
-      double sum = 0.0;
+      const real inv_pts = real(1.0) / static_cast<real>(nrj);
+      real sum = 0;
       for (int dj = 0; dj < nrj; ++dj) {
-        sum += inv_pts * static_cast<double>(nfld(ni0_base, nj0_base + dj, k));
+        sum += inv_pts * static_cast<real>(nfld(ni0_base, nj0_base + dj, k));
       }
       cfld(ci0, cj0, k) = static_cast<real>(sum);
     } else if (!xstag && ystag) {
-      const double inv_pts = 1.0 / static_cast<double>(nri);
-      double sum = 0.0;
+      const real inv_pts = real(1.0) / static_cast<real>(nri);
+      real sum = 0;
       for (int di = 0; di < nri; ++di) {
-        sum += inv_pts * static_cast<double>(nfld(ni0_base + di, nj0_base, k));
+        sum += inv_pts * static_cast<real>(nfld(ni0_base + di, nj0_base, k));
       }
       cfld(ci0, cj0, k) = static_cast<real>(sum);
     }
@@ -231,11 +231,11 @@ struct KCopyFcnView2D {
     const int cj = cj0 + 1;
     const int ni0_base = (ci - ipos) * nri;
     const int nj0_base = (cj - jpos) * nrj;
-    const double inv_pts = 1.0 / static_cast<double>(nri * nrj);
-    double sum = 0.0;
+    const real inv_pts = real(1.0) / static_cast<real>(nri * nrj);
+    real sum = 0;
     for (int dj = 0; dj < nrj; ++dj) {
       for (int di = 0; di < nri; ++di) {
-        sum += inv_pts * static_cast<double>(nfld(ni0_base + di, nj0_base + dj));
+        sum += inv_pts * static_cast<real>(nfld(ni0_base + di, nj0_base + dj));
       }
     }
     cfld(ci0, cj0) = static_cast<real>(sum);
@@ -296,9 +296,9 @@ struct KSm121J3D {
   View3<real> tv;
   View3<const real> ccv;
   CPPWRF_HD void operator()(int i, int j, int k) const {
-    tv(i, j, k) = static_cast<real>(0.25 * (static_cast<double>(ccv(i, j + 1, k)) +
-                                            2.0 * static_cast<double>(ccv(i, j, k)) +
-                                            static_cast<double>(ccv(i, j - 1, k))));
+    tv(i, j, k) = static_cast<real>(real(0.25) * (static_cast<real>(ccv(i, j + 1, k)) +
+                                            real(2.0) * static_cast<real>(ccv(i, j, k)) +
+                                            static_cast<real>(ccv(i, j - 1, k))));
   }
 };
 
@@ -306,33 +306,33 @@ struct KSm121I3D {
   View3<real> cv;
   View3<const real> tcv;
   CPPWRF_HD void operator()(int i, int j, int k) const {
-    cv(i, j, k) = static_cast<real>(0.25 * (static_cast<double>(tcv(i + 1, j, k)) +
-                                            2.0 * static_cast<double>(tcv(i, j, k)) +
-                                            static_cast<double>(tcv(i - 1, j, k))));
+    cv(i, j, k) = static_cast<real>(real(0.25) * (static_cast<real>(tcv(i + 1, j, k)) +
+                                            real(2.0) * static_cast<real>(tcv(i, j, k)) +
+                                            static_cast<real>(tcv(i - 1, j, k))));
   }
 };
 
 struct KSmdsmJ3D {
   View3<real> tv;
   View3<const real> ccv;
-  double nu;
+  real nu;
   CPPWRF_HD void operator()(int i, int j, int k) const {
-    double c0 = static_cast<double>(ccv(i, j, k));
-    double cp = static_cast<double>(ccv(i, j + 1, k));
-    double cm = static_cast<double>(ccv(i, j - 1, k));
-    tv(i, j, k) = static_cast<real>(c0 + nu * ((cp + cm) * 0.5 - c0));
+    real c0 = static_cast<real>(ccv(i, j, k));
+    real cp = static_cast<real>(ccv(i, j + 1, k));
+    real cm = static_cast<real>(ccv(i, j - 1, k));
+    tv(i, j, k) = static_cast<real>(c0 + nu * ((cp + cm) * real(0.5) - c0));
   }
 };
 
 struct KSmdsmI3D {
   View3<real> tv;
   View3<const real> ccv;
-  double nu;
+  real nu;
   CPPWRF_HD void operator()(int i, int j, int k) const {
-    double c0 = static_cast<double>(ccv(i, j, k));
-    double cp = static_cast<double>(ccv(i + 1, j, k));
-    double cm = static_cast<double>(ccv(i - 1, j, k));
-    tv(i, j, k) = static_cast<real>(c0 + nu * ((cp + cm) * 0.5 - c0));
+    real c0 = static_cast<real>(ccv(i, j, k));
+    real cp = static_cast<real>(ccv(i + 1, j, k));
+    real cm = static_cast<real>(ccv(i - 1, j, k));
+    tv(i, j, k) = static_cast<real>(c0 + nu * ((cp + cm) * real(0.5) - c0));
   }
 };
 
@@ -346,9 +346,9 @@ struct KSm121J2D {
   View2<real> tv;
   View2<const real> ccv;
   CPPWRF_HD void operator()(int i, int j, int /*k*/) const {
-    tv(i, j) = static_cast<real>(0.25 * (static_cast<double>(ccv(i, j + 1)) +
-                                         2.0 * static_cast<double>(ccv(i, j)) +
-                                         static_cast<double>(ccv(i, j - 1))));
+    tv(i, j) = static_cast<real>(real(0.25) * (static_cast<real>(ccv(i, j + 1)) +
+                                         real(2.0) * static_cast<real>(ccv(i, j)) +
+                                         static_cast<real>(ccv(i, j - 1))));
   }
 };
 
@@ -356,33 +356,33 @@ struct KSm121I2D {
   View2<real> cv;
   View2<const real> tcv;
   CPPWRF_HD void operator()(int i, int j, int /*k*/) const {
-    cv(i, j) = static_cast<real>(0.25 * (static_cast<double>(tcv(i + 1, j)) +
-                                         2.0 * static_cast<double>(tcv(i, j)) +
-                                         static_cast<double>(tcv(i - 1, j))));
+    cv(i, j) = static_cast<real>(real(0.25) * (static_cast<real>(tcv(i + 1, j)) +
+                                         real(2.0) * static_cast<real>(tcv(i, j)) +
+                                         static_cast<real>(tcv(i - 1, j))));
   }
 };
 
 struct KSmdsmJ2D {
   View2<real> tv;
   View2<const real> ccv;
-  double nu;
+  real nu;
   CPPWRF_HD void operator()(int i, int j, int /*k*/) const {
-    double c0 = static_cast<double>(ccv(i, j));
-    double cp = static_cast<double>(ccv(i, j + 1));
-    double cm = static_cast<double>(ccv(i, j - 1));
-    tv(i, j) = static_cast<real>(c0 + nu * ((cp + cm) * 0.5 - c0));
+    real c0 = static_cast<real>(ccv(i, j));
+    real cp = static_cast<real>(ccv(i, j + 1));
+    real cm = static_cast<real>(ccv(i, j - 1));
+    tv(i, j) = static_cast<real>(c0 + nu * ((cp + cm) * real(0.5) - c0));
   }
 };
 
 struct KSmdsmI2D {
   View2<real> tv;
   View2<const real> ccv;
-  double nu;
+  real nu;
   CPPWRF_HD void operator()(int i, int j, int /*k*/) const {
-    double c0 = static_cast<double>(ccv(i, j));
-    double cp = static_cast<double>(ccv(i + 1, j));
-    double cm = static_cast<double>(ccv(i - 1, j));
-    tv(i, j) = static_cast<real>(c0 + nu * ((cp + cm) * 0.5 - c0));
+    real c0 = static_cast<real>(ccv(i, j));
+    real cp = static_cast<real>(ccv(i + 1, j));
+    real cm = static_cast<real>(ccv(i - 1, j));
+    tv(i, j) = static_cast<real>(c0 + nu * ((cp + cm) * real(0.5) - c0));
   }
 };
 
@@ -452,9 +452,9 @@ inline void feedback_field3(
         parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, nk}, KSm121I3D{cv, tcv});
         exchange_field(cfld);
       } else {
-        const double xnu[2] = {0.50, -0.52};
+        const real xnu[2] = {real(0.50), real(-0.52)};
         for (int pass = 0; pass < 2; ++pass) {
-          const double nu = xnu[pass];
+          const real nu = xnu[pass];
           parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, nk}, KSmdsmJ3D{tv, ccv, nu});
           parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, nk}, KCopy3D{cv, tcv});
           exchange_field(cfld);
@@ -510,9 +510,9 @@ inline void feedback_field2(
         parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, 1}, KSm121I2D{cv, tcv});
         exchange_field(cfld);
       } else {
-        const double xnu[2] = {0.50, -0.52};
+        const real xnu[2] = {real(0.50), real(-0.52)};
         for (int pass = 0; pass < 2; ++pass) {
-          const double nu = xnu[pass];
+          const real nu = xnu[pass];
           parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, 1}, KSmdsmJ2D{tv, ccv, nu});
           parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, 1}, KCopy2D{cv, tcv});
           exchange_field(cfld);

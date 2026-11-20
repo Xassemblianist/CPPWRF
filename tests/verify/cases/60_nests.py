@@ -17,6 +17,14 @@ CASES = [
     ("real_n1_fp32_1h", "cuda", "configs/real_n1.ini", [],
      {d: f"{WR}/run_N1/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 3600,
      {f"{d}.{x}": t for d in ("d01", "d02") for x, t in (("U", 9e-4), ("W", 1.5e-2), ("THM", 3e-6), ("QV", 1e-4))}),
+    # CPU FP32 against WRF real*4, bit for bit: run_N1_cpu_sp (fp32id4_data.tar) is WRF real*4's N1 run on the
+    # workstation from run_N1's real*4 inputs; steps/: 3 minutes, history every minute on both domains; 1 h, every 10
+    ("real_n1_fp32_cpu", "cpu_sp", "configs/real_n1_steps.ini", ["real.dir=" + f"{WR}/run_N1_cpu_sp/steps"],
+     {d: f"{WR}/run_N1_cpu_sp/steps/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 180,
+     {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "V", "W", "PH", "MU", "THM", "QV")}),
+    ("real_n1_fp32_cpu_1h", "cpu_sp", "configs/real_n1.ini", ["real.dir=" + f"{WR}/run_N1_cpu_sp"],
+     {d: f"{WR}/run_N1_cpu_sp/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 3600,
+     {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "V", "W", "PH", "MU", "THM", "QV")}),
     ("real_n2_r8_fp64_cpu", "cpu_dp", "configs/real_n2_steps.ini", ["real.dir=" + f"{WR}/run_N2_r8/steps"],
      {d: f"{WR}/run_N2_r8/steps/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 180,
      {"d01.U": 0.0, "d01.THM": 0.0, "d01.QV": 0.0, "d02.U": 0.0, "d02.THM": 0.0, "d02.QV": 0.0}),
@@ -53,6 +61,17 @@ CASES = [
     ("real_n3_r8_fp64_cpu", "cpu_dp", "configs/real_n3_steps.ini", [],
      {d: f"{WR}/run_N3s_r8/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 180,
      {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP")}),
+    # CPU FP32 against WRF real*4, bit for bit: run_N3_cpu_sp (fp32id4_data.tar) is WRF real*4's N3 run on the
+    # workstation from real*4 inputs (real.exe real*4 with the N3 namelist on run_N1's met_em files); steps/:
+    # 3 minutes, history every minute on both domains; 1 h, every 10 minutes
+    ("real_n3_fp32_cpu", "cpu_sp", "configs/real_n3_steps.ini",
+     ["real.dir=" + f"{WR}/run_N3_cpu_sp/steps", "phys.table_dir=" + f"{WR}/run_N3_cpu_sp/steps"],
+     {d: f"{WR}/run_N3_cpu_sp/steps/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 180,
+     {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP")}),
+    ("real_n3_fp32_cpu_1h", "cpu_sp", "configs/real_n3.ini",
+     ["real.dir=" + f"{WR}/run_N3_cpu_sp", "phys.table_dir=" + f"{WR}/run_N3_cpu_sp"],
+     {d: f"{WR}/run_N3_cpu_sp/wrfout_{d}_2026-10-12_00:00:00" for d in ("d01", "d02")}, 3600,
+     {f"{d}.{x}": 0.0 for d in ("d01", "d02") for x in ("U", "W", "THM", "QV", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP")}),
     # N3F1 = N3 (3 parent steps) with wrfinput_d02's LU_INDEX / IVGTYP changed at 173 fed-back land points: the parent's
     # landuse_init / Noah init rerun after the t = 0 feedback (start_domain's second phy_init)
     ("real_n3f1_r8_fp64_cpu", "cpu_dp", "configs/real_n3_steps.ini",
@@ -87,6 +106,10 @@ DATA = {
     'real_n1_r8_fp64_cpu': 'suite_data.tar,v05_files_data.tar',
     'real_n1_r8_fp64_cuda': 'suite_data.tar,v05_files_data.tar',
     'real_n1_fp32_1h': 'port_fp32r4_data.tar',
+    'real_n1_fp32_cpu': 'fp32id4_data.tar',
+    'real_n1_fp32_cpu_1h': 'fp32id4_data.tar',
+    'real_n3_fp32_cpu': 'fp32id4_data.tar',
+    'real_n3_fp32_cpu_1h': 'fp32id4_data.tar',
     'real_n2_r8_fp64_cpu': 'suite_data.tar,v05_files_data.tar',
     'real_n2_r8_fp64_cpu_1h': 'v05_suite_refs.tar,v05_files_links.tar',
     'real_n2s1_r8_fp64_cpu': 'nest_data.tar,v05_files_data.tar,v05_files_links.tar',
