@@ -682,19 +682,93 @@ void integ_moist(const F3<T>& q_in, const F3<T>& p_in, F3<T>& pd_out, const F3<T
   }
 }
 
-// sfcprs3 over metgrid levels (kte = nlev)
-// module_initialize_real.F:8457-8515 sfcprs2 (ez_method = we_have_tavgsfc: TAVGSFC is refused, so .false.):
-// psfc = psfc_in * exp(g del_z / (Rd Tv_sfc)), del_z = input surface height - model terrain
+// module_initialize_real.F:8457-8515 sfcprs2 (ez_method = we_have_tavgsfc, module_initialize_real.F:1415):
+// psfc = psfc_in * exp(g del_z / (Rd Tv_sfc)), del_z = input surface height - model terrain; Tv_sfc from the
+// lowest input level's temperature, or from TAVGSFC (avgsfct) with ez_method
 template <typename T>
 void sfcprs2(const F3<T>& t, const F3<T>& q, const F3<T>& height, const F2<T>& psfc_in, const F2<T>& ter,
-             F2<T>& psfc, const Dims& d, const SkipCtx& sk) {
+             const F2<T>& avgsfct, F2<T>& psfc, bool ez_method, const Dims& d, const SkipCtx& sk) {
   const T Rd = Const<T>::r_d, g = Const<T>::g;
   for (int j = d.jts(); j <= std::min(d.jde - 1, d.jte()); ++j)
     for (int i = d.its(); i <= std::min(d.ide - 1, d.ite()); ++i) {
       if (skip_middle(d, i, j, sk.width, sk.hold_ups)) continue;
-      const T tv_sfc = t(i, 1, j) * (T(1.) + T(0.608) * q(i, 1, j));
+      const T tv_sfc = (ez_method ? avgsfct(i, j) : t(i, 1, j)) * (T(1.) + T(0.608) * q(i, 1, j));
       const T del_z = height(i, 1, j) - ter(i, j);
       psfc(i, j) = psfc_in(i, j) * std::exp(g * del_z / (Rd * tv_sfc));
+    }
+}
+
+// module_initialize_real.F:8147-8453 sfcprs: the surface pressure from the sea-level pressure (PMSL) and the model
+// terrain. ez_method (TAVGSFC): a standard-atmosphere lapse rate over the average surface temperature. Otherwise, with
+// 850, 700 and 500 hPa among the input levels (NINT(p) at the first point of the tile, kts+1..kte), the sea-level
+// temperature from the 850/700/500 hPa lapse rates; without them the lapse-rate formula over the lowest input level's
+// temperature (the code under #if 0 is not compiled). The level search runs over kte = num_metgrid_levels.
+template <typename T>
+void sfcprs(const F3<T>& t, const F3<T>& q, const F3<T>& height, const F2<T>& pslv, const F2<T>& ter,
+            const F2<T>& avgsfct, const F3<T>& p, F2<T>& psfc, bool ez_method, int nlev, const Dims& d,
+            const SkipCtx& sk) {
+  const T g = Const<T>::g, Rd = Const<T>::r_d;
+  const T gamma = T(6.5E-3), pconst = T(10000.0), TC = T(273.15) + T(17.5);  // svpt0 + 17.5
+  const T gammarg = gamma * Rd / g, rov2 = Rd / T(2.);
+  const T expo = -g / (Rd * gamma);
+  const int kts = 1, kte = nlev;
+  const int j1 = std::min(d.jde - 1, d.jte()), i1 = std::min(d.ide - 1, d.ite());
+  auto skip = [&](int i, int j) { return skip_middle(d, i, j, sk.width, sk.hold_ups); };
+  if (ez_method) {
+    for (int j = d.jts(); j <= j1; ++j)
+      for (int i = d.its(); i <= i1; ++i) {
+        if (skip(i, j)) continue;
+        psfc(i, j) = pslv(i, j) * std::pow(T(1.0) + gamma * ter(i, j) / avgsfct(i, j), expo);
+      }
+    return;
+  }
+  int k850 = 0, k700 = 0, k500 = 0;
+  {
+    const int i = d.its(), j = d.jts();
+    for (int k = kts + 1; k <= kte; ++k) {
+      const long n = std::lround(double(p(i, k, j)));
+      if (n == 85000) k850 = k;
+      else if (n == 70000) k700 = k;
+      else if (n == 50000) k500 = k;
+    }
+  }
+  if (k850 == 0 || k700 == 0 || k500 == 0) {
+    for (int j = d.jts(); j <= j1; ++j)
+      for (int i = d.its(); i <= i1; ++i) {
+        if (skip(i, j)) continue;
+        psfc(i, j) = pslv(i, j) * std::pow(T(1.0) + gamma * ter(i, j) / t(i, 1, j), expo);
+      }
+    return;
+  }
+  for (int j = d.jts(); j <= j1; ++j)
+    for (int i = d.its(); i <= i1; ++i) {
+      if (skip(i, j)) continue;
+      // ht = -ter / height(850 hPa); an isothermal first guess of the surface pressure
+      const T ht = -ter(i, j) / height(i, k850, j);
+      T ps = pslv(i, j) * std::pow(pslv(i, j) / p(i, k850, j), ht);
+      T p1;
+      if (ps - T(95000.) >= T(0.)) p1 = T(85000.);
+      else if (ps - T(70000.) >= T(0.)) p1 = ps - pconst;
+      else p1 = T(50000.);
+      const T t850 = t(i, k850, j) * (T(1.) + T(0.608) * q(i, k850, j));
+      const T t700 = t(i, k700, j) * (T(1.) + T(0.608) * q(i, k700, j));
+      const T t500 = t(i, k500, j) * (T(1.) + T(0.608) * q(i, k500, j));
+      const T gamma78 = std::log(t850 / t700) / std::log(p(i, k850, j) / p(i, k700, j));
+      const T gamma57 = std::log(t700 / t500) / std::log(p(i, k700, j) / p(i, k500, j));
+      T t1;
+      if (ps - T(95000.) >= T(0.)) t1 = t850;
+      else if (ps - T(85000.) >= T(0.)) t1 = t700 * std::pow(p1 / p(i, k700, j), gamma78);
+      else if (ps - T(70000.) >= T(0.)) t1 = t500 * std::pow(p1 / p(i, k500, j), gamma57);
+      else t1 = t500;
+      T tslv = t1 * std::pow(pslv(i, j) / p1, gammarg);
+      const T tsfc = tslv - gamma * ter(i, j);
+      const T tfixed = TC - T(0.005) * ((tsfc - TC) * (tsfc - TC));
+      const bool l1 = tslv < TC, l2 = tsfc <= TC, l3 = !l1;
+      if (l2 && l3) tslv = TC;
+      else if (!l2 && l3) tslv = tfixed;
+      p1 = -ter(i, j) * g / (rov2 * (tsfc + tslv));
+      ps = pslv(i, j) * std::exp(p1);
+      psfc(i, j) = ps;
     }
 }
 
