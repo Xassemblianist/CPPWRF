@@ -12,6 +12,7 @@
 #include <cstdio>
 #include <memory>
 #include <stdexcept>
+#include <type_traits>
 
 #include "cases/model.hpp"
 #include "core/constants.hpp"
@@ -249,7 +250,52 @@ void init_real_case(const io::Config& cfg, Model& m) {
   WArray pb = WArray::make(nx, ny, nz, win), alb = WArray::make(nx, ny, nz, win), t_init = WArray::make(nx, ny, nz, win);
   WArray phb = WArray::make(nx, ny, nz + 1, win);
   std::vector<double> mub(std::size_t(nx) * ny);
-  {
+  if constexpr (std::is_same_v<real, float>) {
+    // WRF real*4: start_em's locals (p_surf, temp, pfu, pfd, phm) and the fields it stores (pb, t_init, alb, mub,
+    // phb) are REAL, so every operation rounds to binary32 and each stored value feeds the next as stored.
+    // The WArrays hold the binary32 values exactly.
+    constexpr float g = 9.81f, r_d = 287.f, cp = 7.f * r_d / 2.f, cv = cp - r_d, cvpm = -cv / cp, rcp = r_d / cp;
+    constexpr float p1000mb = 100000.f, t0 = 300.f;
+    const float t00 = float(bp.t00), p00 = float(bp.p00), a = float(bp.a), tiso = float(bp.tiso),
+                a_strat = float(bp.a_strat), p_strat = float(bp.p_strat), p_top = float(d.p_top);
+    auto f = [](double x) { return float(x); };
+    for (int j = iw.j0; j < iw.j1; ++j)
+      for (int i = iw.i0; i < iw.i1; ++i) {
+        const std::size_t ij = std::size_t(j) * nx + i;
+        const float ht = f(d.hgt[ij]);
+        const float p_surf = p00 * libm::exp(-t00 / a + libm::pow((t00 / a) * (t00 / a) - 2.f * g * ht / a / r_d, 0.5f));
+        for (int k = 0; k < nz; ++k) {
+          const std::size_t n = (std::size_t(k) * ny + j) * nx + i;
+          const float pbk = f(d.c3h[k]) * (p_surf - p_top) + f(d.c4h[k]) + p_top;
+          float temp = std::max(tiso, t00 + a * libm::log(pbk / p00));
+          if (pbk < p_strat) temp = tiso + a_strat * libm::log(pbk / p_strat);
+          const float ti = temp * libm::pow(p00 / pbk, rcp) - t0;
+          pb[n] = pbk;
+          t_init[n] = ti;
+          alb[n] = (r_d / p1000mb) * (ti + t0) * libm::pow(pbk / p1000mb, cvpm);
+        }
+        const float mb = p_surf - p_top;
+        mub[ij] = mb;
+        phb[ij] = ht * g;
+        for (int k = 1; k <= nz; ++k) {
+          const std::size_t n = (std::size_t(k) * ny + j) * nx + i, nm = (std::size_t(k - 1) * ny + j) * nx + i;
+          if (hypso == 1) {
+            phb[n] = f(phb[nm]) - f(d.dnw[k - 1]) * (f(d.c1h[k - 1]) * mb + f(d.c2h[k - 1])) * f(alb[nm]);
+          } else {
+            const float pfu = f(d.c3f[k]) * mb + f(d.c4f[k]) + p_top;
+            const float pfd = f(d.c3f[k - 1]) * mb + f(d.c4f[k - 1]) + p_top;
+            const float phm = f(d.c3h[k - 1]) * mb + f(d.c4h[k - 1]) + p_top;
+            phb[n] = f(phb[nm]) + f(alb[nm]) * phm * libm::log(pfd / pfu);
+          }
+        }
+        for (int k = 0; k < nz; ++k) {  // max_dom = 1: pb, alb from mub and t_init
+          const std::size_t n = (std::size_t(k) * ny + j) * nx + i;
+          const float pbk = f(d.c3h[k]) * mb + f(d.c4h[k]) + p_top;
+          pb[n] = pbk;
+          alb[n] = (r_d / p1000mb) * (f(t_init[n]) + t0) * libm::pow(pbk / p1000mb, cvpm);
+        }
+      }
+  } else {
     const double t00 = bp.t00, p00 = bp.p00, a = bp.a, tiso = bp.tiso, a_strat = bp.a_strat, p_strat = bp.p_strat;
     for (int j = iw.j0; j < iw.j1; ++j)
       for (int i = iw.i0; i < iw.i1; ++i) {
@@ -372,6 +418,30 @@ void init_real_case(const io::Config& cfg, Model& m) {
   }
   // al (hypsometric_opt) and p from start_em, theta_m with qvf = 1
   WArray al = WArray::make(nx, ny, nz, win), p = WArray::make(nx, ny, nz, win);
+  if constexpr (std::is_same_v<real, float>) {  // start_em.F 808-853 in REAL (pfu, pfd, phm, al, p REAL)
+    constexpr float r_d = 287.f, cp = 7.f * r_d / 2.f, cpovcv = cp / (cp - r_d), p1000mb = 100000.f, t0 = 300.f;
+    const float p_top = float(d.p_top);
+    auto f = [](double x) { return float(x); };
+    for (int k = 0; k < nz; ++k)
+      for (int j = iw.j0; j < iw.j1; ++j)
+        for (int i = iw.i0; i < iw.i1; ++i) {
+          const std::size_t n = idx3(i, j, k, nx, ny), n1 = idx3(i, j, k + 1, nx, ny);
+          const float mu = f(d.mu[std::size_t(j) * nx + i]), mb = f(mub[std::size_t(j) * nx + i]);
+          const float albk = f(alb[n]);
+          float a;
+          if (hypso == 2) {
+            const float pfu = f(d.c3f[k + 1]) * (mb + mu) + f(d.c4f[k + 1]) + p_top;
+            const float pfd = f(d.c3f[k]) * (mb + mu) + f(d.c4f[k]) + p_top;
+            const float phm = f(d.c3h[k]) * (mb + mu) + f(d.c4h[k]) + p_top;
+            a = (f(d.ph[n1]) - f(d.ph[n]) + f(phb[n1]) - f(phb[n])) / phm / libm::log(pfd / pfu) - albk;
+          } else {
+            const float c1 = f(d.c1h[k]);
+            a = -1.f / ((c1 * mb + f(d.c2h[k])) + c1 * mu) * (albk * (c1 * mu) + f(d.rdnw[k]) * (f(d.ph[n1]) - f(d.ph[n])));
+          }
+          al[n] = a;
+          p[n] = p1000mb * libm::pow((r_d * (t0 + f(thm[n]))) / (p1000mb * (a + albk)), cpovcv) - f(pb[n]);
+        }
+  } else
   for (int k = 0; k < nz; ++k)
     for (int j = iw.j0; j < iw.j1; ++j)
       for (int i = iw.i0; i < iw.i1; ++i) {
