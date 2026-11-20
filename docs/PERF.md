@@ -76,6 +76,14 @@ suite's WRF real*8 reference of P4 (tolerance 0) and GPU FP64 identical to CPU F
 WRF real*8 at 1 h is that of WRF real*4 (P4: U 6.2e-4 against WRF real*4's 6.6e-4, T 3.5e-5 against 4.0e-5). GPU
 memory peaks (FP32 / FP64): P4 8.3 / 9.1 GB, N3 9.5 / 10.9 GB, L 20.8 / 28.7 GB (P4 and R1 in FP32 fit a 6 GB GPU).
 
+**Release 1.1.0: what was and was not measured again.** No new benchmark was run for 1.1.0; the c9c95c5 rerun above
+is the latest. After it, RRTMG LW / SW became single precision in CUDA FP32 builds (4ec7aef); GPU FP32 with that
+change ran P4 for 72 h 2.0x and N3 for 24 h 1.65x faster on the Colab G4 than the GPU FP32 build with RRTMG in
+double precision (CHANGELOG.md, 1.1.0, Performance). The GPU FP32 column above is therefore from before that change.
+The later FP32 changes (WRF real*4's constants and precisions) and the fixes of 1.1.0 were checked for their results
+(CUDA FP64 suite at tolerance 0, CUDA FP32 suite within tolerances, Colab G4 at fb158f3), not for their speed. A new
+benchmark will come with a later release.
+
 The tables below are the first run (b30ec5b).
 
 Stepping time, in seconds per simulated hour (history off):

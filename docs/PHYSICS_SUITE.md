@@ -376,8 +376,11 @@ promotes DOUBLE PRECISION to 16-byte quad in gfortran. Thompson declares its tab
 DOUBLE PRECISION, so that build computes them in software quad: qr_acr_qg alone did not finish in
 8 h. The Thompson references are therefore made with a WRF build from the same source
 with `-fdefault-real-8 -fdefault-double-8` (DOUBLE PRECISION stays 8 bytes, as the author intends
-and as in the single-precision WRF; qr_acr_qg takes 280 s). The schemes verified before (WSM6, KF,
-YSU, Noah, sfclayrev, RRTMG, Kessler) have no DOUBLE PRECISION in their used code paths.
+and as in the single-precision WRF; qr_acr_qg takes 280 s). The same WRF-4.8.0-r8d8 build makes the references
+of every scheme with DOUBLE PRECISION variables in its used code: Thompson (also aerosol-aware, mp_physics 28), the
+radar reflectivity, MYNN-EDMF (its DOUBLE PRECISION locals; also on the two-way nest N3M, whose first reference from
+the stock -r8 build therefore differed), New Tiedtke, Grell-Freitas, WENO advection, NSSL and P3. The schemes
+verified before (WSM6, KF, YSU, Noah, sfclayrev, RRTMG, Kessler) have no DOUBLE PRECISION in their used code paths.
 
 **Tables.** WRF writes qr_acr_qg_V4.dat, qr_acr_qsV2.dat and freezeH2O.dat on its first run and reads
 them afterwards. CPPWRF reads them from `phys.table_dir` (default real.dir; either byte order) and

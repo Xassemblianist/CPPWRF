@@ -1,10 +1,14 @@
 # CPPWRF: status and verification
 
-Version 1.0.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
+Version 1.1.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
-(at main 1d21532: 300 CPU FP64 checks, i.e. 281 cases, 18 restart checks and the Straka check, all passing, plus the 9 slow 24 h, 30 h and 72 h runs of `--slow`; 116 CUDA FP64 cases and 18 CUDA FP64 restart checks, 134 runs; 38 CUDA FP32 cases) and
+(at main 78e46c2, version 1.1.0: 839 cases, 477 CPU FP64, 319 CUDA FP64 and 43 CUDA FP32, and 18 restart
+configurations. The CPU CI runs 342 checks, i.e. the 323 CPU FP64 cases outside `--slow`, 18 restart checks and the
+Straka check, all passing; the 154 slow CPU cases are the 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases.
+The Colab G4 ran all 319 CUDA FP64 cases, the 18 GPU restart checks and the GPU Straka check, 338 checks, all passing
+at tolerance 0, and the 43 CUDA FP32 cases with restart_p1_fp32_cuda, 44 runs within their tolerances) and
 `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
@@ -94,8 +98,9 @@ Bit identity on the CPU requires reproducing WRF's arithmetic exactly: the order
 product, constant folding done by the Fortran compiler, the halo refresh schedule, and the vector math
 functions (glibc libmvec) that gfortran uses in vectorised loops. CPPWRF calls the same libmvec
 functions for the same loop iterations (`cppwrf::vm` in src/core/backend.hpp). The physics reference
-runs use WRF built with `-fdefault-real-8 -fdefault-double-8`, so that DOUBLE PRECISION variables
-(Thompson) are 8-byte as in CPPWRF.
+runs of the schemes with DOUBLE PRECISION variables (Thompson, MYNN, radar reflectivity, New Tiedtke,
+Grell-Freitas, WENO advection, NSSL, P3) use WRF built with `-fdefault-real-8 -fdefault-double-8`, so that these
+variables are 8-byte as in CPPWRF.
 
 ## Results
 
@@ -149,6 +154,7 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | MYNNX1 / MYNNX2 | MYNN with non-default MYNN options (X1: tkeadvect, cloudpdf 1, mixlength 2, closure 3.0, edmf_tke 1, mixqt 1, output 1, tke_budget 1, sfcflux land 2 / water 3, grav_settling 2; X2: edmf 0, cloudmix 0, cloudpdf 0, mixlength 0, closure 2.5, ess 0, mixscalars 1, sfcflux land 3 / water 4, grav_settling 1) | 1 h |
 | P9BMJ | P9 with the Betts-Miller-Janjic cumulus (cu_physics 2; restarted at 30 min; cudt 5) | 1 h |
 | P4BMJ | P4 with BMJ instead of Kain-Fritsch, without and with bmj_rad_feedback | 1 h |
+| P4BMJFI0 | P4BMJF with icloud 0 (no cloud fraction in RRTMG) | 1 h |
 | BL1 | P1 with the BouLac PBL (bl_pbl_physics 8; restarted at 30 min) | 1 h |
 | BL4 | P4 with the BouLac PBL | 1 h |
 | BL9 | P9 with the BouLac PBL over the Eta surface layer | 1 h |
@@ -210,6 +216,7 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | N1 | one-way nest (both domains) | 3 parent steps |
 | N2 | two-way nest (both domains) | 1 h |
 | N2S1 / N2S2 | N2 with smooth_option 1 / 2 (smoothing of the fed-back fields, ht included) | 1 h |
+| N3F1 / N3M | N3 with d02 land use differing at the fed-back points / with MYNN and km_opt 4, 2 | 3 parent steps |
 | N3 | two-way nest with the P4 physics on both domains (physics feedback, nest ozone from the parent) | 1 h |
 | P4, P6, P9, N3 long runs | inputs from real.exe for 24 h / 72 h (wrfbdy every 6 h; 24-72 h from the GFS forecast through WPS), history every 3 h, CPPWRF restarted in the middle from its own wrfrst files | 24 h; 72 h (P4, P6, P9) |
 | D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains | resumed from CPPWRF's wrfrst and native restart files (SR1: native only) between the radiation, PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run's | 15-20 min |
@@ -228,12 +235,16 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | ADV0 | MYNN with moist_adv_opt 0 and scalar_adv_opt 0 | 1 h |
 | MPDFM1 | MYNN with bl_mynn_cloudpdf -1 (subgrid clouds zeroed) | 1 h |
 | MPDFM2 | MYNN with bl_mynn_cloudpdf -2 (subgrid clouds zeroed) | 1 h |
+| G9F6C | N3 with the multi-scale Kain-Fritsch on d01 only and icloud = 0 (WRF: icloud 1 on both domains) | 3 steps |
+| G9F2 | P4 with output_diagnostics and QVAPOR / QCLOUD added to auxhist3 by iofields_filename | 3 steps |
 | W1 | active w_damping (dt 450 s) | 10 steps |
 
 V1-V3, T6, G2, F1, F2, D0, D0V, SU1 and SU2 are compared in every wrfout variable over the whole run; V1-V3 start from the
 global GFS of 2026-10-12 00 UTC through WPS, so the domains, projections and surface types differ from the P
-cases. The Thompson, MYNN and radar reflectivity references (P6, RADW, RADT, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, mp8, V3, D0, D0V, SU1, SU2) come from WRF built with -r8 -double-8: with -r8 alone
-gfortran makes Thompson's DOUBLE PRECISION variables 16-byte (and the reflectivity code of WSM6 and Thompson).
+cases. The Thompson, MYNN and radar reflectivity references (P6, RADW, RADT, MYNN, MYNNSF1, MYNNSF2, MYNNX1, MYNNX2, mp8, V3, D0, D0V, SU1, SU2, and the MYNN nest N3M) come from WRF built with -r8 -double-8: with -r8 alone
+gfortran makes the DOUBLE PRECISION variables of Thompson and of MYNN's locals 16-byte (and the reflectivity code of
+WSM6 and Thompson). N3M's first reference came from the stock -r8 build and differed for that reason; against its
+WRF-4.8.0-r8d8 reference it is bit-identical.
 
 The long runs compare every 3-hourly frame of both halves (the run stopped one step after 12 h / 36 h and the run
 resumed from its wrfrst files) and the wrfrst files at the restart with WRF's uninterrupted run, every variable at
@@ -259,8 +270,11 @@ The differential tests run WRF's objects on the test machine: their Fortran driv
 tests/phys/libmvec_intel.cpp, whose `_ZGVbN2v_log` / `_ZGVbN2v_log10` are these Intel-equivalent functions
 (on Intel identical to libmvec), so WRF's side gives Intel's bits on AMD too (with libmvec's own log / log10 it
 differed on AMD EPYC by 1 ulp in KF, Noah-MP, the MYNN surface layer and the WSM6 / Thompson reflectivity).
-The full CPU suite therefore runs on the AMD CPU of Colab's G4 runtime (`tools/colab/colab_suite.sh --gpu G4
---any-cpu --jobs 12 --threads 4`: the CPU suite, the output files, ideal files, differential and ctest tests); the Intel L4 runtime (2 h 45 min) and the GCP VMs stay possible.
+The full CPU suite therefore runs on AMD CPUs: on every push to main on GitHub-hosted runners (AMD EPYC; for 1.1.0
+at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 33/33, all exact), and
+on the AMD CPU of Colab's G4 runtime (`tools/colab/colab_suite.sh --gpu G4 --any-cpu --jobs 12 --threads 4`: the CPU
+suite, the output files, ideal files, differential and ctest tests); the Intel L4 runtime and the GCP VMs stay
+possible.
 The CPU result does not depend on the OpenMP thread count or on the Intel machine: P4, P6, P8, P9, MYNN,
 P1 with Noah-MP and the two-way nest N3s (1 h, both domains) and em_quarter_ss (30 min) with 1, 16 and 44
 threads are bit-identical to serial WRF on c3 (Sapphire Rapids) and n2 machines (`run.threads` in
@@ -295,10 +309,12 @@ inputs, 30 h, every hourly frame) covers XTIME past one day (days*1440 + seconds
 the first whose coszen depends on it) and N3D50 (N3 with d01 dt 50 s, a nest step of 50/3 s, 1 h) a step that is a
 fraction of a second; both pass at tolerance 0 on the CPU (Colab L4, Intel) and in CUDA FP64 (L4).
 
-CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite (134 runs at main 1d21532 with the GPU
-restart cases; the G4 proof for v1.1 is pending, the last full G4 run covered the 122 runs of main a37a639: R1, T1, P1 to P9, A01 to A09, B01, B03, C01, C04, C16, the MYNN, Noah-MP, slab, radar, Dudhia, RRTM, V1 to V3, D0,
-D0V, sst_update, hybrid, nest and ideal cases) passes with tolerance 0 (tests/verify/exact.py, every frame and variable of the history) on Colab's
-L4 (sm_89), RTX PRO 6000 Blackwell "G4" (sm_120) and A100 (sm_80); H100 was not available. The FP64 device code
+CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite passes with tolerance 0
+(tests/verify/exact.py, every frame and variable of the history). For 1.1.0 the Colab G4 (RTX PRO 6000 Blackwell
+Server Edition, sm_120, CUDA 13.0, 2026-11-20) ran all of them at fb158f3, which has the model code of 78e46c2: 319
+cases, 18 GPU restart checks and the GPU Straka check, 338 PASS, 0 FAIL; the device glibc math proof was identical
+and ctest passed 35/35 in the FP64 and the FP32 CUDA build. Earlier subsets also ran on Colab's L4 (sm_89) and A100
+(sm_80); H100 was not available. The FP64 device code
 computes as WRF's gfortran real*8 build on x86-64:
 
 - no FMA contraction (`--fmad=false` for every CUDA FP64 kernel; gfortran without -march emits none);
@@ -314,15 +330,16 @@ CUDA 13.0's ptxas for sm_120 compiles an integer add of an immediate to the bits
 floating-point add (`mov.b64; add.s64` became `DADD`); log's |x - 1| test then sent inputs near 1 to its table path.
 The device code makes these adds with two 32-bit adds with carry (`glibc::detail::addk`). FP64 stepping time against
 origin/main before this work (1 h, no history; P1 / P4 / D0): L4 +7 % / +2 % / +3 %, G4 +6 % / -4 % / 0 %,
-A100 +5 % / +2 % / +6 %. The CUDA FP32 build is unchanged (CUDA's math library, FMA contraction), against WRF's
-single-precision runs (relative L2 at 1 h):
+A100 +5 % / +2 % / +6 %. The CUDA FP32 build is not affected by this (CUDA's math library, FMA contraction). Its
+relative L2 at 1 h in the 1.1.0 G4 run (fb158f3; docs/FP32_ACCURACY.md, section 1.1.0, has the values that moved
+with this release's FP32 fixes):
 
 | Case | Precision | U | W | THM | QV |
 |---|---|---|---|---|---|
 | R0 (dynamics) | FP32 vs WRF FP32 | 1.6e-4 | 4.9e-3 | 1.0e-6 | 2.0e-5 |
-| P1 | FP32 vs WRF FP32 | 1.9e-4 | 3.9e-3 | 7.5e-7 | 4.9e-5 |
-| P3 | FP32 vs WRF FP32 | 1.9e-4 | 4.0e-3 | 7.5e-7 | 5.1e-5 |
-| P4 / P6 / P8 | FP32 vs WRF FP32 | 2.2e-4 to 8.5e-4 | up to 4.0e-2 | up to 1.5e-5 | up to 6.3e-4 |
+| P1 | FP32 vs WRF FP32 | 1.9e-4 | 3.9e-3 | 7.5e-7 | 4.7e-5 |
+| P3 | FP32 vs WRF FP32 | 1.9e-4 | 4.0e-3 | 7.4e-7 | 4.5e-5 |
+| P4 / P6 / P8 | FP32 vs WRF FP32 | 2.1e-4 to 6.3e-4 | up to 2.1e-2 | up to 9.4e-6 | up to 5.4e-4 |
 | N1 (1 h) | FP32 vs WRF FP32 | 1.9e-4 (d01), 2.8e-4 (d02) | 3.6e-3 / 4.7e-3 | 6.5e-7 / 9.7e-7 | 2.0e-5 / 3.1e-5 |
 
 On the GPU a run restarted after its first step reproduces the uninterrupted run bit for bit
@@ -405,7 +422,8 @@ Stepping time in seconds per simulated hour, history off (rerun at main c9c95c5,
 | L (359 x 269 x 44) | 25.72 | 45.18 | 2.50 | 7.52 | 52.43 |
 
 GPU FP32 is 5.1 to 10.3 times faster than WRF real*4, GPU FP64 3.1 to 6.0 times faster than WRF real*8 (docs/PERF.md
-has the first run and the layouts).
+has the first run and the layouts). This run predates RRTMG in single precision in CUDA FP32 builds; no new benchmark
+was run for 1.1.0 (docs/PERF.md says what was and was not measured again).
 
 Agreement in these runs:
 - The CPU FP64 output is bit-identical to the suite's WRF real*8 references for P4 and N3 (both domains).

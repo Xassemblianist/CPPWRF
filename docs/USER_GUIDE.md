@@ -44,11 +44,11 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files, for the 300 CPU FP64 checks of the suite at main 1d21532 (real-data
+  process, in every variable and output time of the wrfout and wrfrst files, for the 342 CPU FP64 checks of the suite at main 78e46c2 (real-data
   domains in the mid-latitudes, the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
-- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (134 CUDA FP64 runs of the suite at main 1d21532; the G4 proof for v1.1 is pending, the last full
-  run, 122 runs at main a37a639, was on the RTX PRO 6000 Blackwell, earlier subsets on NVIDIA L4 and A100).
+- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all 338 CUDA FP64 checks of the suite for v1.1.0 on the RTX PRO 6000 Blackwell of a Colab G4, earlier
+  subsets on NVIDIA L4 and A100).
 - **GPU, FP32**: the fast mode; its distance from WRF real*8 is that of stock WRF real*4 for most physics suites,
   and in the first hour of single runs with ACM2 / Pleim-Xiu, Morrison or the skin SST up to about twice it, as a
   rounding draw rather than a defect (docs/FP32_ACCURACY.md). Use it for forecasts and
@@ -99,7 +99,7 @@ the GPU FP64 output of the example equals the CPU FP64 output bit for bit.
 - OpenMP
 - NetCDF-C with its headers (`libnetcdf-dev`); NetCDF-4 / HDF5 support for compressed output
 - Python 3 with `netCDF4` and `numpy` for the tools (`tools/wrf2cppwrf.py` itself needs only the standard library)
-- *(GPU builds)* the NVIDIA CUDA Toolkit >= 12 and an NVIDIA GPU (tested: sm_80, sm_89, sm_120)
+- *(GPU builds)* the NVIDIA CUDA Toolkit >= 12.1 and an NVIDIA GPU of compute capability 7.0 or later (tested: sm_80, sm_89, sm_120)
 
 ### Builds
 One source tree gives four builds; build directories are independent.

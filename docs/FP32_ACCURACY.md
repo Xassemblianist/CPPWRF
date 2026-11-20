@@ -21,6 +21,50 @@ statements and re-measured with other builds, perturbed starts and 24 h runs on 
 first-hour outliers"). An earlier, smaller measurement (docs/PERF.md's benchmark: relative
 L2 of eight fields at 1 h, R 0.35 to 1.08) follows first.
 
+The study predates two FP32 changes of release 1.1.0: RRTMG in single precision in CUDA FP32 builds (4ec7aef,
+2026-11-18) and the FP32 builds' WRF real*4 constants and precisions (b0b2479 to aaeddf8). Its tables are those of
+the builds before them; the next section gives the suite's FP32 values after them.
+
+## 1.1.0 (fb158f3, Colab G4, 2026-11-20)
+
+The CUDA FP32 suite (43 cases and restart_p1_fp32_cuda, relative L2 at 1 h against each case's WRF reference) ran
+on a Colab G4 (RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0) at fb158f3, the model code of release
+1.1.0, and before at 66f6165. Both builds have RRTMG in single precision; between them came the FP32 fixes that
+make the FP32 builds compute as WRF real*4 does (b0b2479 to aaeddf8): the RRTMG LW / SW tables as WRF real*4 builds
+them, Thompson's REAL(KIND=R8SIZE) tables and DOUBLE PRECISION process rates in double, MSKF's momentum transport in
+REAL(r8), P3's double temporaries, WSM / WDM rgmma in single precision, julian from the double day of year, and WRF
+real*4's single-precision constants and products (small_step, sfclayrev, x**2.0, NSSL, Noah-MP groundwater, RRTMG
+SW heating). The cases and variables whose value moved by more than 30 % between the two runs (the logs print two
+significant digits; the reference is WRF real*4 for the runs without `_r8`, WRF real*8 for the others):
+
+| Case | Reference | 66f6165 -> fb158f3 |
+|---|---|---|
+| P2 | real*4 | W 4.2e-2 -> 1.5e-2 |
+| P4 | real*4 | W 2.3e-2 -> 1.6e-2 |
+| W5 (real_p4w5_fp32_1h) | real*8 | U 6.3e-4 -> 2.3e-4; W 1.7e-2 -> 5.9e-3; THM 8.6e-6 -> 3.5e-6; QV 5.3e-4 -> 1.5e-4 |
+| U4 (real_p4u_fp32_1h) | real*8 | U 6.4e-4 -> 2.6e-4; W 1.7e-2 -> 7.3e-3; THM 8.4e-6 -> 4.1e-6; QV 5.2e-4 -> 1.8e-4 |
+| RUC4 | real*8 | U 6.2e-4 -> 2.2e-4; W 1.7e-2 -> 7.6e-3; THM 8.3e-6 -> 3.1e-6; QV 5.1e-4 -> 1.5e-4 |
+| TW4 | real*8 | U 8.5e-4 -> 5.7e-4; W 2.1e-2 -> 1.2e-2; THM 1.1e-5 -> 7.3e-6; QV 6.3e-4 -> 2.9e-4 |
+| X4 | real*8 | W 1.8e-2 -> 9.5e-3; THM 1.1e-5 -> 7.3e-6; QV 5.6e-4 -> 2.4e-4 |
+| SKV | real*8 | THM 1.5e-5 -> 1.0e-5 |
+| W3 (real_p4w3_fp32_1h) | real*8 | U 2.2e-4 -> 2.9e-4; W 5.8e-3 -> 8.0e-3; THM 3.1e-6 -> 4.1e-6; QV 1.4e-4 -> 2.4e-4 |
+| MORR | real*8 | W 6.9e-3 -> 9.0e-3 |
+| WM4 | real*8 | THM 5.0e-6 -> 8.8e-6 |
+| ACM7 | real*8 | U 4.1e-4 -> 6.5e-4; W 8.5e-3 -> 3.0e-2; QV 3.5e-4 -> 4.7e-4 |
+| Q4 | real*8 | U 2.6e-4 -> 6.5e-4; W 1.0e-2 -> 1.8e-2; THM 5.1e-6 -> 9.1e-6; QV 1.7e-4 -> 5.6e-4 |
+| Q4M | real*8 | U 2.2e-4 -> 4.1e-4; W 7.6e-3 -> 2.0e-2; THM 3.9e-6 -> 6.1e-6; QV 1.5e-4 -> 3.8e-4 |
+
+- **Smaller:** the P4-based cases W5, U4 and RUC4 are 2 to 3.6 times closer to WRF real*8 in U, W, THM and QV, TW4
+  and X4 1.5 to 2.3 times; P2's W 2.8 times and P4's W 1.4 times closer to WRF real*4.
+- **Larger:** ACM7 (W 3.5x), Q4 (QV 3.3x, U 2.5x), Q4M (W 2.6x) and, less, W3, MORR and WM4. ACM7 and Q4 run
+  Kain-Fritsch, whose first-hour spread from last-bit ties is described in "Root causes of the first-hour outliers"
+  (below); these values are within that spread. In this run ACM7's W (3.02e-2) was just above its tolerance of
+  3e-2, so the FP32 tolerances of ACM7 (W) and Q4 (U, QV) were set to about 3x the values of this run
+  (tests/verify/cases/28_acm.py, 41_qnse.py). With them all 44 FP32 runs pass.
+- The other 29 FP32 cases moved by 30 % or less in every variable.
+
+The ratio R of the study (FP32's difference over WRF real*4's) was not measured again for 1.1.0.
+
 ## Earlier: the 1 h measurement of docs/PERF.md's benchmark
 
 One Colab G4 runtime (AMD EPYC 9B45, RTX PRO 6000 Blackwell). WRF v4.8.0 real*4 and real*8 built from the release

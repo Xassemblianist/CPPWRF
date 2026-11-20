@@ -1,6 +1,6 @@
 # CPPWRF
 
-Version 1.0.0 ([release notes](docs/RELEASE_NOTES.md)).
+Version 1.1.0 ([release notes](docs/RELEASE_NOTES.md)).
 
 CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static nesting,
 `real.exe` and `ideal.exe`. One source tree builds for the CPU (OpenMP) and for NVIDIA GPUs (CUDA), in FP64
@@ -10,11 +10,11 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** The suite has 134 CUDA FP64 runs at main 1d21532; they are compared with
-  WRF and the CPU build at tolerance 0. The G4 proof for v1.1 is pending: the last full run, all 122 CUDA FP64 runs
-  of main a37a639, matched on the Colab G4 (RTX PRO 6000 Blackwell, sm_120), and earlier subsets on L4 (sm_89) and
-  A100 (sm_80).
-- **GPU, FP32:** the fast mode, compared with WRF by relative L2 error.
+- **GPU, FP64: bit-identical to WRF too.** For v1.1.0 all 338 CUDA FP64 checks of the suite (319 cases, 18
+  restart checks and the Straka check) matched WRF at tolerance 0 on the Colab G4 (RTX PRO 6000 Blackwell, sm_120,
+  CUDA 13.0); earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
+- **GPU, FP32:** the fast mode, compared with WRF by relative L2 error; its 44 suite runs are within their measured
+  tolerances.
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
 
@@ -60,8 +60,9 @@ without a port is reported as an error and never silently ignored. Still missing
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
-- **Model runs against WRF** (`tests/verify/wrf_suite.py`): 300 CPU FP64 checks (281 cases, 18 restart
-  checks and the Straka check at main 1d21532) and 134 CUDA FP64 runs. They cover
+- **Model runs against WRF** (`tests/verify/wrf_suite.py`): 342 CPU FP64 checks on every push (323 cases, 18
+  restart checks and the Straka check; 154 more cases run with `--slow`), all passing at main 78e46c2, and 338
+  CUDA FP64 checks per release on a GPU, all passing for v1.1.0. They cover
   real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
   at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are
   compared with WRF's in every variable and output time.
@@ -78,7 +79,8 @@ the same on Intel and AMD processors (`CPPWRF_PORTABLE_LIBMVEC`).
 WRF v4.8.0 and CPPWRF ran on one Google Colab G4 runtime: an AMD EPYC 9B45 (24 cores, 48 hardware threads) and an
 NVIDIA RTX PRO 6000 Blackwell (96 GB). WRF was built there from the release source with its own GNU `configure`
 (MPI, and MPI + OpenMP), in real*4 and real*8; its fastest of five process layouts counts. Each run is 1 simulated
-hour with the same namelist and inputs (CPPWRF main c9c95c5, 2026-11-16). The table gives the stepping time in seconds per simulated hour, without
+hour with the same namelist and inputs (CPPWRF main c9c95c5, 2026-11-16, before RRTMG computed in single precision
+in CUDA FP32 builds; no new benchmark was run for 1.1.0). The table gives the stepping time in seconds per simulated hour, without
 start-up and history output ([docs/PERF.md](docs/PERF.md) has the wall times, other layouts and memory):
 
 | Case | WRF real*4, best layout | WRF real*8, best layout | CPPWRF GPU FP32 | CPPWRF GPU FP64 |
@@ -115,7 +117,8 @@ cmake -S . -B build-gpu-dp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -D
 cmake --build build-gpu-dp -j "$(nproc)"
 ```
 
-You need a C++20 compiler, CMake >= 3.24, OpenMP and NetCDF-C; the CUDA toolkit >= 12 for the GPU builds; Python 3
+You need a C++20 compiler, CMake >= 3.24, OpenMP and NetCDF-C; the CUDA toolkit >= 12.1 and a GPU of compute
+capability 7.0 or later for the GPU builds; Python 3
 with `netCDF4` and `numpy` for the tools. `ctest --test-dir build-cpu` runs the unit tests.
 
 ## Run
@@ -149,7 +152,7 @@ with WRF's `input_sounding`) and the suite's real-data cases, which read the WRF
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): building, the way from WPS to wrfout, the translator, every supported
   and rejected option, nests, GPU runs, restarts, output streams, configuration keys
 - [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md): versions and the verified scope of
-  v1.0.0
+  v1.1.0 (and of v1.0.0)
 - [docs/STATUS.md](docs/STATUS.md): what is ported, how it is verified, every case and result
 - [docs/PERF.md](docs/PERF.md): the benchmark against WRF, the GPU profile and the performance roadmap
 - [docs/FP32_ACCURACY.md](docs/FP32_ACCURACY.md): how close GPU FP32 is to WRF real*8, against stock WRF real*4
