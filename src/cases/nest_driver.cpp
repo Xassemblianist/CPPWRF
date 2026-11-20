@@ -928,7 +928,9 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   auto feedback = [&](DomInstance& d, DomInstance& c) {
     if (c.spec.feedback == 0) return;
     med_nest_feedback(d.model, c.model, c.spec, &d.fb_scratch);
-    dev_sync();
+    // as after the solve and med_nest_force (advance_domain): with CUDA graphs one stream orders the work and every
+    // read of device data waits for it; the run's last root step ends with the device's work
+    if (!step_graphs_on() || doms[0].step == doms[0].model.nsteps) dev_sync();
 #ifdef CPPWRF_HAVE_NETCDF
     if (d.runner->history() && c.runner->history()) {  // the physics state, then history-only fields (Registry u=)
       d.runner->history()->feedback_physics(*c.runner->history(), c.spec.i_parent_start, c.spec.j_parent_start,
