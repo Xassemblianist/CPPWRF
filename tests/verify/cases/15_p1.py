@@ -55,6 +55,14 @@ CASES = [
     ("real_p1_r8_fp64_cuda_1h", "cuda_dp", "configs/real_p1_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P1_r8", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P1_r8/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
+    # CPU FP32 (-DCPPWRF_DOUBLE=OFF) against WRF's real*4 build, bit for bit: run_P1 is WRF real*4's run of P1 from
+    # its own wrfinput / wrfbdy (steps/: 3 minutes, history every step)
+    ("real_p1_fp32_cpu", "cpu_sp", "configs/real_p1_r8.ini", ["real.dir=" + f"{WR}/run_P1/steps"],
+     f"{WR}/run_P1/steps/wrfout_d01_2026-10-12_00:00:00", 180,
+     {"U": 0.0, "W": 0.0, "PH": 0.0, "THM": 0.0, "QV": 0.0, "MU": 0.0}),
+    ("real_p1_fp32_cpu_1h", "cpu_sp", "configs/real_p1_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_P1", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_P1/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_p1_fp32_1h", "cuda", "configs/real_p1_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P1", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P1/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 3e-4, "W": 1e-2, "THM": 2e-6, "QV": 1e-4}),
@@ -87,4 +95,6 @@ DATA = {
     'real_p8_r8_fp64_cpu_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_p1_r8_fp64_cuda_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_p1_fp32_1h': 'suite_data.tar',
+    'real_p1_fp32_cpu': 'fp32id_data.tar',
+    'real_p1_fp32_cpu_1h': 'suite_data.tar',
 }

@@ -4,7 +4,8 @@
 reference run, with the tolerance that the current code meets. Run after every change to the
 dycore, boundaries, diffusion or physics coupling.
 
-  wrf_suite.py --cpu-dp <build>/cppwrf --cuda <build>/cppwrf [--cuda-dp <build>/cppwrf] [--out DIR] [--only NAME[,NAME]]
+  wrf_suite.py --cpu-dp <build>/cppwrf --cuda <build>/cppwrf [--cuda-dp <build>/cppwrf] [--cpu-sp <build>/cppwrf]
+               [--out DIR] [--only NAME[,NAME]]
                [--exact] [--jobs N]   (N CPU cases at once, each with OMP_NUM_THREADS threads) [--allow-skip] [--slow]
   wrf_suite.py --list   (every case with all its fields, then the special and restart checks)
   wrf_suite.py --status-table [FILE]   (docs/STATUS.md's table of the CPU FP64 cases; FILE: replace it there)
@@ -12,7 +13,10 @@ dycore, boundaries, diffusion or physics coupling.
                                         order; tools/colab/colab_suite.sh --cases without --data)
 The cases are defined in tests/verify/cases/ (one file per group, see its __init__.py).
 
-Cases with tolerance 0 (CPU FP64) run with WRF history output and their wrfout files are compared with WRF's at
+Binaries: --cpu-dp the CPU FP64 build (cases cpu_dp, against WRF's real*8 build), --cpu-sp the CPU FP32 build
+(-DCPPWRF_DOUBLE=OFF; cases cpu_sp, against WRF's real*4 build, also at tolerance 0), --cuda / --cuda-dp the CUDA
+FP32 / FP64 builds.
+Cases with tolerance 0 (CPU FP64, CPU FP32) run with WRF history output and their wrfout files are compared with WRF's at
 tolerance 0 (exact.py: NaN equals only NaN, -0 differs from +0): every variable of the reference file, every
 reference frame up to the case's time (the final one must be there), types and variable attributes, and the
 global attributes when the reference's namelist.input is there (CPPWRF's history then reads it). The other
@@ -563,6 +567,7 @@ def status_table(path=None):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cpu-dp")
+    ap.add_argument("--cpu-sp", help="the CPU FP32 build (-DCPPWRF_DOUBLE=OFF): the cpu_sp cases")
     ap.add_argument("--cuda")
     ap.add_argument("--cuda-dp")
     ap.add_argument("--out", default=os.path.expanduser("~/cppwrf_scratch/wrf_suite"))
@@ -681,7 +686,7 @@ def main():
         done(path, good)
         return good, f"{'PASS' if good else 'FAIL'}  {name:22s} {msg}"
 
-    bins = {"cpu_dp": a.cpu_dp, "cuda": a.cuda, "cuda_dp": a.cuda_dp}
+    bins = {"cpu_dp": a.cpu_dp, "cpu_sp": a.cpu_sp, "cuda": a.cuda, "cuda_dp": a.cuda_dp}
     for k, b in bins.items():  # a binary that was asked for and is not there (a failed build) is no SKIP
         if b and not os.path.exists(b):
             print(f"ERROR --{k.replace('_', '-')} {b}: no such file (build failed?)", flush=True)
@@ -700,7 +705,7 @@ def main():
             print(f"SKIP  {name:22s} (reference missing: {', '.join(missing)})", flush=True)
             count["SKIP"] += 1
             continue
-        (cpu if key == "cpu_dp" else gpu).append((t, name, lambda n=name, b=b, c=cfg, s=sets, r=refs, t=t, tl=tol: case(n, b, c, s, r, t, tl)))
+        (cpu if key in ("cpu_dp", "cpu_sp") else gpu).append((t, name, lambda n=name, b=b, c=cfg, s=sets, r=refs, t=t, tl=tol: case(n, b, c, s, r, t, tl)))
     if a.cpu_dp and os.path.exists(a.cpu_dp):
         if not only or wanted("straka_wrf"):
             p = os.path.join(a.out, "straka")
