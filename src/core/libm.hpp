@@ -87,7 +87,7 @@ CPPWRF_LM_FUNC1(sinh, glibc::sinh)
 CPPWRF_LM_FUNC1(erf, glibc::erf)
 CPPWRF_LM_FUNC1(asin, glibc::asin)
 CPPWRF_LM_FUNC1(acos, glibc::acos)
-CPPWRF_LM_FUNC1(tan, glibc::tan)
+CPPWRF_LM_FUNC1F(tan, glibc::tan, glibcf::tanf)
 CPPWRF_LM_FUNC1(tgamma, glibc::tgamma)
 #undef CPPWRF_LM_FUNC1
 #undef CPPWRF_LM_FUNC1F
@@ -99,8 +99,15 @@ CPPWRF_LM double atan2_d(double a, double b) {
 }
 template <class A, class B, std::enable_if_t<std::is_arithmetic_v<A> && std::is_arithmetic_v<B>, int> = 0>
 CPPWRF_LM auto atan2(A a, B b) {
-  if constexpr (std::is_same_v<A, float> && std::is_same_v<B, float>) return std::atan2(a, b);
-  else return atan2_d(double(a), double(b));
+  if constexpr (std::is_same_v<A, float> && std::is_same_v<B, float>) {
+#if defined(CPPWRF_FP32_IDENTITY) && defined(__CUDA_ARCH__)
+    return glibcf::atan2f(a, b);
+#else
+    return std::atan2(a, b);
+#endif
+  } else {
+    return atan2_d(double(a), double(b));
+  }
 }
 // hypot: as atan2
 CPPWRF_LM double hypot_d(double a, double b) {

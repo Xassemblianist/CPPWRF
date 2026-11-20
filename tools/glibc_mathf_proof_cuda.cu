@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Proof of src/core/glibc_mathf.hpp and src/core/libmvec_f4.hpp on the device: every float input of the scalar
-// expf, logf, sinf, cosf, atanf, tanhf, log10f and of the 4-lane expf, logf, sinf, cosf, atanf, and powf (scalar and
-// 4-lane) on 2^N pseudo-random pairs, device against host, bit for bit (two NaNs count as equal). The host functions
-// are proven against the system libm / libmvec by tools/glibc_mathf_proof.cpp and tests/unit/test_libmvec_f4.cpp.
+// expf, logf, sinf, cosf, atanf, tanf, tanhf, log10f and of the 4-lane expf, logf, sinf, cosf, atanf, and powf (scalar
+// and 4-lane) and atan2f on 2^N pseudo-random pairs, device against host, bit for bit (two NaNs count as equal). The
+// host functions are proven against the system libm / libmvec by tools/glibc_mathf_proof.cpp and
+// tests/unit/test_libmvec_f4.cpp.
 //   nvcc -std=c++20 -O3 --fmad=false -arch=native -DCPPWRF_GLIBC_MATH -DCPPWRF_FP32_IDENTITY -Isrc \
 //        -Xcompiler -fopenmp,-ffp-contract=off --expt-relaxed-constexpr tools/glibc_mathf_proof_cuda.cu -o proof_cuda
-//   ./proof_cuda [log2 of the number of powf pairs, default 32]
+//   ./proof_cuda [log2 of the number of pairs, default 32] [names, e.g. "tanf,atan2f": only those]
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -18,9 +19,10 @@
 
 namespace {
 constexpr long long kBatch = 1ll << 26;
-enum Fn { kExp, kLog, kSin, kCos, kAtan, kTanh, kLog10, kVExp, kVLog, kVSin, kVCos, kVAtan, kPow, kVPow, kNFn };
-const char* kName[kNFn] = {"expf", "logf", "sinf", "cosf", "atanf", "tanhf", "log10f",
-                           "v4 expf", "v4 logf", "v4 sinf", "v4 cosf", "v4 atanf", "powf", "v4 powf"};
+enum Fn { kExp, kLog, kSin, kCos, kAtan, kTan, kTanh, kLog10, kVExp, kVLog, kVSin, kVCos, kVAtan, kPow, kVPow, kAtan2,
+          kNFn };
+const char* kName[kNFn] = {"expf", "logf", "sinf", "cosf", "atanf", "tanf", "tanhf", "log10f", "v4 expf", "v4 logf",
+                           "v4 sinf", "v4 cosf", "v4 atanf", "powf", "v4 powf", "atan2f"};
 __host__ __device__ inline std::uint64_t mix(std::uint64_t z) {
   z += 0x9e3779b97f4a7c15ull;
   z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
@@ -45,6 +47,10 @@ __host__ __device__ inline float eval(int fn, long long i) {
     pair(i, x, y);
     return fn == kPow ? g::powf(x, y) : v::powf(x, y);
   }
+  if (fn == kAtan2) {  // any two floats
+    const std::uint64_t r = mix(std::uint64_t(i) ^ 0x5bd1e995ull);
+    return g::atan2f(asf(std::uint32_t(r)), asf(std::uint32_t(r >> 32)));
+  }
   const float x = asf(std::uint32_t(i));
   switch (fn) {
     case kExp: return g::expf(x);
@@ -52,6 +58,7 @@ __host__ __device__ inline float eval(int fn, long long i) {
     case kSin: return g::sinf(x);
     case kCos: return g::cosf(x);
     case kAtan: return g::atanf(x);
+    case kTan: return g::tanf(x);
     case kTanh: return g::tanhf(x);
     case kLog10: return g::log10f(x);
     case kVExp: return v::expf(x);
@@ -79,7 +86,9 @@ int main(int argc, char** argv) {
   std::vector<float> dev(kBatch);
   long long total = 0;
   for (int fn = 0; fn < kNFn; ++fn) {
-    const long long count = (fn == kPow || fn == kVPow) ? (1ll << lg) : (1ll << 32);
+    if (argc > 2 && !std::strstr(argv[2], kName[fn])) continue;  // a list of names: only those
+    const bool pairs = fn == kPow || fn == kVPow || fn == kAtan2;
+    const long long count = pairs ? (1ll << lg) : (1ll << 32);
     long long bad = 0;
     long long first = -1;
     for (long long i0 = 0; i0 < count; i0 += kBatch) {
@@ -101,7 +110,7 @@ int main(int argc, char** argv) {
       std::printf("CUDA error: %s\n", cudaGetErrorString(e));
       return 2;
     }
-    std::printf("%-8s %s: %lld differ", kName[fn], (fn == kPow || fn == kVPow) ? "pairs" : "all 2^32 inputs", bad);
+    std::printf("%-8s %s: %lld differ", kName[fn], pairs ? "pairs" : "all 2^32 inputs", bad);
     if (first >= 0) std::printf(" (first index %lld)", first);
     std::printf("\n");
     total += bad;

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Proof of src/core/glibc_mathf.hpp on the CPU: every float input of expf, logf, sinf, cosf, atanf, tanhf and log10f,
-// and powf on 2^32 pseudo-random pairs plus grids of special values, against the system libm (glibc 2.41, FMA
-// variants), bit for bit (two NaNs count as equal).
+// Proof of src/core/glibc_mathf.hpp on the CPU: every float input of expf, logf, sinf, cosf, atanf, tanf, tanhf and
+// log10f, and powf and atan2f on 2^32 pseudo-random pairs plus grids of special values, against the system libm
+// (glibc 2.41, FMA variants), bit for bit (two NaNs count as equal).
 //   g++ -std=c++20 -O2 -ffp-contract=off -fopenmp -Isrc tools/glibc_mathf_proof.cpp -o glibc_mathf_proof
-//   ./glibc_mathf_proof [log2 of the number of powf pairs, default 32]
+//   ./glibc_mathf_proof [log2 of the number of powf / atan2f pairs, default 32]
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -30,6 +30,8 @@ float (*volatile sys_logf)(float) = ::logf;
 float (*volatile sys_sinf)(float) = ::sinf;
 float (*volatile sys_cosf)(float) = ::cosf;
 float (*volatile sys_atanf)(float) = ::atanf;
+float (*volatile sys_tanf)(float) = ::tanf;
+float (*volatile sys_atan2f)(float, float) = ::atan2f;
 float (*volatile sys_tanhf)(float) = ::tanhf;
 float (*volatile sys_log10f)(float) = ::log10f;
 float (*volatile sys_powf)(float, float) = ::powf;
@@ -69,6 +71,7 @@ int main(int argc, char** argv) {
   bad += unary("sinf", [](float x) { return g::sinf(x); }, [](float x) { return sys_sinf(x); });
   bad += unary("cosf", [](float x) { return g::cosf(x); }, [](float x) { return sys_cosf(x); });
   bad += unary("atanf", [](float x) { return g::atanf(x); }, [](float x) { return sys_atanf(x); });
+  bad += unary("tanf", [](float x) { return g::tanf(x); }, [](float x) { return sys_tanf(x); });
   bad += unary("tanhf", [](float x) { return g::tanhf(x); }, [](float x) { return sys_tanhf(x); });
   bad += unary("log10f", [](float x) { return g::log10f(x); }, [](float x) { return sys_log10f(x); });
   const int lg = argc > 1 ? std::atoi(argv[1]) : 32;
@@ -95,6 +98,25 @@ int main(int argc, char** argv) {
       }
   std::printf("powf    2^%d pairs + special values: %lld differ\n", lg, pbad);
   bad += pbad;
+  // atan2f: 2^lg pseudo-random pairs (half of them with exponents within 2^-30 .. 2^30 of each other) and the special
+  // values' pairs
+  long long abad = 0;
+#pragma omp parallel for schedule(static, 1 << 16) reduction(+ : abad)
+  for (long long i = 0; i < (1ll << lg); ++i) {
+    const std::uint64_t r = mix(std::uint64_t(i) ^ 0x9e3779b97f4a7c15ull);
+    std::uint32_t a = std::uint32_t(r), b = std::uint32_t(r >> 32);
+    if (i & 1) b = (b & 0x807fffffu) | ((((a >> 23) & 0xffu) + ((b >> 23) % 61u) - 30u) & 0xffu) << 23;
+    const float y = f(a), x = f(b);
+    if (!same(g::atan2f(y, x), sys_atan2f(y, x))) ++abad;
+  }
+  for (float x : sp)
+    for (float y : sp)
+      if (!same(g::atan2f(y, x), sys_atan2f(y, x))) {
+        ++abad;
+        std::printf("atan2f(%a, %a): %a vs %a\n", double(y), double(x), double(g::atan2f(y, x)), double(sys_atan2f(y, x)));
+      }
+  std::printf("atan2f  2^%d pairs + special values: %lld differ\n", lg, abad);
+  bad += abad;
   std::printf(bad ? "glibc_mathf_proof FAILED\n" : "glibc_mathf_proof passed\n");
   return bad ? 1 : 0;
 }

@@ -2,7 +2,7 @@
 #pragma once
 // glibc's scalar float libm (Debian 13, glibc 2.41-12, x86-64) on host and device, bit for bit: expf, logf, powf,
 // sinf, cosf (the FMA variants glibc's ifuncs select on CPUs with FMA and AVX2: __expf_fma, __logf_fma, __powf_fma,
-// __sinf_fma, __cosf_fma) and atanf, tanhf, log10f (CORE-MATH's correctly rounded functions, no FMA).
+// __sinf_fma, __cosf_fma) and atanf, atan2f, tanf, tanhf, log10f (CORE-MATH's correctly rounded functions, no FMA).
 // The CUDA FP32 identity build (CPPWRF_FP32_IDENTITY, CMake option CPPWRF_CUDA_FP32_IDENTITY) computes WRF real*4's
 // float functions with them on the device, so that the GPU computes what the CPU FP32 build computes.
 // Each FMA variant is transcribed from libm's machine code (objdump -d at the address its ifunc resolves to): every
@@ -493,6 +493,275 @@ CPPWRF_GMF float atanf(float x) {
   const bool neg = asu(z) >> 63;
   r = (neg ? -0x1.0fdaa22168c23p-7 : 0x1.0fdaa22168c23p-7) - r + (neg ? -0x1.9p0 : 0x1.9p0);
   return static_cast<float>(r);
+}
+
+// ---- atan2f (CORE-MATH, e_atan2f.c: correctly rounded) ----
+namespace detail {
+CPPWRF_GMF double atan2f_muldd(double xh, double xl, double ch, double cl, double* l) {
+  const double ahlh = ch * xl, alhh = cl * xh, ahhh = ch * xh;
+  double ahhl = fma(ch, xh, -ahhh);
+  ahhl += alhh + ahlh;
+  ch = ahhh + ahhl;
+  *l = (ahhh - ch) + ahhl;
+  return ch;
+}
+CPPWRF_GMF float atan2f_tiny(float y, float x) {
+  const double dy = y, dx = x;
+  const double z = dy / dx;
+  double e = fma(-z, double(x), double(y));
+  const double c = -0x1.5555555555555p-2;
+  const double zz = z * z, cz = c * z;
+  e = e / x + cz * zz;
+  std::uint64_t t = asu(z);
+  if ((t & 0xfffffffull) == 0) {
+    if (z * e > 0) t += 1;
+    else t -= 1;
+  }
+  return static_cast<float>(asd(t));
+}
+}  // namespace detail
+CPPWRF_GMF float atan2f(float y, float x) {
+  using namespace detail;
+  constexpr double cn[7] = {0x1p+0, 0x1.40e0698f94c35p+1, 0x1.248c5da347f0dp+1, 0x1.d873386572976p-1,
+                            0x1.46fa40b20f1dp-3, 0x1.33f5e041eed0fp-7, 0x1.546bbf28667c5p-14};
+  constexpr double cd[7] = {0x1p+0, 0x1.6b8b143a3f6dap+1, 0x1.8421201d18ed5p+1, 0x1.8221d086914ebp+0,
+                            0x1.670657e3a07bap-2, 0x1.0f4951fd1e72dp-5, 0x1.b3874b8798286p-11};
+  constexpr double m[2] = {0, 1};
+  constexpr double pi = 0x1.921fb54442d18p+1, pi2 = 0x1.921fb54442d18p+0, pi2l = 0x1.1a62633145c07p-54;
+  constexpr double off[8] = {0.0, pi2, pi, pi2, -0.0, -pi2, -pi, -pi2};
+  constexpr double offl[8] = {0.0, pi2l, 2 * pi2l, pi2l, -0.0, -pi2l, -2 * pi2l, -pi2l};
+  constexpr double sgn[2] = {1, -1};
+  const std::uint32_t ux = asuf(x), uy = asuf(y);
+  const std::uint32_t ax = ux & (~0u >> 1), ay = uy & (~0u >> 1);
+  if (ay >= (0xffu << 23) || ax >= (0xffu << 23)) {
+    if (ay > (0xffu << 23)) return x + y;
+    if (ax > (0xffu << 23)) return x + y;
+    const bool yinf = ay == (0xffu << 23), xinf = ax == (0xffu << 23);
+    if (yinf && xinf) {
+      if (ux >> 31) return static_cast<float>(0x1.2d97c7f3321d2p+1 * sgn[uy >> 31]);
+      return static_cast<float>(0x1.921fb54442d18p-1 * sgn[uy >> 31]);
+    }
+    if (xinf) {
+      if (ux >> 31) return static_cast<float>(pi * sgn[uy >> 31]);
+      return static_cast<float>(0.0 * sgn[uy >> 31]);
+    }
+    if (yinf) return static_cast<float>(pi2 * sgn[uy >> 31]);
+  }
+  if (ay == 0) {
+    if (!ax) {
+      const std::uint32_t i = (uy >> 31) * 4 + (ux >> 31) * 2;
+      if (ux >> 31) return static_cast<float>(off[i] + offl[i]);
+      return static_cast<float>(off[i]);
+    }
+    if (!(ux >> 31)) return static_cast<float>(0.0 * sgn[uy >> 31]);
+  }
+  const std::uint32_t gt = ay > ax;
+  const std::uint32_t i = (uy >> 31) * 4 + (ux >> 31) * 2 + gt;
+  const double zx = x, zy = y;
+  double z = (m[gt] * zx + m[1 - gt] * zy) / (m[gt] * zy + m[1 - gt] * zx);
+  double r;
+  const int d = int(ax) - int(ay);
+  if (d < (27 << 23) && d > (-(27 << 23))) {
+    const double z2 = z * z, z4 = z2 * z2, z8 = z4 * z4;
+    double cn0 = cn[0] + z2 * cn[1];
+    const double cn2 = cn[2] + z2 * cn[3];
+    double cn4 = cn[4] + z2 * cn[5];
+    const double cn6 = cn[6];
+    cn0 += z4 * cn2;
+    cn4 += z4 * cn6;
+    cn0 += z8 * cn4;
+    double cd0 = cd[0] + z2 * cd[1];
+    const double cd2 = cd[2] + z2 * cd[3];
+    double cd4 = cd[4] + z2 * cd[5];
+    const double cd6 = cd[6];
+    cd0 += z4 * cd2;
+    cd4 += z4 * cd6;
+    cd0 += z8 * cd4;
+    r = cn0 / cd0;
+  } else {
+    r = 1;
+  }
+  z *= sgn[gt];
+  r = z * r + off[i];
+  if (((asu(r) + 8) & 0xfffffffull) <= 16) {
+    if (ay < ax && ((ax - ay) >> 23 >= 25)) return atan2f_tiny(y, x);
+    double zh, zl;
+    if (gt == 0) {
+      zh = zy / zx;
+      zl = fma(zh, -zx, zy) / zx;
+    } else {
+      zh = zx / zy;
+      zl = fma(zh, -zy, zx) / zy;
+    }
+    double z2l;
+    const double z2h = atan2f_muldd(zh, zl, zh, zl, &z2l);
+    constexpr double c[32][2] = {
+        {0x1p+0, -0x1.8c1dac5492248p-87},
+        {-0x1.5555555555555p-2, -0x1.55553bf3a2abep-56},
+        {0x1.999999999999ap-3, -0x1.99deed1ec9071p-57},
+        {-0x1.2492492492492p-3, -0x1.fd99c8d18269ap-58},
+        {0x1.c71c71c71c717p-4, -0x1.651eee4c4d9dp-61},
+        {-0x1.745d1745d1649p-4, -0x1.632683d6c44a6p-58},
+        {0x1.3b13b13b11c63p-4, 0x1.bf69c1f8af41dp-58},
+        {-0x1.11111110e6338p-4, 0x1.3c3e431e8bb68p-61},
+        {0x1.e1e1e1dc45c4ap-5, -0x1.be2db05c77bbfp-59},
+        {-0x1.af286b8164b4fp-5, 0x1.a4673491f0942p-61},
+        {0x1.86185e9ad4846p-5, 0x1.e12e32d79fceep-59},
+        {-0x1.642c6d5161faep-5, 0x1.3ce76c1ca03fp-59},
+        {0x1.47ad6f277e5bfp-5, -0x1.abd8d85bdb714p-60},
+        {-0x1.2f64a2ee8896dp-5, 0x1.ef87d4b615323p-61},
+        {0x1.1a6a2b31741b5p-5, 0x1.a5d9d973547eep-62},
+        {-0x1.07fbdad65e0a6p-5, -0x1.65ac07f5d35f4p-61},
+        {0x1.ee9932a9a5f8bp-6, 0x1.f8b9623f6f55ap-61},
+        {-0x1.ce8b5b9584dc6p-6, 0x1.fe5af96e8ea2dp-61},
+        {0x1.ac9cb288087b7p-6, -0x1.450cdfceaf5cap-60},
+        {-0x1.84b025351f3e6p-6, 0x1.579561b0d73dap-61},
+        {0x1.52f5b8ecdd52bp-6, 0x1.036bd2c6fba47p-60},
+        {-0x1.163a8c44909dcp-6, 0x1.18f735ffb9f16p-60},
+        {0x1.a400dce3eea6fp-7, -0x1.c90569c0c1b5cp-61},
+        {-0x1.1caa78ae6db3ap-7, -0x1.4c60f8161ea09p-61},
+        {0x1.52672453c0731p-8, 0x1.834efb598c338p-62},
+        {-0x1.5850c5be137cfp-9, -0x1.445fc150ca7f5p-63},
+        {0x1.23eb98d22e1cap-10, -0x1.388fbaf1d783p-64},
+        {-0x1.8f4e974a40741p-12, 0x1.271198a97da34p-66},
+        {0x1.a5cf2e9cf76e5p-14, -0x1.887eb4a63b665p-68},
+        {-0x1.420c270719e32p-16, 0x1.efd595b27888bp-71},
+        {0x1.3ba2d69b51677p-19, -0x1.4fb06829cdfc7p-73},
+        {-0x1.29b7e6f676385p-23, -0x1.a783b6de718fbp-77}};
+    // polydd(z2h, z2l, 32, c, &pl)
+    int k = 31;
+    double ch = c[k][0], cl = c[k][1];
+    while (--k >= 0) {
+      ch = atan2f_muldd(z2h, z2l, ch, cl, &cl);
+      const double th = ch + c[k][0];
+      const double tl = (c[k][0] - th) + ch;
+      ch = th;
+      cl += tl + c[k][1];
+    }
+    double pl = cl;
+    double ph = ch;
+    zh *= sgn[gt];
+    zl *= sgn[gt];
+    ph = atan2f_muldd(zh, zl, ph, pl, &pl);
+    const double sh = ph + off[i];
+    const double sl = ((off[i] - sh) + ph) + pl + offl[i];
+    const float rf = static_cast<float>(sh);
+    const double th = rf;
+    const double dh = sh - th;
+    double tm = dh + sl;
+    std::uint64_t tth = asu(th);
+    if (th + th * 0x1p-60 == th - th * 0x1p-60) {
+      tth &= 0x7ffull << 52;
+      tth -= 24ull << 52;
+      if (std::fabs(tm) > asd(tth)) tm *= 1.25;
+      else tm *= 0.75;
+    }
+    r = th + tm;
+  }
+  return static_cast<float>(r);
+}
+
+// ---- tanf (CORE-MATH, s_tanf.c: correctly rounded) ----
+namespace detail {
+CPPWRF_GMF double tanf_rltl(float zf, int* q) {
+  const double x = zf;
+  const double idl = -0x1.b1bbead603d8bp-32 * x;
+  const double idh = 0x1.45f306ep-1 * x;
+#if defined(__CUDA_ARCH__)
+  const double id = ::rint(idh);
+#else
+  const double id = std::nearbyint(idh);
+#endif
+  *q = int(static_cast<std::int64_t>(id));
+  return (idh - id) + idl;
+}
+CPPWRF_GMF void tanf_mul64(std::uint64_t a, std::uint64_t b, std::uint64_t* hi, std::uint64_t* lo) {
+#if defined(__CUDA_ARCH__)
+  *hi = __umul64hi(a, b);
+  *lo = a * b;
+#else
+  const unsigned __int128 p = static_cast<unsigned __int128>(a) * b;
+  *hi = std::uint64_t(p >> 64);
+  *lo = std::uint64_t(p);
+#endif
+}
+CPPWRF_GMF double tanf_rbig(std::uint32_t u, int* q) {
+  constexpr std::uint64_t ipi[4] = {0xfe5163abdebbc562ull, 0xdb6295993c439041ull, 0xfc2757d1f534ddc0ull,
+                                    0xa2f9836e4e441529ull};
+  const int e = (u >> 23) & 0xff;
+  const std::uint64_t m = (u & (~0u >> 9)) | 1u << 23;
+  // 128-bit products as (hi, lo) pairs; p_{n} += p_{n-1} >> 64
+  std::uint64_t h0, l0, h1, l1, h2, l2, h3, l3;
+  tanf_mul64(m, ipi[0], &h0, &l0);
+  tanf_mul64(m, ipi[1], &h1, &l1);
+  l1 += h0;
+  h1 += (l1 < h0);
+  tanf_mul64(m, ipi[2], &h2, &l2);
+  l2 += h1;
+  h2 += (l2 < h1);
+  tanf_mul64(m, ipi[3], &h3, &l3);
+  l3 += h2;
+  h3 += (l3 < h2);
+  const std::uint64_t p3h = h3, p3l = l3, p2l = l2, p1l = l1;
+  std::int64_t a;
+  int i;
+  const int k = e - 127, s = k - 23;
+  if (s < 64) {
+    i = int(p3h << s | p3l >> (64 - s));
+    a = std::int64_t(p3l << s | p2l >> (64 - s));
+  } else if (s == 64) {
+    i = int(p3l);
+    a = std::int64_t(p2l);
+  } else {
+    i = int(p3l << (s - 64) | p2l >> (128 - s));
+    a = std::int64_t(p2l << (s - 64) | p1l >> (128 - s));
+  }
+  int sg = int(u);
+  sg >>= 31;
+  const std::int64_t sm = a >> 63;
+  i -= int(sm);
+  const double z = double(a ^ sg) * 0x1p-64;
+  i = (i ^ sg) - sg;
+  *q = i;
+  return z;
+}
+}  // namespace detail
+CPPWRF_GMF float tanf(float x) {
+  using namespace detail;
+  const std::uint32_t t = asuf(x);
+  const int e = (t >> 23) & 0xff;
+  int i;
+  double z;
+  if (e < 127 + 28) {
+    if (e < 115) {
+      if (e < 102) return fmaf(x, std::fabs(x), x);
+      const float x2 = x * x;
+      return fmaf(x, 0x1.555556p-2f * x2, x);
+    }
+    z = tanf_rltl(x, &i);
+  } else if (e < 0xff) {
+    z = tanf_rbig(t, &i);
+  } else {
+    if (t << 9) return x + x;
+    return invalidf(x);
+  }
+  const double z2 = z * z, z4 = z2 * z2;
+  constexpr double cn[4] = {0x1.921fb54442d18p+0, -0x1.fd226e573289fp-2, 0x1.b7a60c8dac9f6p-6,
+                            -0x1.725beb40f33e5p-13};
+  constexpr double cd[4] = {0x1p+0, -0x1.2395347fb829dp+0, 0x1.2313660f29c36p-3, -0x1.9a707ab98d1c1p-9};
+  constexpr double sv[2] = {0, 1};
+  double n = cn[0] + z2 * cn[1];
+  const double n2 = cn[2] + z2 * cn[3];
+  n += z4 * n2;
+  double d = cd[0] + z2 * cd[1];
+  const double d2 = cd[2] + z2 * cd[3];
+  d += z4 * d2;
+  n *= z;
+  const double s0 = sv[i & 1], s1 = sv[1 - (i & 1)];
+  const double r1 = (n * s1 - d * s0) / (n * s0 + d * s1);
+  // (the 2.41 source's table of hard cases compares asfloat(arg) with ax and never matches a finite argument
+  // above 2^-26: r1 is the result; tools/glibc_mathf_proof checks every input)
+  return static_cast<float>(r1);
 }
 
 // ---- tanhf (CORE-MATH, s_tanhf.c) ----
