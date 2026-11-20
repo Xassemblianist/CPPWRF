@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <set>
 #include <stdexcept>
+#include <type_traits>
 
 #include "core/constants.hpp"
 #include "dyn/physics_coupling.hpp"
@@ -500,6 +501,11 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
     const Layout L = download_timed(s.t_2, ht);
     if (s.P_QV >= 0) download_timed(s.q_2[s.P_QV], hq);
     return mass3([&](int i, int j, int k) {
+      if constexpr (std::is_same_v<real, float>) {  // WRF real*4: (t_2+T0)/(1.+(R_v/R_d)*qv) - T0 in REAL
+        const float t0f = float(b.t0), tm = ht[L.index(i, j, k)] + t0f;
+        const float th = hq.empty() || m_.st->P_QV < 0 ? tm : tm / (1.f + (461.6f / 287.f) * hq[L.index(i, j, k)]);
+        return double(th - t0f);
+      }
       const double tm = double(ht[L.index(i, j, k)]) + b.t0;
       const double th = hq.empty() || m_.st->P_QV < 0 ? tm : tm / (1.0 + cst::rvovrd * double(hq[L.index(i, j, k)]));
       return th - b.t0;
