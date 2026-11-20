@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <type_traits>
 
 #include "core/backend.hpp"
 #include "core/column_work.hpp"
@@ -18,19 +19,28 @@ namespace cppwrf::phys::mp_thompson {
 
 inline constexpr int kMaxLevels = 128;
 
+// Rain sedimentation (lamr+fv_r)**(-cre): gfortran pairs the two into one libmvec 2-lane pow (SLP) in the real*8
+// build; the real*4 build calls the scalar double pow
+CPPWRF_HD inline double sed_pow2(double a, double b) {
+    if constexpr (std::is_same_v<real, float>) return libm::pow(a, b);
+    else return vm::pow(a, b, 0, 2);
+}
+
 // Physical constants matching module_mp_thompson.F
 inline constexpr double PI_CONST = 3.1415926536;
 inline constexpr double rho_w = 1000.0;
 inline constexpr double rho_i = 890.0;
 inline constexpr double rho_s_default = 100.0;
 inline constexpr double rho_g_val = 400.0; // idx_bg1 = 5, rho_g(5) = 400.0
-inline constexpr double am_r = PI_CONST * rho_w / 6.0;
+// The real*4 WRF folds these REAL parameters in float: the FP32 build takes those values
+inline constexpr bool kThompsonR4 = std::is_same_v<real, float>;
+inline constexpr double am_r = kThompsonR4 ? double(float(PI_CONST) * float(rho_w) / 6.0f) : PI_CONST * rho_w / 6.0;
 inline constexpr double bm_r = 3.0;
 inline constexpr double am_s = 0.069;
 inline constexpr double bm_s = 2.0;
 inline constexpr double am_g5 = PI_CONST * rho_g_val / 6.0;
 inline constexpr double bm_g = 3.0;
-inline constexpr double am_i = PI_CONST * rho_i / 6.0;
+inline constexpr double am_i = kThompsonR4 ? double(float(PI_CONST) * float(rho_i) / 6.0f) : PI_CONST * rho_i / 6.0;
 inline constexpr double bm_i = 3.0;
 
 inline constexpr double av_r = 4854.0;
@@ -99,7 +109,8 @@ inline constexpr double naCCN0 = 300.0e6;
 inline constexpr double naCCN1 = 50.0e6;
 inline constexpr double R_uni = 8.314;
 // 4./3.*PI*(2.5e-6)**3: gfortran folds the power correctly rounded, which here equals the two products
-inline constexpr double ar_volume = 4. / 3. * PI_CONST * (2.5e-6 * 2.5e-6 * 2.5e-6);
+inline constexpr double ar_volume = kThompsonR4 ? double(4.f / 3.f * float(PI_CONST) * (2.5e-6f * 2.5e-6f * 2.5e-6f))
+                                                : 4. / 3. * PI_CONST * (2.5e-6 * 2.5e-6 * 2.5e-6);
 
 // Thermodynamic helper functions
 template <typename Real>
@@ -166,6 +177,13 @@ CPPWRF_HD inline Real theta_e(Real pres_Pa, Real temp_K, Real w_non, Real tlcl_K
     return xx * libm::exp(p1 * p2);
 }
 
+// SIGN(1.0, SNGL(rate)): the real*4 build tests the float sign bit (negative zero gives -1); FP64 keeps rate >= 0
+template <typename T>
+CPPWRF_HD inline T thompson_sign1(T rate) {
+    if constexpr (std::is_same_v<real, float>) return std::signbit(static_cast<float>(rate)) ? T(-1.0) : T(1.0);
+    else return (rate >= T(0.0)) ? T(1.0) : T(-1.0);
+}
+
 template <typename Real>
 CPPWRF_HD inline Real theta_wetb(Real thetae_K) {
     constexpr double c[7] = {
@@ -183,6 +201,18 @@ CPPWRF_HD inline Real theta_wetb(Real thetae_K) {
         answer = c[0] + x * (c[1] + x * (c[2] + x * (c[3] + x * (c[4] + x * (c[5] + x * c[6])))));
     } else {
         answer = d[0] + x * (d[1] + x * (d[2] + x * (d[3] + x * (d[4] + x * (d[5] + x * d[6])))));
+    }
+    if constexpr (std::is_same_v<Real, float>) {
+        // real*4 WRF: default-real DATA literals widened into real*8 c, d; REAL answer; REAL answer + 273.15
+        double xf = static_cast<double>(std::min(475.0f, thetae_K));
+        auto f = [](double v) { return static_cast<double>(static_cast<float>(v)); };
+        double a;
+        if (xf <= 335.5) {
+            a = f(c[0]) + xf * (f(c[1]) + xf * (f(c[2]) + xf * (f(c[3]) + xf * (f(c[4]) + xf * (f(c[5]) + xf * f(c[6]))))));
+        } else {
+            a = f(d[0]) + xf * (f(d[1]) + xf * (f(d[2]) + xf * (f(d[3]) + xf * (f(d[4]) + xf * (f(d[5]) + xf * f(d[6]))))));
+        }
+        return static_cast<float>(a) + 273.15f;
     }
     return static_cast<Real>(answer + 273.15);
 }
@@ -291,7 +321,7 @@ CPPWRF_HD inline Real activ_ncloud(Real Tt, Real Ww, Real NCCN, const ThompsonTa
 // module_mp_thompson.F iceDeMott (the DeMott et al. 2010 branch that WRF 4.8 uses for every condition)
 template <typename Real>
 CPPWRF_HD inline Real ice_demott(Real tempc, Real rho, Real nifa) {
-    constexpr double rho_not0 = 101325. / (287.05 * 273.15);
+    constexpr double rho_not0 = kThompsonR4 ? double(101325.f / (287.05f * 273.15f)) : 101325. / (287.05 * 273.15);
     const Real nifa_cc = c_max(Real(0.5), nifa * Real(rho_not0) * Real(1.E-6) / rho);
     Real xni = (Real(5.94e-5) * libm::pow(-tempc, Real(3.33))) *
                libm::pow(nifa_cc, (-(Real(0.0264) * tempc)) + Real(0.0033));
@@ -1215,12 +1245,22 @@ struct ThompsonKernel {
             N0_g[k] = ng[k] * tables.ogg2 * libm::pow(lamg, tables.cge[1]);
         } while (false);
 
-        // gfortran vectorises this k loop (kte down to kts): libmvec's 2-lane pow (cppwrf::vm)
+        // gfortran vectorises this k loop (kte down to kts): libmvec's 2-lane pow (cppwrf::vm). The real*4 build
+        // leaves it scalar (no libmvec call in its mp_thompson): powf for lamr, the double pow for N0_r
         do {  // for (int k = nz - 1; k >= 0; --k)
-            double lamr = vm::pow(Real(am_r) * tables.crg[2] * tables.org2 * nr_loc[k] / rr[k], obmr, nz - 1 - k, nz);
+            double lamr;
+            if constexpr (std::is_same_v<Real, float>) {
+                lamr = libm::pow(Real(am_r) * tables.crg[2] * tables.org2 * nr_loc[k] / rr[k], obmr);
+            } else {
+                lamr = vm::pow(Real(am_r) * tables.crg[2] * tables.org2 * nr_loc[k] / rr[k], obmr, nz - 1 - k, nz);
+            }
             ilamr[k] = Real(1.0) / lamr;
             mvd_r[k] = (Real(3.0) + Real(mu_r) + Real(0.672)) / lamr;
-            N0_r[k] = nr_loc[k] * tables.org2 * vm::pow(lamr, static_cast<double>(tables.cre[1]), nz - 1 - k, nz);
+            if constexpr (std::is_same_v<Real, float>) {
+                N0_r[k] = nr_loc[k] * tables.org2 * libm::pow(lamr, static_cast<double>(tables.cre[1]));
+            } else {
+                N0_r[k] = nr_loc[k] * tables.org2 * vm::pow(lamr, static_cast<double>(tables.cre[1]), nz - 1 - k, nz);
+            }
         } while (false);
 
         // Warm-rain processes
@@ -1810,11 +1850,11 @@ struct ThompsonKernel {
 
             pri_ihm[k] = prs_ihm[k] + prg_ihm[k];
             Real ratio = (std::abs(prr_rcg[k]) < std::abs(prg_rcg[k])) ? std::abs(prr_rcg[k]) : std::abs(prg_rcg[k]);
-            prr_rcg[k] = ratio * ((prr_rcg[k] >= Real(0.0)) ? Real(1.0) : Real(-1.0));
+            prr_rcg[k] = ratio * thompson_sign1(prr_rcg[k]);
             prg_rcg[k] = -prr_rcg[k];
             if (twet[k] > Real(273.15)) {
                 Real ratio_s = (std::abs(prr_rcs[k]) < std::abs(prs_rcs[k])) ? std::abs(prr_rcs[k]) : std::abs(prs_rcs[k]);
-                prr_rcs[k] = ratio_s * ((prr_rcs[k] >= Real(0.0)) ? Real(1.0) : Real(-1.0));
+                prr_rcs[k] = ratio_s * thompson_sign1(prr_rcs[k]);
                 prs_rcs[k] = -prr_rcs[k];
             }
         } while (false);
@@ -2105,12 +2145,22 @@ struct ThompsonKernel {
             N0_g[k] = ng[k] * tables.ogg2 * libm::pow(lamg, tables.cge[1]);
         } while (false);
 
-        // gfortran vectorises this k loop (kte down to kts): libmvec's 2-lane pow (cppwrf::vm)
+        // gfortran vectorises this k loop (kte down to kts): libmvec's 2-lane pow (cppwrf::vm). The real*4 build
+        // leaves it scalar (no libmvec call in its mp_thompson): powf for lamr, the double pow for N0_r
         do {  // for (int k = nz - 1; k >= 0; --k)
-            double lamr = vm::pow(Real(am_r) * tables.crg[2] * tables.org2 * nr_loc[k] / rr[k], obmr, nz - 1 - k, nz);
+            double lamr;
+            if constexpr (std::is_same_v<Real, float>) {
+                lamr = libm::pow(Real(am_r) * tables.crg[2] * tables.org2 * nr_loc[k] / rr[k], obmr);
+            } else {
+                lamr = vm::pow(Real(am_r) * tables.crg[2] * tables.org2 * nr_loc[k] / rr[k], obmr, nz - 1 - k, nz);
+            }
             ilamr[k] = Real(1.0) / lamr;
             mvd_r[k] = (Real(3.0) + Real(mu_r) + Real(0.672)) / lamr;
-            N0_r[k] = nr_loc[k] * tables.org2 * vm::pow(lamr, static_cast<double>(tables.cre[1]), nz - 1 - k, nz);
+            if constexpr (std::is_same_v<Real, float>) {
+                N0_r[k] = nr_loc[k] * tables.org2 * libm::pow(lamr, static_cast<double>(tables.cre[1]));
+            } else {
+                N0_r[k] = nr_loc[k] * tables.org2 * vm::pow(lamr, static_cast<double>(tables.cre[1]), nz - 1 - k, nz);
+            }
         } while (false);
 
         // Condensation & evaporation of cloud water
@@ -2310,9 +2360,9 @@ struct ThompsonKernel {
                     double lamr = libm::pow(Real(am_r) * tables.crg[2] * tables.org2 * nr_loc[k] / rr[k], obmr);
                     // gfortran pairs the two (lamr+fv_r)**(-cre) into one libmvec pow (SLP): vector lanes
                     vtrk[k] = rhof[k] * Real(av_r) * tables.crg[5] * tables.org3 * libm::pow(lamr, tables.cre[2])
-                            * vm::pow(lamr + Real(fv_r), static_cast<double>(-tables.cre[5]), 0, 2);
+                            * sed_pow2(lamr + Real(fv_r), static_cast<double>(-tables.cre[5]));
                     vtnrk[k] = rhof[k] * Real(av_r) * tables.crg[6] / tables.crg[11] * libm::pow(lamr, tables.cre[11])
-                             * vm::pow(lamr + Real(fv_r), static_cast<double>(-tables.cre[6]), 0, 2);
+                             * sed_pow2(lamr + Real(fv_r), static_cast<double>(-tables.cre[6]));
                 } else {
                     vtrk[k] = vtrk[k + 1];
                     vtnrk[k] = vtnrk[k + 1];
