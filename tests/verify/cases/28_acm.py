@@ -31,9 +31,10 @@ CASES = [
     ("real_acm7_r8_fp64_cuda_1h", "cuda_dp", "configs/real_acm7_r8.ini", ["real.dir=" + f"{WR}/run_ACM7_r8"] + _1H,
      f"{WR}/run_ACM7_r8/wrfout_d01_{_D}", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     # FP32 GPU against the real*8 run: about 3x the values measured on an L4 (sm_89) by tools/bench/colab_fp32.sh
-    # (2026-11-09, docs/FP32_ACCURACY.md): U 5.1e-4, W 1.0e-2, THM 9.9e-6, QV 4.8e-4
+    # (2026-11-09, docs/FP32_ACCURACY.md): U 5.1e-4, W 1.0e-2, THM 9.9e-6, QV 4.8e-4. Colab G4 at fb158f3 (the
+    # real*4 constants of the FP32 builds, 2026-11-20): U 6.5e-4, W 3.0e-2, THM 9.0e-6, QV 4.7e-4; W about 3x of it
     ("real_acm7_fp32_1h", "cuda", "configs/real_acm7_r8.ini", ["real.dir=" + f"{WR}/run_ACM7_r8"] + _1H,
-     f"{WR}/run_ACM7_r8/wrfout_d01_{_D}", 3600, {"U": 2e-3, "W": 3e-2, "THM": 3e-5, "QV": 2e-3}),
+     f"{WR}/run_ACM7_r8/wrfout_d01_{_D}", 3600, {"U": 2e-3, "W": 9e-2, "THM": 3e-5, "QV": 2e-3}),
     # ACMB = ACM7 with bldt = 3 (the surface layer, Noah and ACM2 every third step with dtbl = 180 s)
     ("real_acmb_r8_fp64_cpu_1h", "cpu_dp", "configs/real_acm7_r8.ini",
      ["real.dir=" + f"{WR}/run_ACMB_r8", "phys.bldt=3"] + _1H,
