@@ -3,12 +3,18 @@
 
 #include <algorithm>
 #include <cmath>
+#include <type_traits>
 #include "core/backend.hpp"
 #include "core/precision.hpp"
 #include "phys/lsm_noahmp/noahmp_rad_therm.hpp"
 #include "phys/lsm_noahmp/noahmp_var.hpp"
 
 namespace cppwrf::phys::noahmp {
+
+// the lanes of the MOST routines' four logarithms (TMPCM, TMPCH, TMPCM2, TMPCH2): real*8 groups them in pairs
+// (lanes 0, 1 of two 2-lane calls), real*4 in one 4-lane call (lanes 0..3)
+inline constexpr int kMostLogN = std::is_same_v<real, float> ? 4 : 2;
+CPPWRF_HD constexpr int most_log_lane(int i) { return std::is_same_v<real, float> ? i : (i & 1); }
 
 // ============================================================================
 // ResistanceCanopyStomataBallBerryMod.F90
@@ -174,11 +180,12 @@ CPPWRF_HD inline void ResistanceAboveCanopyMOST(NoahmpType& noahmp,
   real MOZOLD = energy.state.MoStabParaAbvCan;
   if (energy.state.RefHeightAboveGrd <= energy.state.ZeroPlaneDispSfc) raise_fatal(kFatalNoahmpRefHeightCanopy);
 
-  // gfortran SLP-vectorizes these 4 log calls into two 2-lane _ZGVbN2v_log calls
-  real TMPCM  = cppwrf::vm::log((energy.state.RefHeightAboveGrd - energy.state.ZeroPlaneDispSfc) / energy.state.RoughLenMomSfc, 0, 2);
-  real TMPCH  = cppwrf::vm::log((energy.state.RefHeightAboveGrd - energy.state.ZeroPlaneDispSfc) / energy.state.RoughLenShCanopy, 1, 2);
-  real TMPCM2 = cppwrf::vm::log((real(2.0) + energy.state.RoughLenMomSfc) / energy.state.RoughLenMomSfc, 0, 2);
-  real TMPCH2 = cppwrf::vm::log((real(2.0) + energy.state.RoughLenShCanopy) / energy.state.RoughLenShCanopy, 1, 2);
+  // gfortran SLP-vectorizes these 4 log calls: two 2-lane _ZGVbN2v_log calls in real*8, one 4-lane _ZGVbN4v_logf
+  // call in real*4 (lanes 0..3)
+  real TMPCM  = cppwrf::vm::log((energy.state.RefHeightAboveGrd - energy.state.ZeroPlaneDispSfc) / energy.state.RoughLenMomSfc, most_log_lane(0), kMostLogN);
+  real TMPCH  = cppwrf::vm::log((energy.state.RefHeightAboveGrd - energy.state.ZeroPlaneDispSfc) / energy.state.RoughLenShCanopy, most_log_lane(1), kMostLogN);
+  real TMPCM2 = cppwrf::vm::log((real(2.0) + energy.state.RoughLenMomSfc) / energy.state.RoughLenMomSfc, most_log_lane(2), kMostLogN);
+  real TMPCH2 = cppwrf::vm::log((real(2.0) + energy.state.RoughLenShCanopy) / energy.state.RoughLenShCanopy, most_log_lane(3), kMostLogN);
 
   if (IterationInd == 1) {
     energy.state.FrictionVelVeg = real(0.0);
@@ -438,11 +445,12 @@ CPPWRF_HD inline void ResistanceBareGroundMOST(NoahmpType& noahmp,
   real MOZOLD = energy.state.MoStabParaBare;
   if (energy.state.RefHeightAboveGrd <= energy.state.ZeroPlaneDispGrd) raise_fatal(kFatalNoahmpRefHeightBare);
 
-  // gfortran SLP-vectorizes these 4 log calls into two 2-lane _ZGVbN2v_log calls
-  real TMPCM  = cppwrf::vm::log((energy.state.RefHeightAboveGrd - energy.state.ZeroPlaneDispGrd) / energy.state.RoughLenMomGrd, 0, 2);
-  real TMPCH  = cppwrf::vm::log((energy.state.RefHeightAboveGrd - energy.state.ZeroPlaneDispGrd) / energy.state.RoughLenShBareGrd, 1, 2);
-  real TMPCM2 = cppwrf::vm::log((real(2.0) + energy.state.RoughLenMomGrd) / energy.state.RoughLenMomGrd, 0, 2);
-  real TMPCH2 = cppwrf::vm::log((real(2.0) + energy.state.RoughLenShBareGrd) / energy.state.RoughLenShBareGrd, 1, 2);
+  // gfortran SLP-vectorizes these 4 log calls: two 2-lane _ZGVbN2v_log calls in real*8, one 4-lane _ZGVbN4v_logf
+  // call in real*4 (lanes 0..3)
+  real TMPCM  = cppwrf::vm::log((energy.state.RefHeightAboveGrd - energy.state.ZeroPlaneDispGrd) / energy.state.RoughLenMomGrd, most_log_lane(0), kMostLogN);
+  real TMPCH  = cppwrf::vm::log((energy.state.RefHeightAboveGrd - energy.state.ZeroPlaneDispGrd) / energy.state.RoughLenShBareGrd, most_log_lane(1), kMostLogN);
+  real TMPCM2 = cppwrf::vm::log((real(2.0) + energy.state.RoughLenMomGrd) / energy.state.RoughLenMomGrd, most_log_lane(2), kMostLogN);
+  real TMPCH2 = cppwrf::vm::log((real(2.0) + energy.state.RoughLenShBareGrd) / energy.state.RoughLenShBareGrd, most_log_lane(3), kMostLogN);
 
   if (IndIter == 1) {
     energy.state.FrictionVelBare = real(0.0);

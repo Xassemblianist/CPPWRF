@@ -38,6 +38,10 @@ CASES = [
     ("real_nmp1_fp32_1h", "cuda", "configs/real_nmp1_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_NMP1", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_NMP1/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 3e-4, "W": 1e-2, "THM": 2e-6, "QV": 1e-4}),
+    # CPU FP32 against WRF's real*4 run_NMP1, bit for bit
+    ("real_nmp1_fp32_cpu_1h", "cpu_sp", "configs/real_nmp1_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_NMP1", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_NMP1/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
 ]
 
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
@@ -59,4 +63,5 @@ DATA = {
     'real_nmp1_r8_fp64_cpu_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_nmp1_r8_fp64_cuda_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_nmp1_fp32_1h': 'suite_data.tar',
+    'real_nmp1_fp32_cpu_1h': 'suite_data.tar',
 }
