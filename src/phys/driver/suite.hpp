@@ -453,6 +453,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   Grid g_, gs_;
   SuiteOptions o_;
   noah::NoahTables noah_tables_;
+  noah::NoahTables* d_noah_tables_ = nullptr;                     // device copy, uploaded once
   noahmp::NoahmpTables noahmp_tables_;
   noahmp::NoahmpTables* d_noahmp_tables_ = nullptr;              // device copy, uploaded once
   ruc::RucTables* d_ruc_tables_ = nullptr;                       // RUC LSM tables (RUCLSMINIT), device copy

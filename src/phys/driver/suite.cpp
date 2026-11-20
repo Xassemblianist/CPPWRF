@@ -587,6 +587,8 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     n_rclast = IntField2(g, "n_rclast");
     if (!noah::read_noah_tables(o.table_dir, o.mminlu, o.mminsl, noah_tables_))
       throw std::runtime_error("PhysicsSuite: cannot read the Noah tables from " + o.table_dir);
+    d_noah_tables_ = static_cast<noah::NoahTables*>(dev_alloc(sizeof(noah_tables_)));
+    copy_to_dev(d_noah_tables_, &noah_tables_, sizeof(noah_tables_));
     if (o.sf_urban_physics == 1) {  // phy_init: urban_param_init (slucm_distributed_drag = .false.)
       const std::string path = o.table_dir + (o.use_wudapt_lcz == 1 ? "/URBPARM_LCZ.TBL" : "/URBPARM.TBL");
       urban::UrbanTableOptions uo;
@@ -1040,6 +1042,7 @@ void PhysicsSuite::init_noahmp(bool fndsnowh) {
 }
 
 PhysicsSuite::~PhysicsSuite() {
+  if (d_noah_tables_) dev_free(d_noah_tables_);
   if (d_noahmp_tables_) dev_free(d_noahmp_tables_);
   if (d_ruc_tables_) dev_free(d_ruc_tables_);
   if (d_sfclay_tables_) dev_free(d_sfclay_tables_);

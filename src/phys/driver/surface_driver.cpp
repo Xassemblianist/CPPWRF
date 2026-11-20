@@ -1654,7 +1654,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       nk.dt = dtbl; nk.zlvl = real(0); nk.nsoil = nsoil;
       for (int k = 0; k < nsoil; ++k) nk.sldpth[k] = real(dzs[k]);
       nk.isurban = o_.isurban;
-      nk.tables = noah_tables_;
+      nk.tables = d_noah_tables_;
       nk.rdlai2d = o_.rdlai2d; nk.usemonalb = o_.usemonalb; nk.opt_thcnd = o_.opt_thcnd;
       nk.active = n_active.cview(); nk.alb_out = n_albbrd.view();
       // debug: CPPWRF_NOAH_DUMP=dir, CPPWRF_NOAH_DUMP_STEP=n: SFLX inputs/outputs of the land columns at step n

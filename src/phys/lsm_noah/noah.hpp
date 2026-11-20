@@ -98,7 +98,7 @@ struct NoahKernel {
   int nsoil;
   real sldpth[kMaxSoilLevels];
   int isurban;
-  NoahTables tables;
+  const NoahTables* tables = nullptr;  // device copy, uploaded once (PhysicsSuite), not a by-value kernel argument
 
   // WRF namelist rdlai2d / usemonalb (SFLX/REDPRM: table LAI and background albedo when false).
   // The standalone SFLX test runs with both true.
@@ -1095,11 +1095,12 @@ struct NoahKernel {
       // standalone test: skip water points (USGS category 16, STATSGO soil 14)
       return;
     }
+    const NoahTables& tb = *tables;
     // REDPRM: categories beyond the tables and more root layers than soil layers stop WRF
-    if (styp > tables.slcats) { raise_fatal(kFatalNoahSoilTypes); return; }
-    if (vtyp > tables.lucats) { raise_fatal(kFatalNoahLanduseTypes); return; }
-    if (slop > tables.slpcats) { raise_fatal(kFatalNoahSlopeTypes); return; }
-    if (tables.nrotbl[vtyp - 1] > nsoil) { raise_fatal(kFatalNoahRootLayers); return; }
+    if (styp > tb.slcats) { raise_fatal(kFatalNoahSoilTypes); return; }
+    if (vtyp > tb.lucats) { raise_fatal(kFatalNoahLanduseTypes); return; }
+    if (slop > tb.slpcats) { raise_fatal(kFatalNoahSlopeTypes); return; }
+    if (tb.nrotbl[vtyp - 1] > nsoil) { raise_fatal(kFatalNoahRootLayers); return; }
 
     // Initialize outputs
     runoff1(i, j) = real(0.0);
@@ -1115,52 +1116,52 @@ struct NoahKernel {
     }
 
     // Retrieve parameters from tables via REDPRM
-    real csoil = tables.csoil_data;
-    real bexp = tables.bb[styp - 1];
-    real dksat = tables.satdk[styp - 1];
-    real dwsat = tables.satdw[styp - 1];
-    real f1 = tables.f11[styp - 1];
-    real psisat = tables.satpsi[styp - 1];
-    real quartz = tables.qtz[styp - 1];
-    real smcdry = tables.drysmc[styp - 1];
-    real smcmax = tables.maxsmc[styp - 1];
-    real smcref = tables.refsmc[styp - 1];
-    real smcwlt = tables.wltsmc[styp - 1];
+    real csoil = tb.csoil_data;
+    real bexp = tb.bb[styp - 1];
+    real dksat = tb.satdk[styp - 1];
+    real dwsat = tb.satdw[styp - 1];
+    real f1 = tb.f11[styp - 1];
+    real psisat = tb.satpsi[styp - 1];
+    real quartz = tb.qtz[styp - 1];
+    real smcdry = tb.drysmc[styp - 1];
+    real smcmax = tb.maxsmc[styp - 1];
+    real smcref = tb.refsmc[styp - 1];
+    real smcwlt = tb.wltsmc[styp - 1];
 
-    real zbot = tables.zbot_data;
-    real salp = tables.salp_data;
-    real sbeta = tables.sbeta_data;
-    real refdk = tables.refdk_data;
-    real frzk = tables.frzk_data;
-    real fxexp = tables.fxexp_data;
-    real refkdt = tables.refkdt_data;
+    real zbot = tb.zbot_data;
+    real salp = tb.salp_data;
+    real sbeta = tb.sbeta_data;
+    real refdk = tb.refdk_data;
+    real frzk = tb.frzk_data;
+    real fxexp = tb.fxexp_data;
+    real refkdt = tb.refkdt_data;
     real kdt = refkdt * dksat / refdk;
-    real slope = tables.slope_data[slop - 1];
-    real lvcoef = tables.lvcoef_data;
+    real slope = tb.slope_data[slop - 1];
+    real lvcoef = tb.lvcoef_data;
 
     real frzfact = (smcmax / smcref) * (real(0.412) / real(0.468));
     real frzx = frzk * frzfact;
 
-    real topt = tables.topt_data;
-    real cmcmax = tables.cmcmax_data;
-    real cfactr = tables.cfactr_data;
-    real rsmax = tables.rsmax_data;
-    int nroot = tables.nrotbl[vtyp - 1];
-    real snup = tables.snuptbl[vtyp - 1];
-    real rsmin_val = tables.rstbl[vtyp - 1];
-    real rgl = tables.rgltbl[vtyp - 1];
-    real hs = tables.hstbl[vtyp - 1];
-    real emissmin = tables.emissmintbl[vtyp - 1];
-    real emissmax = tables.emissmaxtbl[vtyp - 1];
-    real laimin = tables.laimintbl[vtyp - 1];
-    real laimax = tables.laimaxtbl[vtyp - 1];
-    real z0min = tables.z0mintbl[vtyp - 1];
-    real z0max = tables.z0maxtbl[vtyp - 1];
-    real albedomin = tables.albedomintbl[vtyp - 1];
-    real albedomax = tables.albedomaxtbl[vtyp - 1];
+    real topt = tb.topt_data;
+    real cmcmax = tb.cmcmax_data;
+    real cfactr = tb.cfactr_data;
+    real rsmax = tb.rsmax_data;
+    int nroot = tb.nrotbl[vtyp - 1];
+    real snup = tb.snuptbl[vtyp - 1];
+    real rsmin_val = tb.rstbl[vtyp - 1];
+    real rgl = tb.rgltbl[vtyp - 1];
+    real hs = tb.hstbl[vtyp - 1];
+    real emissmin = tb.emissmintbl[vtyp - 1];
+    real emissmax = tb.emissmaxtbl[vtyp - 1];
+    real laimin = tb.laimintbl[vtyp - 1];
+    real laimax = tb.laimaxtbl[vtyp - 1];
+    real z0min = tb.z0mintbl[vtyp - 1];
+    real z0max = tb.z0maxtbl[vtyp - 1];
+    real albedomin = tb.albedomintbl[vtyp - 1];
+    real albedomax = tb.albedomaxtbl[vtyp - 1];
 
     real cur_shdfac = shdfac(i, j);
-    if (vtyp == tables.bare) cur_shdfac = real(0.0);
+    if (vtyp == tb.bare) cur_shdfac = real(0.0);
 
     // NROOT = 0 (water, USGS 26/27, NLCD 18-21) is kept as in WRF: RTDIS stays unset and the
     // root loops are empty. CANRES/TRANSP run only with SHDFAC > 0; such a point with SHDFAC > 0
