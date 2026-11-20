@@ -56,6 +56,10 @@ CASES = [
     ("real_p9_r8_fp64_cuda_1h", "cuda_dp", "configs/real_p9_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P9_r8", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P9_r8/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
+    # CPU FP32 against WRF's real*4 run_P9, bit for bit
+    ("real_p9_fp32_cpu_1h", "cpu_sp", "configs/real_p9_r8.ini",
+     ["run.run_time=3600", "real.dir=" + f"{WR}/run_P9", "output.out_interval=10", "output.diag_interval=10"],
+     f"{WR}/run_P9/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 0.0, "W": 0.0, "THM": 0.0, "QV": 0.0}),
     ("real_p9_fp32_1h", "cuda", "configs/real_p9_r8.ini",
      ["run.run_time=3600", "real.dir=" + f"{WR}/run_P9", "output.out_interval=10", "output.diag_interval=10"],
      f"{WR}/run_P9/wrfout_d01_2026-10-12_00:00:00", 3600, {"U": 6e-4, "W": 1e-2, "THM": 1e-5, "QV": 2e-3}),
@@ -87,4 +91,5 @@ DATA = {
     'real_p9_r8_fp64_cpu_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_p9_r8_fp64_cuda_1h': 'suite_data.tar,v05_suite_refs.tar',
     'real_p9_fp32_1h': 'suite_data.tar',
+    'real_p9_fp32_cpu_1h': 'suite_data.tar',
 }

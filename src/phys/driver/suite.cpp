@@ -1325,6 +1325,8 @@ void PhysicsSuite::part1(dyn::State& s, const dyn::BaseState& b, dyn::Tendencies
   pbl_driver(s, b);
   vmdump::dump("vm_pbl", 1, {&pt.rublten, &pt.rvblten, &pt.rthblten, &pt.rqvblten, &exch_h}, {&pblh});
   cumulus_driver(s, b);
+  vmdump::dump("vm_cu", 1, {&pt.rthcuten, &pt.rqvcuten, &pt.rqccuten, &pt.rqrcuten, &pt.rqicuten, &pt.rqscuten},
+               {&raincv, &nca});
   if (o_.cu_physics == 3 || o_.cu_physics == 5) convtrans_prep(s);  // cu_diag = 1 (check_a_mundo)
   fddagd_driver(s, b);
 }

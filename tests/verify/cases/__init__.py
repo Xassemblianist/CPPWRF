@@ -2,7 +2,7 @@
 """The cases of tests/verify/wrf_suite.py, one file per group: NN_<group>.py (loaded in the order of their names, so
 the case order is fixed; a new group takes a free number) defines CASES, a list of
   (name, binary key, config, extra --set, WRF wrfout, time [s], {var: max rel L2 (whole domain)})
-(binary key cpu_dp, cuda_dp or cuda; WRF wrfout: a file, or {domain: file} for nests; tolerances all 0.0: compared
+(binary key cpu_dp, cpu_sp (the CPU FP32 build, against WRF real*4 references), cuda_dp or cuda; WRF wrfout: a file, or {domain: file} for nests; tolerances all 0.0: compared
 exactly in every variable of the wrfout file, the list names the variables that matter most for the case). A config
 "dropin:<WRF run directory>" runs tools/cppwrf-wrf in a copy of that directory instead (wrf_suite.dropin_spec).
 A group file may define STATUS, its rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py

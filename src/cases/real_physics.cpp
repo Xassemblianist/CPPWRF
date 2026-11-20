@@ -16,6 +16,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <type_traits>
 #include <vector>
 
 #include "cases/model.hpp"
@@ -82,7 +83,10 @@ LanduseInit landuse_init(const std::string& table_dir, const std::string& mminlu
     albedo[p] = albbck[p];
     // SCFX(IS) comes from lu_state: the last season read (see above), not season ISN
     if (snowc[p] > 0.5)
-      albedo[p] = usemonalb ? snoalb_in[p] : albbck[p] * (1. + lt.categories[std::max(0, lt.n_seasons - 1)][is].scfx);
+      albedo[p] = usemonalb ? snoalb_in[p]
+                  : std::is_same_v<real, float>  // WRF real*4: ALBBCK*(1.+SCFX(IS)) in REAL
+                      ? double(real(albbck[p]) * (real(1.) + lt.categories[std::max(0, lt.n_seasons - 1)][is].scfx))
+                      : albbck[p] * (1. + lt.categories[std::max(0, lt.n_seasons - 1)][is].scfx);
     z0[p] = c.sfz0 / 100.;
     embck[p] = c.sfem;
     emiss[p] = embck[p];
@@ -568,7 +572,9 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     if (!phys::noah::read_noah_tables(o.table_dir, o.mminlu, o.mminsl, nt))
       throw std::runtime_error("real physics: cannot read the Noah tables from " + o.table_dir);
     if (!rdmaxalb)
-      for (std::size_t p = 0; p < n2; ++p) snoalb[p] = nt.maxalb[int(std::lround(lu[p])) - 1] * 0.01;
+      for (std::size_t p = 0; p < n2; ++p)  // WRF real*4: MAXALB(IVGTYP)*0.01 in REAL
+        snoalb[p] = std::is_same_v<real, float> ? double(real(nt.maxalb[int(std::lround(lu[p])) - 1]) * real(0.01))
+                                                : nt.maxalb[int(std::lround(lu[p])) - 1] * 0.01;
     put2(su.snoalb, snoalb);
     std::vector<double> sh2o(n2 * ns);
     for (std::size_t p = 0; p < n2; ++p) {
@@ -579,7 +585,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
       for (int k = 0; k < ns; ++k) {
         const std::size_t q = p + n2 * k;
         if (bx > 0 && smcmax > 0 && psisat > 0) {
-          if (tslb[q] < 273.149) {
+          if (std::is_same_v<real, float> ? real(tslb[q]) < real(273.149) : tslb[q] < 273.149) {  // REAL TSLB
             bx = nt.bb[st - 1];
             if (bx > real(5.5)) bx = real(5.5);
             const real t = real(tslb[q]);

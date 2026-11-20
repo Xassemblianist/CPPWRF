@@ -13,6 +13,8 @@ The measure is the ratio, per case, variable and output time,
 
 R <= 1: CPPWRF FP32 is at least as close to the double-precision answer as WRF's own single-precision build.
 
+The CPU FP32 build is a different matter: on the cases of docs/FP32_IDENTITY.md it is bit-identical to WRF real*4.
+
 ## Status
 
 Measured (tools/bench/colab_fp32.sh, 2026-11-09/10): eleven domains at 1 h on a Colab L4, P4 for 72 h and N3 for

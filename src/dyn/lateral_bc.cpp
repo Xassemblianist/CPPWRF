@@ -5,6 +5,7 @@
 #include <climits>
 #include <cmath>
 #include <stdexcept>
+#include <type_traits>
 
 #include "core/halo.hpp"
 
@@ -201,9 +202,15 @@ void LateralBC::set_dt(double dt) {
   gcx_h_.assign(width_, 0.0);
   for (int loop = spec_zone_ + 1; loop <= spec_zone_ + relax_zone_; ++loop) {  // Fortran index
     // WRF: 0.1 / dt * (spec_zone + relax_zone - loop) / (relax_zone - 1), left to right
-    const double num = double(spec_zone_ + relax_zone_ - loop), den = double(relax_zone_ - 1);
-    fcx_h_[loop - 1] = 0.1 / dt * num / den;
-    gcx_h_[loop - 1] = 1.0 / dt / 50.0 * num / den;
+    if constexpr (std::is_same_v<real, float>) {  // WRF real*4: REAL dt, every operation in single precision
+      const float dtf = float(dt), num = float(spec_zone_ + relax_zone_ - loop), den = float(relax_zone_ - 1);
+      fcx_h_[loop - 1] = 0.1f / dtf * num / den;
+      gcx_h_[loop - 1] = 1.0f / dtf / 50.f * num / den;
+    } else {
+      const double num = double(spec_zone_ + relax_zone_ - loop), den = double(relax_zone_ - 1);
+      fcx_h_[loop - 1] = 0.1 / dt * num / den;
+      gcx_h_[loop - 1] = 1.0 / dt / 50.0 * num / den;
+    }
   }
   std::vector<real> h(2 * std::size_t(width_));
   for (int b = 0; b < width_; ++b) { h[b] = real(fcx_h_[b]); h[width_ + b] = real(gcx_h_[b]); }
