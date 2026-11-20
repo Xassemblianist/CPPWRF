@@ -31,12 +31,19 @@ processed over the whole domain (`hold_ups`, also set by grid_fdda, qna_update, 
 `src/init_real` follows `main/real_em.F` and `dyn_em/module_initialize_real.F` statement by statement:
 
 - `real_core.hpp`: vertical interpolation (`vert_interp`, `lagrange_setup`, `lagrange_interp`), `p_dry`,
-  `p_dts`, `p_dhs`, `integ_moist`, `sfcprs3`, `rh_to_mxrat1`, `compute_eta` (including
+  `p_dts`, `p_dhs`, `integ_moist`, `sfcprs`, `sfcprs2`, `sfcprs3`, `rh_to_mxrat1`, `compute_eta` (including
   `auto_levels_opt = 2`), and `compute_vcoord_1d_coeffs`.
 - `real_domain.cpp`: the met_em input of `input_auxinput1` and `optional_input`, and `init_domain_rk`.
   That covers the base state, the hydrostatic dry-pressure loop, the soil levels and soil temperatures,
   the sea-ice adjustments and the land/water consistency checks.
 - `real_bdy.hpp`: `couple` (with `calc_mu_staggered`), `stuff_bdy_new` and `stuff_bdytend_new`.
+
+TAVGSFC input (`FLAG_TAVGSFC = 1`: the surface pressure of `sfcprs` / `sfcprs2`, the SST and skin temperature of
+inland lakes and of water points without a valid SST, the slab's TMN) and the surface pressure from PMSL alone
+(`sfcprs`, without PSFC or SOILHGT) are ported statement by statement but not yet compared with a WRF real.exe run:
+`cppwrf_real` runs them only with `&cppwrf allow_unverified = .true.` in namelist.input (unverified tier).
+`use_tavg_for_tsk` only checks for TSK or TAVGSFC, as in WRF, whose skin temperature from TAVGSFC is overwritten by
+SKINTEMP in the metgrid branch.
 
 The arithmetic matches gfortran's. That includes the libmvec vector lanes of `log`/`exp`, the expansion
 of constant powers, and the kind of each Fortran literal.
@@ -84,8 +91,6 @@ Arctic V2 domain with sea ice), every file identical.
 The following real.exe paths are not ported. `cppwrf_real` stops with an error when the namelist
 selects one:
 
-- `sf_surface_physics` other than 0, 1, 2 and 4 (RUC, PX, CLM and SSiB soil handling), and TAVGSFC input with the
-  slab;
-- `use_tavg_for_tsk`;
+- `sf_surface_physics` other than 0, 1, 2 and 4 (RUC, PX, CLM and SSiB soil handling);
 - `chem_opt` and `tracer_opt` (the 4-D chemistry and tracer arrays);
 - `vert_refine_method`.

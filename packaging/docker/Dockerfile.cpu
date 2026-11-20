@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # CPPWRF, CPU build (OpenMP, FP64: bit-identical to WRF v4.8.0 real*8), on Debian 13, the system the proofs use
 # (gcc 14.2, glibc 2.41). From the repository's top directory:
-#   docker build -f packaging/docker/Dockerfile.cpu -t cppwrf:1.1.0-cpu .
-#   docker run --rm -v "$PWD/case:/work" cppwrf:1.1.0-cpu cppwrf-wrf --threads 8       # a WRF run directory
+#   docker build -f packaging/docker/Dockerfile.cpu -t cppwrf:1.1.1-cpu .
+#   docker run --rm -v "$PWD/case:/work" cppwrf:1.1.1-cpu cppwrf-wrf --threads 8       # a WRF run directory
 # Pin the base image by digest for a reproducible image: --build-arg DEBIAN=debian:13.1-slim@sha256:...
 ARG DEBIAN=debian:13.1-slim
 

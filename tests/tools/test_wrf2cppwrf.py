@@ -727,6 +727,43 @@ class TestValidationAndWarnings(unittest.TestCase):
             self.assertIn(msg, errors(phys), phys)
         self.assertEqual(errors("sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1"), "")
 
+    def test_cumulus_or_radiation_without_surface(self):
+        # wrf.exe runs cumulus or radiation without a surface layer and a land surface model (module_physics_init.F
+        # sfclay_select / sfc_select do nothing for 0); cppwrf stops at its start, so the translator gives the
+        # model's error: PhysicsSuite's (src/phys/driver/suite.cpp) with a cumulus scheme, model.cpp's with
+        # radiation only
+        def errors(phys):
+            t = WrfTranslator(parse_namelist(real_case(f"""
+            &time_control /
+            &domains time_step = 60 /
+            &physics mp_physics = 6, {phys} /
+            &dynamics /
+            """)))
+            t.translate()
+            return " ".join(t.errors)
+        suite_msg = ("PhysicsSuite: only sf_sfclay_physics=1|2|4|5|7, sf_surface_physics=1|2|3|4, "
+                     "bl_pbl_physics=0|1|2|4|5|7|8 (the PX land surface, sf_surface_physics=7, is not ported)")
+        rad_msg = ("phys.ra_lw/ra_sw_physics without surface-layer, land-surface, PBL or cumulus physics is not "
+                   "supported")
+        for phys, msg in (("cu_physics = 1", suite_msg),
+                          ("cu_physics = 2", suite_msg),
+                          ("cu_physics = 3", suite_msg),
+                          ("cu_physics = 16", suite_msg),
+                          ("cu_physics = 1, ra_lw_physics = 4, ra_sw_physics = 4", suite_msg),
+                          ("cu_physics = 1, ra_lw_physics = 1, ra_sw_physics = 1", suite_msg),
+                          ("ra_lw_physics = 4, ra_sw_physics = 4", rad_msg),
+                          ("ra_lw_physics = 1, ra_sw_physics = 1", rad_msg),
+                          ("ra_lw_physics = 4, ra_sw_physics = 1", rad_msg)):
+            err = errors(phys)
+            self.assertIn(msg, err, phys)
+            self.assertEqual(err.count("cppwrf would stop"), 1, phys)
+        # with a surface layer and a land surface model both run
+        for phys in ("sf_sfclay_physics = 1, sf_surface_physics = 2, cu_physics = 1",
+                     "sf_sfclay_physics = 1, sf_surface_physics = 2, ra_lw_physics = 4, ra_sw_physics = 4",
+                     "sf_sfclay_physics = 1, sf_surface_physics = 2, bl_pbl_physics = 1, cu_physics = 1, "
+                     "ra_lw_physics = 4, ra_sw_physics = 4"):
+            self.assertNotIn("cppwrf would stop", errors(phys), phys)
+
     def test_boulac(self):
         # bl_pbl_physics = 8 (module_bl_boulac.F) over sf_sfclay_physics = 1 or 2 (module_physics_init: 'use sfclay or
         # myjsfc scheme for this pbl option'); verified: no tier warning; Shin-Hong (11) is not ported
@@ -1444,7 +1481,7 @@ class TestValidationAndWarnings(unittest.TestCase):
         # WRF passes ishallow to the G3 and GF schemes only (phys/module_cumulus_driver.F) and check_a_mundo has no
         # rule for it with other cumulus schemes: Kain-Fritsch with ishallow = 1 runs as without it
         t = WrfTranslator(parse_namelist(real_case("&time_control /\n&domains time_step = 60 /\n"
-                                                   "&physics cu_physics = 1, ishallow = 1 /\n")))
+                                                   "&physics sf_sfclay_physics = 1, sf_surface_physics = 2, cu_physics = 1, ishallow = 1 /\n")))
         t.translate()
         self.assertEqual(t.errors, [])
 
@@ -1529,7 +1566,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         with self.assertRaises(NamelistParseError):
             parse_namelist("&bdy_control specified = 1 /\n")
         # radt(1) unset: the Registry default 0
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 2*1, radt(2) = 3 /\n")
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 2*1, radt(2) = 3 /\n")
         self.assertEqual(t.errors, [])
         self.assertNotIn("radt", sec["phys"])
         self.assertEqual(sec["d02"]["phys_radt"], 3)
@@ -1587,17 +1624,17 @@ class TestWrfNamelistSemantics(unittest.TestCase):
     def test_cu_rad_feedback_cldovrlp_0(self):
         # cldovrlp 0: RRTMG without clouds; cu_rad_feedback per domain (phy_init's icloud_cu); shallowcu_forced_ra
         # acts only with KF-CuP (cu_physics 10)
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 1, 1, ra_lw_physics = 2*4, ra_sw_physics = 2*4, "
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 1, 1, ra_lw_physics = 2*4, ra_sw_physics = 2*4, "
                                 "cldovrlp = 0, cu_rad_feedback = .true., .false., shallowcu_forced_ra = 2*.true. /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["cldovrlp"], 0)
         self.assertEqual(sec["phys"]["cu_rad_feedback"], True)
         self.assertEqual(sec["d02"]["phys_cu_rad_feedback"], False)
         # a nest without an entry: the Registry default .false.
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 3, 3, cu_rad_feedback = .true. /\n")
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 3, 3, cu_rad_feedback = .true. /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["d02"]["phys_cu_rad_feedback"], False)
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 6, 6, cu_rad_feedback = .false., .true. /\n")
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 6, 6, cu_rad_feedback = .false., .true. /\n")
         self.assertEqual(t.errors, [])
         self.assertNotIn("cu_rad_feedback", sec["phys"])
         self.assertEqual(sec["d02"]["phys_cu_rad_feedback"], True)
@@ -1605,21 +1642,21 @@ class TestWrfNamelistSemantics(unittest.TestCase):
     def test_bmj_and_bmj_rad_feedback(self):
         # cu_physics = 2 (BMJ, verified: no tier warning); bmj_rad_feedback per domain, used by BMJ only; with
         # the radiation it needs cloud water and ice (QCCONV / QICONV go into the radiation's QC / QI)
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 2, 2, bmj_rad_feedback = .true., .false. /\n")
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 2, 2, bmj_rad_feedback = .true., .false. /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["cu_physics"], 2)
         self.assertEqual(sec["phys"]["bmj_rad_feedback"], True)
         self.assertEqual(sec["d02"]["phys_bmj_rad_feedback"], False)
         self.assertFalse(any("verification tier" in w for w in t.warnings), t.warnings)
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 1, 1, bmj_rad_feedback = 2*.true. /\n")
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 1, 1, bmj_rad_feedback = 2*.true. /\n")
         self.assertEqual(t.errors, [])
         self.assertNotIn("bmj_rad_feedback", sec["phys"])
         self.assertTrue(any("bmj_rad_feedback" in n and "no effect" in n for n in t.notices), t.notices)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 2, 2, mp_physics = 2*1, ra_lw_physics = 2*4, "
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 2, 2, mp_physics = 2*1, ra_lw_physics = 2*4, "
                               "ra_sw_physics = 2*4, bmj_rad_feedback = .true. /\n")
         self.assertTrue(any("bmj_rad_feedback = .true. with the radiation and mp_physics = 1" in e for e in t.errors),
                         t.errors)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 2, 2, mp_physics = 2*6, ra_lw_physics = 2*4, "
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 2, 2, mp_physics = 2*6, ra_lw_physics = 2*4, "
                               "ra_sw_physics = 2*4, bmj_rad_feedback = .true. /\n")
         self.assertEqual(t.errors, [])
 
@@ -1627,7 +1664,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         # cu_physics = 5 (Grell-3D, verified: no tier warning); cugd_avedx 1 / 3
         # (other values rejected), the ensemble sizes fixed; ishallow and clos_choice as with Grell-Freitas;
         # cu_physics = 93 (Grell-Devenyi) is not ported
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 5, 5, ishallow = 1, cugd_avedx = 3, "
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 5, 5, ishallow = 1, cugd_avedx = 3, "
                                 "clos_choice = 3 /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["cu_physics"], 5)
@@ -1635,16 +1672,16 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertEqual(sec["phys"]["cugd_avedx"], 3)
         self.assertEqual(sec["phys"]["clos_choice"], 3)
         self.assertFalse(any("verification tier" in w for w in t.warnings), t.warnings)
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 5, 5 /\n")
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 5, 5 /\n")
         self.assertEqual(t.errors, [])
         self.assertNotIn("cugd_avedx", sec["phys"])
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 5, 5, cugd_avedx = 2 /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 5, 5, cugd_avedx = 2 /\n")
         self.assertTrue(any("cugd_avedx = 2" in e for e in t.errors), t.errors)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 5, 5, maxens3 = 12 /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 5, 5, maxens3 = 12 /\n")
         self.assertTrue(any("maxens3 = 12" in e for e in t.errors), t.errors)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 93, 93 /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 93, 93 /\n")
         self.assertTrue(any("Grell-Devenyi" in e for e in t.errors), t.errors)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 5, 5, ra_sw_physics = 2*1, cu_rad_feedback = .true. /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 5, 5, ra_sw_physics = 2*1, cu_rad_feedback = .true. /\n")
         self.assertTrue(any("Dudhia shortwave" in e for e in t.errors), t.errors)
 
     def test_values_wrf_runs_differently(self):
@@ -1667,7 +1704,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertIn("spec_bdy_width = 7", errs(self.NEST.replace(".false. /", ".false., spec_bdy_width = 7 /")))
         # check_a_mundo: cu_rad_feedback gives cu_diag = 1 on every such domain when d01 runs GF / G3 / GD
         self.assertIn("cu_diag = 1 on domain 2", errs(
-            self.NEST + "&physics cu_physics = 3, 0, cu_rad_feedback = .true., .true., sf_sfclay_physics = 1, 1,"
+            self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 3, 0, cu_rad_feedback = .true., .true., sf_sfclay_physics = 1, 1,"
             " sf_surface_physics = 2, 2, bl_pbl_physics = 1, 1 /\n"))
         # a nest without an e_vert entry has the Registry default 31
         nest_ev = self.NEST.replace("e_vert = 45, 45,", "e_vert = 45,")
@@ -1700,37 +1737,37 @@ class TestWrfNamelistSemantics(unittest.TestCase):
 
     def test_mskf_and_unported_kf_variants(self):
         # cu_physics = 11 (multi-scale Kain-Fritsch) is ported; 10 (KF-CuP) and 99 (old Kain-Fritsch) are not
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 11, 11, kfeta_trigger = 3 /\n")
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 11, 11, kfeta_trigger = 3 /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["cu_physics"], 11)
         self.assertEqual(sec["phys"]["kfeta_trigger"], 3)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 11, 11, kfeta_trigger = 2 /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 11, 11, kfeta_trigger = 2 /\n")
         self.assertTrue(any("kfeta_trigger = 2" in e for e in t.errors), t.errors)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 11, 11, aercu_opt = 1 /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 11, 11, aercu_opt = 1 /\n")
         self.assertTrue(any("aercu_opt" in e for e in t.errors), t.errors)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 11, 11, kf_edrates = 1, 1 /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 11, 11, kf_edrates = 1, 1 /\n")
         self.assertTrue(any("kf_edrates" in e for e in t.errors), t.errors)
         # check_a_mundo: MSKF on any domain sets icloud = 1 for every domain (a nest without cumulus included)
         # (the nest keeps column physics: a parent with it and a nest without is refused)
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 11, 0, icloud = 0, ra_lw_physics = 4, 4,"
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 11, 0, icloud = 0, ra_lw_physics = 4, 4,"
                                 " ra_sw_physics = 4, 4, sf_sfclay_physics = 1, 1, sf_surface_physics = 2, 2,"
                                 " bl_pbl_physics = 1, 1 /\n")
         self.assertEqual(t.errors, [])
         self.assertTrue(all("icloud" not in v for v in sec.values() if isinstance(v, dict)), sec)
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 1, 0, icloud = 0, ra_lw_physics = 4, 4,"
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 1, 0, icloud = 0, ra_lw_physics = 4, 4,"
                                 " ra_sw_physics = 4, 4, sf_sfclay_physics = 1, 1, sf_surface_physics = 2, 2,"
                                 " bl_pbl_physics = 1, 1 /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["icloud"], 0)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 10, 10 /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 10, 10 /\n")
         self.assertTrue(any("KF-CuP" in e for e in t.errors), t.errors)
-        t, _ = self.translate(self.NEST + "&physics cu_physics = 99, 99 /\n")
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 99, 99 /\n")
         self.assertTrue(any("old Kain-Fritsch" in e for e in t.errors), t.errors)
 
     def test_nest_entries_take_registry_defaults(self):
         # r32cudt1 / r32bldt1: a nest without a cudt / bldt entry calls the scheme every step (Registry default 0,
         # rconfig CUDT / BLDT in upper case)
-        t, sec = self.translate(self.NEST + "&physics cu_physics = 1, 1, cudt = 5, bldt = 1 /\n")
+        t, sec = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 1, 1, cudt = 5, bldt = 1 /\n")
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["cudt"], 5)
         self.assertEqual(sec["d02"]["phys_cudt"], 0)
@@ -1754,7 +1791,10 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         # the cumulus scheme alone on the parent: the nest has no column physics, whose state arrays WRF feeds back
         t, _ = self.translate(self.NEST + "&physics cu_physics = 1, 0 /\n")
         self.assertTrue(any("no surface layer, LSM or PBL" in e for e in t.errors), t.errors)
+        # the cumulus scheme alone on both domains: cppwrf's column physics suite needs a surface layer and an LSM
         t, _ = self.translate(self.NEST + "&physics cu_physics = 1, 1 /\n")
+        self.assertTrue(any("PhysicsSuite: only sf_sfclay_physics" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, cu_physics = 1, 1 /\n")
         self.assertEqual(t.errors, [])
 
     def test_options_wrf_needs(self):

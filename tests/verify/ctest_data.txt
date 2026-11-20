@@ -5,3 +5,5 @@
 port_gem10_data.tar
 # real_vs_wrf_runs: run_G13ICE_r8 ... run_G13SW_r8 (wrfref gem13-refs)
 port_gem13_data.tar
+# real_vs_wrf_runs: run_V111TAV_r8 ... run_V111NSH_r8 (wrfref v111-refs: TAVGSFC, surface pressure from PMSL)
+port_v111_data.tar

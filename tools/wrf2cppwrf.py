@@ -2029,6 +2029,24 @@ class WrfTranslator:
                     self.error(f"WRF sf_sfclay_physics = 0 (no surface layer) with sf_surface_physics = {sf_surface} "
                                "is not supported by CPPWRF: its land surface models run with a surface layer scheme "
                                "(sf_sfclay_physics = 1, 2, 4, 5 or 7).")
+                elif sf_sfclay == 0 and sf_surface == 0:
+                    # cumulus or radiation without a surface layer and a land surface model: wrf.exe runs them
+                    # (module_physics_init.F:3316-3409 sfclay_select and :3414-3851 sfc_select do nothing for 0), but
+                    # CPPWRF's column physics suite needs both, and the model stops at its start
+                    # (src/phys/driver/suite.cpp PhysicsSuite with cu_physics; src/cases/model.cpp with radiation only)
+                    if cu_physics != 0:
+                        self.error(f"WRF cu_physics = {cu_physics} without sf_sfclay_physics and sf_surface_physics is "
+                                   "not supported by CPPWRF (cppwrf would stop: \"PhysicsSuite: only "
+                                   "sf_sfclay_physics=1|2|4|5|7, sf_surface_physics=1|2|3|4, "
+                                   "bl_pbl_physics=0|1|2|4|5|7|8 (the PX land surface, sf_surface_physics=7, is not "
+                                   "ported)\"): its cumulus schemes run in the column physics suite with a surface "
+                                   "layer and a land surface model.")
+                    else:
+                        self.error(f"WRF ra_lw_physics = {ra_lw} / ra_sw_physics = {ra_sw} without surface-layer, "
+                                   "land-surface, PBL or cumulus physics is not supported by CPPWRF (cppwrf would "
+                                   "stop: \"phys.ra_lw/ra_sw_physics without surface-layer, land-surface, PBL or "
+                                   "cumulus physics is not supported\"): its radiation runs in the column physics "
+                                   "suite with a surface layer and a land surface model.")
 
                 # radiation_driver: a LW scheme needs a SW scheme and the reverse (wrf_error_fatal); CPPWRF ports
                 # RRTMG or RRTM LW with RRTMG or Dudhia SW

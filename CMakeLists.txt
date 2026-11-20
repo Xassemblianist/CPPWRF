@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 cmake_minimum_required(VERSION 3.24)
-project(CPPWRF VERSION 1.1.0 LANGUAGES CXX)
+project(CPPWRF VERSION 1.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -238,6 +238,8 @@ if(TARGET netCDF::netcdf OR NETCDF_FOUND OR NETCDF_INCDIR)
            runs:run_G10REAL_r8 runs:run_G10LAG1_r8 runs:run_G10DST_r8 runs:run_G10SSO_r8
            runs:run_G13ICE_r8 runs:run_G13ICEF_r8 runs:run_G13NOLAKE_r8 runs:run_G13SH_r8 runs:run_G13SHQ_r8
            runs:run_G13NOGHT_r8 runs:run_G13FLIP_r8 runs:run_G13S2P_r8 runs:run_G13PT_r8 runs:run_G13SW_r8
+           runs:run_V111TAV_r8 runs:run_V111TAVT_r8 runs:run_V111TS2P_r8 runs:run_V111TSLAB_r8 runs:run_V111TNL_r8
+           runs:run_V111PMS_r8 runs:run_V111PMT_r8 runs:run_V111NSH_r8
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(real_vs_wrf_runs PROPERTIES SKIP_RETURN_CODE 77)
   # wrfout/wrfrst files identical to WRF v4.8.0's (CPU FP64 builds; skipped, exit 77, without ${CPPWRF_WRF_RUNS})

@@ -2,20 +2,28 @@
 // WRF's fatal stops inside physics kernels (raise_fatal in the kernel, fatal_check on the host):
 //  (a) Noah land SFLX, glacial ice and sea ice with SNEQV / SNOWH > 1 stop with
 //      "Physical snow depth is less than snow water equiv.";
-//      Noah land with a category beyond the tables or NROOT > NSOIL stops as WRF's REDPRM;
+//      Noah land with a category beyond the tables or NROOT > NSOIL stops as WRF's REDPRM; a land-use category beyond
+//      the VEGPARM.TBL dataset of MMINLU (a tiny synthetic table read by read_noah_tables) stops with REDPRM's
+//      'Warning: too many input landuse types' (module_sf_noahlsm.F:2436-2438), as wrf.exe does on MODIS input
+//      whose lake category 21 stays land without ISLAKE (VEGPARM.TBL lists 20 MODIS categories);
 //  (b) the Kain-Fritsch codes (QG(1) < 0, ISTOP = 1) raised in a kernel stop with WRF's messages;
 //  (c) a physical snowpack raises nothing, and fatal_check clears the flag after a stop.
 // The kernels run on the backend of the build (CPU or CUDA device flag).
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
+
+#include <unistd.h>
 
 #include "core/backend.hpp"
 #include "core/field.hpp"
 #include "core/precision.hpp"
 #include "phys/driver/noah_ice.hpp"
 #include "phys/lsm_noah/noah.hpp"
+#include "phys/lsm_noah/noah_tables.hpp"
 
 using namespace cppwrf;
 static int fails = 0;
@@ -75,16 +83,19 @@ struct KRaise {
 
 // Noah land SFLX on one column: every real view points into a zeroed scratch block except SNEQV and
 // SNOWH; VEGTYP = SOILTYP = SLOPETYP = ACTIVE = 1; one category in each table (cats: SLCATS, LUCATS,
-// SLPCATS; nroot: NROTBL(1)).
-static int noah_land(real sneqv, real snowh, int cats = 1, int nroot = 1) {
+// SLPCATS; nroot: NROTBL(1)). With tb: those tables and VEGTYP = vegtyp.
+static int noah_land(real sneqv, real snowh, int cats = 1, int nroot = 1, const phys::noah::NoahTables* tb = nullptr,
+                     int vegtyp = 1) {
   const int nscr = 64;
   real* scr = static_cast<real*>(dev_alloc(sizeof(real) * nscr));
   real* snow = static_cast<real*>(dev_alloc(sizeof(real) * 2));
   int* ones = static_cast<int*>(dev_alloc(sizeof(int)));
+  int* veg = static_cast<int*>(dev_alloc(sizeof(int)));
   const real hs[2] = {sneqv, snowh};
   const int one_i = 1;
   copy_to_dev(snow, hs, sizeof hs);
   copy_to_dev(ones, &one_i, sizeof one_i);
+  copy_to_dev(veg, &vegtyp, sizeof vegtyp);
   phys::noah::NoahKernel k{};
   View2<real> s{scr, 1};
   View2<const real> c{scr, 1};
@@ -93,6 +104,7 @@ static int noah_land(real sneqv, real snowh, int cats = 1, int nroot = 1) {
   k.lwdn = k.soldn = k.solnet = k.sfcprs = k.prcp = k.sfctmp = k.th2 = k.q2 = k.sfcspd = k.q2sat = k.dqsdt2 =
       k.ffrozp = k.shdfac = k.shdmin = k.shdmax = k.alb = k.snoalb = k.tbot = c;
   k.vegtyp = k.soiltyp = k.slopetyp = k.active = n;
+  k.vegtyp = View2<const int>{veg, 1};
   k.z0brd = k.embrd = k.cmc = k.t1 = k.albedo = k.ch = k.cm = k.emissi = k.z0 = k.xlai = k.snotime1 = k.ribb = s;
   k.stc = k.smc = k.sh2o = k.et = k.smav = s3;
   k.eta = k.sheat = k.eta_kinematic = k.fdown = k.ec = k.edir = k.ett = k.esnow = k.drip = k.dew = k.beta = k.etp =
@@ -106,13 +118,41 @@ static int noah_land(real sneqv, real snowh, int cats = 1, int nroot = 1) {
   const real sl[4] = {real(0.1), real(0.3), real(0.6), real(1.0)};
   for (int z = 0; z < 4; ++z) k.sldpth[z] = sl[z];
   k.isurban = 1;
-  k.tables.slcats = k.tables.lucats = k.tables.slpcats = cats;
-  k.tables.nrotbl[0] = nroot;
+  phys::noah::NoahTables t{};
+  if (tb) {
+    t = *tb;
+  } else {
+    t.slcats = t.lucats = t.slpcats = cats;
+    t.nrotbl[0] = nroot;
+  }
+  auto* d_tb = static_cast<phys::noah::NoahTables*>(dev_alloc(sizeof t));
+  copy_to_dev(d_tb, &t, sizeof t);
+  k.tables = d_tb;
   const int code = stop_code([&] { phys::noah::run_noah(k, one); });
+  dev_free(d_tb);
   dev_free(scr);
   dev_free(snow);
   dev_free(ones);
+  dev_free(veg);
   return code;
+}
+
+// GENPARM.TBL, SOILPARM.TBL and VEGPARM.TBL with one slope, one soil and two land-use categories (dataset SYNTH2)
+static bool synthetic_tables(const std::filesystem::path& dir, phys::noah::NoahTables& tb) {
+  std::filesystem::create_directories(dir);
+  std::ofstream(dir / "GENPARM.TBL") << "General Parameters\nSLOPE_DATA\n1\n0.1\nZBOT_DATA\n-8.0\n";
+  std::ofstream(dir / "SOILPARM.TBL") << "Soil Parameters\nSTAS\n1,1 'BB DRYSMC'\n"
+                                         "1, 2.79, 0.010, -0.472, 0.339, 0.236, 0.069, 1.07E-6, 0.608E-6, 0.010, "
+                                         "0.92, 'SAND'\n";
+  std::ofstream v(dir / "VEGPARM.TBL");
+  v << "Vegetation Parameters\nSYNTH2\n2,1 'SHDFAC NROOT'\n";
+  for (int lc = 1; lc <= 2; ++lc)
+    v << lc << ", .10, 1, 300., 100., 42.00, 0.04, 70., 0.50, 3.29, .920, .920, 0.15, 0.15, .03, .05, 0.0, 0.0, "
+             "'CAT'\n";
+  v << "TOPT_DATA\n298.0\nCMCMAX_DATA\n0.5E-3\nCFACTR_DATA\n0.5\nRSMAX_DATA\n5000.0\nBARE\n2\nNATURAL\n1\n";
+  for (int n = 1; n <= 11; ++n) v << "LCZ_" << n << "\n1\n";
+  v.close();
+  return phys::noah::read_noah_tables(dir.string(), "SYNTH2", "STAS", tb);
 }
 
 int main() {
@@ -123,6 +163,19 @@ int main() {
   // Noah REDPRM: a category beyond the tables, more root layers than soil layers
   CHECK(noah_land(real(0.2), real(0.8), 0) == kFatalNoahSoilTypes, "noah soil types");
   CHECK(noah_land(real(0.2), real(0.8), 1, 5) == kFatalNoahRootLayers, "noah root layers");
+  // a land-use category beyond VEGPARM.TBL's LUCATS (2 in the synthetic SYNTH2 dataset): REDPRM's stop
+  {
+    const auto dir = std::filesystem::temp_directory_path() / ("cppwrf_test_fatal_" + std::to_string(::getpid()));
+    phys::noah::NoahTables tb{};
+    const bool read = synthetic_tables(dir, tb);
+    CHECK(read && tb.lucats == 2 && tb.slcats == 1 && tb.slpcats == 1, "synthetic tables");
+    if (read) {
+      CHECK(noah_land(real(0.2), real(0.8), 1, 1, &tb, 3) == kFatalNoahLanduseTypes, "noah landuse types");
+      CHECK(noah_land(real(0.2), real(0.8), 1, 1, &tb, 2) != kFatalNoahLanduseTypes, "noah landuse in table");
+    }
+    std::filesystem::remove_all(dir);
+  }
+  CHECK(std::strcmp(fatal_message(kFatalNoahLanduseTypes), "Warning: too many input landuse types") == 0, "msg");
   // (b) Kain-Fritsch codes and the messages
   CHECK(stop_code([] { column_for(one, KRaise{kFatalKfQgSurface}); }) == kFatalKfQgSurface, "kf qg");
   CHECK(stop_code([] { column_for(one, KRaise{kFatalKfIstop}); }) == kFatalKfIstop, "kf istop");

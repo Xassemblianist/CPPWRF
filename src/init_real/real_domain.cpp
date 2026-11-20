@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include "core/strings.hpp"
 #include "init_real/real_domain.hpp"
+#include "io/option_tiers.hpp"
 #include "wrf_io/wrf_schema.hpp"
 
 #include <cstdio>
@@ -123,6 +125,10 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
   o.polar = c.logical("polar");
   o.seaice_threshold = c.num("seaice_threshold");
   o.use_tavg_for_tsk = c.logical("use_tavg_for_tsk");
+  {
+    const std::string a = to_lower(trim(nl.raw("cppwrf", "allow_unverified").value_or("")));
+    o.allow_unverified = a == ".true." || a == "t" || a == ".t." || a == "true";
+  }
   o.spec_bdy_width = c.integer("spec_bdy_width");
   o.real_data_init_type = c.integer("real_data_init_type");
   o.input_from_file = c.logical("input_from_file");
@@ -251,7 +257,7 @@ RealDomain<T>::RealDomain(const RealOptions& opt) : o(opt) {
                    &lakemask, &msft, &msfu, &msfv, &msftx, &msfty, &msfux, &msfuy, &msfvx, &msfvy, &msfvx_inv, &f, &e,
                    &sina, &cosa, &tsk_save, &var_sso, &var2d, &oc12d, &oa1, &oa2, &oa3, &oa4, &ol1, &ol2, &ol3, &ol4,
                    &water_depth, &pdhs, &toposoil, &sct_dom_gc, &scb_dom_gc, &frc_urb2d, &psfc_gc, &pslv_gc, &ht_gc,
-                   &intq_gc, &tsk_gc, &tmn_gc, &xlat_gc, &xlong_gc})
+                   &intq_gc, &tsk_gc, &tmn_gc, &xlat_gc, &xlong_gc, &tavgsfc})
     *a = F2<T>(1, ide, 1, jde);
   ivgtyp = F2<int>(1, ide, 1, jde);
   isltyp = F2<int>(1, ide, 1, jde);
@@ -339,7 +345,10 @@ void RealDomain<T>::read_input(const MetEm& m) {
   // 2-D fields (Registry i1 names)
   if (m.has("PSFC")) put2(m, "PSFC", psfc);
   if (m.has("PMSL")) put2(m, "PMSL", pslv_gc);
-  for (auto [fl, n] : {std::pair<const char*, const char*>{"PSFC", "PSFC"}, {"SLP", "PMSL"}, {"SOILHGT", "SOILHGT"}})
+  // TAVGSFC (module_optional_input.F:884-915 optional_tavgsfc: FLAG_TAVGSFC; the field is Registry tavgsfc, i1)
+  if (m.has("TAVGSFC")) put2(m, "TAVGSFC", tavgsfc);
+  for (auto [fl, n] : {std::pair<const char*, const char*>{"PSFC", "PSFC"}, {"SLP", "PMSL"}, {"SOILHGT", "SOILHGT"},
+                       {"TAVGSFC", "TAVGSFC"}})
     if (flags.count(fl) && flags[fl] == 1 && !m.has(n))
       throw std::runtime_error(std::string("real: FLAG_") + fl + " = 1 but met_em has no " + n + ": " + m.path);
   put2(m, "HGT_M", ht_gc); put2(m, "SKINTEMP", tsk_gc);
@@ -516,8 +525,12 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   } else {
     throw std::runtime_error("real: met_em without FLAG_MF_XY is not supported");
   }
+  // module_initialize_real.F:595-622: use_tavg_for_tsk needs TSK or TAVGSFC; its TSK = TAVGSFC is overwritten by
+  // grid%tsk = grid%tsk_gc (SKINTEMP) in the metgrid part (:704-713), so it changes no field
   const bool we_have_tavgsfc = flag("TAVGSFC") == 1;
-  if (o.use_tavg_for_tsk) throw std::runtime_error("real: use_tavg_for_tsk is not ported");
+  if (o.use_tavg_for_tsk && flag("TSK") != 1 && !we_have_tavgsfc)
+    throw std::runtime_error("real: We either need TSK or TAVGSFC, verify these fields are coming from WPS "
+                             "(use_tavg_for_tsk = .true.; module_initialize_real.F:607-612)");
   if (flag("METGRID") != 1) throw std::runtime_error("real: input must come from metgrid (FLAG_METGRID = 1)");
 
   // ================================ vertical interpolation part
@@ -701,16 +714,22 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
     if (flag("PSFC") == 1 && flag("SOILHGT") == 1 && flag("SLP") == 1 && !sfcp_to_sfcp) {
       sfcprs3(ght_gc, p_gc, ht, pslv_gc, psfc, nlev, dm, sk);
     } else if (flag("PSFC") == 1 && flag("SOILHGT") == 1 && sfcp_to_sfcp) {
-      sfcprs2(t_gc, qv_gc, ght_gc, psfc_gc, ht, psfc, dm, sk);
-    } else if (flag("SLP") == 1) {
-      throw std::runtime_error("real: met_em without surface pressure (FLAG_PSFC = " + std::to_string(flag("PSFC")) +
-                               ") or soil height (FLAG_SOILHGT = " + std::to_string(flag("SOILHGT")) +
-                               "): WRF's sfcprs path (from PMSL) is not ported");
+      sfcprs2(t_gc, qv_gc, ght_gc, psfc_gc, ht, tavgsfc, psfc, we_have_tavgsfc, dm, sk);
+    } else if (flag("SLP") == 1) {  // from PMSL (module_initialize_real.F:1419-1426)
+      sfcprs(t_gc, qv_gc, ght_gc, pslv_gc, ht, tavgsfc, p_gc, psfc, we_have_tavgsfc, nlev, dm, sk);
     } else {
       throw std::runtime_error("real: not enough info for a p sfc computation (FLAG_PSFC = " +
                                std::to_string(flag("PSFC")) + ", FLAG_SOILHGT = " + std::to_string(flag("SOILHGT")) +
-                               ", FLAG_SLP = 0)");
+                               ", FLAG_SLP = 0, sfcp_to_sfcp = " + (sfcp_to_sfcp ? "T" : "F") + ")");
     }
+    // module_initialize_real.F:1436-1446: without input surface pressure, the computed one goes into level 1
+    if (flag("PSFC") != 1)
+      for (int j = jts; j <= j1; ++j)
+        for (int i = its; i <= i1; ++i) {
+          if (skip(i, j)) continue;
+          psfc_gc(i, j) = psfc(i, j);
+          p_gc(i, 1, j) = psfc(i, j);
+        }
     integ_moist(qv_gc, p_gc, pd_gc, t_gc, ght_gc, intq_gc, nlev, dm, sk);
   }
   p_dts(mu0, intq_gc, psfc, p_top, d, sk);
@@ -793,19 +812,28 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   // module_initialize_real.F:2822-2884
   if (islake < 0) {  // land use without an inland-lake category (USGS 24, MODIS 20, NLCD40: ISLAKE = -1)
     lakeflag = 0;
-    if (we_have_tavgsfc) throw std::runtime_error("real: TAVGSFC (FLAG_TAVGSFC = 1) is not ported");
     for (int j = jts; j <= j1; ++j)
       for (int i = its; i <= i1; ++i) {
         if (skip(i, j)) continue;
         if ((landusef(i, iswater, j) >= T(0.5) || lu_index(i, j) == T(iswater)) &&
             (sst(i, j) < T(150) || sst(i, j) > T(400))) {
+          if (we_have_tavgsfc) sst(i, j) = tavgsfc(i, j);
           if (sst(i, j) < T(150) || sst(i, j) > T(400)) sst(i, j) = tsk(i, j);
           if (sst(i, j) < T(150) || sst(i, j) > T(400)) sst(i, j) = t2(i, j);
         }
       }
   } else {
     lakeflag = 1;
-    if (we_have_tavgsfc) throw std::runtime_error("real: TAVGSFC with inland lakes is not ported");
+    if (we_have_tavgsfc)  // inland lakes take the average surface temperature (module_initialize_real.F:2845-2859)
+      for (int j = jts; j <= j1; ++j)
+        for (int i = its; i <= i1; ++i) {
+          if (skip(i, j)) continue;
+          if (landusef(i, islake, j) >= T(0.5) || lu_index(i, j) == T(islake)) {
+            sst(i, j) = tavgsfc(i, j);
+            tsk(i, j) = tavgsfc(i, j);
+          }
+          if (sst(i, j) < T(150) || sst(i, j) > T(400)) sst(i, j) = t2(i, j);
+        }
     for (int j = jts; j <= j1; ++j)
       for (int i = its; i <= i1; ++i) {
         if (skip(i, j)) continue;
@@ -838,26 +866,34 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
   ifndsnowh = flag("SNOWH");
   ifndsoilw = num_sw_levels_input >= 1 ? 1 : 0;
   if (slab) {
-    // process_soil_real (module_soil_pre.F), SLABSCHEME: fix_bottom_level_for_temp takes TMN from the input soil
-    // temperature closest to 30 cm (TAVGSFC is not read by cppwrf_real)
-    if (flag("TAVGSFC") == 1) throw std::runtime_error("real: TAVGSFC input with sf_surface_physics = 1 is not ported");
-    int closest_layer = 1000;
-    T closest_depth = T(1.e6);
-    for (int k = 1; k <= num_st_levels_input; ++k) {
-      const T diff_cm = std::abs(T(st_levels_input[std::size_t(k - 1)]) - T(30.));
-      if (diff_cm < closest_depth) {
-        closest_depth = diff_cm;
-        closest_layer = k;
-      }
-    }
-    if (closest_layer != 1000)
+    // process_soil_real (module_soil_pre.F:650-686), SLABSCHEME: fix_bottom_level_for_temp takes TMN from TAVGSFC
+    // (FLAG_TAVGSFC = 1), else from the input soil temperature closest to 30 cm
+    if (we_have_tavgsfc) {
       for (int j = jts; j <= j1; ++j)
         for (int i = its; i <= i1; ++i) {
           if (skip(i, j)) continue;
-          tmn(i, j) = st_input(i, closest_layer + 1, j);
+          tmn(i, j) = tavgsfc(i, j);
         }
-    // adjust_soil_temp_new: no lapse-rate TMN for the slab; with the input's soil height, TMN is lowered by the
-    // height difference when a layer lies above 40 cm (by the model terrain otherwise)
+    } else {
+      int closest_layer = 1000;
+      T closest_depth = T(1.e6);
+      for (int k = 1; k <= num_st_levels_input; ++k) {
+        const T diff_cm = std::abs(T(st_levels_input[std::size_t(k - 1)]) - T(30.));
+        if (diff_cm < closest_depth) {
+          closest_depth = diff_cm;
+          closest_layer = k;
+        }
+      }
+      if (closest_layer != 1000)
+        for (int j = jts; j <= j1; ++j)
+          for (int i = its; i <= i1; ++i) {
+            if (skip(i, j)) continue;
+            tmn(i, j) = st_input(i, closest_layer + 1, j);
+          }
+    }
+    // adjust_soil_temp_new (module_soil_pre.F:1043-1055): no lapse-rate TMN for the slab; with the input's soil
+    // height, TMN is lowered by the height difference with TAVGSFC or when a layer lies above 40 cm (by the model
+    // terrain otherwise)
     if (flag("SOILHGT") == 1) {
       int st_near_sfc = 0;
       for (int k = 1; k <= num_st_levels_input; ++k)
@@ -871,7 +907,7 @@ void RealDomain<T>::init_domain(int loop, const std::string& current_date) {
           if (vmax > T(10000)) continue;
           if (dmin < T(-3000) || dmax > T(3000)) continue;
           if (landmask(i, j) > T(0.5)) {
-            if (st_near_sfc == 1) tmn(i, j) = tmn(i, j) - T(0.0065) * (ht(i, j) - toposoil(i, j));
+            if (we_have_tavgsfc || st_near_sfc == 1) tmn(i, j) = tmn(i, j) - T(0.0065) * (ht(i, j) - toposoil(i, j));
             else tmn(i, j) = tmn(i, j) - T(0.0065) * ht(i, j);
             tsk(i, j) = tsk(i, j) - T(0.0065) * (ht(i, j) - toposoil(i, j));
             for (int k = 2; k <= num_st_levels_input + 1; ++k)

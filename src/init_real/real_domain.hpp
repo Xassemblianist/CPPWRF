@@ -49,6 +49,7 @@ struct RealOptions {
   bool all_ic_times = false, polar = false;
   double seaice_threshold = 100;
   bool use_tavg_for_tsk = false;
+  bool allow_unverified = false;  // &cppwrf allow_unverified: input paths not yet compared with a WRF real.exe run
   // bdy_control
   int spec_bdy_width = 5;
   int real_data_init_type = 1;  // init_soil_1_real: water points' TSLB from SST only for 1 (SI)
@@ -102,6 +103,7 @@ class RealDomain {
   // ---- metgrid fields (i, 1..nlev, j)
   F3<T> p_gc, t_gc, rh_gc, u_gc, v_gc, ght_gc, qv_gc, sh_gc, pd_gc;
   F2<T> psfc_gc, pslv_gc, ht_gc, intq_gc, tsk_gc, tmn_gc, xlat_gc, xlong_gc;
+  F2<T> tavgsfc;  // Registry tavgsfc (i1: met_em only, not in wrfinput), read with FLAG_TAVGSFC = 1
   F3<T> greenfrac, albedo12m, lai12m, landusef, soilctop, soilcbot;  // (i, month/category, j)
   // ---- soil
   F3<T> tslb, smois, sh2o;  // (i, 1..num_soil_layers, j)
