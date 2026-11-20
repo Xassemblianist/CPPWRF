@@ -38,5 +38,5 @@ Stage: final
 
 %labels
     org.opencontainers.image.title CPPWRF (CPU FP64)
-    org.opencontainers.image.version 1.0.0
+    org.opencontainers.image.version 1.1.0
     org.opencontainers.image.licenses GPL-3.0-or-later

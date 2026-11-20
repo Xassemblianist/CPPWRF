@@ -31,7 +31,9 @@ Ubuntu 24.04'te de aynı paketler var (`g++-14` "universe" deposunda). Gerekenle
 - **CMake 3.24 ya da üstü.** OpenMP g++ ile birlikte gelir.
 - **NetCDF-C ve başlık dosyaları** (`libnetcdf-dev`).
 - **Python 3, `numpy` ve `netCDF4`:** araçlar için.
-- **GPU derlemeleri için CUDA Toolkit 12 ya da üstü ve bir NVIDIA GPU.**
+- **GPU derlemeleri için CUDA Toolkit 12.1 ya da üstü ve hesaplama yeteneği (compute capability) 7.0 (Volta) ya da
+  üstü bir NVIDIA GPU.** Toplu kernel başlatmaları 32 KB'a kadar kernel parametresi geçirir; daha eski araç takımları
+  ve GPU'lar (4 KB sınırı) bunu reddeder.
   - Derleme CUDA 12.4 ve 13.0 ile denendi.
   - sm_120 (Blackwell) için CUDA 12.8 ya da üstü gerekir.
   - nvcc'nin kabul etmediği yeni bir g++ varsa `-DCMAKE_CUDA_HOST_COMPILER=g++-13` verin.
@@ -112,7 +114,7 @@ sürümünden etkilenmez.
 
 ## Hazır paketler ve kapsayıcılar
 
-- **Sürüm paketleri.** Her derleme için bir `.tar.gz` vardır, ör. `cppwrf-1.0.0-cpu-fp64-linux-x86_64.tar.gz`.
+- **Sürüm paketleri.** Her derleme için bir `.tar.gz` vardır, ör. `cppwrf-1.1.0-cpu-fp64-linux-x86_64.tar.gz`.
   Açıp `bin/` dizinini kullanmanız yeterli. Debian 13'te derlendikleri için glibc 2.38+, GCC 13.2+ libstdc++ ve
   Debian 13'ün NetCDF kitaplığı (`libnetcdf22`) gerekir. GPU paketleri ayrıca uygun bir NVIDIA sürücüsü (CUDA 12.8
   için 570+) ve CUDA çalışma kitaplığı (`libcudart`) ister.
