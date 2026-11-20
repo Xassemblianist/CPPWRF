@@ -7,6 +7,8 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+## 1.1.1 (2026-11-20)
+
 ### Added
 - `cppwrf_real`: TAVGSFC input (`FLAG_TAVGSFC = 1`), as real.exe uses it: the surface pressure of sfcprs2 with
   `sfcp_to_sfcp` (ez_method, Tv from TAVGSFC; module_initialize_real.F:1409-1418, 8457-8515), the SST and skin

@@ -1,3 +1,35 @@
+# CPPWRF 1.1.1 release notes
+
+CPPWRF 1.1.1 is a fix release of 1.1.0. Model results are unchanged: the CPU FP64 and CUDA FP64 builds give the same
+output as 1.1.0 for every namelist 1.1.0 runs.
+
+## Added
+
+- **`cppwrf_real`: TAVGSFC input** (`FLAG_TAVGSFC = 1`), as real.exe uses it: the surface pressure of `sfcp_to_sfcp`
+  (sfcprs2's ez_method), the SST and skin temperature of inland-lake points, the SST repair of water points without
+  lake information (`ISLAKE = -1`), the slab's TMN and its terrain adjustment. `use_tavg_for_tsk` stops only when the
+  input has neither TSK nor TAVGSFC, as in WRF.
+- **`cppwrf_real`: surface pressure from PMSL** (sfcprs) when the met_em files have no PSFC or no SOILHGT, with WRF's
+  850 / 700 / 500 hPa lapse rates, its fallback without those levels, and the TAVGSFC variant.
+- Both are compared with WRF v4.8.0 real.exe (real*8) at tolerance 0 in eight new runs of ctest `real_vs_wrf_runs`
+  (wrfinput and wrfbdy identical): V111TAV, V111TAVT (`use_tavg_for_tsk`), V111TS2P (`sfcp_to_sfcp`), V111TSLAB (the
+  slab), V111TNL (`ISLAKE = -1`), V111PMS (no PSFC), V111PMT (no PSFC, with TAVGSFC), V111NSH (no SOILHGT).
+
+## Fixed
+
+- **Translator:** a namelist with cumulus or radiation physics but no surface layer and land surface model was
+  translated, and `cppwrf` then stopped at its start. It is now an error at translation time with the model's
+  message. wrf.exe runs such namelists; CPPWRF's column physics needs both schemes (docs/USER_GUIDE.md, "Rejected
+  Options and Why").
+
+## Verification
+
+Full CPU CI on the release commit's parent ade4b90 (GitHub-hosted runners): suite PASS 342, WRF output files 42,
+ideal-case files 14, differential tests 32 / 32, ctest 33 / 33 (real_vs_wrf_runs: 22 WRF real.exe runs), all at
+tolerance 0. The CUDA code is unchanged from 1.1.0 (its G4 proof holds).
+
+---
+
 # CPPWRF 1.1.0 release notes
 
 CPPWRF 1.1.0 is a C++20 / CUDA port of WRF-ARW v4.8.0. As in 1.0.0, the CPU FP64 and CUDA FP64 builds reproduce

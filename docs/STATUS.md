@@ -1,6 +1,6 @@
 # CPPWRF: status and verification
 
-Version 1.1.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
+Version 1.1.1 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
