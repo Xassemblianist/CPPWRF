@@ -8,11 +8,11 @@
 //   rrtmg_lw_setcoef_stage per layer: setcoef of one layer (GPU batch: prep leaves setcoef to it)
 //   rrtmg_lw_layer    per layer  : taumol, cldprmc, cloudy-layer flag
 //   rrtmg_lw_bandstage per band  : rtrnmc g-point loop of the band (rrtmg_lw_rtrnmc.hpp)
-//   rrtmg_lw_level    per level  : rtrnmc band sums
+//   rrtmg_lw_level    per level  : rtrnmc band sums (GPU batch: rrtmg_lw_bandsum_level)
 //   rrtmg_lw_finish   per column : heating rates and the RRTMG_LWRAD outputs
 // The CPU column driver (rrtmg_lw_column) runs them in this order on stride-1 arrays; the GPU
 // batch driver runs each stage for all columns (layers, g-points, levels) at once, with the band
-// stage as rrtmg_lw_gpointstage per g-point and rrtmg_lw_bandsum per level. The arithmetic of
+// stage as rrtmg_lw_gpointstage per g-point and rrtmg_lw_bandsum_level per level. The arithmetic of
 // every value is WRF's (checked bit for bit against WRF dumps on the CPU path).
 #include <algorithm>
 #include <cmath>
@@ -62,19 +62,23 @@ struct LwViews {
       scaleminorn2;
   SD2 cldfmc, taucmc;                          // [140][nl]
   SD2 fracs, taug;                             // [nl][140]
-  SD2 bu, bd, bcu, bcd;                        // [16][nl + 1] band sums of rtrnmc
+  SD2 bu, bd, bcu, bcd;                        // [16][nl + 1] band sums of rtrnmc (not in the GPU batch's layout)
   SD gu0, gcu0;                                // [140] the g-points' level-0 radiances (GPU batch)
   SD totuflux, totdflux, totuclfl, totdclfl, fnet, fnetc, htr, htrc;  // [nl + 1]
-  SI iscal;  // [0] laytrop, [1] inflag, [2] iceflag, [3] liqflag, [4] any_cloud
+  SI iscal;  // [0] laytrop, [1] inflag, [2] iceflag, [3] liqflag, [4] 1 + the top cloudy layer (0: a clear column)
   SD dscal;  // [0] pwvcm
 };
 
 // Storage of the views: element e of column col of a batch of ncol columns at base[e*ncol + col]
 // (doubles and ints separately). nl = layer dimension (>= nlayers).
+// band_sums = false (the GPU batch, whose levels add the band sums in registers): no bu / bd / bcu / bcd.
 struct LwLayout {
   int nl;
+  bool band_sums = true;
   std::size_t nd = 0, ni = 0;  // doubles and ints per column
-  CPPWRF_HD explicit LwLayout(int nl_) : nl(nl_) { views(nullptr, nullptr, 0, 1, &nd, &ni); }
+  CPPWRF_HD explicit LwLayout(int nl_, bool band_sums_ = true) : nl(nl_), band_sums(band_sums_) {
+    views(nullptr, nullptr, 0, 1, &nd, &ni);
+  }
   CPPWRF_FORCEINLINE LwViews views(rr* d, int* ip, int col, int ncol, std::size_t* nd_out = nullptr,
                                    std::size_t* ni_out = nullptr) const {
     LwViews v{};
@@ -107,7 +111,7 @@ struct LwLayout {
     v.scaleminor = v1(L); v.scaleminorn2 = v1(L);
     v.cldfmc = v2(140, L); v.taucmc = v2(140, L);
     v.fracs = v2(L, 140); v.taug = v2(L, 140);
-    v.bu = v2(16, L1); v.bd = v2(16, L1); v.bcu = v2(16, L1); v.bcd = v2(16, L1);
+    if (band_sums) { v.bu = v2(16, L1); v.bd = v2(16, L1); v.bcu = v2(16, L1); v.bcd = v2(16, L1); }
     v.gu0 = v1(140); v.gcu0 = v1(140);
     v.totuflux = v1(L1); v.totdflux = v1(L1); v.totuclfl = v1(L1); v.totdclfl = v1(L1);
     v.fnet = v1(L1); v.fnetc = v1(L1); v.htr = v1(L1); v.htrc = v1(L1);
@@ -348,8 +352,10 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
     v.cldfrac[L] = rr(0.0);
   }
 
-  // ozone: inirad climatology, o3input = 2 CAM ozone on the model levels, shifted above
+  // ozone: inirad climatology, o3input = 2 CAM ozone on the model levels, shifted above (o3input = 2 reads the
+  // climatology from level num_levels - 1 up only)
   for (int k = 0; k <= nlayers - 1; ++k) {
+    if (c.o3input == 2 && k < num_levels - 1) continue;
     rr o3 = rr(0.0);
     const rr pr_k = v.pz[k], pr_k1 = v.pz[k + 1];
     for (int jj = 0; jj < 31; ++jj) {
@@ -363,7 +369,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
   }
   constexpr rr amdo = rr(0.603461);
   for (int k = 0; k < nlayers; ++k) {
-    rr o3vmr = v.o3mmr[k] * amdo;
+    rr o3vmr;
     if (c.o3input == 2) {
       if (k < num_levels) {
         o3vmr = in.o33d[k];
@@ -371,8 +377,10 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
         o3vmr = in.o33d[num_levels - 1] - v.o3mmr[num_levels - 1] * amdo + v.o3mmr[k] * amdo;
         if (o3vmr <= rr(0.)) o3vmr = v.o3mmr[k] * amdo;
       }
-    } else if (in.o3_out.p && k < num_levels) {
-      in.o3_out[k] = o3vmr;  // o31d(k) = o3vmr(ncol,k), then O33D(I,K,J) = O31D(K) ("output o3 for o3input=0")
+    } else {
+      o3vmr = v.o3mmr[k] * amdo;
+      // o31d(k) = o3vmr(ncol,k), then O33D(I,K,J) = O31D(K) ("output o3 for o3input=0")
+      if (in.o3_out.p && k < num_levels) in.o3_out[k] = o3vmr;
     }
     v.wkl[2][k] = o3vmr;
   }
@@ -424,14 +432,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
       }
     });
   }
+  int top_cld_plus1 = 0;  // 1 + the top cloudy layer, 0 without one
   for (int ilev = 0; ilev < nlayers; ++ilev) {
     const int bit = (ilev < 64) ? int((icld_mask_lo >> ilev) & 1u) : int((icld_mask_hi >> (ilev - 64)) & 1u);
     v.icldlyr[ilev] = bit;
+    if (bit) top_cld_plus1 = ilev + 1;
   }
   v.iscal[1] = inflglw;
   v.iscal[2] = iceflglw;
   v.iscal[3] = liqflglw;
-  v.iscal[4] = (icld_mask_lo != 0 || icld_mask_hi != 0) ? 1 : 0;
+  v.iscal[4] = top_cld_plus1;
 
   // inatm
   rrtmg_lw_inatm(nlayers, v);
@@ -500,21 +510,24 @@ CPPWRF_FORCEINLINE void rrtmg_lw_bandstage(int nlayers, int iband, const LwViews
 // inputs: the down sweep's radld / radclrd of level l in taug[l][igc] / fracs[l][igc] (read at layer l just before),
 // the up sweep's radlu / radclru of level lev >= 1 in cldfmc[igc][lev - 1] / taucmc[igc][lev - 1] (cldfmc read at
 // layer lev - 1 just before), level 0 in gu0 / gcu0. rrtmg_lw_bandsum_level adds them per band in g-point order.
+// The clear-sky radiances below the first cloud (iclddn = 0) are not stored: there rtrnmc's clear-sky sums take the
+// all-sky ones (rrtmg_lw_bandsum_level reads fracs at level l only with a cloudy layer at or above it, taucmc only in
+// a column with a cloudy layer).
 struct LwGpointStore {
   SD2 taug, fracs, cldfmc, taucmc;
   SD gu0, gcu0;
   int igc;
-  CPPWRF_FORCEINLINE void down(int l, rr radld, rr radclrd, int) const {
+  CPPWRF_FORCEINLINE void down(int l, rr radld, rr radclrd, int iclddn) const {
     taug[l][igc] = radld;
-    fracs[l][igc] = radclrd;
+    if (iclddn == 1) fracs[l][igc] = radclrd;
   }
-  CPPWRF_FORCEINLINE void up(int lev, rr radlu, rr radclru, int) const {
+  CPPWRF_FORCEINLINE void up(int lev, rr radlu, rr radclru, int iclddn) const {
     if (lev == 0) {
       gu0[igc] = radlu;
       gcu0[igc] = radclru;
     } else {
       cldfmc[igc][lev - 1] = radlu;
-      taucmc[igc][lev - 1] = radclru;
+      if (iclddn == 1) taucmc[igc][lev - 1] = radclru;
     }
   }
 };
@@ -540,16 +553,17 @@ CPPWRF_FORCEINLINE void rrtmg_lw_gpointstage(int nlayers, int igc, const LwViews
 
 // ---- stage 3b (GPU batch): per level, after rrtmg_lw_gpointstage of every g-point ---------------------------
 // The band sums of level lev as rtrnmc forms them (LwBandAcc: each band's g-points in order; below the first cloud
-// clrdrad = drad and clrurad = urad, at level 0 clrurad adds radclru), into bu / bd / bcu / bcd.
-CPPWRF_FORCEINLINE void rrtmg_lw_bandsum(int nlayers, int lev, const LwViews& v,
-                                         const RrtmgLwTables& CPPWRF_RESTRICT tables) {
+// clrdrad = drad and clrurad = urad, at level 0 clrurad adds radclru), then the level's fluxes from them as
+// rrtmg_lw_level (rrtmg_lw_accum: the same operations in the same order) with the band sums in registers.
+CPPWRF_FORCEINLINE void rrtmg_lw_bandsum_level(int nlayers, int lev, const LwViews& v,
+                                               const RrtmgLwTables& CPPWRF_RESTRICT tables) {
   // rtrnmc's iclddn after the down sweep's layer lev (a cloudy layer at or above it) and at the end of it
-  int cld_dn = 0, cld_col = 0;
-  for (int l = 0; l < nlayers; ++l)
-    if (CSI(v.icldlyr)[l] == 1) {
-      cld_col = 1;
-      if (l >= lev) cld_dn = 1;
-    }
+  const int top_cld_plus1 = CSI(v.iscal)[4];
+  const int cld_dn = top_cld_plus1 > lev ? 1 : 0, cld_col = top_cld_plus1 > 0 ? 1 : 0;
+  constexpr rr pi = rr(3.14159265358979323846);
+  constexpr rr fluxfac = pi * rr(2.0e4);
+  constexpr rr wtdiff = rr(0.5);
+  rr tu = rr(0.0), td = rr(0.0), tuc = rr(0.0), tdc = rr(0.0);
   for (int iband = 0; iband < 16; ++iband) {
     const int igc0 = iband == 0 ? 0 : tables.ngs[iband - 1];
     const int igc1 = tables.ngs[iband];
@@ -569,11 +583,23 @@ CPPWRF_FORCEINLINE void rrtmg_lw_bandsum(int nlayers, int lev, const LwViews& v,
         else cu = u;
       }
     }
-    v.bu[iband][lev] = u;
-    v.bd[iband][lev] = d;
-    v.bcu[iband][lev] = cu;
-    v.bcd[iband][lev] = cd;
+    // rrtmg_lw_accum
+    const rr dw = tables.delwave[iband];
+    rr uflux = u * wtdiff;
+    rr dflux = d * wtdiff;
+    tu += uflux * dw;
+    td += dflux * dw;
+    rr uclfl = cu * wtdiff;
+    rr dclfl = cd * wtdiff;
+    tuc += uclfl * dw;
+    tdc += dclfl * dw;
   }
+  tu *= fluxfac;
+  td *= fluxfac;
+  tuc *= fluxfac;
+  tdc *= fluxfac;
+  v.totuflux[lev] = tu; v.totdflux[lev] = td; v.totuclfl[lev] = tuc; v.totdclfl[lev] = tdc;
+  v.fnet[lev] = tu - td; v.fnetc[lev] = tuc - tdc;
 }
 
 // ---- stage 4: per level -------------------------------------------------------------------------

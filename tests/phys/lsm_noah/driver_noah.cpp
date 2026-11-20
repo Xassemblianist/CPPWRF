@@ -341,7 +341,9 @@ int main(int argc, char** argv) {
     kernel.sldpth[k] = real(h_sldpth[k]);
   }
   kernel.isurban = isurban;
-  kernel.tables = tables;
+  DevBuffer<phys::noah::NoahTables> d_tables(1);
+  copy_to_dev(d_tables.p, &tables, sizeof(tables));
+  kernel.tables = d_tables.p;
 
   Range2D range{0, n_cols, 0, 1};
 

@@ -86,7 +86,7 @@ struct KLwLayer {
 };
 
 // rtrnmc per g-point: the sweeps of 140 g-points run in parallel (the band loop's g-points one after another
-// were a chain of 2..16 sweeps per thread); KLwLevel adds them per band in g-point order
+// were a chain of 2..16 sweeps per thread); KLwLevel adds them per band in g-point order and forms the level's fluxes
 template <int MAX_LAY>
 struct KLwGpoint {
   LwChunk ch;
@@ -104,8 +104,7 @@ struct KLwLevel {
   CPPWRF_HD void operator()(int a, int b, int cc) const {
     const LwViews v = ch.views(LW_CI(a, b, cc));
     const int lev = LW_X(a, b, cc);
-    rrtmg_lw_bandsum(nlayers, lev, v, *t);
-    rrtmg_lw_level(lev, v, *t);
+    rrtmg_lw_bandsum_level(nlayers, lev, v, *t);
   }
 };
 
@@ -133,7 +132,7 @@ struct KLwFinish {
 }  // namespace
 
 RrtmgLwBatch::RrtmgLwBatch(const RrtmgLwTables& tables, int nlayers, int ncol)
-    : lay_(nlayers), chunk_(rrtmg_chunk_columns(ncol, lay_.nd * sizeof(rr) + lay_.ni * sizeof(int))) {
+    : lay_(nlayers, false), chunk_(rrtmg_chunk_columns(ncol, lay_.nd * sizeof(rr) + lay_.ni * sizeof(int))) {
   if (nlayers > RRTMG_LW_SWEEP_MAX) throw std::runtime_error("RRTMG LW: too many layers");
   d_tables_ = static_cast<RrtmgLwTables*>(rrtmg_shared_dev_copy(&tables, sizeof(RrtmgLwTables)));
   d_consts_ = static_cast<RrtmgLwConsts*>(rrtmg_shared_dev_copy(&rrtmg_lw_consts(), sizeof(RrtmgLwConsts)));

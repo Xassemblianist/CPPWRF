@@ -320,7 +320,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_band(int nlayers, int iband, CSD secdiff, CSD s
 }
 
 // Level lev (0..nlayers): rtrnmc's band sums in band order, scaled by fluxfac; fnet / fnetc.
-// bu / bd / bcu / bcd: written by rrtmg_lw_bandsum of the same level in the same kernel (KLwLevel), coherent loads
+// bu / bd / bcu / bcd: written by rrtmg_lw_band (the GPU batch adds the same sums in rrtmg_lw_bandsum_level)
 CPPWRF_FORCEINLINE void rrtmg_lw_accum(int lev, RSD2 bu, RSD2 bd, RSD2 bcu, RSD2 bcd,
                                        const RrtmgLwTables& CPPWRF_RESTRICT tables, rr& totuflux, rr& totdflux,
                                        rr& totuclfl, rr& totdclfl, rr& fnet, rr& fnetc) {

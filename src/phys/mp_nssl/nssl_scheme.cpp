@@ -13,16 +13,16 @@ namespace cppwrf::phys::mp_nssl {
 
 namespace {
 
-// one thread per row: column i0 of the launch range runs the row j over the tile's i-range
+// one thread per row: the launch's first index is the row j (each thread runs the row over the tile's i-range), so
+// a warp of the column launch runs 32 rows (with the row on the second index 31 of its 32 threads would idle)
 template <class Real>
 struct NsslRowKernel {
   const NsslParams<Real>* P;
   NsslRowArgs<Real> A;
   char* work;
   std::size_t wbytes;
-  int i0, j0;
-  CPPWRF_HD void operator()(int i, int j) const {
-    if (i != i0) return;
+  int j0;
+  CPPWRF_HD void operator()(int j, int) const {
     char* w = work + std::size_t(j - j0) * wbytes;
     Work W{w, w + wbytes};
     nssl_row(*P, W, A, j);
@@ -107,8 +107,7 @@ void NsslScheme<Real>::run(const NsslRowArgs<Real>& A, int j0, int j1) const {
     throw std::runtime_error("NSSL microphysics: row longer than its work space");
   for (int jb = j0; jb < j1; jb += impl_->rows) {
     const int je = std::min(j1, jb + impl_->rows);
-    column_for_whole(Range2D{A.its, A.its + 1, jb, je},
-                     NsslRowKernel<Real>{impl_->dparams, A, impl_->work, impl_->wbytes, A.its, jb});
+    column_for_whole(Range2D{jb, je, 0, 1}, NsslRowKernel<Real>{impl_->dparams, A, impl_->work, impl_->wbytes, jb});
   }
 }
 

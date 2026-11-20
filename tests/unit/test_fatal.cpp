@@ -118,13 +118,18 @@ static int noah_land(real sneqv, real snowh, int cats = 1, int nroot = 1, const 
   const real sl[4] = {real(0.1), real(0.3), real(0.6), real(1.0)};
   for (int z = 0; z < 4; ++z) k.sldpth[z] = sl[z];
   k.isurban = 1;
+  phys::noah::NoahTables t{};
   if (tb) {
-    k.tables = *tb;
+    t = *tb;
   } else {
-    k.tables.slcats = k.tables.lucats = k.tables.slpcats = cats;
-    k.tables.nrotbl[0] = nroot;
+    t.slcats = t.lucats = t.slpcats = cats;
+    t.nrotbl[0] = nroot;
   }
+  auto* d_tb = static_cast<phys::noah::NoahTables*>(dev_alloc(sizeof t));
+  copy_to_dev(d_tb, &t, sizeof t);
+  k.tables = d_tb;
   const int code = stop_code([&] { phys::noah::run_noah(k, one); });
+  dev_free(d_tb);
   dev_free(scr);
   dev_free(snow);
   dev_free(ones);
