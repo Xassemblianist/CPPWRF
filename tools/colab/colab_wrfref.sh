@@ -83,7 +83,7 @@ if [ $DRY = 1 ]; then
   for t in ${DATA//,/ }; do
     w=
     timeout 120 rclone lsf "cppwrf-drive:cppwrf-data/$t" 2> /dev/null | grep -qx "$t" && w="Drive"
-    grep -q "  $t\.part" <<< "$SUMS" && w="${w:+$w and }the GitHub release"
+    grep -qF "  $t.part" <<< "$SUMS" && w="${w:+$w and }the GitHub release"
     [ -n "$BK" ] && timeout 120 gcloud storage ls "gs://$BK/$t" > /dev/null 2>&1 && w="${w:+$w and }the bucket"
     echo "[colab_wrfref] $t: ${w:-NOT FOUND (Drive, GitHub${BK:+, bucket})}"
     [ -n "$w" ] || bad=1
@@ -122,9 +122,10 @@ print("HEAD_OK", os.path.getsize(T + "/$hname"), len(n), " ".join(x for x in n i
 EOF
 fi
 cj_launch "$REPO/tools/colab/wrfref_body.sh" "$DATA" "$FILES" "$CASES" "$STAGE" "$FETCH" "$REALC"
-cj_wait "$HOURS" refs.out
-cj_results
+# a job that died, timed out or a session that stopped answering: its logs so far, then the stop (exit trap)
+cj_wait "$HOURS" refs.out || { cj_salvage || true; echo "[colab_wrfref] the job did not finish; logs in $OUT/partial"; exit 1; }
 bad=0
+cj_results || bad=1
 grep . "$OUT/setup.out" 2>/dev/null && bad=1
 # the references whose WRF runs succeeded (as gcp_wrfref.sh: wrf_ref_run.py's SUCCESS lines; make_restart_refs.sh /
 # make_resumed_refs.sh: "NAME: <count of SUCCESS COMPLETE WRF> ... restart / history files")
@@ -145,7 +146,10 @@ if [ $FETCH = 1 ] && [ -n "$good" ]; then
   cj_fetch refs.tar "$OUT/refs.tar" || { echo "[colab_wrfref] refs.tar: download failed (colab and $DRIVE_RESULTS)"; exit 1; }
   echo "[colab_wrfref] downloaded refs.tar ($(( $(stat -c %s "$OUT/refs.tar") / 1000000 )) MB) in $((SECONDS - t0)) s"
   stage="$RUNS/.wrfref-$STAMP"; mkdir "$stage"
-  tar xf "$OUT/refs.tar" -C "$stage" || bad=1
+  if ! tar xf "$OUT/refs.tar" -C "$stage"; then  # a damaged archive: kept, nothing moved into RUNS
+    rm -rf "${stage:?}"
+    echo "[colab_wrfref] $OUT/refs.tar does not unpack (kept; nothing moved into $RUNS)"; exit 1
+  fi
   rm -f "$OUT/refs.tar"
   for d in $good; do [ -d "$stage/$d" ] && mv "$stage/$d" "$RUNS/"; done
   rm -rf "${stage:?}"
@@ -160,6 +164,8 @@ if [ $FETCH = 1 ] && [ -n "$good" ]; then
           /opt/job/wrf_runs/*) nt=$RUNS/${t#/opt/job/wrf_runs/} ;;
           */wrf_r8d8.exe) nt=$WRF_R8D8 ;;
           */wrf_r8.exe) nt=$WRF_R8 ;;
+          */real_r8d8.exe) nt=$(dirname "$WRF_R8D8")/real.exe ;;
+          */real_r8.exe) nt=$(dirname "$WRF_R8")/real.exe ;;
           *) echo "[colab_wrfref] link not mapped: $l -> $t"; continue ;;
         esac
         [ -e "$nt" ] || echo "[colab_wrfref] missing locally: $l -> $nt"
@@ -172,7 +178,12 @@ fi
 echo "[colab_wrfref] results in $OUT"; cat "$OUT/refs.out" 2>/dev/null || true
 if [ -n "$STAGE" ]; then
   echo "== stage"; tail -3 "$OUT/stage.log" 2>/dev/null || echo "no stage.log"
-  grep -q "^DRIVE ${STAGE%%:*} " "$OUT/data.txt" 2>/dev/null || { echo "[colab_wrfref] $STAGE: not staged"; bad=1; }
+  # packed whole (wrfref_body.sh: STAGED, only when every WRF run succeeded) and uploaded (remote_chroot_job.sh: DRIVE)
+  objs=${STAGE%%:*}; [ -z "$FILES" ] || objs="$objs ${objs%_data.tar}_files.tar"
+  for o in $objs; do
+    grep -qx "STAGED $o" "$OUT/stage.log" 2>/dev/null && grep -q "^DRIVE $o " "$OUT/data.txt" 2>/dev/null ||
+      { echo "[colab_wrfref] $o: not staged ($(grep -m1 STAGE_SKIPPED "$OUT/stage.log" 2>/dev/null || echo "stage.log, data.txt"))"; bad=1; }
+  done
 fi
 for f in files.log suite.log real.log; do
   [ -f "$OUT/$f" ] || continue

@@ -43,16 +43,19 @@ finish() {
   ( cd $J 2> /dev/null && cp -f ./*.log ./*.out ./*.txt $C/res/ 2> /dev/null )
   cat $C/res/setup.out >> $C/setup.out 2> /dev/null; rm -f $C/res/setup.out
   [ -d $J/fetch ] && mv $J/fetch $C/fetch
+  # the results on Drive too (the caller's fallback to colab download): the large files first, so that their RESULTS
+  # lines and drive_results.log are in results.tar.gz; results.tar.gz itself last
+  todrive() {
+    rclone --config $C/rclone.conf copyto "$1" "cppwrf-drive:$DRES/$(basename "$1")" --drive-chunk-size 256M \
+      >> $C/drive_results.log 2>&1 && echo "RESULTS $(basename "$1") $(stat -c %s "$1")" >> $C/data.txt ||
+      echo "RESULTS_FAILED $(basename "$1")" >> $C/data.txt
+  }
+  if [ -n "$DRES" ] && [ -f $C/rclone.conf ]; then
+    for f in $C/fetch/*; do [ -f "$f" ] && todrive "$f"; done
+  fi
   cp -f $C/*.log $C/*.out $C/*.txt $C/res/ 2> /dev/null
   tar czf $C/results.tar.gz -C $C/res .
-  if [ -n "$DRES" ] && [ -f $C/rclone.conf ]; then  # the results on Drive too (the caller's fallback to colab download)
-    for f in $C/fetch/* $C/results.tar.gz; do
-      [ -f "$f" ] || continue
-      rclone --config $C/rclone.conf copyto "$f" "cppwrf-drive:$DRES/$(basename "$f")" --drive-chunk-size 256M \
-        > $C/drive_results.log 2>&1 && echo "RESULTS $(basename "$f") $(stat -c %s "$f")" >> $C/data.txt ||
-        echo "RESULTS_FAILED $(basename "$f")" >> $C/data.txt
-    done
-  fi
+  [ -n "$DRES" ] && [ -f $C/rclone.conf ] && todrive $C/results.tar.gz
   rm -f $C/rclone.conf
   date > $C/done
 }
@@ -100,12 +103,12 @@ gcs() {  # an expired token (it lives as long as the workstation's gcloud token,
 gh_has() {  # TAR is in the GitHub release (its SHA256SUMS lists TAR's parts)
   [ -s $C/SHA256SUMS ] ||
     { curl -sSfL --retry 5 -o $C/SHA256SUMS.$BASHPID "$GH/SHA256SUMS" 2>> $C/gh.log && mv -f $C/SHA256SUMS.$BASHPID $C/SHA256SUMS; }
-  grep -q "  $1\.part" $C/SHA256SUMS 2> /dev/null
+  grep -qF "  $1.part" $C/SHA256SUMS 2> /dev/null
 }
 gh_cat() {  # TAR from the GitHub release to stdout: its parts downloaded one by one into $T/parts, checked, concatenated
   local t=$1 sum p i ok
   mkdir -p $T/parts
-  grep "  $t\.part" $C/SHA256SUMS | while read -r sum p; do
+  grep -F "  $t.part" $C/SHA256SUMS | while read -r sum p; do
     ok=0
     for i in 1 2 3 4 5; do
       curl -sSfL --retry 5 -o "$T/parts/$p" "$GH/$p" 2>> "$C/fetch_$t.log" &&
@@ -153,7 +156,7 @@ if [ "${CPPWRF_COLAB_STREAM:-auto}" = 1 ] || { [ "${CPPWRF_COLAB_STREAM:-auto}" 
       sleep 30
     done
     if [ $ok = 1 ]; then echo "TAR $t 0 $((SECONDS - t0)) stream" >> $C/data.txt; continue; fi
-    if [ -z "$B" ] && gh_has "$t"; then  # no bucket: the GitHub release's parts streamed into tar x
+    if gh_has "$t"; then  # the GitHub release's parts streamed into tar x (the bucket's path keeps the tar on disk)
       if ( set -o pipefail; gh_cat "$t" | tar xf - -C $J/data ); then echo "TAR $t 0 $((SECONDS - t0)) github-stream" >> $C/data.txt
       else echo "DATA_FAILED $t (github)" >> $C/setup.out; fi
       continue
@@ -178,6 +181,8 @@ fi
 wait
 echo "DATA_TOTAL $((SECONDS - DT0)) s for $(echo ${DATA//,/ } | wc -w) tars (fetched and unpacked)" >> $C/data.txt
 rm -f $C/gcs.tok
+# the tars that did not arrive, for the job (tools/colab/wrfref_body.sh then runs nothing on partial data)
+grep '^DATA_FAILED' $C/setup.out > $J/data_failed 2> /dev/null || rm -f $J/data_failed
 touch $C/data_done
 for f in $T/*.todrive; do  # the tars that came from the bucket, to Drive next to the job
   [ -e "$f" ] || continue
@@ -197,6 +202,6 @@ kill $MEM
 wait $TODRIVE
 for f in $J/drive/*; do  # the job's tars for the next runs (wrfref_body.sh STAGE)
   [ -f "$f" ] || continue
-  if rclone --config $C/rclone.conf copyto "$f" "cppwrf-drive:cppwrf-data/$(basename "$f")" --drive-chunk-size 256M > $C/drive.log 2>&1
+  if rclone --config $C/rclone.conf copyto "$f" "cppwrf-drive:cppwrf-data/$(basename "$f")" --drive-chunk-size 256M >> $C/drive.log 2>&1
   then echo "DRIVE $(basename "$f") $(stat -c %s "$f")" >> $C/data.txt; else echo "DRIVE_FAILED $(basename "$f") (drive.log)" >> $C/setup.out; fi
 done

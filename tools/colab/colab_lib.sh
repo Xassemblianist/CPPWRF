@@ -15,6 +15,8 @@
 #                         5 to 60 min; the runtime retries a 401 for 20 min); fails when the job died or took longer
 #   cj_results            OUT gets the job's logs (results.tar.gz), prints versions.txt and data.txt
 #   cj_fetch NAME DEST    the job's large result /content/cpu/fetch/NAME -> DEST (colab download, else DRIVE_RESULTS)
+#   cj_salvage            after a failed cj_wait: the logs so far (runtime and job) -> OUT/partial/, before the stop
+# Download errors go to OUT/download.log; a partial file of a failed download is deleted.
 # The runtime gets only the rclone section of the Drive remote cppwrf-drive and, with a bucket, read-only bucket tokens
 # (tools/colab/gcs_token.py); the token is deleted when the data are in place, both at the end and on exit.
 
@@ -100,11 +102,19 @@ EOF
   done
 }
 
+cj_get() {  # REMOTE DEST DRIVE_NAME TIMEOUT: colab download, else the Drive copy (DRIVE_RESULTS); errors in download.log
+  echo "== $(date +%H:%M) $1" >> "$OUT/download.log"
+  timeout "$4" colab download -s "$S" "$1" "$2" >> "$OUT/download.log" 2>&1 && return 0
+  rm -f "$2"
+  [ -n "${DRIVE_RESULTS:-}" ] || return 1
+  timeout "$4" rclone copyto "cppwrf-drive:$DRIVE_RESULTS/$3" "$2" >> "$OUT/download.log" 2>&1 &&
+    { echo "[$TAG] $3 from Drive ($DRIVE_RESULTS)"; return 0; }
+  rm -f "$2"; return 1
+}
+
 cj_results() {
-  timeout 1800 colab download -s "$S" /content/cpu/results.tar.gz "$OUT/results.tar.gz" > /dev/null 2>&1 ||
-    { [ -n "${DRIVE_RESULTS:-}" ] && timeout 1800 rclone copyto "cppwrf-drive:$DRIVE_RESULTS/results.tar.gz" "$OUT/results.tar.gz" \
-        > /dev/null 2>&1 && echo "[$TAG] results.tar.gz from Drive ($DRIVE_RESULTS)"; } ||
-    { echo "[$TAG] download failed"; return 1; }
+  cj_get /content/cpu/results.tar.gz "$OUT/results.tar.gz" results.tar.gz 1800 ||
+    { echo "[$TAG] download failed ($OUT/download.log)"; return 1; }
   tar xzf "$OUT/results.tar.gz" -C "$OUT" && rm -f "$OUT/results.tar.gz" "$OUT/src.tar.gz"
   echo "[$TAG] results in $OUT"; cat "$OUT/versions.txt" 2>/dev/null || true
   awk '$1 == "TAR" {printf "[%s] data %s: %.0f MB in %d s from %s\n", tag, $2, $3 / 1e6, $4, $5}
@@ -113,8 +123,20 @@ cj_results() {
 }
 
 cj_fetch() {  # NAME DEST: /content/cpu/fetch/NAME by colab download, else from DRIVE_RESULTS
-  timeout 7200 colab download -s "$S" "/content/cpu/fetch/$1" "$2" > /dev/null 2>&1 && return 0
-  [ -n "${DRIVE_RESULTS:-}" ] && timeout 7200 rclone copyto "cppwrf-drive:$DRIVE_RESULTS/$1" "$2" > /dev/null 2>&1 &&
-    { echo "[$TAG] $1 from Drive ($DRIVE_RESULTS)"; return 0; }
-  return 1
+  cj_get "/content/cpu/fetch/$1" "$2" "$1" 7200
+}
+
+cj_salvage() {  # the logs of a job that did not finish (or of a session that stopped answering), into OUT/partial
+  rx 300 <<'EOF' | grep -q SALVAGED || { echo "[$TAG] no logs salvaged"; return 1; }
+import glob, os, tarfile
+with tarfile.open("/content/cpu/partial.tar.gz", "w:gz") as t:
+    for d, pre in (("/content/cpu", ""), ("/content/deb13/opt/job", "job_")):
+        for p in glob.glob(d + "/*.log") + glob.glob(d + "/*.out") + glob.glob(d + "/*.txt"):
+            t.add(p, arcname=pre + os.path.basename(p))
+print("SALVAGED")
+EOF
+  mkdir -p "$OUT/partial"
+  timeout 900 colab download -s "$S" /content/cpu/partial.tar.gz "$OUT/partial.tar.gz" >> "$OUT/download.log" 2>&1 &&
+    tar xzf "$OUT/partial.tar.gz" -C "$OUT/partial" && rm -f "$OUT/partial.tar.gz" &&
+    echo "[$TAG] the logs so far in $OUT/partial"
 }
