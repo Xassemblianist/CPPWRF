@@ -5,12 +5,16 @@
 #include <cstdlib>
 #include <string>
 
+#include "core/parse_real.hpp"
+
 namespace cppwrf::phys {
 
 // [sign] digits [. digits] [exponent], exponent = (E|D|Q|e|d|q) [sign] digits or sign digits, without blanks;
 // implied_d: the Fw.d edit descriptor's d (digits without a decimal point: the last d are the fraction), 0 in
-// list-directed input. Converted as gfortran does (strtod of the digits: correctly rounded).
-inline bool fortran_real(const std::string& s, int implied_d, double& v) {
+// list-directed input. Converted as gfortran does: strtod (v a double, REAL(r8)) or strtof (v a float, REAL in
+// real*4) of the digits, one correct rounding (core/parse_real.hpp).
+template <typename T>
+inline bool fortran_real(const std::string& s, int implied_d, T& v) {
   const std::size_t n = s.size();
   std::size_t i = 0, nd = 0;
   bool dp = false;
@@ -45,7 +49,7 @@ inline bool fortran_real(const std::string& s, int implied_d, double& v) {
     if (neg) e = -e;
   }
   if (!dp) e -= implied_d;
-  v = std::strtod((m + "e" + std::to_string(e)).c_str(), nullptr);
+  v = strto_kind<T>((m + "e" + std::to_string(e)).c_str(), nullptr);
   return true;
 }
 
@@ -81,7 +85,8 @@ inline bool fortran_f_field(const std::string& rec, std::size_t a, std::size_t w
 // READ (unit, *) x of one real: the record's first value (r*c: c; the rest of the record is skipped).
 // 1: read; 0: blank record (the read goes on with the next one); -1: not a number, or a null value / slash
 // (x left undefined)
-inline int fortran_list_real(const std::string& rec, double& v) {
+template <typename T>
+inline int fortran_list_real(const std::string& rec, T& v) {
   const std::size_t a = rec.find_first_not_of(" \t\r");
   if (a == std::string::npos) return 0;
   std::string t = rec.substr(a, rec.find_first_of(" \t\r,/", a) - a);

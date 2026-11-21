@@ -19,12 +19,12 @@ std::vector<rb> read_list(const std::string& path, std::size_t n) {
   std::string line;
   for (std::size_t i = 0; i < n; ++i) {
     int st = 0;
-    double x = 0;  // the value as a double, then rounded to rb (WRF's REAL arrays)
+    rb x = 0;  // READ into WRF's REAL arrays: one rounding to rb
     while (st == 0 && std::getline(f, line))
       if ((st = fortran_list_real(line, x)) < 0)
         throw std::runtime_error("CAM ozone: bad value in " + path + ": '" + line + "'");
     if (st == 0) throw std::runtime_error("CAM ozone: short file " + path);
-    v[i] = rb(x);
+    v[i] = x;
   }
   return v;
 }

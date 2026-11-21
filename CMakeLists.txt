@@ -352,6 +352,11 @@ add_subdirectory(tests/tools)
 # every launch of a kernel that raises a WRF fatal stop is followed by fatal_check() (tools/lint_fatal_check.py)
 add_test(NAME lint_fatal_check COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/lint_fatal_check.py ${CMAKE_SOURCE_DIR}/src)
 set_tests_properties(lint_fatal_check PROPERTIES LABELS unit)
+# no decimal literal whose double-then-float rounding differs from gfortran's one rounding to real*4
+# (tools/fp32_double_rounding.py)
+add_test(NAME fp32_double_rounding COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/fp32_double_rounding.py -v
+         ${CMAKE_SOURCE_DIR}/src)
+set_tests_properties(fp32_double_rounding PROPERTIES LABELS unit)
 # deliberate faults the model refuses: unknown configuration keys, nz above a column limit, a restart with other
 # options; the non-finite check of every step (tests/robustness/run_test.sh, analytic cases)
 if(TARGET cppwrf)

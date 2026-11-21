@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "phys/sf_urban/urban_tables.hpp"
+#include "core/parse_real.hpp"
 
 #include <cmath>
 #include <cstdlib>
@@ -22,7 +23,8 @@ std::string trim(const std::string& s) {
 }
 
 // Fortran list-directed read of n values from one record (separators: blanks and commas; r*c repeats);
-// fewer values than n: WRF's internal read hits the end of the record and stops
+// fewer values than n: WRF's internal read hits the end of the record and stops. The values are WRF's REALs, each
+// rounded once to real (core/parse_real.hpp) and held as a double
 std::vector<double> list_read(const std::string& rec, std::size_t n, const std::string& what) {
   std::vector<double> v;
   std::string tok;
@@ -31,11 +33,11 @@ std::vector<double> list_read(const std::string& rec, std::size_t n, const std::
     const auto star = tok.find('*');
     if (star != std::string::npos) {
       const long r = std::strtol(tok.substr(0, star).c_str(), nullptr, 10);
-      const double c = std::strtod(tok.substr(star + 1).c_str(), nullptr);
+      const double c = strto_kind<real>(tok.substr(star + 1).c_str(), nullptr);
       for (long k = 0; k < r; ++k) v.push_back(c);
     } else {
       char* end = nullptr;
-      const double c = std::strtod(tok.c_str(), &end);
+      const double c = strto_kind<real>(tok.c_str(), &end);
       if (end == tok.c_str() || *end != '\0')
         throw std::runtime_error("URBPARM: cannot read '" + tok + "' of " + what);
       v.push_back(c);
