@@ -76,11 +76,7 @@ CPPWRF_HOST_DEVICE inline void pow_pair(real x0, real x1, real y, real& r0,
 
 template <typename real>
 CPPWRF_HOST_DEVICE inline real tgamma_fn(real x) {
-  if constexpr (std::is_same_v<real, float>) {
-    return ::tgammaf(x);
-  } else {
-    return libm::tgamma(x);
-  }
+  return libm::tgamma(x);  // float: tgammaf (the CUDA FP32 identity build: glibc's on the device)
 }
 
 template <typename real>

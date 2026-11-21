@@ -301,6 +301,24 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/src/main.cpp)
   target_link_libraries(cppwrf PRIVATE cppwrf_core)
   target_compile_definitions(cppwrf PRIVATE CPPWRF_VERSION="${PROJECT_VERSION}" CPPWRF_COMMIT="${CPPWRF_COMMIT}")
 endif()
+# FP32 builds on x86-64: glibc 2.41's float functions (expf, logf, powf, ...) defined in the executables themselves
+# (src/core/glibc_mathf_host.cpp), in place of the host's libm, whose float functions differ between glibc versions;
+# the ctest fp32_host_libm checks that cppwrf imports none of them
+if(NOT CPPWRF_DOUBLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  set(CPPWRF_GLIBCF_HOST_FUNCS expf logf powf sinf cosf sincosf tanf atanf atan2f asinf acosf sinhf tanhf log10f erff
+      tgammaf)
+  if(TARGET cppwrf)
+    target_sources(cppwrf PRIVATE ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
+    string(REPLACE ";" "|" _gfh "${CPPWRF_GLIBCF_HOST_FUNCS}")
+    add_test(NAME fp32_host_libm
+             COMMAND bash -c "! nm -D --undefined-only \"$1\" | grep -E \" (${_gfh})(@|$)\"" _ $<TARGET_FILE:cppwrf>)
+    set_tests_properties(fp32_host_libm PROPERTIES LABELS unit)
+  endif()
+  if(TARGET cppwrf_real)
+    target_sources(cppwrf_real PRIVATE ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
+    target_include_directories(cppwrf_real PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  endif()
+endif()
 
 # Unit tests (tests/unit/*.cpp; tests/unit/io belongs to cppwrf_io)
 file(GLOB CPPWRF_UNIT_TESTS CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/tests/unit/*.cpp)
