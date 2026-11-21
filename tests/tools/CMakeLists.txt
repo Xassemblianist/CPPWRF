@@ -45,3 +45,7 @@ set_tests_properties(verify_obs PROPERTIES LABELS unit ENVIRONMENT "CPPWRF_TEST_
 add_test(NAME affected_cases COMMAND python3 -m unittest discover -s tests/tools -p test_affected_cases.py
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(affected_cases PROPERTIES LABELS unit)
+# tools/fp32_double_rounding.py itself (the source scan is ctest fp32_double_rounding)
+add_test(NAME fp32_double_rounding_tool COMMAND python3 -m unittest discover -v -s tests/tools -p test_fp32_double_rounding.py
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(fp32_double_rounding_tool PROPERTIES LABELS unit)

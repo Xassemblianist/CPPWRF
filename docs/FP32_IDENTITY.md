@@ -191,6 +191,15 @@ FP64 (the glibc ports compute in double), will pay more; the fast build stays th
   in REAL (r_v/r_d is 1 ulp below the double quotient rounded to float) or a product it evaluates in REAL from left
   to right; the FP64 build keeps its code path unchanged (`if constexpr` on the real type), and
   FP64 results are checked byte for byte against main.
+- Decimal constants: gfortran rounds a REAL literal once, decimal to binary32; CPPWRF's `real(c)` of a double
+  literal rounds twice (decimal to binary64 to binary32), which gives the neighbouring float for a decimal whose
+  nearest double is exactly halfway between two floats. tools/fp32_double_rounding.py checks every decimal literal of
+  src/ (ctest `fp32_double_rounding`, `-L unit`): none rounds differently. Tables WRF READs into REAL (LANDUSE.TBL,
+  SOILPARM / VEGPARM / GENPARM.TBL for Noah and RUC, URBPARM.TBL, the CAM ozone files, P3's itab) are converted with
+  strtof in FP32 builds (src/core/parse_real.hpp), as libgfortran does; values WRF reads into double precision
+  (CAMtr_volume_mixing_ratio, P3's itabcoll through dp_dum1 / dp_dum2) keep strtod. `--data PATH` checks text files
+  read through a double: no value of WRF v4.8.0's run directory, of data/ or of the reference runs' namelists
+  rounds differently.
 
 ## What is not identical yet
 

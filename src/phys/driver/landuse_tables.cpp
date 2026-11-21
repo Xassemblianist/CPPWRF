@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "phys/driver/landuse_tables.hpp"
+#include "core/parse_real.hpp"
 #include "core/strings.hpp"
 
 #include <algorithm>
@@ -90,13 +91,13 @@ bool read_landuse_table(const std::string& filepath,
         }
         if (cat_idx >= kMaxLanduseCats) continue;
         LanduseCategory& cat = tables.categories[sn][cat_idx];
-        cat.albd = static_cast<real>(std::stod(tokens[1]));
-        cat.slmo = static_cast<real>(std::stod(tokens[2]));
-        cat.sfem = static_cast<real>(std::stod(tokens[3]));
-        cat.sfz0 = static_cast<real>(std::stod(tokens[4]));
-        cat.therin = static_cast<real>(std::stod(tokens[5]));
-        cat.scfx = static_cast<real>(std::stod(tokens[6]));
-        cat.sfhc = static_cast<real>(std::stod(tokens[7]));
+        cat.albd = sto_kind(tokens[1]);
+        cat.slmo = sto_kind(tokens[2]);
+        cat.sfem = sto_kind(tokens[3]);
+        cat.sfz0 = sto_kind(tokens[4]);
+        cat.therin = sto_kind(tokens[5]);
+        cat.scfx = sto_kind(tokens[6]);
+        cat.sfhc = sto_kind(tokens[7]);
         if (tokens.size() >= 9) cat.name = tokens[8];
       }
     }

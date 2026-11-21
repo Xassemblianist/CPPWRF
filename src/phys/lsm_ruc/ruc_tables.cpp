@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "phys/lsm_ruc/ruc_tables.hpp"
+#include "core/parse_real.hpp"
 
 #include <cctype>
 #include <fstream>
@@ -46,7 +47,7 @@ std::string read_ruc_tables(const std::string& table_dir, const std::string& mmi
   else if (mminlu == "MODIS" || mminlu == "MODIFIED_IGBP_MODIS_NOAH") want = "MODI-RUC";
   else return "RUC LSM: MMINLU '" + mminlu + "' has no RUC table (WRF: USGS, MODIS or MODIFIED_IGBP_MODIS_NOAH)";
   const std::string dir = table_dir.empty() ? std::string(".") : table_dir;
-  auto num = [](const std::string& s) { return real(std::stod(s)); };
+  auto num = [](const std::string& s) { return sto_kind(s); };  // READ into REAL: one rounding
   try {
     std::ifstream f(dir + "/VEGPARM.TBL");
     if (!f) return "module_sf_ruclsm.F: soil_veg_gen_parm: failure opening VEGPARM.TBL";

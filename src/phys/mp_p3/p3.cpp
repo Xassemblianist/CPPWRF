@@ -9,6 +9,7 @@
 #include <type_traits>
 
 #include "core/limits.hpp"
+#include "core/parse_real.hpp"
 
 namespace cppwrf::phys::mp_p3 {
 
@@ -93,14 +94,16 @@ P3Host<Real> p3_init(const std::string& dir) {
   std::getline(f, line);
   h.itab.assign(kItab, Real(0));
   h.itabcoll.assign(kItabColl, Real(0));
-  auto values = [&](int nskip, int nval, Real* out[]) {
+  // itab: READ into REAL (one rounding to Real); itabcoll: READ into double precision dp_dum1 / dp_dum2, then
+  // assigned to REAL
+  auto values = [&](int nskip, int nval, Real* out[], bool via_double) {
     if (!std::getline(f, line)) throw std::runtime_error("P3: " + path + " ends early");
     const char* p = line.c_str();
     char* e = nullptr;
     for (int n = 0; n < nskip + nval; ++n) {
-      const double v = std::strtod(p, &e);
+      const Real v = via_double ? Real(std::strtod(p, &e)) : strto_kind<Real>(p, &e);
       if (e == p) throw std::runtime_error("P3: unreadable line in " + path + ": " + line);
-      if (n >= nskip) *out[n - nskip] = Real(v);
+      if (n >= nskip) *out[n - nskip] = v;
       p = e;
     }
   };
@@ -115,12 +118,12 @@ P3Host<Real> p3_init(const std::string& dir) {
       for (int i = 1; i <= isize; ++i) {
         Real* out[tabsize];
         for (int n = 0; n < tabsize; ++n) out[n] = &h.itab[std::size_t(ix(jj, ii, i, n + 1))];
-        values(3, tabsize, out);
+        values(3, tabsize, out, false);
       }
       for (int i = 1; i <= isize; ++i)
         for (int j = 1; j <= rcollsize; ++j) {
           Real* out[2] = {&h.itabcoll[std::size_t(ixc(jj, ii, i, j, 1))], &h.itabcoll[std::size_t(ixc(jj, ii, i, j, 2))]};
-          values(3, 2, out);
+          values(3, 2, out, true);
         }
     }
 

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "phys/lsm_noah/noah_tables.hpp"
+#include "core/parse_real.hpp"
 #include "core/strings.hpp"
 
 #include <algorithm>
@@ -48,14 +49,14 @@ bool read_genparm(const std::string& path, NoahTables& tables) {
   tables.slpcats = n_slope;
   for (int i = 0; i < n_slope; ++i) {
     if (!std::getline(f, line)) return false;
-    tables.slope_data[i] = static_cast<real>(std::stod(trim(line)));
+    tables.slope_data[i] = sto_kind(trim(line));
   }
 
   while (std::getline(f, line)) {
     std::string key = trim(line);
     if (key.empty()) continue;
     if (!std::getline(f, line)) break;
-    double val = std::stod(trim(line));
+    const real val = sto_kind(trim(line));
     if (key == "SBETA_DATA") tables.sbeta_data = static_cast<real>(val);
     else if (key == "FXEXP_DATA") tables.fxexp_data = static_cast<real>(val);
     else if (key == "CSOIL_DATA") tables.csoil_data = static_cast<real>(val);
@@ -103,16 +104,16 @@ bool read_soilparm(const std::string& path, const std::string& dataset, NoahTabl
     auto toks = tokenize(line);
     if (toks.size() < 11) return false;
     // Format: IINDEX, BB, DRYSMC, F11, MAXSMC, REFSMC, SATPSI, SATDK, SATDW, WLTSMC, QTZ
-    tables.bb[lc] = static_cast<real>(std::stod(toks[1]));
-    tables.drysmc[lc] = static_cast<real>(std::stod(toks[2]));
-    tables.f11[lc] = static_cast<real>(std::stod(toks[3]));
-    tables.maxsmc[lc] = static_cast<real>(std::stod(toks[4]));
-    tables.refsmc[lc] = static_cast<real>(std::stod(toks[5]));
-    tables.satpsi[lc] = static_cast<real>(std::stod(toks[6]));
-    tables.satdk[lc] = static_cast<real>(std::stod(toks[7]));
-    tables.satdw[lc] = static_cast<real>(std::stod(toks[8]));
-    tables.wltsmc[lc] = static_cast<real>(std::stod(toks[9]));
-    tables.qtz[lc] = static_cast<real>(std::stod(toks[10]));
+    tables.bb[lc] = sto_kind(toks[1]);
+    tables.drysmc[lc] = sto_kind(toks[2]);
+    tables.f11[lc] = sto_kind(toks[3]);
+    tables.maxsmc[lc] = sto_kind(toks[4]);
+    tables.refsmc[lc] = sto_kind(toks[5]);
+    tables.satpsi[lc] = sto_kind(toks[6]);
+    tables.satdk[lc] = sto_kind(toks[7]);
+    tables.satdw[lc] = sto_kind(toks[8]);
+    tables.wltsmc[lc] = sto_kind(toks[9]);
+    tables.qtz[lc] = sto_kind(toks[10]);
   }
   return true;
 }
@@ -150,24 +151,24 @@ bool read_vegparm(const std::string& path, const std::string& dataset, NoahTable
     // IINDEX, SHDTBL, NROTBL, RSTBL, RGLTBL, HSTBL, SNUPTBL, MAXALB,
     // LAIMINTBL, LAIMAXTBL, EMISSMINTBL, EMISSMAXTBL, ALBEDOMINTBL, ALBEDOMAXTBL,
     // Z0MINTBL, Z0MAXTBL, ZTOPVTBL, ZBOTVTBL
-    tables.shdtbl[lc] = static_cast<real>(std::stod(toks[1]));
+    tables.shdtbl[lc] = sto_kind(toks[1]);
     tables.nrotbl[lc] = std::stoi(toks[2]);
-    tables.rstbl[lc] = static_cast<real>(std::stod(toks[3]));
-    tables.rgltbl[lc] = static_cast<real>(std::stod(toks[4]));
-    tables.hstbl[lc] = static_cast<real>(std::stod(toks[5]));
-    tables.snuptbl[lc] = static_cast<real>(std::stod(toks[6]));
-    tables.maxalb[lc] = static_cast<real>(std::stod(toks[7]));
-    tables.laimintbl[lc] = static_cast<real>(std::stod(toks[8]));
-    tables.laimaxtbl[lc] = static_cast<real>(std::stod(toks[9]));
-    tables.emissmintbl[lc] = static_cast<real>(std::stod(toks[10]));
-    tables.emissmaxtbl[lc] = static_cast<real>(std::stod(toks[11]));
-    tables.albedomintbl[lc] = static_cast<real>(std::stod(toks[12]));
-    tables.albedomaxtbl[lc] = static_cast<real>(std::stod(toks[13]));
-    tables.z0mintbl[lc] = static_cast<real>(std::stod(toks[14]));
-    tables.z0maxtbl[lc] = static_cast<real>(std::stod(toks[15]));
+    tables.rstbl[lc] = sto_kind(toks[3]);
+    tables.rgltbl[lc] = sto_kind(toks[4]);
+    tables.hstbl[lc] = sto_kind(toks[5]);
+    tables.snuptbl[lc] = sto_kind(toks[6]);
+    tables.maxalb[lc] = sto_kind(toks[7]);
+    tables.laimintbl[lc] = sto_kind(toks[8]);
+    tables.laimaxtbl[lc] = sto_kind(toks[9]);
+    tables.emissmintbl[lc] = sto_kind(toks[10]);
+    tables.emissmaxtbl[lc] = sto_kind(toks[11]);
+    tables.albedomintbl[lc] = sto_kind(toks[12]);
+    tables.albedomaxtbl[lc] = sto_kind(toks[13]);
+    tables.z0mintbl[lc] = sto_kind(toks[14]);
+    tables.z0maxtbl[lc] = sto_kind(toks[15]);
     if (toks.size() >= 18) {
-      tables.ztopvtbl[lc] = static_cast<real>(std::stod(toks[16]));
-      tables.zbotvtbl[lc] = static_cast<real>(std::stod(toks[17]));
+      tables.ztopvtbl[lc] = sto_kind(toks[16]);
+      tables.zbotvtbl[lc] = sto_kind(toks[17]);
     }
   }
 
@@ -176,13 +177,13 @@ bool read_vegparm(const std::string& path, const std::string& dataset, NoahTable
     std::string key = trim(line);
     if (key.empty()) continue;
     if (key == "TOPT_DATA") {
-      if (std::getline(f, line)) tables.topt_data = static_cast<real>(std::stod(trim(line)));
+      if (std::getline(f, line)) tables.topt_data = sto_kind(trim(line));
     } else if (key == "CMCMAX_DATA") {
-      if (std::getline(f, line)) tables.cmcmax_data = static_cast<real>(std::stod(trim(line)));
+      if (std::getline(f, line)) tables.cmcmax_data = sto_kind(trim(line));
     } else if (key == "CFACTR_DATA") {
-      if (std::getline(f, line)) tables.cfactr_data = static_cast<real>(std::stod(trim(line)));
+      if (std::getline(f, line)) tables.cfactr_data = sto_kind(trim(line));
     } else if (key == "RSMAX_DATA") {
-      if (std::getline(f, line)) tables.rsmax_data = static_cast<real>(std::stod(trim(line)));
+      if (std::getline(f, line)) tables.rsmax_data = sto_kind(trim(line));
     } else if (key == "BARE") {
       if (std::getline(f, line)) tables.bare = std::stoi(trim(line));
     } else if (key == "NATURAL") {
