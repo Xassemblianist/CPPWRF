@@ -5,8 +5,8 @@ FP64 reproduce WRF v4.8.0 real*8 bit for bit, CPU FP32 and the CUDA FP32 identit
 on the configurations of docs/FP32_IDENTITY.md. What changes are runs outside the verified set that differed from
 WRF without a word: tiled runs with the cumulus diagnostics, runs resumed from CPPWRF's own restart files, a resumed
 two-way nest, and a few options CPPWRF accepted where WRF stops or does something else. It also makes several MPI
-ranks per node choose their GPU by node-local rank. It covers the commits from `v1.2.0` (db0ea0a) to `main`
-[MAIN PENDING]. The 1.2.0 notes follow below.
+ranks per node choose their GPU by node-local rank. It covers 6 commits (not counting merges) from `v1.2.0` (db0ea0a)
+to the 1.2.1 release commit. The 1.2.0 notes follow below.
 
 ## Fixed
 
@@ -42,8 +42,10 @@ ranks per node choose their GPU by node-local rank. It covers the commits from `
 
 | Where | Result |
 |---|---|
-| CPU CI at [MAIN PENDING] (GitHub-hosted runners, Debian 13 container) | [CI PENDING] |
-| GPU: Colab G4 at 4a57df7 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120) | [G4 PENDING] |
+| CPU CI at 4a57df7 (GitHub-hosted runners, Debian 13 container, run 44908377629) | suite PASS 387 FAIL 0 SKIP 0 at tolerance 0 (with the new `real_a05g_r8_fp64_cpu_1h_t2x2` and the 44 `cpu_sp` cases); WRF output files 42; ideal files 14; differential tests 32 / 32; ctest 36 / 36 |
+| GPU: Colab G4 at 4a57df7 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-21 | CUDA FP64 338 / 338 at tolerance 0; CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 38 / 38 (FP64) and 39 / 39 (FP32); device glibc math proof identical |
+
+The commits after 4a57df7 change documentation and version strings only.
 
 ## Known limitations
 
