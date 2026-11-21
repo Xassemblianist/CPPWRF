@@ -147,6 +147,9 @@ fp32id3_data.tar
 # made on the workstation (steps/ 3 minutes, history every step; 1 h); G2, SLAB1, N3 and MON3 with real*4 real.exe
 # inputs: the CPU FP32 cases of WDM, Morrison, GWDO, the nests, monotonic advection and the S-effort schemes
 fp32id4_data.tar
+# the second coverage wave's references (TROP, CONN, ADCB, ADGF, CB53, MYKF, MYBJ, UMYJ, RRDU, G3N, GFN, N3OW, MPRE0,
+# O3G0, ISF0, ADV64, HAIL, SFT1; tests/verify/cases/72_coverage2.py, tests/verify/refs/cov2_refs.txt) and their inputs
+port_cov2_data.tar
 # the WRF v4.8.0 objects (-r8, -r8 -fdefault-double-8 builds) and input subsets of the differential tests
 # (ctest -L diff; tools/gcp/stage_diff_data.sh, tools/gcp/run_diff_tests.sh)
 diff_data.tar
