@@ -8,7 +8,7 @@ merges) from `v1.1.1` (7629981) to `main` 0bc4652. The 1.1.1 notes follow below.
 
 ## Highlights
 
-- **FP32 bit-identical to WRF real*4.** The CPU FP32 build (`-DCPPWRF_DOUBLE=OFF`) gives the output of stock WRF
+- **FP32 bit-identical to WRF real*4.** The CPU FP32 build (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`) gives the output of stock WRF
   v4.8.0 real*4 (gfortran, WRF's default real*4 build), every history variable and every bit, on 24 configurations:
   P1, P2, P3, P4, P9, Noah-MP (NMP1), Thompson (P6), MYNN, the aerosol-aware Thompson (C01), WDM6, WDM5, Morrison
   with hail and with graupel (MORR, MORG), the gravity wave drag (G2), the one-way nest N1, the two-way nest N3,
@@ -35,9 +35,10 @@ merges) from `v1.1.1` (7629981) to `main` 0bc4652. The 1.1.1 notes follow below.
   loops call glibc libmvec's 4-lane SSE4 float functions (expf, logf, powf, sinf, cosf, atanf); CPPWRF ports them lane
   by lane (src/core/libmvec_f4.hpp) and calls them for the same loop iterations.
 - **Suite backend `cpu_sp`** (`tests/verify/wrf_suite.py --cpu-sp BIN`): 44 cases, the 24 configurations above at
-  1 h and 20 of them also over 3 minutes with history every step, compared with WRF real*4 history files at
-  tolerance 0. New data tars fp32id_data.tar, fp32id2_data.tar, fp32id3_data.tar and fp32id4_data.tar hold the WRF
-  real*4 references.
+  1 h and 20 of them also over 3 minutes with history every step (every minute on the nests of N3 and MON3),
+  compared with WRF real*4 history files at tolerance 0. New data tars fp32id_data.tar, fp32id2_data.tar,
+  fp32id3_data.tar and fp32id4_data.tar hold the new WRF real*4 references; the 1 h references of P1, P2, P3, P9 and
+  NMP1 are earlier real*4 runs in suite_data.tar.
 - **CUDA FP32 identity build**, CMake option `CPPWRF_CUDA_FP32_IDENTITY` (default `OFF`; needs `CPPWRF_ENABLE_CUDA=ON`,
   `CPPWRF_DOUBLE=OFF` and `CPPWRF_CUDA_GLIBC_MATH=ON`): `--fmad=false` in every kernel, glibc 2.41's scalar float
   functions on the device (from libm's FMA variants and from CORE-MATH's correctly rounded sources), glibc's double
@@ -56,7 +57,7 @@ merges) from `v1.1.1` (7629981) to `main` 0bc4652. The 1.1.1 notes follow below.
   b2d320c):
   - KWSolve carries the neighbour level of w in a register; pi = 4 atan(1) is computed once on the host.
   - An RK3 step with microphysics and lateral boundaries runs calc_p_rho_phi once, as WRF's solve_em does.
-  - The nest feedback synchronises the device only when CUDA graphs are off.
+  - The nest feedback synchronises the device only when CUDA graphs are off, or at the run's last root step.
   - Noah reads its parameter tables through a device pointer instead of a by-value copy in the kernel arguments.
   - RRTMG LW's batch kernel forms the band sums and the level fluxes in registers.
   - The surface driver no longer zeroes u_phytmp / v_phytmp.
@@ -103,8 +104,7 @@ cases outside `--slow`, the 18 CPU restart checks and the Straka check; the 154 
 
 - **The fast CUDA FP32 build** (the default) is not bit-identical to anything: FMA contraction and CUDA's math
   library. It is checked against WRF with measured tolerances (docs/FP32_ACCURACY.md).
-- **On the identity build's device** hypotf (no FP32 code calls it) and the optional radar reflectivity's complex
-  logarithm are CUDA's.
+- **On the identity build's device** hypotf is CUDA's (no FP32 code calls it).
 - **FP32 identity needs a WRF real*4 reference:** only the configurations of docs/FP32_IDENTITY.md are checked bit for
   bit. Other configurations are checked against WRF real*8 with tolerances, or not at all in FP32.
 - **Not covered by FP32 identity:** moving nests, more than two domains, vertical refinement, restarts, and the

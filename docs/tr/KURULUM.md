@@ -65,7 +65,7 @@ CUDA derlemesi uzun sürer ve iş başına birkaç GB bellek ister. Bellek azsa 
 | `CPPWRF_NATIVE` | `ON` | `-march=native`. Başka işlemcilerde çalışacak ikili dosyalar için `OFF` verin; sonuçlar değişmez. |
 | `CPPWRF_PORTABLE_LIBMVEC` | `ON` | glibc'nin vektör `log` / `log10` işlevlerini her işlemcide Intel'deki gibi hesaplar. |
 | `CPPWRF_CUDA_GLIBC_MATH` | `ON` | FP64 GPU derlemesinde glibc'nin matematik işlevlerini GPU'da çalıştırır. |
-| `CPPWRF_CUDA_FP32_IDENTITY` | `OFF` | Yalnız CUDA FP32: `ON`, CPU FP32 derlemesinin sonucunu GPU'da bit bit aynen verir (docs/FP32_IDENTITY.md'deki vakalarda WRF real*4'ünkü); hızlı kipten biraz yavaştır. `gpu-fp32` adıyla kurulur. |
+| `CPPWRF_CUDA_FP32_IDENTITY` | `OFF` | Yalnız CUDA FP32 (`CPPWRF_CUDA_GLIBC_MATH=ON` gerekir): `ON`, CPU FP32 derlemesinin sonucunu GPU'da bit bit aynen verir (docs/FP32_IDENTITY.md'deki vakalarda WRF real*4'ünkü); hızlı kipten biraz yavaştır. `gpu-fp32` adıyla kurulur. |
 
 Son üç seçenek neden var? WRF'nin sonucu, matematik işlevlerinin son bitine kadar nasıl yuvarlandığına bağlıdır:
 

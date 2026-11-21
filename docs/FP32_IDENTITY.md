@@ -195,8 +195,8 @@ FP64 (the glibc ports compute in double), will pay more; the fast build stays th
 ## What is not identical yet
 
 - The fast CUDA FP32 build (the default): FMA contraction and CUDA's math library; it stays measured in
-  docs/FP32_ACCURACY.md. The identity build covers the cases above only; hypotf (no FP32 code calls it) and the
-  optional radar reflectivity's complex logarithm are CUDA's on its device.
+  docs/FP32_ACCURACY.md. The identity build covers the cases above only; hypotf (no FP32 code calls it) is CUDA's on
+  its device (the optional radar reflectivity's complex logarithm is glibc's port there, as in the FP64 build).
 - Schemes and options other than those of the cases above are not checked against WRF real*4: aerosol-aware Thompson
   (mp_physics 28) with aerosol input fields or wif_input_opt 2, the MYNN options other than the defaults
   (MYNNX1 / MYNNX2, SPP), WDM6 with hail_opt 1, the other microphysics, cumulus, PBL, surface and radiation schemes,

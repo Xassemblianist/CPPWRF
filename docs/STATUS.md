@@ -383,12 +383,12 @@ and LH with isfflx 0 uninitialised; they are not compared.)
 
 ### FP32 against WRF real*4
 
-The CPU FP32 build (`-DCPPWRF_DOUBLE=OFF`) is bit-identical to stock WRF v4.8.0 real*4 (gfortran 14.2, glibc 2.41,
+The CPU FP32 build (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`) is bit-identical to stock WRF v4.8.0 real*4 (gfortran 14.2, glibc 2.41,
 the default real*4 build) on 24 configurations: P1, P2, P3, P4, P9, NMP1 (Noah-MP), P6 (Thompson), MYNN, C01
 (aerosol-aware Thompson), D6 (WDM6), D5 (WDM5), MORR and MORG (Morrison with hail / graupel), G2 (GWDO), the nests N1
 (one-way) and N3 (two-way, P4 physics), MON3 (monotonic advection on N3), KESSKF (Kessler), ACM7 (ACM2 + Pleim-Xiu),
 Q4 (QNSE), T6 (Tiedtke), P7 (New Tiedtke), DUD4 (Dudhia shortwave) and SLAB1 (5-layer slab LSM). The 44 `cpu_sp`
-cases run each of them for 1 h and 20 of them also for 3 minutes with history every step, every variable of the WRF
+cases run each of them for 1 h and 20 of them also for 3 minutes with history every step (every minute on the nests of N3 and MON3), every variable of the WRF
 real*4 history at tolerance 0. The CUDA FP32 identity build (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`: no FMA contraction,
 glibc 2.41's float functions on the device) gives the same bits on the GPU: the 44 `cuda_sp_id` cases pass on an RTX
 2060 (sm_75) and on a Colab G4 (sm_120). The FP32 executables define glibc 2.41's float functions themselves

@@ -77,8 +77,8 @@ without a port is reported as an error and never silently ignored. Still missing
 To be bit-identical, the port must repeat WRF's arithmetic exactly. That means the order of every sum, the
 constants gfortran folds, the halo schedule, and the glibc vector math (libmvec) that gfortran calls. On the
 GPU, CPPWRF runs a device port of the same glibc functions and turns FMA contraction off. The CPU result is
-the same on Intel and AMD processors (`CPPWRF_PORTABLE_LIBMVEC`). The FP32 builds carry glibc 2.41's float functions
-in the executable, so their result does not depend on the host's glibc version.
+the same on Intel and AMD processors (`CPPWRF_PORTABLE_LIBMVEC`). On x86-64 the FP32 builds carry glibc 2.41's
+float functions in the executable, so their result does not depend on the host's glibc version.
 
 ## Performance
 

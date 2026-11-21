@@ -189,8 +189,8 @@ cd case && apptainer run --nv ../cppwrf-cuda.sif --mode gpu-fp64
   architectures.
 - The CUDA image is Ubuntu 24.04 (glibc 2.39). The proofs of bit identity ran on Debian 13 (glibc 2.41), and the host
   code of the FP64 builds calls glibc's libm. In that image, check `gpu-fp64` against `cpu-fp64` with `cppwrf-compare`
-  before relying on bit identity with WRF. The FP32 builds carry glibc 2.41's float functions and do not depend on
-  the image's libm.
+  before relying on bit identity with WRF. The FP32 builds carry glibc 2.41's float functions (x86-64) and their FP32
+  results do not depend on the image's libm.
 - Pin the base images by digest for reproducible images.
 
 A Spack recipe is in `packaging/spack` (`spack repo add packaging/spack; spack install cppwrf +cuda cuda_arch=89`).

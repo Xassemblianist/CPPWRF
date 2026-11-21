@@ -49,7 +49,7 @@ updates, branches, constants and defaults. Every result is checked against WRF i
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
 - **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all 338 CUDA FP64 checks of the suite for v1.1.0 on the RTX PRO 6000 Blackwell of a Colab G4, earlier
   subsets on NVIDIA L4 and A100).
-- **CPU, FP32** (`-DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default real*4
+- **CPU, FP32** (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default real*4
   build) on 24 configurations, the 44 `cpu_sp` cases of the suite (P1-P4, P9, Noah-MP, Thompson, MYNN, WDM6,
   Morrison, the nests N1 / N3 and more); the CUDA FP32 identity build (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) gives the same
   bits on the GPU. The FP32 executables carry glibc 2.41's float functions, so the result does not depend on the

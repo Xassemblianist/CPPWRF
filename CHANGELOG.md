@@ -10,12 +10,13 @@ resumes across versions from WRF's wrfrst files.
 ## 1.2.0 (2026-11-21)
 
 ### Added
-- CPU FP32 builds (`-DCPPWRF_DOUBLE=OFF`) bit-identical to WRF v4.8.0 real*4 (gfortran, the default real*4 build)
+- CPU FP32 builds (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`) bit-identical to WRF v4.8.0 real*4 (gfortran, the default real*4 build)
   on 24 configurations, every history variable at tolerance 0 (docs/FP32_IDENTITY.md):
   - P1 and P4 (Kain-Fritsch, WSM6, RRTMG; 3 minutes with history every step, and 1 h) and P2, P3, P9 (1 h): start_em's
     base state, al and p, the lbc_fcx_gcx relaxation coefficients, Noah init (SNOALB, snow albedo, the TSLB freezing
     test), history T, WSM6's mp_wsm6_init products and moist_physics_prep_em's R_v/R_d rounded where WRF real*4 rounds
-    them (new data tar fp32id_data.tar).
+    them (new data tar fp32id_data.tar; the 1 h references of P1, P2, P3 and P9 are earlier real*4 runs in
+    suite_data.tar).
   - Noah-MP NMP1 (1 h; the MOST resistances' four logarithms through the 4-lane logf) and Thompson P6 (3 minutes and
     1 h; thompson_init's constants, coefficients and table builders in REAL where WRF real*4 has them, the runtime's
     rain slope and sedimentation powers scalar; new data tar fp32id2_data.tar).
@@ -31,7 +32,7 @@ resumes across versions from WRF's wrfrst files.
     blend_terrain, adjust_tempqv, press_adj) and the feedback (copy_fcn's average, sm121, smdsm) in REAL.
   - glibc 2.41 libmvec's 4-lane SSE4 float functions (`_ZGVbN4v_expf`, `_ZGVbN4v_logf`, `_ZGVbN4vv_powf` with Intel's
     rcpps table, `_ZGVbN4v_sinf`, `_ZGVbN4v_cosf`, `_ZGVbN4v_atanf`) ported lane by lane (src/core/libmvec_f4.hpp,
-    tables from tools/libmvec_f4_tables.py) and called for the iterations WRF's vectorised loops give them
+    the expf / logf / sinf / cosf tables from tools/libmvec_f4_tables.py) and called for the iterations WRF's vectorised loops give them
     (test_libmvec_f4 `all`: expf, logf, sinf, cosf and atanf over every float input, 0 differ).
 - The suite's CPU FP32 backend `cpu_sp` (`tests/verify/wrf_suite.py --cpu-sp BIN`): 44 cases (`real_*_fp32_cpu`,
   `real_*_fp32_cpu_1h`) against WRF real*4 history files at tolerance 0; each also checks its configuration against
@@ -43,7 +44,7 @@ resumes across versions from WRF's wrfrst files.
   rounded sources), glibc's double functions as in the CUDA FP64 build, libmvec's 4-lane float functions with the CPU
   build's lane rule, and `Reducer::sum` in the CPU build's order. Proofs: tools/glibc_mathf_proof.cpp (each port
   against the system libm over every float input, 2^32 pairs plus special values for powf and atan2f) and
-  tools/glibc_mathf_proof_cuda.cu (device against host, RTX 2060), sampled in every build by test_glibc_mathf. The
+  tools/glibc_mathf_proof_cuda.cu (device against host, RTX 2060); test_glibc_mathf samples the scalar ports in every FP32 build. The
   suite's backend `cuda_sp_id` (`--cuda-sp-id BIN`) runs the 44 `cpu_sp` cases on the GPU (`real_*_fp32_cuda_id*`)
   against the same references at tolerance 0. Cost on an RTX 2060 (P4, 10 steps): kernel time +3 %. The default
   fast CUDA FP32 build is unchanged.
@@ -52,7 +53,7 @@ resumes across versions from WRF's wrfrst files.
 - GPU performance, the same operations in the same order (FP64 bit-identical on the Colab G4: 338 / 338 at b2d320c):
   KWSolve's Thomas sweeps carry the neighbour level of w in a register and pi = 4 atan(1) is computed once on the
   host; an RK3 step with microphysics and lateral boundaries runs one interior calc_p_rho_phi (no second one after
-  spec_bdy_final, as solve_em); the nest feedback synchronises the device only when CUDA graphs are off; the Noah
+  spec_bdy_final, as solve_em); the nest feedback synchronises the device only when CUDA graphs are off or at the run's last root step; the Noah
   parameter tables by device pointer instead of a by-value copy in the kernel arguments; RRTMG LW's batch kernel
   KLwLevel forms the band sums and the level fluxes in registers; the surface driver no longer zeroes u_phytmp /
   v_phytmp and KSfcPrep fills only the levels the surface layer schemes read. On the G4 the 1 h stepping times were
