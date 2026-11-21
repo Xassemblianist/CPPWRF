@@ -376,6 +376,10 @@ void device_memory_report(const char* when) {
               when, double(total_b - free_b) / mib, double(total_b) / mib, limit, sms * tpsm,
               double(limit) * sms * tpsm / mib);
 }
+namespace {
+int work_share = 1;  // set_device_work_share
+}  // namespace
+void set_device_work_share(int processes) { work_share = processes > 1 ? processes : 1; }
 std::size_t device_work_budget() {
   static const std::size_t cap = [] {
     const char* e = std::getenv("CPPWRF_DEVICE_MEMORY_MIB");
@@ -385,7 +389,7 @@ std::size_t device_work_budget() {
   std::size_t free_b = 0, total_b = 0;
   if (cudaMemGetInfo(&free_b, &total_b) != cudaSuccess) return 0;
   if (cap && cap < total_b) total_b = cap;
-  return std::min(total_b / 8, free_b / 4);
+  return std::min(total_b / 8, free_b / 4) / std::size_t(work_share);
 }
 Reducer::Reducer(int max_k) : max_k_(max_k), hpart_(max_k) { dpart_ = static_cast<double*>(dev_alloc(sizeof(double) * max_k)); }
 Reducer::~Reducer() { dev_free(dpart_); }
@@ -428,6 +432,7 @@ int current_device() { return 0; }
 const char* backend_name() { return "cpu"; }
 void device_memory_report(const char*) {}
 std::size_t device_work_budget() { return 0; }
+void set_device_work_share(int) {}
 StepScope::StepScope(const void*) {}
 StepScope::~StepScope() {}
 void StepScope::end() {}

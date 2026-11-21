@@ -48,6 +48,13 @@ resumes across versions from WRF's wrfrst files.
   `cuda_sp_id` (`--cuda-sp-id`) runs every `cpu_sp` case on the GPU against the same WRF real*4 references at
   tolerance 0 (`real_p1_fp32_cuda_id`, ..., `real_p6_fp32_cuda_id_1h`). The default fast CUDA FP32 build, FP64 and
   the CPU builds are unchanged.
+- CUDA builds with `CPPWRF_MPI`: a rank's device is chosen by its rank among the ranks of its node, not by its global
+  rank: `CPPWRF_RANK_DEVICES=d0,d1,...` gives node-local rank `r` device `d[r mod n]` (an entry that is not a device
+  number stops the run with an error); without it the ranks of a node spread over the visible devices
+  (`r mod count`); with one visible device nothing changes. Rank 0 prints the mapping unless every rank is on
+  device 0. The ranks of a node that share a device divide its work-buffer budget, and every rank sizes the column
+  physics' work buffer (and NSSL's row work space) for its own patch instead of the whole domain. Results unchanged
+  (test_rank_device; docs/MPI.md).
 
 ### Fixed
 - FP32 results no longer depend on the host's libm: they were WRF real*4's only on a host with glibc 2.41 (Debian 13,

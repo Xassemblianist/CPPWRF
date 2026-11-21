@@ -135,7 +135,7 @@ class ColumnSlots {
 #define CPPWRF_COLUMN_SLOTS(work, i, j) [[maybe_unused]] ::cppwrf::ColumnSlots cppwrf_cw_((work), (i), (j));
 
 // Grows the process's work buffer (outside the time loop) for a kernel of bytes_per_col bytes per column over the
-// columns of r: all of them while they fit an eighth of the device memory and a quarter of what is free, else rows
+// columns of r (in a decomposed run the worker's own, as column_work_chunks launches them): all of them while they fit an eighth of the device memory and a quarter of what is free, else rows
 // of them (at least two). The kernels of every scheme and domain run one after another on the one launch stream
 // and share it. CPU build: no-op.
 void column_work_reserve(const Range2D& r, std::size_t bytes_per_col);

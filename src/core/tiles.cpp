@@ -730,6 +730,32 @@ std::vector<int> parse_ints(const std::string& s) {
   return v;
 }
 
+}  // namespace
+
+int rank_device(const char* spec, int local, int count) {
+  if (!spec || !*spec) return count > 1 ? local % count : -1;
+  const std::string s(spec);
+  std::vector<int> d;
+  for (std::size_t p = 0;;) {
+    std::size_t q = s.find(',', p);
+    if (q == std::string::npos) q = s.size();
+    const std::string e = s.substr(p, q - p);
+    if (e.empty() || e.size() > 9 || e.find_first_not_of("0123456789") != std::string::npos)
+      throw std::runtime_error("CPPWRF_RANK_DEVICES=" + s + ": the entries are CUDA device numbers (non-negative "
+                               "integers separated by commas), not '" + e + "'");
+    const int v = std::stoi(e);
+    if (count > 0 && v >= count)
+      throw std::runtime_error("CPPWRF_RANK_DEVICES=" + s + ": device " + e + ", but the rank sees " +
+                               std::to_string(count) + " CUDA device" + (count == 1 ? "" : "s"));
+    d.push_back(v);
+    if (q == s.size()) break;
+    p = q + 1;
+  }
+  return d[std::size_t(local) % d.size()];
+}
+
+namespace {
+
 // ---- tiles' transport: a mailbox per (receiver, sender) ----
 class ThreadNet {
  public:
