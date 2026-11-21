@@ -89,7 +89,8 @@ WRF's results depend on the exact rounding of its math functions. Three options 
   run on the same machine, but not the Intel-made references.
 - **`CPPWRF_CUDA_GLIBC_MATH`** (CUDA FP64 builds only). `ON` runs ports of glibc's `exp`, `log`, `pow` and the other
   math functions on the GPU instead of CUDA's math library. That is what makes `gpu-fp64` bit-identical to WRF.
-  It costs 0 to 7 % of the FP64 time. `OFF` uses CUDA's math library, which agrees with WRF to roundoff only.
+  With the rest of the FP64 bit-identity changes it moved the FP64 stepping time by -4 to +7 % (docs/STATUS.md);
+  `OFF` alone was not timed. `OFF` uses CUDA's math library, which agrees with WRF to roundoff only.
 - **`CPPWRF_CUDA_FP32_IDENTITY`** (CUDA FP32 builds only; needs `CPPWRF_CUDA_GLIBC_MATH=ON`). `ON` turns FMA
   contraction off in every kernel and runs glibc 2.41's float functions on the GPU, so `gpu-fp32` gives the same bits
   as `cpu-fp32`. On an RTX 2060 it costs 3 % of kernel time on P4. The default `OFF` is the fast mode.

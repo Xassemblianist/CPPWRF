@@ -73,7 +73,9 @@ Son üç seçenek neden var? WRF'nin sonucu, matematik işlevlerinin son bitine 
   libmvec'in `log` işlevi Intel'de ve AMD'de son bitte farklı sonuç verir. Başvuru WRF koşuları Intel'de yapıldı,
   bu yüzden `ON`, AMD'de de Intel'deki sonucu üretir.
 - **`CPPWRF_CUDA_GLIBC_MATH`:** CUDA'nın kendi matematik kitaplığı glibc ile aynı yuvarlamayı yapmaz. `ON`, glibc'nin
-  algoritmalarını GPU'ya taşır; `gpu-fp64`'ü WRF ile bit bit aynı yapan budur ve FP64 süresine en çok %7 ekler.
+  algoritmalarını GPU'ya taşır; `gpu-fp64`'ü WRF ile bit bit aynı yapan budur. FP64'ü bit bit aynı yapan öteki
+  değişikliklerle birlikte FP64 adım süresini %-4 ile %+7 arasında değiştirdi (docs/STATUS.md); tek başına `OFF`
+  ölçülmedi.
 - **`CPPWRF_CUDA_FP32_IDENTITY`:** FP32 GPU derlemesinde her çekirdekte FMA birleştirmesini kapatır ve glibc 2.41'in
   float işlevlerini GPU'da çalıştırır; böylece `gpu-fp32`, `cpu-fp32` ile bit bit aynı sonucu verir. RTX 2060'ta P4'te
   çekirdek süresine %3 ekler. Varsayılan `OFF` hızlı kiptir.

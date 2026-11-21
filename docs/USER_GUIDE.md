@@ -44,10 +44,10 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files, for the 342 CPU FP64 checks of the suite at main 78e46c2 (real-data
+  process, in every variable and output time of the wrfout and wrfrst files, for the 343 CPU FP64 checks of the suite at 4a57df7, version 1.2.1 (real-data
   domains in the mid-latitudes, the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
-- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all 338 CUDA FP64 checks of the suite for v1.1.0 on the RTX PRO 6000 Blackwell of a Colab G4, earlier
+- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all 338 CUDA FP64 checks of the suite for v1.1.0, v1.2.0 and v1.2.1 on the RTX PRO 6000 Blackwell of a Colab G4, earlier
   subsets on NVIDIA L4 and A100).
 - **CPU, FP32** (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default real*4
   build) on 24 configurations, the 44 `cpu_sp` cases of the suite (P1-P4, P9, Noah-MP, Thompson, MYNN, WDM6,
@@ -184,9 +184,15 @@ enforce them:
 - **CUDA:** nvcc's defaults (`-prec-div=true`, `-prec-sqrt=true`, `-ftz=false`). The FP64 build
   (`-DCPPWRF_DOUBLE=ON`) is bit-identical to WRF's real*8 build and to the CPU build: `--fmad=false` in every
   kernel and glibc's libm / libmvec algorithms on the device (`CPPWRF_CUDA_GLIBC_MATH`, default ON; OFF uses
-  CUDA's math library, which agrees with WRF to roundoff). It costs 0 to 7 % of the FP64 stepping time. The FP32
-  build contracts FMAs (`--fmad=true`) except RRTMG's batch kernels, Thompson and the physics drivers, and uses
-  CUDA's math library: it agrees with WRF's single-precision run to roundoff. The FP32 identity build
+  CUDA's math library, which agrees with WRF to roundoff). Together with the other changes that made the FP64 build
+  bit-identical, it changed the FP64 stepping time by -4 to +7 % (docs/STATUS.md); `OFF` alone was not timed. The
+  FP32 build uses CUDA's math library and contracts FMAs (`--fmad=true`) in the dynamics, in Kessler, WSM3 / 5 / 6
+  and WDM6 (physics_coupling.cpp), in the schemes with their own source files (KF, multi-scale KF, YSU, MYJ, QNSE,
+  the revised MM5 / Eta / QNSE surface layers, Noah, Noah-MP) and in radiation.cpp (Dudhia shortwave). CMakeLists.txt
+  builds with `--fmad=false` in both precisions RRTMG's LW / SW batch kernels, Thompson, Morrison, P3, NSSL and the
+  suite, surface, PBL, cumulus and FDDA drivers, and so the header-only schemes compiled in those drivers (e.g. MYNN,
+  ACM2, BouLac, Grell-Freitas, Grell-3D, Tiedtke, New Tiedtke, BMJ, RUC, the slab, the MYNN and Pleim-Xiu surface
+  layers). It agrees with WRF's single-precision run to roundoff. The FP32 identity build
   (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) has `--fmad=false` everywhere and glibc's float and double functions on the
   device: the CPU FP32 build's results, bit for bit (docs/FP32_IDENTITY.md).
 
@@ -508,10 +514,11 @@ CPU build.
 
 - **FP64** (`-DCPPWRF_DOUBLE=ON`): bit-identical to WRF real*8 and to the CPU FP64 build. The CMake files compile
   every FP64 kernel with `--fmad=false` (no fused multiply-add, as gfortran on x86-64 without `-march`) and run
-  glibc's libm / libmvec algorithms on the device (`CPPWRF_CUDA_GLIBC_MATH`); this costs 0 to 7 % of the stepping
-  time. Verified on L4 (sm_89), RTX PRO 6000 Blackwell (sm_120) and A100 (sm_80).
+  glibc's libm / libmvec algorithms on the device (`CPPWRF_CUDA_GLIBC_MATH`); these changes together moved the FP64
+  stepping time by -4 to +7 % (docs/STATUS.md). Verified on L4 (sm_89), RTX PRO 6000 Blackwell (sm_120) and A100 (sm_80).
 - **FP32** (`-DCPPWRF_DOUBLE=OFF`): the fast mode, with CUDA's math library and FMA contraction (except in RRTMG's
-  batch kernels, Thompson and the physics drivers). Its difference from WRF real*8 is of the size of stock WRF
+  batch kernels, Thompson, Morrison, P3, NSSL and the physics drivers with the schemes compiled in them; list in
+  [Required Flags and Determinism](#required-flags-and-determinism)). Its difference from WRF real*8 is of the size of stock WRF
   real*4's (docs/FP32_ACCURACY.md: the measurement, its method and tools/verify/fp32_accuracy.py, which compares any
   two sets of wrfout files).
 - **FP32 identity** (`-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON`): the CPU FP32 build's results bit for bit,

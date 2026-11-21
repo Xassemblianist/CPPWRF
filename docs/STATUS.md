@@ -4,13 +4,13 @@ Version 1.2.1 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
-(at main 0bc4652, version 1.2.0: 927 cases, 477 CPU FP64, 319 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`, against
-WRF real*4) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart configurations. The CPU CI runs 386 checks, i.e.
-the 323 CPU FP64 cases outside `--slow`, 18 restart checks, the Straka check and the 44 `cpu_sp` cases, all passing at
-0bc4652; the 154 slow CPU cases are the 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases. For 1.1.0 the
+(at 4a57df7, version 1.2.1: 928 cases, 478 CPU FP64, 319 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`, against
+WRF real*4) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart configurations. The CPU CI runs 387 checks, i.e.
+the 324 CPU FP64 cases outside `--slow`, 18 restart checks, the Straka check and the 44 `cpu_sp` cases, all passing at
+4a57df7; the 154 slow CPU cases are the 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases. For 1.1.0 the
 Colab G4 ran all 319 CUDA FP64 cases, the 18 GPU restart checks and the GPU Straka check, 338 checks, all passing
-at tolerance 0, and the 43 CUDA FP32 cases with restart_p1_fp32_cuda, 44 runs within their tolerances; the 1.2.0 GPU
-run is in docs/RELEASE_NOTES.md) and `tests/verify/run_wrf_files_test.sh` (WRF output files).
+at tolerance 0, and the 43 CUDA FP32 cases with restart_p1_fp32_cuda, 44 runs within their tolerances; the 1.2.0 and
+1.2.1 GPU runs are in docs/RELEASE_NOTES.md) and `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
 
@@ -276,7 +276,8 @@ differed on AMD EPYC by 1 ulp in KF, Noah-MP, the MYNN surface layer and the WSM
 The full CPU suite therefore runs on AMD CPUs: on every push to main on GitHub-hosted runners (AMD EPYC; for 1.1.0
 at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 33/33, all exact; for
 1.2.0 at 0bc4652, in a Debian 13 container: suite PASS 386 with the 44 `cpu_sp` cases, WRF output files 42, ideal
-files 14, `ctest -L diff` 32/32, ctest 35/35, all exact), and
+files 14, `ctest -L diff` 32/32, ctest 35/35, all exact; for 1.2.1 at 4a57df7: suite PASS 387, WRF output files 42,
+ideal files 14, `ctest -L diff` 32/32, ctest 36/36, all exact), and
 on the AMD CPU of Colab's G4 runtime (`tools/colab/colab_suite.sh --gpu G4 --any-cpu --jobs 12 --threads 4`: the CPU
 suite, the output files, ideal files, differential and ctest tests); the Intel L4 runtime and the GCP VMs stay
 possible.
@@ -325,8 +326,10 @@ computes as WRF's gfortran real*8 build on x86-64:
 - no FMA contraction (`--fmad=false` for every CUDA FP64 kernel; gfortran without -march emits none);
 - glibc 2.41's libm (the FMA variants WRF's executable selects) and libmvec (SSE4 2-lane pow, exp, log, atan, sin,
   cos, log10; the lane of each call as gfortran vectorises the loop) ported to the device (src/core/glibc_math.hpp,
-  CMake option `CPPWRF_CUDA_GLIBC_MATH`, default ON); tools/glibc_math_proof*.cpp prove the port equal to glibc
-  (10^9 inputs per function on the CPU, 10^7 on each GPU against the host);
+  CMake option `CPPWRF_CUDA_GLIBC_MATH`, default ON); tools/glibc_math_proof.cpp and tools/glibc_math_proof_cuda.cu
+  prove the port equal to glibc (10^9 random inputs per function on the CPU; 10^7 per function on each GPU against
+  the host, the `CPPWRF_JOB_GLIBC_PROOF` default of tools/colab/remote_job.py that the release GPU proofs ran, e.g.
+  the 1.2.1 G4 proof; the tool's own default without an argument is 10^8);
 - the folds gcc and gfortran make: x**2.0 with a constant exponent as x * x (`rpow2c`), functions of constants as
   constants;
 - no atomics in floating-point sums; division and sqrt correctly rounded (`-prec-div`, `-prec-sqrt`).
@@ -334,8 +337,10 @@ computes as WRF's gfortran real*8 build on x86-64:
 CUDA 13.0's ptxas for sm_120 compiles an integer add of an immediate to the bits of a double register as a
 floating-point add (`mov.b64; add.s64` became `DADD`); log's |x - 1| test then sent inputs near 1 to its table path.
 The device code makes these adds with two 32-bit adds with carry (`glibc::detail::addk`). FP64 stepping time against
-origin/main before this work (1 h, no history; P1 / P4 / D0): L4 +7 % / +2 % / +3 %, G4 +6 % / -4 % / 0 %,
-A100 +5 % / +2 % / +6 %. The CUDA FP32 build is not affected by this (CUDA's math library, FMA contraction). Its
+main before the FP64 bit-identity work (a862af3, CUDA's math library and FMA contraction; the work, e09fe5e to
+86d8aa7: glibc's math on the device, `--fmad=false`, this work-around and the folds, measured together; 1 h, no
+history; P1 / P4 / D0): L4 +7 % / +2 % / +3 %, G4 +6 % / -4 % / 0 %, A100 +5 % / +2 % / +6 %. No other measurement
+of the device math's cost exists (in particular none of `CPPWRF_CUDA_GLIBC_MATH=OFF` against `ON` alone). The CUDA FP32 build is not affected by this (CUDA's math library, FMA contraction). Its
 relative L2 at 1 h in the 1.1.0 G4 run (fb158f3; docs/FP32_ACCURACY.md, section 1.1.0, has the values that moved
 with this release's FP32 fixes):
 

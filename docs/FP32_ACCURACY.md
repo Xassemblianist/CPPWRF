@@ -120,12 +120,12 @@ What the numbers say, and what they do not:
 
 | Case | Configuration | Length | WRF real*4 runs |
 |---|---|---|---|
-| P4 | 15 km, 119 x 89 x 44, KF + WSM6 + YSU + Noah + RRTMG (radt 1) | 1 h | one process; also 8 MPI ranks |
+| P4 | 15 km, 119 x 89 x 44, KF + WSM6 + YSU + Noah + RRTMG (radt 1) | 1 h | one process; also 4 MPI ranks (see below) |
 | P6 | P4 domain, Thompson | 1 h | one process |
 | P9 | P4 domain, MYJ + Eta | 1 h | one process |
-| N3 | P4 with a two-way nest (5 km, 120 x 90) | 1 h | one process; also 12 MPI ranks |
+| N3 | P4 with a two-way nest (5 km, 120 x 90) | 1 h | one process; also 4 MPI ranks (see below) |
 | V1 | tropics (Bay of Bengal) | 1 h | one process |
-| T1 | Arctic | 1 h | one process |
+| T1 | R1's domain (15 km, 119 x 89 x 44) without physics: dry dynamics with diff_opt 2 / km_opt 2 (1.5-order TKE), QVAPOR a passive tracer | 1 h | one process |
 | SKV | V1 with `sst_skin` = 1, `tmn_update` = 1 | 1 h | one process |
 | MORR | P4 with Morrison (mp 10, hail) and KF | 1 h | one process |
 | ACM7 | P4 with ACM2 over the Pleim-Xiu surface layer | 1 h | one process |
@@ -134,7 +134,10 @@ What the numbers say, and what they do not:
 | N3L | N3 from the inputs of the suite's 24 h reference | 24 h | 12 MPI ranks |
 
 The long real*4 runs use MPI ranks: one process would need about 2.5 h for each. WRF's result depends on its process
-layout; P4 and N3 in both layouts for 1 h, and P4L's first 24 h in one process, show how much.
+layout; P4 and N3 in both layouts for 1 h, and P4L's first 24 h in one process, show how much. fp32_run.py asks for 8
+(P4) and 12 (N3) ranks in the second 1 h layout but caps an MPI run at a third of the CPUs on runtimes with 16 or
+fewer vCPUs: on the 12-vCPU L4 of the 1 h results below both ran with 4 ranks (runs.jsonl of that run). The long
+runs (G4, 48 vCPUs) ran with the ranks of the table.
 
 **Pairs** (columns of the tables):
 - `r4-r8`: WRF real*4 (one process; long runs: MPI) against WRF real*8 (= CPPWRF FP64).
@@ -227,7 +230,8 @@ Hourly rain >= 1 mm, fraction of points whose category differs (r4-r8 / fp32-r8;
 
 How to read it:
 - **The claim holds in 7 of the 11 domains** (P4, P6, P9, N3 d01 and d02, T1, L): median R 0.80 to 1.01, every
-  near-surface field within 1.1 except single threshold-driven fields (P4 PBLH 2.57, T1 QVAPOR 1.64; see below).
+  near-surface field within 1.1 except single fields (P4 PBLH 2.57, threshold-driven, see below; T1 QVAPOR 1.64,
+  a passive tracer in this dry case, advected with the positive-definite limiter, whose clipping is a threshold).
   In P6 (Thompson) and N3's parent CPPWRF FP32 is clearly closer to real*8 than WRF real*4 (R 0.4 to 0.6 in many
   fields).
 - **A single real*4 run is a noisy reference.** The same WRF real*4 executable with 4 MPI ranks instead of one
@@ -457,7 +461,8 @@ configuration; no FP32 port defect was found, so no FP32 byte changes:
 - Two structural differences from WRF real*4 make CPPWRF FP32 **more** accurate, never less: the start (base state
   and pressure in double precision) and the loops gfortran vectorises with libmvec's float functions (CPPWRF calls
   glibc's scalar functions there, at least as accurate). FMA contraction on the GPU (KF, the dycore and most schemes;
-  the physics drivers, Thompson, Morrison and RRTMG are compiled without it) is not a cause either: GPU FP32 without
+  the physics drivers and the schemes compiled in them, Thompson, Morrison, P3, NSSL and RRTMG's batch kernels are
+  compiled without it) is not a cause either: GPU FP32 without
   FMA is one more draw (ACM7 T 1.40, MORR QRAIN 2.00 at 1 h, 24 h median 1.01).
 - Nothing to fix: making the FP32 start single-precision as in WRF real*4 would correlate CPPWRF's error with WRF
   real*4's (and lower R) by making CPPWRF less accurate; R > 1 in the first hour of these configurations is the
@@ -471,7 +476,7 @@ configuration; no FP32 port defect was found, so no FP32 byte changes:
   the chaotic spread that any last-bit perturbation reaches, even one in double precision (24 h / 72 h R 0.8 to
   1.1; WRF real*4's own process layout moves the same numbers by up to 10 %).
 - **In the first hours** FP32 is as close to real*8 as WRF real*4 or closer for KF / WSM6 / YSU / Noah / RRTMG, Thompson,
-  MYJ, the nest, the Arctic, the tropics and the large domain. With ACM2 + Pleim-Xiu (ACM7), Morrison's hydrometeors
+  MYJ, the nest, the dry TKE case, the tropics and the large domain. With ACM2 + Pleim-Xiu (ACM7), Morrison's hydrometeors
   and the skin SST single runs reach R 1.2 to 2.3 at 1 h; "Root causes of the first-hour outliers" traces each to
   single Kain-Fritsch decisions that are ties at the last bit (and grow through ACM2's mixing), finds no FP32 port
   defect, and shows R ranging 1.1 to 2.0 (ACM7 T) over five builds of the same code. By 6 h these configurations are

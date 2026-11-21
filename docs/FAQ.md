@@ -6,8 +6,8 @@ Yes, in FP64, for the configurations CPPWRF verifies. `cpu-fp64` and `gpu-fp64` 
 at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must equal NaN, and -0 must differ from
 +0.
 
-- **What was compared.** The verification suite runs 342 CPU FP64 checks against WRF on every push (323 cases, 18 restart
-  checks and the Straka check at main 78e46c2, version 1.1.0; 154 more cases with `--slow`), and 338 CUDA FP64
+- **What was compared.** The verification suite runs 343 CPU FP64 checks against WRF on every push (324 cases, 18 restart
+  checks and the Straka check at 4a57df7, version 1.2.1; 154 more cases with `--slow`), and 338 CUDA FP64
   checks on a GPU for each release:
   - real-data domains in the mid-latitudes, the tropics, the Arctic and the Alps;
   - 24 h and 72 h forecasts;

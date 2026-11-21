@@ -45,6 +45,12 @@ to the 1.2.1 release commit. The 1.2.0 notes follow below.
 | CPU CI at 4a57df7 (GitHub-hosted runners, Debian 13 container, run 44908377629) | suite PASS 387 FAIL 0 SKIP 0 at tolerance 0 (with the new `real_a05g_r8_fp64_cpu_1h_t2x2` and the 44 `cpu_sp` cases); WRF output files 42; ideal files 14; differential tests 32 / 32; ctest 36 / 36 |
 | GPU: Colab G4 at 4a57df7 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-21 | CUDA FP64 338 / 338 at tolerance 0; CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 38 / 38 (FP64) and 39 / 39 (FP32); device glibc math proof identical |
 
+How the counts relate (`tests/verify/wrf_suite.py --list` at 4a57df7): the suite defines 928 cases, 478 CPU FP64
+(154 of them `--slow`), 319 CUDA FP64, 43 CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`, one more CPU FP64 case than
+1.2.0 (`real_a05g_r8_fp64_cpu_1h_t2x2`). The CI's 387 checks are the other 324 CPU FP64 cases, 18 restart checks,
+the Straka check and the 44 `cpu_sp` cases; the G4's 338 CUDA FP64 checks are the 319 cases, 18 restart checks and
+the Straka check.
+
 The commits after 4a57df7 change documentation and version strings only.
 
 ## Known limitations
@@ -570,7 +576,7 @@ Google Colab G4 runtime, where the example's GPU FP64 output equalled the CPU FP
 - GPU FP64 builds with `--fmad=false` and `CPPWRF_CUDA_GLIBC_MATH` (the CMake defaults).
 - GPU FP32 is not bit-identical to anything. docs/FP32_ACCURACY.md compares its difference from WRF real*8 with stock
   WRF real*4's (the usual production build), R = FP32's / real*4's, over eleven domains at 1 h (and 24 h / 72 h):
-  in the KF / WSM6 / Thompson / MYJ, nest, Arctic and large-domain cases R is 0.4 to 1.1 for the state and surface
+  in the KF / WSM6 / Thompson / MYJ, nest, dry TKE and large-domain cases R is 0.4 to 1.1 for the state and surface
   fields (as close as WRF real*4 or closer); with ACM2 + Pleim-Xiu, Morrison and the skin SST single runs reach up to
   2 at 1 h (2.3 for QVAPOR in ACM7) and higher for sparse hydrometeors. These were traced to Kain-Fritsch decisions
   that are ties at the last bit, not to a port defect: other builds of the same code give 1.1 to 2.0, and from 6 h on

@@ -64,9 +64,9 @@ without a port is reported as an error and never silently ignored. Still missing
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
-- **Model runs against WRF** (`tests/verify/wrf_suite.py`): on every push 342 CPU FP64 checks against WRF real*8
-  (323 cases, 18 restart checks and the Straka check; 154 more cases run with `--slow`) and 44 CPU FP32 cases
-  against WRF real*4, all passing at tolerance 0 at main 0bc4652, and the CUDA FP64 checks and the CUDA FP32 identity
+- **Model runs against WRF** (`tests/verify/wrf_suite.py`): on every push 343 CPU FP64 checks against WRF real*8
+  (324 cases, 18 restart checks and the Straka check; 154 more cases run with `--slow`) and 44 CPU FP32 cases
+  against WRF real*4, all passing at tolerance 0 at 4a57df7 (version 1.2.1), and the CUDA FP64 checks and the CUDA FP32 identity
   cases once per release on a GPU. They cover
   real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
   at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are

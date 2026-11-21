@@ -1,6 +1,7 @@
 # cppwrf_real: WRF real.exe in C++
 
-`cppwrf_real` makes `wrfinput_d0N` and `wrfbdy_d01` (and `wrflowinp_d0N` with `sst_update = 1`) from
+`cppwrf_real` makes `wrfinput_d0N` and `wrfbdy_d01` (and `wrflowinp_d0N` with `sst_update = 1`, `wrffdda_d0N`
+with `grid_fdda = 1`) from
 WPS `met_em` files, as WRF v4.8.0's
 `real.exe` does. Its output files are identical to real.exe's: every value (tolerance 0, for the
 default single-precision build and the `-r8` build), the variable list and order, dimensions, types,
@@ -17,7 +18,7 @@ build/src/init_real/cppwrf_real --namelist namelist.input --met-dir /path/to/met
 |---|---|---|
 | `--namelist` | `namelist.input` | WRF namelist (the same file real.exe reads) |
 | `--met-dir` | `.` | Directory of the `met_em.d0N.<date>.nc` files |
-| `--out-dir` | `.` | Where `wrfinput_d0N`, `wrfbdy_d01` and `wrflowinp_d0N` are written |
+| `--out-dir` | `.` | Where `wrfinput_d0N`, `wrfbdy_d01`, `wrflowinp_d0N` and `wrffdda_d0N` are written |
 | `--precision` | `double` | WRF's default REAL kind: `float` (standard build) or `double` (`-r8`) |
 | `--schema` | `${CPPWRF_DATA_DIR}/wrf_schema/wrf-4.8.0.tsv` | WRF I/O schema (below) |
 
@@ -40,8 +41,8 @@ processed over the whole domain (`hold_ups`, also set by grid_fdda, qna_update, 
 
 TAVGSFC input (`FLAG_TAVGSFC = 1`: the surface pressure of `sfcprs` / `sfcprs2`, the SST and skin temperature of
 inland lakes and of water points without a valid SST, the slab's TMN) and the surface pressure from PMSL alone
-(`sfcprs`, without PSFC or SOILHGT) are ported statement by statement but not yet compared with a WRF real.exe run:
-`cppwrf_real` runs them only with `&cppwrf allow_unverified = .true.` in namelist.input (unverified tier).
+(`sfcprs`, without PSFC or SOILHGT) are ported statement by statement and compared with WRF real.exe runs (the
+`V111*` cases of `ctest -R real_vs_wrf_runs`, below): every file identical.
 `use_tavg_for_tsk` only checks for TSK or TAVGSFC, as in WRF, whose skin temperature from TAVGSFC is overwritten by
 SKINTEMP in the metgrid branch.
 
@@ -86,6 +87,16 @@ temperature closest to 30 cm, sea ice turned into land ice) is compared with rea
 (`tools/gcp/real_variant.py`: the P1 domain, also with `real_data_init_type = 2`, the two-domain nest N3s and the
 Arctic V2 domain with sea ice), every file identical.
 
+`ctest -R real_vs_wrf_runs` compares 22 further WRF real.exe runs of the reference workflow (`runs:run_*_r8` in
+CMakeLists.txt; data `port_gem10_data.tar`, `port_gem13_data.tar` and `port_v111_data.tar` of
+tests/verify/ctest_data.txt, the data of the CI job that runs the ctest tests), every file identical:
+
+- `G10*`: `lagrange_order = 1`, `default_soiltype` 14, met_em files with VAR_SSO / FLAG_VAR_SSO, the plain P1 met_em;
+- `G13*`: sea ice with SST, `ISLAKE = -1`, SPECHUMD (`use_sh_qv`), no GHT, top-down levels, `sfcprs2`, the met_em
+  pass-through fields, soil water;
+- `V111*`: TAVGSFC (also with `use_tavg_for_tsk`, `sfcp_to_sfcp`, the slab and `ISLAKE = -1`) and the surface pressure
+  from PMSL (without PSFC, also with TAVGSFC, and without SOILHGT).
+
 ## Not covered
 
 The following real.exe paths are not ported. `cppwrf_real` stops with an error when the namelist
@@ -93,4 +104,4 @@ selects one:
 
 - `sf_surface_physics` other than 0, 1, 2 and 4 (RUC, PX, CLM and SSiB soil handling);
 - `chem_opt` and `tracer_opt` (the 4-D chemistry and tracer arrays);
-- `vert_refine_method`.
+- `vert_refine_method` and `vert_refine_fact` other than 1 (ndown).
