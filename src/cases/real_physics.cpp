@@ -295,7 +295,8 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   // is replaced as wrf.exe replaces it (the wrfinput soil fields have that many layers)
   {
     const int lsm = o.sf_surface_physics, given = int(cfg.get_int("phys.num_soil_layers", -1));
-    const int wrf = lsm == 0 || lsm == 1 ? 5 : lsm == 3 ? (given == 6 || given == 9 ? given : 6) : 4;
+    const int wrf = lsm == 0 || lsm == 1 ? 5 : lsm == 3 ? (given == 6 || given == 9 ? given : 6)
+                    : lsm == 5 ? 10 : lsm == 7 ? 2 : lsm == 8 ? 3 : 4;  // CLM, Pleim-Xiu, SSiB (not ported)
     if (given != -1 && given != wrf && tile::writer())
       std::cerr << "cppwrf: NOTE: phys.num_soil_layers = " << given << " is set to " << wrf
                 << " for sf_surface_physics = " << lsm << ", as wrf.exe does (set_physics_rconfigs)" << std::endl;

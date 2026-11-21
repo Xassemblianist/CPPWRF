@@ -68,7 +68,8 @@ int physics_suite_option(std::string physics_suite, const std::string& option, i
 // check_nml_consistency (module_check_a_mundo.F:753-783, 855-880, 897-943) after setup_physics_suite: the fatal
 // cross-domain checks of the physics options over domains 2..max_dom with grid_allowed (sf_surface_physics,
 // sf_sfclay_physics, ra_lw_physics, ra_sw_physics equal to domain 1's; bl_pbl_physics, gwd_opt, cu_physics equal or
-// 0). Returns WRF's message of the first failure, empty when none.
+// 0), after setup_physics_suite's stop on a physics_suite other than none, CONUS or tropical ("Unrecognized physics
+// suite"). Returns WRF's message of the first failure, empty when none.
 std::string physics_domain_consistency(const WrfConfig& c, int max_dom);
 
 // One variable as written to a file.

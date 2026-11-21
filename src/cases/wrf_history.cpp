@@ -180,6 +180,12 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
   c.set("use_theta_m", m_.st->P_QV >= 0 ? "1" : "0");
   c.set("mp_physics", std::to_string(m_.rk && m_.rk->physics() ? m_.rk->physics()->params().mp_physics : 0));
   c.set("do_radar_ref", std::to_string(cfg.get_int("phys.do_radar_ref", 0)));  // REFL_10CM, REFD_MAX
+  // interval_seconds without a namelist entry: the configuration's, else the wrfbdy interval (as the model has it;
+  // WE_JUST_D01_LBC, DTBC, the boundary alarm), not the Registry default 10800
+  if (cfg.has("time.interval_seconds"))
+    c.set("interval_seconds", std::to_string(cfg.get_int("time.interval_seconds", 0)));
+  else if (m_.bdy_interval_s > 0)
+    c.set("interval_seconds", std::to_string(std::lround(m_.bdy_interval_s)));
   // check_a_mundo: num_soil_layers = 5 without a land surface model, whatever the namelist says (the history
   // soil fields are then 5 layers of zeros); Noah / Noah-MP set it below
   if (!m_.suite) wc_->set("num_soil_layers", "5");
@@ -244,7 +250,7 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
   wrf_io::apply_iofields_option(*schema_, *wc_, std::filesystem::path(nl_path).parent_path().string(), {25, 29, 35});
   frames_per_outfile_ = std::max(1, wc_->integer("frames_per_outfile"));
   if (cfg.get_int("phys.sst_update", 0) == 1)
-    auxinput4_interval_s_ = cfg.get_double("phys.auxinput4_interval", 360.0) * 60.0;
+    auxinput4_interval_s_ = cfg.get_double("phys.auxinput4_interval", 0.0) * 60.0;
   hist_outname_ = wc_->get("history_outname");  // the file names of open_hist_w / med_restart_out
   rst_outname_ = wc_->get("rst_outname");
   aux3_outname_ = wc_->get("auxhist3_outname");
@@ -1129,7 +1135,13 @@ void WrfHistory::phy_init_from_restart(const std::string& wrfrst_path) {
   int id;
   if (nc_open(wrfrst_path.c_str(), NC_NOWRITE, &id) != NC_NOERR)
     throw std::runtime_error("cannot open the restart file " + wrfrst_path);
+  // what wrf.exe computes again on a restart whatever the file says: phy_init's STEPRA / STEPBL / STEPCU / STEPFG
+  // (ra_init, bl_init, cu_init, fg_init: nint(*DT*60./DT)) and LANDUSE_ISICE (isice, module_physics_init.F:1190),
+  // start_em's lbc_fcx_gcx (FCX, GCX: start_em.F:365)
+  static const std::set<std::string> recomputed = {"STEPRA", "STEPBL", "STEPCU", "STEPFG", "LANDUSE_ISICE", "FCX",
+                                                   "GCX"};
   for (auto& [name, v] : phy_init_) {
+    if (recomputed.count(name)) continue;
     int vid, nd, dims[NC_MAX_VAR_DIMS];
     if (nc_inq_varid(id, name.c_str(), &vid) != NC_NOERR || nc_inq_varndims(id, vid, &nd) != NC_NOERR ||
         nc_inq_vardimid(id, vid, dims) != NC_NOERR)
@@ -1145,6 +1157,9 @@ void WrfHistory::phy_init_from_restart(const std::string& wrfrst_path) {
     if (nc_get_var_double(id, vid, f.data()) != NC_NOERR)
       throw std::runtime_error(wrfrst_path + ": cannot read " + name);
     v = std::move(f);
+    // med_nest_initial of a restart feeds nothing back (input_restart only): the file's value, not that of the
+    // initial feedback (a two-way parent; TOPOSLPX, SLOPE, CTOPO, ...)
+    fed_.erase(name);
   }
   nc_close(id);
 }

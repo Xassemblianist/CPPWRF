@@ -351,6 +351,22 @@ Model Model::build(const io::Config& cfg) {
   // the adaptive time step sets time_step_sound = 0 (start_em.F:979)
   const int tss = m.adapt ? 0 : int(cfg.get_int("time.time_step_sound", 0));
   m.n_sound = tss > 0 ? tss : dyn::RK3::auto_sound_steps(g.dt, g.dx, g.dy);
+  // check_a_mundo (module_check_a_mundo.F:1474-1495, also with run_time = 0; below): sst_update = 1 with no
+  // auxinput4_interval (Registry default 0) on domain 1 is fatal in WRF; the configuration has no default interval
+  // either, and an interval below 0 (an alarm that never rings) is not supported
+  auto check_aux4 = [&cfg] {
+    if (cfg.get_int("phys.sst_update", 0) != 1) return;
+    if (!cfg.has("phys.auxinput4_interval"))
+      throw std::runtime_error("phys.sst_update = 1 needs phys.auxinput4_interval (minutes between the wrflowinp "
+                               "records; WRF stops without an auxinput4 interval)");
+    const double iv = cfg.get_double("phys.auxinput4_interval", 0.0);
+    if (!cfg.get_bool("real.nested", false) && iv == 0.0)
+      throw std::runtime_error("phys.sst_update = 1 with phys.auxinput4_interval = 0 on domain 1: WRF stops (\"If "
+                               "sst_update /= 0, one of the auxinput4_interval settings must be /= 0\")");
+    if (iv < 0.0) throw std::runtime_error("phys.auxinput4_interval < 0 is not supported");
+  };
+  // (a run without the column physics stops below: sst_update needs it)
+  if (m.nsteps == 0 || wants_column_physics(cfg)) check_aux4();
   if (m.nsteps > 0) {
     m.rk = std::make_unique<dyn::RK3>(g, lp, m.ap, tss, sp);
     m.n_sound = m.rk->n_sound();
@@ -456,11 +472,6 @@ Model Model::build(const io::Config& cfg) {
     if (!m.suite && cfg.get_int("phys.sst_update", 0) != 0)
       throw std::runtime_error("phys.sst_update = 1 without surface-layer, land-surface, PBL or cumulus physics is not "
                                "supported (wrflowinp is read with the column physics suite only)");
-    // check_a_mundo (module_check_a_mundo.F:1474-1495): sst_update = 1 with no auxinput4_interval (Registry default 0)
-    // is fatal in WRF; the configuration has no default interval either
-    if (m.suite && cfg.get_int("phys.sst_update", 0) == 1 && !cfg.has("phys.auxinput4_interval"))
-      throw std::runtime_error("phys.sst_update = 1 needs phys.auxinput4_interval (minutes between the wrflowinp "
-                               "records; WRF stops without an auxinput4 interval)");
     // topo_wind (start_em's CTOPO / CTOPO2), slope_rad and topo_shading are ported with the real-data column physics
     if (!m.suite && (cfg.get_int("phys.topo_wind", 0) != 0 || cfg.get_int("phys.slope_rad", 0) != 0 ||
                      cfg.get_int("phys.topo_shading", 0) != 0))

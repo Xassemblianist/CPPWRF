@@ -59,7 +59,9 @@ int rrtmg_chunk_columns(int ncol, std::size_t bytes_per_col) {
     std::lock_guard<std::mutex> lk(mtx);
     budget = std::max(budget, dbuf.bytes + ibuf.bytes);
   }
-  const std::size_t cap = std::max<std::size_t>(budget / bytes_per_col, 2048);
+  // at least 2048 columns a launch (1 / K of them for K processes or tiles on one device)
+  const std::size_t floor = std::max<std::size_t>(1, 2048 / std::size_t(device_work_share()));
+  const std::size_t cap = std::max<std::size_t>(budget / bytes_per_col, floor);
   if (std::size_t(ncol) <= cap) return ncol;
   const std::size_t nchunks = (std::size_t(ncol) + cap - 1) / cap;
   return int((std::size_t(ncol) + nchunks - 1) / nchunks);

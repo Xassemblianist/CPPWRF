@@ -120,6 +120,12 @@ int physics_suite_option(std::string suite, const std::string& option, int value
 
 std::string physics_domain_consistency(const WrfConfig& c, int max_dom) {
   const std::string suite = c.get("physics_suite");
+  {  // setup_physics_suite (module_check_a_mundo.F:3143-3201): 'none', 'CONUS', 'tropical', else fatal
+    std::string t = suite;
+    t.erase(std::remove_if(t.begin(), t.end(), [](char ch) { return ch == '\'' || ch == '"' || ch == ' '; }), t.end());
+    t = to_lower(t);
+    if (t != "none" && t != "conus" && t != "tropical") return "Unrecognized physics suite";
+  }
   auto opt = [&](const char* o, int id) {
     const int v = c.integer(o, id);
     return std::string(o) == "gwd_opt" ? v : physics_suite_option(suite, o, v);

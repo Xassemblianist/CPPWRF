@@ -1250,6 +1250,10 @@ class TestValidationAndWarnings(unittest.TestCase):
         self.assertEqual(sec["phys"]["sst_update"], 1)
         self.assertEqual(sec["phys"]["auxinput4_interval"], 180)
         self.assertEqual(sec["real"]["wrflowinp"], "lowinp_d01")
+        # an interval below 0 (an alarm that never rings) is not supported
+        t = WrfTranslator(parse_namelist(real_case(text.replace("auxinput4_interval = 180", "auxinput4_interval = -60"))))
+        t.translate()
+        self.assertTrue(any("auxinput4_interval < 0" in e for e in t.errors), t.errors)
 
     def test_sst_update_interval_and_time_step(self):
         """auxinput4_interval that is not a multiple of the time step: WRF's AUXINPUT4 alarm rings at the first step
@@ -1587,6 +1591,19 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                 self.assertEqual(bool(hit), bad, (line, t.errors))
                 if bad:
                     self.assertIn("wrffdda", hit[0])
+            # READ(strmid,'(I3)'): -0 is stream 0; a line of an unknown stream type keeps the last known one
+            # (strmtyp_int); ++0 is a Fortran read error
+            for text, want in (("-:i:-0:tsk\n", "input stream changes"), ("+:i:11:sst\n-:x:10:u_ndg_old\n", "input stream changes"),
+                               ("+:h:0:rainc\n-:x:10:u_ndg_old\n", None), ("+:i:++0:tsk\n", "bad stream id")):
+                path = os.path.join(d, "iof.txt")
+                with open(path, "w") as f:
+                    f.write(text)
+                t, _ = self.translate(self.FULL.replace("&time_control /",
+                                                        f"&time_control iofields_filename = '{path}' /"))
+                if want:
+                    self.assertTrue(any(want in e for e in t.errors), (text, t.errors))
+                else:
+                    self.assertFalse(any("stream" in e for e in t.errors), (text, t.errors))
 
     def test_urban_canopy(self):
         # sf_urban_physics = 1 (single-layer UCM) with Noah on one domain, URBPARM.TBL or URBPARM_LCZ.TBL

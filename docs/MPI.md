@@ -171,7 +171,11 @@ CPPWRF_TILES=2x2 build/cppwrf CONFIG.ini
   `MPI_COMM_TYPE_SHARED`), not by its global rank. With `CPPWRF_RANK_DEVICES=d0,d1,...` (non-negative device numbers
   below the count the rank sees, else the run stops with an error) node-local rank `r` takes `d[r mod n]`; without it
   and with several visible devices `r mod count`; with one visible device (also when the launcher gives each rank its
-  own through `CUDA_VISIBLE_DEVICES`) every rank stays on device 0, as one process. Rank 0 prints the mapping
+  own through `CUDA_VISIBLE_DEVICES`) every rank stays on device 0, as one process. Only the entry a rank takes must
+  be below the count it sees. The numbering assumes that the ranks of a node see the same devices in the same order
+  (or one device each) and that `MPI_COMM_TYPE_SHARED` spans the node: a launcher that gives the ranks of a node
+  reordered `CUDA_VISIBLE_DEVICES` lists, or an MPI whose shared-memory communicator is narrower than the node, can
+  put two ranks on one GPU (the per-device budget below still counts them by UUID within the communicator). Rank 0 prints the mapping
   (`cppwrf: CUDA device of each rank ...`) unless every rank is on device 0. The device is a rank's context only:
   results do not depend on it.
 - CUDA builds: K ranks of a node on one device (counted by the device's UUID) each size their work buffers (the

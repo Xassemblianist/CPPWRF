@@ -93,6 +93,8 @@ void RK3::step(State& s, Tendencies& t, const BaseState& b) {
   StepScope graph(this);  // CUDA: the step as graphs (the same launches in the same order)
   if (bc_) bc_->advance_time(g_.dt);  // solve_em: dtbc = dtbc + dt
   vmdump::on() = vm_step_ == vm_dump_step();
+  if (vmdump::on() && g_.patched() && std::getenv("CPPWRF_VM_DUMP"))  // the dump writes the whole fields of one patch
+    throw std::runtime_error("CPPWRF_VM_DUMP is not supported with run.tiles or MPI ranks (a decomposed run)");
   {  // debug: the whole state (halos too) at the start of the dumped step
     std::vector<const Field3*> f3 = {&s.u_1, &s.u_2, &s.v_1, &s.v_2, &s.w_1, &s.w_2, &s.t_1, &s.t_2, &s.ph_1, &s.ph_2,
                                      &s.p, &s.al, &s.ww, &s.ww_m, &s.php, &s.alt, &s.ru, &s.rv, &s.ru_m, &s.rv_m,

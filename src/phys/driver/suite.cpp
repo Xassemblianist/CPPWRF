@@ -906,11 +906,14 @@ struct KUrbanInit {
     utype(i, j) = ut;
     if (ut > 0) {
       // HGT_URB2D > 0: NUDAPT morphology (not ported); LP, LB, HGT, MH, STDH, LF are 0 otherwise (WrfHistory)
-      if (hgt(i, j) > real(0.) || ut > icate) {
+      // a class beyond the table: WRF reads FRC_URB_TBL past its categories only when FRC_URB2D is not in (0, 1]
+      // (else phy_init stops on the LCZ classes, init_urban below)
+      const bool frc_ok = frc(i, j) > real(0) && frc(i, j) <= real(1.);
+      if (hgt(i, j) > real(0.) || (ut > icate && !frc_ok)) {
         raise_fatal(kFatalUrbanInput);
         return;
       }
-      if (!(frc(i, j) > real(0) && frc(i, j) <= real(1.))) frc(i, j) = frc_tbl[ut - 1];
+      if (!frc_ok) frc(i, j) = frc_tbl[ut - 1];
     } else {
       frc(i, j) = real(0.);
     }
@@ -988,6 +991,9 @@ void PhysicsSuite::init_urban(const std::vector<double>& frc_in, const std::vect
   if (o_.use_wudapt_lcz == 1 && max_utype <= 3.0)
     throw std::runtime_error("urban: USING URBPARM_LCZ.TBL WITH OLD 3 URBAN CLASSES. SET USE_WUDAPT_LCZ=0 (WRF stops: "
                              "use_wudapt_lcz = 1 and no urban point of the domain has an LCZ class above 3)");
+  if (max_utype > double(urban_tables_.icate))
+    throw std::runtime_error("sf_urban_physics = 1: an urban class beyond the categories of the URBPARM table is not "
+                             "supported (the UCM reads its parameters past the table)");
 }
 
 void PhysicsSuite::init_noahmp(bool fndsnowh) {

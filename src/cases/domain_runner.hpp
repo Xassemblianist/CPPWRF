@@ -95,6 +95,12 @@ class DomainRunner {
   // restart from a WRF file (its seconds to the next ring become the interval; ringing at the start when the file
   // says so); aux3_write_: io_form_auxhist3 = 2, the auxhist3 files (output.auxhist3)
   long aux3_iv_ = 0, aux3_ref_ = 0;
+  long aux3_cfg_iv_ = 0;  // the configuration's auxhist3 interval (steps)
+  // the step this run started at: 0, the restart step of a wrfrst resume, or (CPPWRF's own restart file) the start of
+  // the run that wrote the file
+  long run_start_step_ = 0;
+  // CPPWRF's own restart file: the restart alarm's PrevRingTime and one-shot RingTime there (< 0: none)
+  double native_rst_prev_ = -1.0, native_rst_ring_time_ = -1.0;
   int aux3_ring_at_start_ = -1;
   bool aux3_write_ = false;
   bool aux3_due(long n) const { return aux3_iv_ > 0 && n > aux3_ref_ && (n - aux3_ref_) % aux3_iv_ == 0; }

@@ -472,4 +472,8 @@ Restart and input limits that remain (each refused with an error):
 - the single-layer urban model resumed from any restart file (WRF's urban_var_init on a restart is not ported);
 - CPPWRF's own restart files (`restart_<step>.nc`) with nests, the adaptive time step or `tmn_update`: resume from
   the run's wrfrst files;
-- two-way nest feedback with Noah and the NLCD40 land use (phy_init after the feedback).
+- two-way nest feedback with Noah and the NLCD40 land use (phy_init after the feedback);
+- the debug dump `CPPWRF_VM_DUMP` with `run.tiles` or MPI ranks.
+
+`CPPWRF_KTIME=1` with `run.tiles` on one GPU synchronises the whole device around each launch: a tile's kernel times
+include the other tiles' kernels running at the same time (use it without tiles for kernel timings).
