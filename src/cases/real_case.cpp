@@ -499,6 +499,7 @@ void init_real_case(const io::Config& cfg, Model& m) {
   if (interval <= 0 && !bd->this_bdy_times.empty() && !bd->next_bdy_times.empty())
     interval = seconds_between(bd->this_bdy_times[0], bd->next_bdy_times[0]);
   if (interval <= 0) throw std::runtime_error("real: cannot determine the boundary interval (set real.bdy_interval)");
+  m.bdy_interval_s = interval;
   // WRF's dtbc is a running sum of dt, reset only when the model time equals a boundary time exactly
   // (mediation_integrate.F); dtbc = t0 - need * interval below is that sum only when dt is an integer
   // (exact sums) that divides the interval

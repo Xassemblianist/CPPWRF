@@ -3,8 +3,10 @@
 #include "phys/driver/suite.hpp"
 #include "phys/driver/topo.hpp"
 
+#include "core/tiles.hpp"
 #include "core/vm_dump.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -971,6 +973,21 @@ void PhysicsSuite::init_urban(const std::vector<double>& frc_in, const std::vect
   column_for(g_.columns(), k);
   fatal_check();
   u.u10_urb.fill_host([](int, int, int) { return 0.0; });
+  // phy_init after urban_var_init (module_physics_init.F:3519-3532): MAXVAL(UTYPE_URB2D) over the domain; the LCZ
+  // table with only the 3 old urban classes (or no urban point) and the old table with LCZ classes are fatal
+  std::vector<int> ut;
+  u.utype_urb2d.download(ut);
+  const Layout& L = u.utype_urb2d.layout();
+  int mx = 0;
+  for (int j = L.j0(); j < L.j1(); ++j)
+    for (int i = L.i0(); i < L.i1(); ++i) mx = std::max(mx, ut[L.index(i, j, 0)]);
+  const double max_utype = tile::max(double(mx));
+  if (o_.use_wudapt_lcz == 0 && max_utype > 3.0)
+    throw std::runtime_error("urban: USING 10 WUDAPT LCZ WITHOUT URBPARM_LCZ.TBL. SET USE_WUDAPT_LCZ=1 (WRF stops: "
+                             "the land use has LCZ urban classes)");
+  if (o_.use_wudapt_lcz == 1 && max_utype <= 3.0)
+    throw std::runtime_error("urban: USING URBPARM_LCZ.TBL WITH OLD 3 URBAN CLASSES. SET USE_WUDAPT_LCZ=0 (WRF stops: "
+                             "use_wudapt_lcz = 1 and no urban point of the domain has an LCZ class above 3)");
 }
 
 void PhysicsSuite::init_noahmp(bool fndsnowh) {
@@ -1243,6 +1260,9 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
 std::vector<std::pair<std::string, IntField2*>> PhysicsSuite::carried_int(bool native) {
   std::vector<std::pair<std::string, IntField2*>> v = {{"sfc_ivgtyp", &ivgtyp}, {"sfc_isltyp", &isltyp}, {"sfc_kpbl", &kpbl}};
   if (native && o_.topo_shading == 1) v.emplace_back("shadowmask", &topo_->shadowmask);
+  // Noah-MP's NoahmpIO%RANLAND (a point that ran as land keeps its outputs as water or sea ice): not in WRF's restart
+  // stream (NoahmpIO is initialised again), carried by CPPWRF's own file
+  if (native && o_.sf_surface_physics == 4) v.emplace_back("noahmp_ranland", &noahmp_ranland);
   if (myj_family(o_)) v.emplace_back("sfc_lowlyr", &lowlyr);
   if (o_.sf_surface_physics == 4) {
     v.emplace_back("sfc_isnowxy", &isnowxy);

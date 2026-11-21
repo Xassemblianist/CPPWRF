@@ -259,7 +259,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
       acc_qinsurxy, acc_qsevaxy, eflxbxy, acc_dwaterxy, acc_prcpxy, acc_ecanxy, acc_etranxy, acc_edirxy, acc_glaflwxy,
       fsatxy, wsurfxy;  // FSAT / WSURF: the wetland model's state (opt_wetland > 0)
   IntField2 isnowxy, cropcat, pgsxy;
-  IntField2 noahmp_ranland;  // not in the restart file (NoahmpIO is initialised again)
+  IntField2 noahmp_ranland;  // not in WRF's restart stream (NoahmpIO is initialised again); in CPPWRF's own file
   Field2 thc, capg;           // slab (sf_surface_physics == 1): thermal inertia (landuse_init), heat capacity
   // RUC LSM (sf_surface_physics == 3): package ruclsmscheme and LSMRUC's other grid arrays
   Field2 soilt1, tsnav, qvg, qsg, qcg, dew, rhosnf, snowfallac, precipfr, acrunoff;
@@ -440,14 +440,21 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // native: CPPWRF's own restart file, which also continues state WRF's restart stream leaves out (topo_shading's
   // SHADOWMASK between two radiation calls), so that a resumed run is the uninterrupted one
   std::vector<std::pair<std::string, IntField2*>> carried_int(bool native = false);
-  void restarted(long step) {
+  // a run resumed at step `step`. From WRF's restart file (wrf_file) the run starts there as wrf.exe's resumed run
+  // (solve_em's curr_secs2 counts from it; NOAHMP_INIT's CROPCAT); from CPPWRF's own file it goes on as the run that
+  // wrote it, which started at run_start (its curr_secs2, CROPCAT as that run has it)
+  void restarted(long step, bool wrf_file, long run_start) {
     itimestep = step;
-    run_start_step = step;
+    run_start_step = wrf_file ? step : run_start;
     t1_lag_set_ = true;
     // NOAHMP_INIT on a restart (NoahmpWRFinitMod.F90:463): CROPCAT is an output only, NoahmpIO%CROPCAT keeps its
     // allocation value undefined_int, which replaces the restart file's values
-    if (o_.sf_surface_physics == 4) cropcat.upload(std::vector<int>(cropcat.layout().total, -9999));
+    if (wrf_file && o_.sf_surface_physics == 4) cropcat.upload(std::vector<int>(cropcat.layout().total, -9999));
   }
+  // module_convtrans_prep.F's SAVE stepave_count (one per tile thread, cumulus_driver.cpp): not in WRF's restart
+  // stream (0 in wrf.exe's resumed run); CPPWRF's own restart file carries it
+  static int convtrans_stepave_count();
+  static void set_convtrans_stepave_count(int n);
 
  private:
   Grid g_, gs_;

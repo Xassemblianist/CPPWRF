@@ -1122,6 +1122,33 @@ void WrfHistory::phy_init_after_feedback() {
   landuse_phy_init(lu, xice, snowc, albbck_in, snoalb_in);
 }
 
+void WrfHistory::phy_init_from_restart(const std::string& wrfrst_path) {
+  // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
+  const tile::Service svc;
+  if (svc.served()) return;
+  int id;
+  if (nc_open(wrfrst_path.c_str(), NC_NOWRITE, &id) != NC_NOERR)
+    throw std::runtime_error("cannot open the restart file " + wrfrst_path);
+  for (auto& [name, v] : phy_init_) {
+    int vid, nd, dims[NC_MAX_VAR_DIMS];
+    if (nc_inq_varid(id, name.c_str(), &vid) != NC_NOERR || nc_inq_varndims(id, vid, &nd) != NC_NOERR ||
+        nc_inq_vardimid(id, vid, dims) != NC_NOERR)
+      continue;
+    std::size_t n = 1;
+    for (int d = 0; d < nd; ++d) {
+      std::size_t len = 0;
+      nc_inq_dimlen(id, dims[d], &len);
+      n *= len;
+    }
+    if (n != v.size()) continue;
+    std::vector<double> f(n);
+    if (nc_get_var_double(id, vid, f.data()) != NC_NOERR)
+      throw std::runtime_error(wrfrst_path + ": cannot read " + name);
+    v = std::move(f);
+  }
+  nc_close(id);
+}
+
 void WrfHistory::restart_slopes() {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;

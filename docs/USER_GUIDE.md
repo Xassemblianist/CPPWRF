@@ -624,7 +624,7 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[time]` | `target_cfl`, `target_hcfl`, `max_step_increase_pct` | double, double, integer | `1.2`, `0.84`, `5` | Adaptive step: target vertical / horizontal CFL and the largest increase per step | same names (`&domains`) |
 | `[time]` | `starting_time_step`, `max_time_step`, `min_time_step` (and `_den`) | integer | `-1` (4, 8, 3 × min(dx,dy)/1000 s) | Adaptive step limits in seconds (a fraction with `_den` > 0) | same names (`&domains`) |
 | `[time]` | `step_to_output_time` | bool | `true` | Adaptive step: land on the history times | `step_to_output_time` |
-| `[time]` | `history_interval_s`, `interval_seconds` | integer | `3600`, `21600` | Adaptive step: the history interval (seconds) and the boundary interval it steps to | `history_interval*`, `interval_seconds` |
+| `[time]` | `history_interval_s`, `interval_seconds` | integer | `3600`, the wrfbdy interval | Adaptive step: the history interval (seconds) and the boundary interval it steps to (a value that differs from the wrfbdy file's is an error) | `history_interval*`, `interval_seconds` |
 | `[dyn]` | `khdif`, `kvdif` | double | `0.0` | Constant horizontal/vertical eddy diffusion in $m^2/s$ | `khdif`, `kvdif` |
 | `[dyn]` | `diff_opt` | integer | `0` | Diffusion option (0 = off, 1 = coordinate-surface diffusion, 2 = physical-space diffusion) | `diff_opt` |
 | `[dyn]` | `km_opt` | integer | `1` | Eddy viscosity closure (1 = constant, 2 = 1.5-order TKE, 3 = 3D Smagorinsky, 4 = 2D Smagorinsky) | `km_opt` |
@@ -782,10 +782,12 @@ run_time = 7200
 restart_file = out/real/restart_000060.nc   # or .../wrfrst_d01_2026-10-12_01:00:00
 ```
 
-CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 4: the scalars NSTEPS,
+CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 5: the scalars NSTEPS,
 DECLIN and SOLCON as `SCALAR_<name>` attributes; WW, WW_M, PHP, ALT; in a run of one patch the halo points of every
-field as `HALO_<name>`, so that a run resumed from the file continues the uninterrupted one bit for bit, also between
-two radiation, PBL or cumulus calls), the commit of the sources
+field as `HALO_<name>`; the step the run started at, convtrans_prep's averaging counter and the history, auxhist3,
+auxinput4 and auxinput10 alarms; REFL_10CM and Noah-MP's land-point flag, which WRF's restart stream leaves out; so
+that a run resumed from the file continues the uninterrupted one bit for bit, also between two radiation, PBL or
+cumulus calls, within a bucket, `prec_acc_dt`, `auxhist3` (output_diagnostics), FDDA or cumulus averaging period), the commit of the sources
 (`CPPWRF_COMMIT`) and the run's options (`CPPWRF_OPTIONS`: every configuration key except `[run]`, `[restart]`,
 `[output]`, `[real]`, `time.history_interval_s`, `phys.auxhist3_interval` and `phys.table_dir`). A resumed run
 refuses a file of another format version, of another commit (unless `run.restart_any_commit = true`) or of a run with

@@ -867,6 +867,9 @@ namespace {
 thread_local int stepave_count = 0;
 }  // namespace
 
+int PhysicsSuite::convtrans_stepave_count() { return stepave_count; }
+void PhysicsSuite::set_convtrans_stepave_count(int n) { stepave_count = n; }
+
 // dyn_em/module_convtrans_prep.F convtrans_prep (called in first_rk_step_part1 when cu_diag == 1)
 void PhysicsSuite::convtrans_prep(const dyn::State& s) {
   const int ktau = int(itimestep);

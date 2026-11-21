@@ -73,6 +73,10 @@ class WrfHistory {
   // the history (THC; without column physics also ALBBCK, ALBEDO, ZNT, Z0, EMISS, EMBCK, MAVAIL) from the fed-back
   // LU_INDEX, SEAICE and SNOWC (the column physics' fields: phy_init_after_feedback in real_physics.cpp)
   void phy_init_after_feedback();
+  // a run resumed from WRF's restart file: phy_init leaves these fields to the restart stream (its landuse_init is
+  // in the IF(.not.restart) part, module_physics_init.F:1247-1439), so the history's phy_init values are the file's
+  // (a parent's fed-back THC, LU_STATE, ... of the run that wrote it) where the file has them
+  void phy_init_from_restart(const std::string& wrfrst_path);
   // a run resumed from a restart file at time_sec: START_DATE is the restart time
   void set_restart_time(double time_sec) { restart_sec_ = time_sec; }
   // the clock's exact time since the simulation start of the next write (Times = its whole seconds, XTIME =
