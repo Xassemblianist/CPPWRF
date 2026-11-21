@@ -18,7 +18,7 @@
 # Drive (cppwrf-data/paper_lday_data.tar, ~2 GB) for a later --data-lday session, which reads them instead of making
 # them. --cpu-rate: compute units per hour of a CPU-only runtime with the same CPU, a stated assumption for WRF's
 # cost (bench_stats.py). --dry-run: print the data list, the job's arguments, where each tar is and paper_run.py's
-# estimate; start nothing. After "--": options for paper_run.py (e.g. --reps 5 --nc0).
+# estimate; start nothing. After "--": options for paper_run.py (e.g. --reps 4 --nc0).
 # Data: fp2_data.tar (run_FP2_P4_24h_r8: C1, C3 and the large domain's tables) and n3_data.tar (run_N3h_r8: C4),
 # with --data-lday also paper_lday_data.tar. The job: tools/bench/paper_job.sh on the runtime (the Debian 13 chroot,
 # the data, tools/bench/paper_gpu.sh, tools/bench/paper_body.sh). Results in OUT (default
@@ -148,8 +148,10 @@ if [ -f "$P/raw_runs.jsonl" ]; then
   A=("$P/raw_runs.jsonl" --verify "$P/verify.jsonl" --md "$OUT/report.md" --json "$OUT/summary.json" --csv "$OUT/runs.csv")
   for f in manifest cases best; do [ -f "$P/$f.json" ] && A+=(--$f "$P/$f.json"); done
   [ -f "$P/accuracy.md" ] && A+=(--accuracy-md "$P/accuracy.md")
-  python3 "$REPO/tools/bench/bench_stats.py" "${A[@]}" ${rate:+--rate "$rate"} ${CPU_RATE:+--cpu-rate "$CPU_RATE"}
-  python3 "$REPO/tools/bench/bench_plot.py" "$OUT/summary.json" --out "$OUT/svg" > /dev/null
+  python3 "$REPO/tools/bench/bench_stats.py" "${A[@]}" ${rate:+--rate "$rate"} ${CPU_RATE:+--cpu-rate "$CPU_RATE"} ||
+    { echo "[$TAG] bench_stats.py failed"; bad=1; }
+  python3 "$REPO/tools/bench/bench_plot.py" "$OUT/summary.json" --out "$OUT/svg" > /dev/null ||
+    { echo "[$TAG] bench_plot.py failed"; bad=1; }
   echo "[$TAG] $GPU rate ${rate:-?} compute units / hour; report: $OUT/report.md, figures: $OUT/svg"
 else echo "[$TAG] no raw_runs.jsonl"; bad=1; fi
 tail -40 "$P/paper.log" 2> /dev/null || true

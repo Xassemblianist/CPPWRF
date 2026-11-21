@@ -60,6 +60,8 @@ fi
 mnt
 chroot $R dpkg-query -W -f='${Package} ${Version}\n' libc6 gcc-14 gfortran-14 cmake libnetcdf22 python3-numpy \
   python3-netcdf4 > $C/versions.txt 2>&1
+dpkg-query -W -f='${Package} ${Version}\n' > $C/host_packages.txt 2>&1  # the runtime's own (the CUDA side)
+{ cat /etc/os-release; uname -a; nvidia-smi 2>&1 | head -12; nvcc --version 2>&1 | tail -2; } > $C/host.txt 2>&1
 rm -rf $J; mkdir -p $J/src $J/data
 tar xzf $I/src.tar.gz -C $J/src || { echo "SRC_FAILED" >> $C/setup.txt; exit 1; }
 cp $I/commit.txt $I/wps.tar.gz $J/
@@ -68,8 +70,8 @@ nohup bash $J/src/tools/bench/paper_gpu.sh $STAMP > /dev/null 2>&1 &
 drive_tar() {  # TAR: rclone cat | tar x, three tries
   local t=$1 i
   for i in 1 2 3; do
-    rclone $RC cat "cppwrf-drive:cppwrf-data/$t" 2>> $C/fetch_$t.log | tar xf - -C $J/data 2>> $C/fetch_$t.log &&
-      [ "${PIPESTATUS[0]}" = 0 ] && return 0
+    rclone $RC cat "cppwrf-drive:cppwrf-data/$t" 2>> $C/fetch_$t.log | tee >(sha256sum | cut -c1-64 > $C/sha_$t) |
+      tar xf - -C $J/data 2>> $C/fetch_$t.log && [ "${PIPESTATUS[0]}" = 0 ] && return 0
     sleep 30
   done
   return 1
@@ -88,14 +90,15 @@ gh_tar() {  # TAR: its release parts (SHA256SUMS) downloaded one by one, checked
       done
       [ $ok = 1 ] || { echo "PART_FAILED $p" >> $C/fetch_$t.log; exit 1; }
       cat $C/parts/$p; rm -f $C/parts/$p
-    done | tar xf - -C $J/data ) 2>> $C/fetch_$t.log
+    done | tee >(sha256sum | cut -c1-64 > $C/sha_$t) | tar xf - -C $J/data ) 2>> $C/fetch_$t.log
 }
 for t in ${DATA//,/ }; do
   t0=$SECONDS
   if rclone $RC lsf "cppwrf-drive:cppwrf-data/$t" 2> /dev/null | grep -qx "$t" && drive_tar $t; then src=drive
   elif gh_tar $t; then src=github
   else echo "DATA_FAILED $t" >> $C/setup.txt; continue; fi
-  echo "TAR $t $src $((SECONDS - t0)) s" >> $C/data.txt
+  sleep 2  # the digest's process substitution ends after tar
+  echo "TAR $t $src $((SECONDS - t0)) s sha256 $(cat $C/sha_$t 2> /dev/null)" >> $C/data.txt
 done
 E=; [ -e $I/save_lday ] && E=PAPER_SAVE_LDAY=1
 chroot $R env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root $E \

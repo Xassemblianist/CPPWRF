@@ -16,11 +16,18 @@ on the runtime's own Ubuntu, the sequencer in the Debian 13 chroot).
 A job: {"id", "cwd", "cmd" (a bash command line; "{bin:NAME}" stands for the executable of build NAME: DIR/NAME/cppwrf
 with --bins DIR, else the job's "bins" map), "env" (added to the environment), "log" (stdout and stderr),
 "timeout" (s, default 7200), "telemetry" (true: nvidia-smi samples into "csv" from "pre_idle" s before the start,
-default 1.5, to 0.3 s after the end), "pause" (s to sleep before the run, default 0: lets the GPU cool down)}.
-The result: the job's fields and exit (124: timeout), wall (time.monotonic() around the process), t0 / t1 (epoch),
-load (the processes running just before, this one aside: /proc/stat procs_running, read before the sampler
-starts), cpu_mhz (the mean "cpu MHz" of /proc/cpuinfo just before), rapl_j (the package energy between start and
-end when a RAPL counter is readable, else null) and gpu (tools/bench/telemetry.py's summary of the window, or null).
+default 1.5, to 0.3 s after the end), "pause" (s to wait before the run, default 0), "cool_max" / "cool_delta" /
+"cool_base" (with telemetry: before the run wait at least "pause" s and until the GPU is within cool_delta C,
+default 5, of its idle temperature cool_base, default the agent's measurement at its start, at most cool_max s),
+"stamp" (a regular expression: the log goes through a pipe and the epoch times of the first and the last matching
+line are kept, the steady window of the GPU energy)}.
+The result: the job's fields and exit (124: timeout), wall (time.monotonic() around the process), t0 / t1 (epoch;
+clock_step_s = (t1 - t0) - wall, nonzero when the system clock stepped), load (the processes running just before,
+this one aside: /proc/stat procs_running, read before the sampler starts), cpu_mhz (the mean "cpu MHz" of
+/proc/cpuinfo just before), cpu_mhz_run (its mean / min / max once a second during the run), cpu_share (steal,
+iowait and busy percentages of the machine's CPU time during the run, /proc/stat), cool (the cool-down: seconds,
+temperatures), stamps, rapl_j (the package energy between start and end when a RAPL counter is readable, else null)
+and gpu (tools/bench/telemetry.py's summary of the window, with the steady window's energy, or null).
 """
 import json
 import os
@@ -48,6 +55,88 @@ def cpu_mhz():
         return None
 
 
+def cpu_times():
+    """The aggregate cpu line of /proc/stat: {user, nice, system, idle, iowait, irq, softirq, steal} in jiffies."""
+    try:
+        for x in open("/proc/stat"):
+            if x.startswith("cpu "):
+                v = [int(y) for y in x.split()[1:9]]
+                return dict(zip(("user", "nice", "system", "idle", "iowait", "irq", "softirq", "steal"), v))
+    except (OSError, ValueError):
+        pass
+    return None
+
+
+def cpu_share(a, b):
+    """Percentages of the CPU time between two cpu_times(): steal (the hypervisor ran something else), iowait, busy."""
+    if not a or not b:
+        return None
+    d = {k: b[k] - a[k] for k in a}
+    tot = sum(d.values())
+    if tot <= 0:
+        return None
+    return dict(steal_pct=100.0 * d["steal"] / tot, iowait_pct=100.0 * d["iowait"] / tot,
+                busy_pct=100.0 * (tot - d["idle"] - d["iowait"] - d["steal"]) / tot)
+
+
+class MhzSampler:
+    """The mean "cpu MHz" of /proc/cpuinfo once a second during a run (a VM may report a fixed value)."""
+
+    def __init__(self, every=1.0):
+        import threading
+        self.v, self.every, self.stop_ev = [], every, threading.Event()
+        self.t = threading.Thread(target=self.loop, daemon=True)
+
+    def loop(self):
+        while not self.stop_ev.wait(self.every):
+            x = cpu_mhz()
+            if x:
+                self.v.append(x)
+
+    def start(self):
+        self.t.start()
+        return self
+
+    def stop(self):
+        self.stop_ev.set()
+        self.t.join(5)
+        v = self.v
+        return dict(n=len(v), mean=round(sum(v) / len(v), 1), min=min(v), max=max(v)) if v else None
+
+
+_COOL_BASE = []
+
+
+def cool_down(job):
+    """Waits until the GPU is within job["cool_delta"] C of its idle temperature (measured at the first GPU job, or
+    job["cool_base"]), at least job["pause"] s and at most job["cool_max"] s. Returns (seconds, temperature at the
+    start of the wait, at its end, the target)."""
+    t0 = time.monotonic()
+    pause = float(job.get("pause", 0) or 0)
+    if not job.get("telemetry") or job.get("cool_max") is None:
+        if pause > 0:
+            time.sleep(pause)
+        return None
+    if job.get("cool_base") is not None:
+        base = float(job["cool_base"])
+    else:
+        if not _COOL_BASE:
+            _COOL_BASE.append(telemetry.temperature())
+        base = _COOL_BASE[0]
+    first = telemetry.temperature()
+    target = base + float(job.get("cool_delta", 5)) if base is not None else None
+    cur = first
+    while True:
+        el = time.monotonic() - t0
+        if el >= pause and (target is None or cur is None or cur <= target):
+            break
+        if el >= float(job["cool_max"]):
+            break
+        time.sleep(1.0)
+        cur = telemetry.temperature()
+    return dict(wait_s=round(time.monotonic() - t0, 2), temp_start_c=first, temp_end_c=cur, target_c=target)
+
+
 def resolve(cmd, bins):
     def sub(m):
         n = m.group(1)
@@ -62,9 +151,7 @@ def resolve(cmd, bins):
 def execute(job, bins=None):
     """Runs one job (see the module's doc); returns the result dict."""
     res = dict(job)
-    pause = float(job.get("pause", 0) or 0)
-    if pause > 0:
-        time.sleep(pause)
+    res["cool"] = cool_down(job)
     try:
         cmd = resolve(job["cmd"], bins if bins is not None else job.get("bins", {}))
     except KeyError as e:
@@ -81,21 +168,50 @@ def execute(job, bins=None):
             time.sleep(float(job.get("pre_idle", 1.5)))
         else:
             sampler = None
-    r0 = telemetry.rapl_read()
+    r0, c0 = telemetry.rapl_read(), cpu_times()
+    mhz = MhzSampler().start()
+    stamp = re.compile(job["stamp"]) if job.get("stamp") else None
+    stamps = []  # epoch times of the log lines matching job["stamp"] (the first and the last are kept)
     t0, m0 = time.time(), time.monotonic()
     try:
         with open(job["log"], "w") as f:
-            rc = subprocess.run(["bash", "-c", cmd], cwd=job["cwd"], env=env, stdout=f, stderr=subprocess.STDOUT,
-                                timeout=float(job.get("timeout", 7200))).returncode
+            if stamp is None:
+                rc = subprocess.run(["bash", "-c", cmd], cwd=job["cwd"], env=env, stdout=f, stderr=subprocess.STDOUT,
+                                    timeout=float(job.get("timeout", 7200))).returncode
+            else:  # the log through a pipe, each line stamped as it arrives (CPPWRF flushes every timing line)
+                p = subprocess.Popen(["bash", "-c", cmd], cwd=job["cwd"], env=env, stdout=subprocess.PIPE,
+                                     stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
+                import threading
+                timer = threading.Timer(float(job.get("timeout", 7200)), p.kill)
+                timer.start()
+                for line in p.stdout:
+                    f.write(line)
+                    if stamp.search(line):
+                        now = t0 + (time.monotonic() - m0)
+                        if len(stamps) < 2:
+                            stamps.append(now)
+                        else:
+                            stamps[1] = now
+                        res["stamp_count"] = res.get("stamp_count", 0) + 1
+                rc = p.wait()
+                timer.cancel()
+                if rc == -9:
+                    rc = 124
     except subprocess.TimeoutExpired:
         rc = 124
-    wall, t1 = time.monotonic() - m0, time.time()
+    wall = time.monotonic() - m0
+    t1 = time.time()
     res["rapl_j"] = telemetry.rapl_delta_j(r0, telemetry.rapl_read())
-    res.update(exit=rc, wall=wall, t0=t0, t1=t1)
+    res["cpu_share"], res["cpu_mhz_run"] = cpu_share(c0, cpu_times()), mhz.stop()
+    # the epoch window must match the monotonic wall: a clock step (NTP) during the run is flagged
+    res.update(exit=rc, wall=wall, t0=t0, t1=t1, clock_step_s=round((t1 - t0) - wall, 3))
+    if stamps:
+        res["stamps"] = stamps  # derived from the monotonic clock: [first, last] matching line
     if sampler:
         time.sleep(0.3)
         sampler.stop()
-        res["gpu"] = telemetry.summarize(sampler.csv, t0, t1, float(job.get("pre_idle", 1.5)))
+        steady = (stamps[0], stamps[1]) if len(stamps) == 2 else None
+        res["gpu"] = telemetry.summarize(sampler.csv, t0, t0 + wall, float(job.get("pre_idle", 1.5)), steady)
     else:
         res["gpu"] = None
     return res
@@ -111,7 +227,12 @@ def write_atomic(path, obj):
 def agent(q, bins=None, idle_exit=36000.0):
     import threading
     os.makedirs(q, exist_ok=True)
-    write_atomic(os.path.join(q, "agent.json"), dict(start=time.time(), pid=os.getpid(), probe=telemetry.probe()))
+    probe = telemetry.probe()  # also caches the sampler's fields: no probes before each run
+    temps = [x for x in (telemetry.temperature() for _ in range(5)) if x is not None]
+    if temps:  # the idle temperature the cool-down waits for
+        _COOL_BASE.append(sorted(temps)[len(temps) // 2])
+    write_atomic(os.path.join(q, "agent.json"), dict(start=time.time(), pid=os.getpid(), probe=probe,
+                                                     idle_temp_c=_COOL_BASE[0] if _COOL_BASE else None))
 
     def beat():  # QDIR/alive: the sequencer stops waiting for an agent that died
         while True:

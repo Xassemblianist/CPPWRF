@@ -32,6 +32,7 @@ W=/opt/wrfbench P=/opt/paper
 rm -rf $P && mkdir -p $W $P/out $P/q $J/fetch
 touch $J/setup.out
 B() { echo "$(date +%H:%M:%S) $*" >> $P/out/paper.log; }
+SHA() { echo "$(sha256sum < "$1" | cut -c1-64)  $2" >> $P/out/inputs_sha256.txt; }  # FILE LABEL: an input's digest
 echo "$STAMP" > $P/body_started
 for n in wrf.exe real.exe cppwrf mpiexec mpiexec.hydra hydra_pmi_proxy; do pkill -9 -x $n; done  # an earlier run's (--keep)
 set -x
@@ -58,7 +59,8 @@ wrf_src() {  # the release tarball (with its submodules), else a git clone of th
   for u in https://github.com/wrf-model/WRF/releases/download/v4.8.0/v4.8.0.tar.gz \
            https://github.com/wrf-model/WRF/releases/download/v4.8.0/WRFV4.8.0.tar.gz; do
     if curl -sfL --retry 3 -o $W/src.part "$u" && tar tzf $W/src.part | grep -q 'phys/noahmp/src/'; then
-      mv $W/src.part $W/wrf-src.tar.gz; echo "WRF source $u md5 $(md5sum < $W/wrf-src.tar.gz | cut -c1-32)" >> $P/out/wrf_config.txt
+      mv $W/src.part $W/wrf-src.tar.gz; echo "WRF source $u sha256 $(sha256sum < $W/wrf-src.tar.gz | cut -c1-64)" >> $P/out/wrf_config.txt
+      SHA $W/wrf-src.tar.gz "$u"
       return 0
     fi
   done
@@ -84,15 +86,18 @@ build_wrf() {  # NAME CONFIGURE_OPTION [-r8] [tuned: FCOPTIM -O3 -march=native -
 wps_day() {  # met_em files of the daytime large domain in $W/wps_day
   [ -f $W/wps_day/met_ok ] && return 0
   rm -rf $W/wps_day && mkdir -p $W/wps_day && cd $W/wps_day && tar xzf $J/wps.tar.gz || return 1
+  SHA $J/wps.tar.gz "wps.tar.gz (WPS 4.6.0 executables and tables, uploaded by the launcher)"
   sed -i -e "s/start_date *= *'[^']*'/start_date = '2026-10-12_06:00:00'/" \
          -e "s/end_date *= *'[^']*'/end_date   = '2026-10-12_12:00:00'/" namelist.wps
   if [ ! -d $W/geog/WPS_GEOG_LOW_RES ]; then
-    mkdir -p $W/geog && curl -sfL --retry 3 https://www2.mmm.ucar.edu/wrf/src/wps_files/geog_low_res_mandatory.tar.gz |
-      tar xzf - -C $W/geog || return 1
+    mkdir -p $W/geog && curl -sfL --retry 3 -o $W/geog.tgz \
+      https://www2.mmm.ucar.edu/wrf/src/wps_files/geog_low_res_mandatory.tar.gz && tar xzf $W/geog.tgz -C $W/geog || return 1
+    SHA $W/geog.tgz "https://www2.mmm.ucar.edu/wrf/src/wps_files/geog_low_res_mandatory.tar.gz"; rm -f $W/geog.tgz
   fi
   local h L=ABCDEFGHIJ n=0
   for h in 006 012; do
     curl -sf --retry 5 -o gfs.f$h "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20261012/00/atmos/gfs.t00z.pgrb2.0p25.f$h" || return 1
+    SHA gfs.f$h "https://noaa-gfs-bdp-pds.s3.amazonaws.com/gfs.20261012/00/atmos/gfs.t00z.pgrb2.0p25.f$h"
     ln -sf gfs.f$h GRIBFILE.AA${L:$n:1}; n=$((n + 1))
   done
   ./geogrid.exe > geogrid.log 2>&1; grep -q "Successful completion of geogrid" geogrid.log || return 1
@@ -155,7 +160,8 @@ fi
 if [ "${PAPER_SAVE_LDAY:-0}" = 1 ] && [ -s $W/run_Lday/wrfbdy_d01 ]; then
   mkdir -p $J/drive $J/stage/wrf_runs/run_Lday
   for f in $W/run_Lday/*; do ln -sfn "$(readlink -f "$f")" $J/stage/wrf_runs/run_Lday/; done
-  tar chf $J/drive/paper_lday_data.tar -C $J/stage wrf_runs && B "paper_lday_data.tar: $(du -h $J/drive/paper_lday_data.tar | cut -f1)"
+  tar chf $J/drive/paper_lday_data.tar -C $J/stage wrf_runs && B "paper_lday_data.tar: $(du -h $J/drive/paper_lday_data.tar | cut -f1)" &&
+    SHA $J/drive/paper_lday_data.tar "paper_lday_data.tar (written to Drive cppwrf-data)"
 fi
 M=(--cmake cpu-dp=$W/cpu-dp --cmake cpu-sp=$W/cpu-sp)
 [ "$SET" = full ] && M+=(--cmake cpu-dp-hwlog=$W/cpu-dp-hwlog)
@@ -164,14 +170,18 @@ python3 tools/bench/manifest.py collect --side cpu --commit $J/commit.txt "${M[@
 OPTS=(--root $P --data $J/data/wrf_runs --wrf $W --src $J/src --cases "$CASES")
 [ "$SET" = full ] || OPTS+=(--models gpu_fp32,gpu_fp32id,gpu_fp64 --proof cpu_fp64,cpu_fp32 --proof-threads $((NP / 2)))
 OPTS+=("$@")
-python3 tools/bench/paper_run.py prepare "${OPTS[@]}" >> $P/out/run.log 2>&1
+python3 tools/bench/paper_run.py prepare "${OPTS[@]}" >> $P/out/run.log 2>&1 ||
+  echo "PAPER_PHASE_FAILED prepare exit $? (run.log)" >> $J/setup.out
+grep -q 'FAILED' $P/out/paper.log && grep 'wrf2cppwrf.py FAILED' $P/out/paper.log | sed 's/^/PAPER_TRANSLATE_FAILED /' >> $J/setup.out
 for i in $(seq 720); do [ -e $P/gpu_ready ] && break; sleep 10; done  # the GPU side's builds end before the timings
 B "GPU side: $(cat $P/gpu_ready 2> /dev/null || echo 'not ready after 2 h')"
 python3 tools/bench/manifest.py merge $P/manifest_cpu.json $P/manifest_gpu.json --out $P/out/manifest.json >> $P/out/manifest.log 2>&1
-[ "$SET" = full ] && python3 tools/bench/paper_run.py screen "${OPTS[@]}" >> $P/out/run.log 2>&1
-for step in timed proof verify report; do
-  python3 tools/bench/paper_run.py $step "${OPTS[@]}" >> $P/out/run.log 2>&1 || B "paper_run.py $step: exit $?"
+STEPS="timed proof verify report"; [ "$SET" = full ] && STEPS="screen $STEPS"
+for step in $STEPS; do  # a phase that fails is logged and reported (setup.out: the launcher exits non-zero)
+  python3 tools/bench/paper_run.py $step "${OPTS[@]}" >> $P/out/run.log 2>&1 ||
+    { rc=$?; B "paper_run.py $step: exit $rc"; echo "PAPER_PHASE_FAILED $step exit $rc (run.log)" >> $J/setup.out; }
 done
+dpkg-query -W -f='${Package} ${Version}\n' > $P/out/packages_chroot.txt 2>&1  # every package of the chroot
 touch $P/q/stop
 for i in $(seq 24); do [ -e $P/gpu_exit ] && break; sleep 5; done
 cp $J/build-*.log $J/wrf_build.log $J/wps.log $J/mpi.log $P/out/logs/ 2> /dev/null

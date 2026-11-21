@@ -9,27 +9,36 @@
 
 RAW_RUNS.jsonl: tools/bench/paper_run.py's runs (one JSON line each). Warm-up runs, failed runs and the proof runs
 are not counted (the failures are listed). For every case, model and history setting ("regime" off / on) over the
-timed repetitions: the median, the quartiles (q25, q75: numpy's linear interpolation), the minimum and the maximum of
+timed repetitions: the median, the quartiles (q25, q75: numpy's linear interpolation), the minimum and the maximum,
+a 95 % percentile bootstrap interval of the median (10000 resamples, fixed seed; 3 or more values) and the
+coefficient of variation of
 
 - wall: the process, launch to exit (time.monotonic());
-- stepping, step1, steady, io, other: tools/bench/bench_parse.py's split of the WRF timing lines both models print
-  (wall = other + step1 + steady + io);
-- the GPU's board energy (J) and mean power (W) over the run, the median SM clock (nvidia-smi samples,
-  tools/bench/telemetry.py);
+- tools/bench/bench_parse.py's split of the WRF timing lines both models print: step_s (seconds per step over the
+  steady steps 2 .. N: the headline compute metric), steady, step1, stepping, io, io_steady, input_in, other
+  (wall = other + step1 + steady + io + input_in), marginal (the part that grows with the simulated time) and fixed
+  (wall - marginal: start-up, the frame at t = 0, the finish);
+- the GPU's board energy over the run and over the steady steps (J), mean and steady power (W), the median SM clock
+  (nvidia-smi samples, tools/bench/telemetry.py).
 
-and from the medians: seconds per simulated day (wall, and steady stepping scaled to a day), simulated days per
-wall day (sim. time / wall), SYPD (simulated years per wall-clock day, from the wall time and from the steady
-stepping), ns per cell and step (the steady stepping over the cells x steps of all domains after step 1), GPU energy
-per simulated day (Wh). Speed-ups against WRF real*4 and real*8 at their fastest screened layouts: the ratio of the
-two runs of the same block (the blocks interleave the models, so a block's runs share the machine's state), as the
-median over the blocks with the smallest and largest block ratio; and the ratio of the medians.
+With history on, the CUDA builds' split between steps and writes (step_s, steady, step1, stepping, io, io_steady)
+is not published (a write waits for the queued steps): wall, other, marginal and fixed are.
 
-Cost: Colab compute units per simulated day = median wall / 3600 x 86400 / simulated seconds x RATE, with RATE the
-session's runtime rate from `colab usage` (--rate; the runtime costs the same whichever processor a run uses, so
-for WRF this is the co-located price: an upper bound, the GPU idles). --cpu-rate: the rate of a CPU-only runtime
-with the same CPU, as a STATED ASSUMPTION (printed as such): WRF's cost there. Without --cpu-rate no CPU-only price
-is printed. Runs whose load (processes running just before) was above 0 or whose GPU samples show throttling are
-flagged. --md: the Markdown report; --json: the summary for tools/bench/bench_plot.py; --csv: one line per run.
+From the medians: SYPD from the wall time and from the steady rate, ns per cell and step (step_s over the cell
+updates of all domains per domain-1 step), and one simulated day as fixed + marginal x 86400 / simulated seconds
+(the fixed start-up counted once, not scaled with the length); the GPU energy of a day likewise (the fixed energy
+once + the steady power x a day's marginal time). Speed-ups against WRF real*4, tuned real*4 and real*8 at their
+fastest screened layouts: per block, WRF's run over CPPWRF's run of that block (the blocks interleave the models),
+over the blocks both ran in: the median block ratio with its bootstrap interval and range, and the ratio of the
+two medians over those same blocks; history off for step_s and wall, history on for wall.
+
+Cost: Colab compute units at RATE, the session's runtime rate from `colab usage` (--rate): the measured run, the
+fixed part, the marginal part per simulated day and one forecast day (the runtime costs the same whichever
+processor a run uses, so for WRF this is the co-located price: an upper bound, the GPU idles). --cpu-rate: the rate
+of a CPU-only runtime with the same CPU, as a STATED ASSUMPTION (printed as such): WRF's and CPPWRF CPU's cost
+there. Runs are flagged (not dropped) for load (processes running just before), thermal / hardware GPU slowdown,
+CPU steal time above 1 %, a system clock step, a cool-down that ended at its limit. --md: the Markdown report;
+--json: the summary for tools/bench/bench_plot.py; --csv: one line per run.
 """
 import csv
 import json
@@ -45,7 +54,29 @@ NAMES = {"wrf_r4": "WRF real*4", "wrf_r8": "WRF real*8", "wrf_r4t": "WRF real*4 
          "wrf_r4_dm1": "WRF real*4, one process", "cpu_fp64_hwlog": "CPPWRF CPU FP64 (this CPU's log)",
          "cpu_fp32": "CPPWRF CPU FP32"}
 ORDER = ["wrf_r4", "wrf_r4t", "wrf_r8", "gpu_fp32", "gpu_fp32id", "gpu_fp64", "cpu_fp64", "gpu_fp32_nc0"]
-METRICS = ("wall", "stepping", "step1", "steady", "io", "other", "energy_j", "power_mean_w", "sm_clock_median_mhz")
+METRICS = ("wall", "step_s", "steady", "step1", "stepping", "io", "io_steady", "input_in", "other", "marginal", "fixed",
+           "energy_j", "energy_steady_j", "power_mean_w", "power_steady_w", "sm_clock_median_mhz")
+GPU_KEYS = ("energy_j", "energy_steady_j", "power_mean_w", "power_steady_w", "sm_clock_median_mhz")
+# with history on, a CUDA build's write waits for the steps queued before it: its split between the steps and the
+# writes is not published (their sum, the marginal and fixed parts and the wall time are)
+SPLIT = ("step_s", "steady", "step1", "stepping", "io", "io_steady")
+BOOT, SEED = 10000, 20261121
+
+
+def masked(r, k):
+    return r.get("regime") == "on" and r.get("kind") == "gpu" and k in SPLIT
+
+
+def boot_ci(v, n=BOOT, q=(2.5, 97.5)):
+    """Percentile bootstrap interval of the median (n resamples, a fixed seed); None below 3 values."""
+    v = [x for x in v if x is not None]
+    if len(v) < 3:
+        return None
+    rng = np.random.default_rng(SEED)
+    a = np.asarray(v, dtype=float)
+    med = np.median(a[rng.integers(0, len(a), size=(n, len(a)))], axis=1)
+    lo, hi = np.percentile(med, q)
+    return [float(lo), float(hi)]
 
 
 def stats(v):
@@ -53,16 +84,24 @@ def stats(v):
     if not v:
         return None
     a = np.asarray(v, dtype=float)
-    return dict(n=len(v), median=float(np.median(a)), q25=float(np.quantile(a, 0.25)), q75=float(np.quantile(a, 0.75)),
-                min=float(a.min()), max=float(a.max()))
+    med = float(np.median(a))
+    return dict(n=len(v), median=med, q25=float(np.quantile(a, 0.25)), q75=float(np.quantile(a, 0.75)),
+                min=float(a.min()), max=float(a.max()), ci95=boot_ci(v),
+                cv=float(a.std(ddof=1) / a.mean()) if len(v) > 1 and a.mean() else None)
 
 
 def value(r, k):
+    if masked(r, k):
+        return None
     if k == "wall":
         return r.get("wall")
-    if k in ("energy_j", "power_mean_w", "sm_clock_median_mhz"):
+    if k in GPU_KEYS:
         return (r.get("gpu") or {}).get(k)
     return (r.get("timing") or {}).get(k)
+
+
+def pos(x):
+    return x is not None and x > 0
 
 
 def load(path):
@@ -70,7 +109,7 @@ def load(path):
 
 
 def summarize(runs, verify, cases_info=None, best=None, manifest=None, rate=None, cpu_rate=None):
-    timed = [r for r in runs if r.get("phase") == "timed" and not r.get("warmup")]
+    timed = [r for r in runs if r.get("phase") == "timed" and not r.get("warmup") and r.get("regime") in ("off", "on")]
     ok = [r for r in timed if r.get("ok")]
     failed = [r for r in runs if not r.get("ok")]
     cases = []
@@ -88,28 +127,64 @@ def summarize(runs, verify, cases_info=None, best=None, manifest=None, rate=None
                 r0 = g[0]
                 sim = r0.get("sim_seconds") or 3600
                 cs = r0.get("grid") or [[0, 1]]
-                cell_steps = sum(a * b for a, b in cs)
-                n1 = cs[0][1] if cs else 1
-                steady_frac = (n1 - 1) / n1 if n1 > 1 else 1
-                d = {}
-                w = st["wall"]["median"] if st["wall"] else None
-                sd = st["steady"]["median"] if st["steady"] else None
+                n1 = cs[0][1] if cs and cs[0][1] else 1
+                cells_per_step = sum(a * b for a, b in cs) / n1  # all domains' cell updates per domain-1 step
+                med = lambda k: st[k]["median"] if st.get(k) else None  # noqa: E731
+                d, day = {}, 86400 / sim
+                w, ss, mg, fx = med("wall"), med("step_s"), med("marginal"), med("fixed")
                 if w:
-                    d.update(s_per_sim_day_wall=w * 86400 / sim, sim_speed_wall=sim / w, sypd_wall=sim / (365.25 * w))
-                if sd and steady_frac > 0:
-                    d.update(s_per_sim_day_steady=sd * 86400 / (sim * steady_frac),
-                             sypd_steady=sim * steady_frac / (365.25 * sd),
-                             ns_cell_step=sd * 1e9 / (cell_steps * steady_frac) if cell_steps else None)
-                if st["energy_j"]:
-                    d["gpu_wh_per_sim_day"] = st["energy_j"]["median"] / 3600 * 86400 / sim
-                if w and rate:
-                    d["cu_per_sim_day"] = w / 3600 * 86400 / sim * rate
-                if w and cpu_rate and m.startswith("wrf"):
-                    d["cu_per_sim_day_cpu_runtime"] = w / 3600 * 86400 / sim * cpu_rate
+                    d.update(sim_speed_wall=sim / w, sypd_wall=sim / (365.25 * w))
+                if ss:  # the steady rate: seconds per step, scaled to a simulated day
+                    d.update(s_per_sim_day_steady=ss * n1 * day, sypd_steady=sim / (365.25 * ss * n1),
+                             ns_cell_step=ss * 1e9 / cells_per_step if cells_per_step else None)
+                if mg is not None and fx is not None:  # a one-day forecast: the fixed part once + a day's marginal part
+                    d.update(s_marginal_per_sim_day=mg * day, s_fixed=fx, s_per_forecast_day=fx + mg * day)
+                ps, et = med("power_steady_w"), med("energy_j")
+                if ps is not None and mg is not None:
+                    d["gpu_wh_marginal_per_sim_day"] = ps * mg * day / 3600
+                    fixed_e = [((r.get("gpu") or {}).get("energy_j") - (r.get("gpu") or {}).get("power_steady_w") *
+                                (r.get("timing") or {}).get("marginal")) for r in g
+                               if (r.get("gpu") or {}).get("energy_j") is not None and
+                               (r.get("gpu") or {}).get("power_steady_w") is not None and
+                               (r.get("timing") or {}).get("marginal") is not None]
+                    if fixed_e:
+                        d["gpu_wh_fixed"] = float(np.median(fixed_e)) / 3600
+                        d["gpu_wh_per_forecast_day"] = d["gpu_wh_fixed"] + d["gpu_wh_marginal_per_sim_day"]
+                if et is not None:
+                    d["gpu_wh_run"] = et / 3600
+                cpu_only = m.startswith("wrf") or m.startswith("cpu")
+                for key, rt in (("cu", rate), ("cu_cpu_runtime", cpu_rate if cpu_only else None)):
+                    if not rt:
+                        continue
+                    if w:
+                        d[f"{key}_run"] = w / 3600 * rt
+                    if "s_per_forecast_day" in d:
+                        d[f"{key}_marginal_per_sim_day"] = d["s_marginal_per_sim_day"] / 3600 * rt
+                        d[f"{key}_fixed"] = fx / 3600 * rt
+                        d[f"{key}_per_forecast_day"] = d["s_per_forecast_day"] / 3600 * rt
+                gpu_s = [r.get("gpu") or {} for r in g]
                 flags = dict(loaded=sum(1 for r in g if (r.get("load") or 0) > 0),
-                             throttled=sum(1 for r in g if ((r.get("gpu") or {}).get("throttled_samples") or 0) > 0))
-                groups.append(dict(case=c, regime=reg, model=m, layout=r0.get("layout"), n=len(g), sim_seconds=sim,
-                                   grid=cs, stats=st, derived=d, flags=flags))
+                             throttled=sum(1 for x in gpu_s if (x.get("throttled_samples") or 0) > 0),
+                             power_capped=sum(1 for x in gpu_s if (x.get("power_cap_samples") or 0) > 0),
+                             steal=sum(1 for r in g if ((r.get("cpu_share") or {}).get("steal_pct") or 0) > 1.0),
+                             clock_step=sum(1 for r in g if abs(r.get("clock_step_s") or 0) > 0.5),
+                             cool_capped=sum(1 for r in g if (r.get("cool") or {}).get("temp_end_c") is not None and
+                                             (r.get("cool") or {}).get("target_c") is not None and
+                                             r["cool"]["temp_end_c"] > r["cool"]["target_c"]))
+                # the run with the median wall time (the lower middle one of an even count): its parts add up to
+                # its wall time (medians of the parts would not), for the breakdown figure
+                gw = sorted((r for r in g if r.get("wall") is not None), key=lambda r: r["wall"])
+                rep_run = None
+                if gw:
+                    rr = gw[(len(gw) - 1) // 2]
+                    t = rr.get("timing") or {}
+                    rep_run = dict(id=rr.get("id"), block=rr.get("block"), wall=rr["wall"],
+                                   parts={k: t.get(k) for k in ("other", "input_in", "step1", "steady", "io")})
+                groups.append(dict(case=c, regime=reg, model=m, kind=r0.get("kind"), layout=r0.get("layout"), n=len(g),
+                                   rep_run=rep_run,
+                                   sim_seconds=sim, grid=cs, stats=st, derived=d, flags=flags,
+                                   steal_pct_median=(stats([(r.get("cpu_share") or {}).get("steal_pct") for r in g])
+                                                     or {}).get("median")))
             for base in ("wrf_r4", "wrf_r4t", "wrf_r8"):
                 b = {r["block"]: r for r in rs if r["model"] == base}
                 if not b:
@@ -117,27 +192,26 @@ def summarize(runs, verify, cases_info=None, best=None, manifest=None, rate=None
                 for m in models:
                     if m.startswith("wrf"):
                         continue
-                    for k in (("stepping", "steady", "wall") if reg == "off" else ("wall",)):
-                        ratios = [value(b[r["block"]], k) / value(r, k) for r in rs if r["model"] == m
-                                  and r["block"] in b and value(r, k) and value(b[r["block"]], k)]
-                        gm = next((x for x in groups if x["case"] == c and x["regime"] == reg and x["model"] == m), None)
-                        gb = next((x for x in groups if x["case"] == c and x["regime"] == reg and x["model"] == base),
-                                  None)
-                        mr = (gb["stats"][k]["median"] / gm["stats"][k]["median"]
-                              if gm and gb and gm["stats"][k] and gb["stats"][k] and gm["stats"][k]["median"] else None)
-                        if ratios:
-                            speed.append(dict(case=c, regime=reg, model=m, vs=base, metric=k, n=len(ratios),
-                                              median=float(np.median(ratios)), min=min(ratios), max=max(ratios),
-                                              ratio_of_medians=mr))
-    layouts = []
-    for r in runs:
-        if r.get("phase") == "screen" and r.get("ok"):
-            layouts.append(dict(case=r["case"], model=r["model"], layout=r.get("layout"),
-                                stepping=r["timing"]["stepping"], wall=r["wall"]))
+                    for k in ("step_s", "wall"):
+                        pr = [(value(b[r["block"]], k), value(r, k)) for r in rs if r["model"] == m and
+                              r["block"] in b]
+                        pr = [(x, y) for x, y in pr if pos(x) and pos(y)]  # the blocks both models ran in
+                        if not pr:
+                            continue
+                        ratios = [x / y for x, y in pr]
+                        # the ratio of the two medians over the same (matched) blocks
+                        mr = float(np.median([x for x, _ in pr]) / np.median([y for _, y in pr]))
+                        speed.append(dict(case=c, regime=reg, model=m, vs=base, metric=k, n=len(ratios),
+                                          median=float(np.median(ratios)), min=min(ratios), max=max(ratios),
+                                          ci95=boot_ci(ratios), ratio_of_medians=mr,
+                                          blocks=sorted(r["block"] for r in rs if r["model"] == m and r["block"] in b)))
     lay = {}
-    for x in layouts:
-        lay.setdefault((x["case"], x["model"], x["layout"]), []).append(x["stepping"])
-    screen = [dict(case=c, model=m, layout=layo, n=len(v), median=float(np.median(v)))
+    for r in runs:
+        if r.get("phase") == "screen" and r.get("ok") and not r.get("warmup"):
+            v = (r.get("timing") or {}).get("step_s")
+            if v:
+                lay.setdefault((r["case"], r["model"], r.get("layout")), []).append(v)
+    screen = [dict(case=c, model=m, layout=layo, n=len(v), median=float(np.median(v)), min=min(v), max=max(v))
               for (c, m, layo), v in lay.items()]
     return dict(cases=cases, cases_info=cases_info or {}, groups=groups, speedups=speed, screen=screen, best=best or {},
                 verify=[v for v in verify if v.get("kind") in ("exact", "l2")],
@@ -176,6 +250,12 @@ def f(x, n=2):
     if abs(x) >= 1000:
         return f"{x:.0f}"
     return f"{x:.{n}f}"
+
+
+def scale(s, k):
+    if not s:
+        return s
+    return dict(s, **{x: (s[x] * k if s.get(x) is not None else None) for x in ("median", "q25", "q75", "min", "max")})
 
 
 def cell(s, n=2):
@@ -221,11 +301,13 @@ def markdown(S, accuracy_md=None):
               + f"; simulated {g0['sim_seconds'] / 3600:g} h.\n")
         cpu = [x for x in S["screen"] if x["case"] == c and not x["model"].startswith("wrf")]
         if cpu:
-            w("CPPWRF CPU thread counts (1 h, history off), stepping s: " + ", ".join(
-                f"{x['layout']} {x['median']:.2f}" for x in sorted(cpu, key=lambda x: x["layout"])) + ".\n")
+            w("CPPWRF CPU thread counts (screening runs, history off), ms per step, median (min-max): " + ", ".join(
+                f"{x['layout']} {1e3 * x['median']:.1f} ({1e3 * x['min']:.1f}-{1e3 * x['max']:.1f})"
+                for x in sorted(cpu, key=lambda x: x["layout"])) + ".\n")
         scr = [x for x in S["screen"] if x["case"] == c and x["model"].startswith("wrf")]
         if scr:
-            w("WRF process layouts (1 h, history off), stepping s, median of the screening runs:\n")
+            w("WRF process layouts (screening runs after a warm-up run, history off), ms per step (steady), median "
+              "(min-max) of the screening runs; bold: the chosen layout:\n")
             lays = sorted({x["layout"] for x in scr}, key=lambda s: (s[:2], int(s[2:].split("x")[0]) if s[2:].split("x")[0].isdigit() else 0, s))
             mods = sorted({x["model"] for x in scr})
             w("| layout | " + " | ".join(NAMES.get(m, m) for m in mods) + " |")
@@ -235,68 +317,99 @@ def markdown(S, accuracy_md=None):
                 for m in mods:
                     v = next((x for x in scr if x["layout"] == la and x["model"] == m), None)
                     b = S["best"].get(f"{c}:{m}")
-                    row.append("-" if not v else (f"**{v['median']:.2f}**" if b == la else f"{v['median']:.2f}"))
+                    t = "-" if not v else f"{1e3 * v['median']:.1f} ({1e3 * v['min']:.1f}-{1e3 * v['max']:.1f})"
+                    row.append(f"**{t}**" if v and b == la else t)
                 w(f"| {la} | " + " | ".join(row) + " |")
             w("")
-        for reg, title in (("off", "History off (the frame at t = 0 only)"), ("on", "History on")):
+        for reg, title in (("off", "History off (the frame at t = 0 only): the primary comparison"),
+                           ("on", "History on")):
             gs = [g for g in S["groups"] if g["case"] == c and g["regime"] == reg]
             if not gs:
                 continue
             w(f"### {title}\n")
             if reg == "on":
                 w("With history on, a GPU run's write waits for the steps queued before it (the steps run "
-                  "asynchronously), so for the GPU builds the split between stepping and I/O is not meaningful; "
-                  "their sum and the wall time are. The speed-ups below are of the wall time only.\n")
-            w("| model | layout | n | wall | stepping | step 1 | steady | I/O | other | ns / cell / step | "
-              "s / sim. day (wall) | SYPD (wall / steady) |")
-            w("|---|---|---|---|---|---|---|---|---|---|---|---|")
+                  "asynchronously): for the CUDA builds the split between the steps and the writes is not published "
+                  "(\"n/p\"); the wall time, the marginal and the fixed parts are. The speed-ups are of the wall "
+                  "time.\n")
+            w("| model | layout | n | wall | ms / step (steady) | step 1 | I/O | input in steps | other | fixed | "
+              "marginal | ns / cell / step | SYPD (wall / steady) |")
+            w("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
             for g in gs:
                 s, d = g["stats"], g["derived"]
+                mk = reg == "on" and g.get("kind") == "gpu"
+                np_ = lambda x: "n/p" if mk else x  # noqa: E731
                 w(f"| {NAMES.get(g['model'], g['model'])} | {g['layout']} | {g['n']} | {cell(s['wall'], 1)} | "
-                  f"{cell(s['stepping'])} | {cell(s['step1'])} | {cell(s['steady'])} | {cell(s['io'])} | "
-                  f"{cell(s['other'])} | {f(d.get('ns_cell_step'), 1)} | {f(d.get('s_per_sim_day_wall'), 0)} | "
-                  f"{f(d.get('sypd_wall'), 3)} / {f(d.get('sypd_steady'), 3)} |")
+                  f"{np_(cell(scale(s['step_s'], 1e3), 1))} | {np_(cell(s['step1']))} | {np_(cell(s['io']))} | "
+                  f"{cell(s['input_in'])} | {cell(s['other'])} | {cell(s['fixed'], 1)} | {cell(s['marginal'], 1)} | "
+                  f"{np_(f(d.get('ns_cell_step'), 1))} | {f(d.get('sypd_wall'), 3)} / {np_(f(d.get('sypd_steady'), 3))} |")
             w("")
             sp = [x for x in S["speedups"] if x["case"] == c and x["regime"] == reg]
             if sp:
-                w("Speed-up (WRF time / CPPWRF time), median over the blocks (smallest - largest block):\n")
-                w("| model | vs | stepping | steady | wall |")
-                w("|---|---|---|---|---|")
+                w("Speed-up (WRF time / CPPWRF time of the same block): median of the block ratios [95 % bootstrap "
+                  "interval of that median] (smallest - largest block ratio); ratio of the medians over the same "
+                  "blocks. Steady: seconds per step after step 1 (the headline compute metric):\n")
+                w("| model | vs | n | steady | wall | ratio of medians (steady / wall) |")
+                w("|---|---|---|---|---|---|")
                 for m in sorted({x["model"] for x in sp}, key=lambda m: ORDER.index(m) if m in ORDER else 99):
                     for vs in ("wrf_r4", "wrf_r4t", "wrf_r8"):
+                        xs = {k: next((y for y in sp if y["model"] == m and y["vs"] == vs and y["metric"] == k), None)
+                              for k in ("step_s", "wall")}
+                        if not any(xs.values()):
+                            continue
                         row = []
-                        for k in ("stepping", "steady", "wall"):
-                            x = next((y for y in sp if y["model"] == m and y["vs"] == vs and y["metric"] == k), None)
-                            row.append(f"{x['median']:.2f}x ({x['min']:.2f}-{x['max']:.2f})" if x else "-")
-                        if any(r != "-" for r in row):
-                            w(f"| {NAMES.get(m, m)} | {NAMES[vs]} | " + " | ".join(row) + " |")
+                        for k in ("step_s", "wall"):
+                            x = xs[k]
+                            ci = f" [{x['ci95'][0]:.2f}-{x['ci95'][1]:.2f}]" if x and x.get("ci95") else ""
+                            row.append(f"{x['median']:.2f}x{ci} ({x['min']:.2f}-{x['max']:.2f})" if x else "-")
+                        n = max(x["n"] for x in xs.values() if x)
+                        rm = " / ".join(f"{xs[k]['ratio_of_medians']:.2f}x" if xs[k] else "-" for k in ("step_s", "wall"))
+                        w(f"| {NAMES.get(m, m)} | {NAMES[vs]} | {n} | " + " | ".join(row) + f" | {rm} |")
+                w("")
+            fd = [g for g in gs if "s_per_forecast_day" in g["derived"]]
+            if fd:
+                w("One simulated day (a fixed part once per run + the marginal part scaled to 24 h; seconds, from the "
+                  "medians):\n")
+                w("| model | fixed s | marginal s / sim. day | s / forecast day | measured run s |")
+                w("|---|---|---|---|---|")
+                for g in fd:
+                    d = g["derived"]
+                    w(f"| {NAMES.get(g['model'], g['model'])} | {f(d['s_fixed'], 1)} | {f(d['s_marginal_per_sim_day'], 0)} | "
+                      f"{f(d['s_per_forecast_day'], 0)} | {f(g['stats']['wall']['median'] if g['stats']['wall'] else None, 1)} |")
                 w("")
             eg = [g for g in gs if g["stats"]["energy_j"]]
             if eg:
-                w("GPU board energy (nvidia-smi power.draw integrated over the run; the board only):\n")
-                w("| model | energy J | mean power W | SM clock MHz | Wh / sim. day | runs with throttling |")
-                w("|---|---|---|---|---|---|")
+                w("GPU board energy (nvidia-smi power.draw integrated; the board only, not the host). Steady power: over "
+                  "the steady steps (domain 1's first to last timing line); per simulated day = steady power x the "
+                  "marginal time of a day, plus the fixed part once:\n")
+                w("| model | run energy J | steady power W | SM clock MHz | Wh fixed | Wh marginal / sim. day | "
+                  "Wh / forecast day | throttled runs | power-capped runs |")
+                w("|---|---|---|---|---|---|---|---|---|")
                 for g in eg:
-                    s = g["stats"]
-                    w(f"| {NAMES.get(g['model'], g['model'])} | {cell(s['energy_j'], 0)} | {cell(s['power_mean_w'], 0)} | "
-                      f"{cell(s['sm_clock_median_mhz'], 0)} | {f(g['derived'].get('gpu_wh_per_sim_day'), 1)} | "
-                      f"{g['flags']['throttled']} |")
+                    s, d = g["stats"], g["derived"]
+                    w(f"| {NAMES.get(g['model'], g['model'])} | {cell(s['energy_j'], 0)} | {cell(s['power_steady_w'], 0)} | "
+                      f"{cell(s['sm_clock_median_mhz'], 0)} | {f(d.get('gpu_wh_fixed'), 2)} | "
+                      f"{f(d.get('gpu_wh_marginal_per_sim_day'), 1)} | {f(d.get('gpu_wh_per_forecast_day'), 1)} | "
+                      f"{g['flags']['throttled']} | {g['flags']['power_capped']} |")
                 w("")
     if S.get("rate"):
         w("## Cost\n")
-        w(f"Colab compute units per simulated day: median wall time x the session's rate, {S['rate']} units per hour "
-          "(`colab usage`). The runtime costs the same whichever processor a run uses: for WRF this is the price on "
-          "the GPU runtime with the GPU idle, an upper bound." + (
-              f" The CPU-only column assumes {S['cpu_rate']} units per hour for a CPU-only runtime with the same CPU: "
+        w(f"Colab compute units at the session's rate, {S['rate']} units per hour (`colab usage`): the measured run, "
+          "and one simulated day as the fixed part once plus the marginal part of 24 h. The runtime costs the same "
+          "whichever processor a run uses: for WRF this is the price on the GPU runtime with the GPU idle, an upper "
+          "bound, not a CPU-only price." + (
+              f" The CPU-only columns assume {S['cpu_rate']} units per hour for a CPU-only runtime with the same CPU: "
               "a stated assumption, not a measurement." if S.get("cpu_rate") else
               " A CPU-only runtime's price was not given (--cpu-rate) and is not shown.") + "\n")
-        w("| case | history | model | CU / sim. day | CU / sim. day, CPU-only runtime |")
-        w("|---|---|---|---|---|")
+        w("| case | history | model | CU run | CU fixed | CU marginal / sim. day | CU / forecast day | "
+          "CPU-only CU / forecast day |")
+        w("|---|---|---|---|---|---|---|---|")
         for g in S["groups"]:
             d = g["derived"]
-            if "cu_per_sim_day" in d:
-                w(f"| {g['case']} | {g['regime']} | {NAMES.get(g['model'], g['model'])} | {d['cu_per_sim_day']:.3f} | "
-                  f"{f(d.get('cu_per_sim_day_cpu_runtime'), 3)} |")
+            if "cu_run" in d:
+                w(f"| {g['case']} | {g['regime']} | {NAMES.get(g['model'], g['model'])} | {f(d['cu_run'], 3)} | "
+                  f"{f(d.get('cu_fixed'), 3)} | {f(d.get('cu_marginal_per_sim_day'), 3)} | "
+                  f"{f(d.get('cu_per_forecast_day'), 3)} | {f(d.get('cu_cpu_runtime_per_forecast_day'), 3)} |")
         w("")
     w("## Bit identity and accuracy in the same runs\n")
     w("Tolerance 0 (tests/verify/exact.py: every variable of every frame, NaN and signed zero exact) on the history-on "
@@ -309,8 +422,10 @@ def markdown(S, accuracy_md=None):
             if "error" in x:
                 parts.append(f"{d}: {x['error']}")
             else:
+                vi = x.get("values_identical", x["identical"])
                 parts.append(f"{d}: {x['frames']} frames " + ("**identical**" if x["identical"] else
-                             "DIFFER (" + ", ".join(sorted(x["differ"])[:8]) + ")"))
+                             "values identical, metadata differ (" + str(x["differ"].get("(metadata)"))[:160] + ")"
+                             if vi else "DIFFER (" + ", ".join(sorted(x["differ"])[:8]) + ")"))
         w(f"- {v['case']}: {v['what']}: " + "; ".join(parts))
     l2s = [v for v in S["verify"] if v["kind"] == "l2"]
     if l2s:
@@ -328,26 +443,32 @@ def markdown(S, accuracy_md=None):
         for x in S["failed"]:
             w(f"- {x['case']} {x['phase']} {x['model']} {x.get('layout') or ''} {x.get('regime') or ''} block "
               f"{x.get('block')}: {x['error']}")
-    fl = [g for g in S["groups"] if g["flags"]["loaded"] or g["flags"]["throttled"]]
+    fl = [g for g in S["groups"] if any(v for k, v in g["flags"].items() if k != "power_capped")]
     if fl:
         w("\n## Flagged repetitions\n")
+        w("Flagged, not dropped: runs started with other processes running, with thermal / hardware GPU slowdown "
+          "samples, with more than 1 % CPU steal time, with a system clock step, or whose cool-down ended at its "
+          "limit above the target temperature.\n")
         for g in fl:
-            w(f"- {g['case']} {g['regime']} {g['model']}: {g['flags']['loaded']} runs started with other processes "
-              f"running, {g['flags']['throttled']} with GPU throttling samples")
+            fg = g["flags"]
+            w(f"- {g['case']} {g['regime']} {g['model']}: {fg['loaded']} loaded, {fg['throttled']} throttled, "
+              f"{fg['steal']} steal, {fg['clock_step']} clock step, {fg['cool_capped']} cool-down at its limit")
     return "\n".join(o) + "\n"
 
 
 def write_csv(runs, path):
-    cols = ["id", "phase", "case", "model", "build", "layout", "regime", "block", "warmup", "ok", "exit", "wall",
-            "stepping", "step1", "steady", "io", "other", "steps", "load", "cpu_mhz", "energy_j", "power_mean_w",
-            "power_peak_w", "power_idle_w", "sm_clock_median_mhz", "temp_max_c", "mem_used_peak_mib",
-            "throttled_samples"]
+    cols = ["id", "phase", "case", "model", "build", "kind", "layout", "regime", "block", "pos", "prev", "warmup", "ok",
+            "exit", "wall", "step_s", "steady", "steady_steps", "step1", "stepping", "io", "io_steady", "input_in",
+            "other", "marginal", "fixed", "steps", "load", "cpu_mhz", "steal_pct", "energy_j", "energy_steady_j",
+            "power_mean_w", "power_steady_w", "power_peak_w", "power_idle_w", "sm_clock_median_mhz", "temp_max_c",
+            "mem_used_peak_mib", "throttled_samples", "power_cap_samples", "cool_wait_s", "clock_step_s"]
     with open(path, "w", newline="") as fh:
         wr = csv.writer(fh)
         wr.writerow(cols)
         for r in runs:
             t, g = r.get("timing") or {}, r.get("gpu") or {}
-            wr.writerow([r.get(k) if k in r else t.get(k, g.get(k)) for k in cols])
+            x = dict(steal_pct=(r.get("cpu_share") or {}).get("steal_pct"), cool_wait_s=(r.get("cool") or {}).get("wait_s"))
+            wr.writerow([r.get(k) if k in r else x[k] if k in x else t.get(k, g.get(k)) for k in cols])
 
 
 def main():

@@ -20,9 +20,12 @@ Summary of a window [t0, t1]: energy_j (the trapezoidal integral of power.draw o
 interpolated linearly between samples and at the window's ends), power_mean_w (energy / duration), power_peak_w,
 power_idle_w (the median of the samples in the idle_before seconds before t0, default 1.5 s: the sampler starts
 before the run), sm_clock_median_mhz, sm_clock_min_mhz, mem_clock_median_mhz, temp_max_c, util_median_pct,
-mem_used_peak_mib, mem_used_idle_mib, samples, throttled_samples (samples whose clock event reasons include a power
-cap, a hardware slowdown or a thermal slowdown: bits 0x4, 0x8, 0x40, 0x80, 0x100; 0x1 idle and 0x2 application
-clocks are not throttling) and reasons_seen (the union of the reason bits). nvidia-smi's power.draw is the board's
+mem_used_peak_mib, mem_used_idle_mib, samples, throttled_samples (samples whose clock event reasons include a
+hardware slowdown 0x8, a software thermal slowdown 0x20, a hardware thermal slowdown 0x40 or a power brake 0x80),
+power_cap_samples (the software power cap 0x4: normal at full load, counted on its own; 0x1 idle, 0x2 application
+clocks, 0x10 sync boost and 0x100 display clock are not throttling), reasons_seen (the union of the reason bits),
+head_gap_s / tail_gap_s (window start to the first sample, last sample to the window end) and, with a steady
+window [ta, tb] (the run's steady steps), energy_steady_j and power_steady_w over it. nvidia-smi's power.draw is the board's
 power: not the host CPU, memory, disks or the data centre's overhead. A field the GPU does not report ([N/A]) gives
 null.
 """
@@ -39,7 +42,13 @@ import time
 FIELDS = ["timestamp", "power.draw", "clocks.sm", "clocks.mem", "temperature.gpu", "utilization.gpu", "memory.used",
           "pstate", "clocks_event_reasons.active"]
 ALT = {"clocks_event_reasons.active": "clocks_throttle_reasons.active"}
-THROTTLE_BITS = 0x4 | 0x8 | 0x40 | 0x80 | 0x100
+# NVML clock event reasons (nvml.h nvmlClocksEventReason*, nvidia-smi -q "Clocks Event Reasons"): 0x1 GpuIdle,
+# 0x2 ApplicationsClocksSetting, 0x4 SwPowerCap, 0x8 HwSlowdown, 0x10 SyncBoost, 0x20 SwThermalSlowdown,
+# 0x40 HwThermalSlowdown, 0x80 HwPowerBrakeSlowdown, 0x100 DisplayClockSetting. A sample is "throttled" when a
+# thermal or hardware slowdown is active; the power cap (normal at full load) is counted on its own.
+THROTTLE_BITS = 0x8 | 0x20 | 0x40 | 0x80
+POWER_CAP_BIT = 0x4
+_FIELDS = None
 
 
 def _ok(fields):
@@ -48,8 +57,13 @@ def _ok(fields):
 
 
 def query_fields():
-    """The fields of FIELDS this nvidia-smi accepts (in order), or [] without nvidia-smi."""
+    """The fields of FIELDS this nvidia-smi accepts (in order), or [] without nvidia-smi; probed once per process
+    (the probes are nvidia-smi calls, which must not run in a run's idle window)."""
+    global _FIELDS
+    if _FIELDS is not None:
+        return list(_FIELDS)
     if not shutil.which("nvidia-smi"):
+        _FIELDS = []
         return []
     out = []
     for f in FIELDS:
@@ -57,7 +71,18 @@ def query_fields():
             out.append(f)
         elif f in ALT and _ok(out + [ALT[f]]):
             out.append(ALT[f])
+    _FIELDS = list(out)
     return out
+
+
+def temperature():
+    """The GPU's temperature (C) now, or None."""
+    try:
+        q = subprocess.run(["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+                           capture_output=True, text=True, timeout=30)
+        return float(q.stdout.split()[0]) if q.returncode == 0 and q.stdout.split() else None
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return None
 
 
 def rapl_probe():
@@ -115,8 +140,12 @@ class Sampler:
         self.f = open(self.csv, "w")
         self.f.write("# " + ",".join(self.fields) + "\n")
         self.f.flush()
-        self.p = subprocess.Popen(["nvidia-smi", "--query-gpu=" + ",".join(self.fields), "--format=csv,noheader,nounits",
-                                   "-lms", str(self.interval)], stdout=self.f, stderr=subprocess.DEVNULL)
+        # stdbuf -oL: one line per sample reaches the file at once (a block-buffered stdout loses its tail when the
+        # sampler is terminated)
+        pre = ["stdbuf", "-oL"] if shutil.which("stdbuf") else []
+        self.p = subprocess.Popen(pre + ["nvidia-smi", "--query-gpu=" + ",".join(self.fields),
+                                         "--format=csv,noheader,nounits", "-lms", str(self.interval)],
+                                  stdout=self.f, stderr=subprocess.DEVNULL)
         return True
 
     def stop(self):
@@ -181,7 +210,9 @@ def _integrate(pts, t0, t1):
     return sum((at(a) + at(b)) / 2 * (b - a) for a, b in zip(knots, knots[1:]))
 
 
-def summarize(csv, t0, t1, idle_before=1.5):
+def summarize(csv, t0, t1, idle_before=1.5, steady=None):
+    """steady: (ta, tb), the epoch window of the steady steps (bench_exec.py's line stamps): energy_steady_j and
+    power_steady_w over it."""
     s = read_samples(csv) if os.path.exists(csv) else []
     win = [(t, r) for t, r in s if t0 <= t <= t1]
     pre = [(t, r) for t, r in s if t0 - idle_before <= t < t0]
@@ -207,7 +238,14 @@ def summarize(csv, t0, t1, idle_before=1.5):
                mem_used_peak_mib=max(col(win, "memory.used"), default=None),
                mem_used_idle_mib=med(col(pre, "memory.used")),
                throttled_samples=sum(1 for x in reasons if int(x) & THROTTLE_BITS) if reason_key else None,
-               reasons_seen=hex(seen) if reason_key else None)
+               power_cap_samples=sum(1 for x in reasons if int(x) & POWER_CAP_BIT) if reason_key else None,
+               reasons_seen=hex(seen) if reason_key else None,
+               # the sampler's coverage: a gap at either end is filled with the nearest sample's power
+               head_gap_s=(win[0][0] - t0) if win else None, tail_gap_s=(t1 - win[-1][0]) if win else None)
+    if steady and pw and steady[1] > steady[0]:
+        ta, tb = steady
+        es = _integrate(pw, ta, tb)
+        out.update(steady_window_s=tb - ta, energy_steady_j=es, power_steady_w=es / (tb - ta) if es is not None else None)
     return out
 
 

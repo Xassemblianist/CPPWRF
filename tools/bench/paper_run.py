@@ -5,8 +5,8 @@ with warm-up, the untimed proof runs, the bit-identity and accuracy comparisons 
 
   paper_run.py plan     [OPTIONS]   the runs of every phase and the session estimate (G4 rates of docs/PERF.md)
   paper_run.py prepare  [OPTIONS]   the run directories and CPPWRF configurations of the cases
-  paper_run.py screen   [OPTIONS]   WRF's process layouts and CPPWRF CPU's thread counts, 1 h, history off
-  paper_run.py timed    [OPTIONS]   the timed blocks (history off: warm-up + REPS blocks; history on: REPS_ON)
+  paper_run.py screen   [OPTIONS]   WRF's process layouts and CPPWRF CPU's thread counts, history off
+  paper_run.py timed    [OPTIONS]   the warm-up runs, the timed blocks (history off: REPS, history on: REPS_ON)
   paper_run.py proof    [OPTIONS]   the untimed reference runs (WRF in one process, CPPWRF CPU FP64 / FP32)
   paper_run.py verify   [OPTIONS]   tolerance-0 comparisons and the FP32 accuracy statistics
   paper_run.py report   [OPTIONS]   ROOT/out/report.md, summary.json, svg/ (bench_stats.py, bench_plot.py)
@@ -29,13 +29,18 @@ OPTIONS (defaults: the Colab G4 session of tools/bench/colab_paper.sh):
   --proof P,...       the proof runs (default wrf_r8_dm1,wrf_r4_dm1,cpu_fp64,cpu_fp64_hwlog,cpu_fp32)
   --layouts L,...     WRF's layouts to screen (default dm12,dm24,dm48,sm24x2,sm12x4,sm12x2,sm6x4,sm8x3; dmN: N
                       ranks, smNxT: N ranks x T threads of the dm+sm build); --layout dm24 skips the screening
-  --screen-reps N     repetitions of each screened layout (default 1, interleaved)
-  --reps N            timed blocks with history off after the warm-up block (default 4)
-  --reps-on N         timed blocks with history on (default 3, no warm-up: the history-off blocks warmed up)
-  --cpu-reps N        CPPWRF CPU FP64 runs with history off, in blocks 1 .. N (default 3, no own warm-up)
-  --warmup N          warm-up blocks before the history-off blocks (default 1; not counted)
+  --screen-reps N     rounds of the screening after one warm-up run per model (default 2, each round over all
+                      layouts in a turned order)
+  --screen-min M      simulated minutes of a screening run (default 30; the case's length if shorter)
+  --reps N            timed blocks with history off (default 5)
+  --reps-on N         timed blocks with history on (default 3: the history-off blocks warmed up)
+  --cpu-reps N        CPPWRF CPU FP64 runs with history off, in blocks 1 .. N (default 3)
+  --warmup 0|1        the warm-up block: every model of every case once, history off, not counted (default 1)
+  --warm-min M        simulated minutes of a warm-up run (default 30)
   --hist-min M        minutes between history frames with history on (default 60)
-  --pause S           seconds before each GPU run (default 3)
+  --pause S           seconds at least before each GPU run (default 3)
+  --cool-max S        at most S seconds of cool-down before a GPU run (default 90): the wait ends when the GPU is
+  --cool-delta C      within C degrees (default 5) of its idle temperature (the agent's, at its start)
   --gpu agent|local|none   GPU runs through the agent of ROOT/q (tools/bench/bench_exec.py agent, default), here
                       (--gpu-bin NAME=PATH ...) or not at all
   --cpu-bin NAME=PATH the CPU builds (default WRF_DIR/NAME/cppwrf)
@@ -51,15 +56,20 @@ default build "cuda"), gpu_fp32id (CUDA FP32 identity build "cuda_sp_id"), gpu_f
 (CPU FP64 "cpu-dp" at the fastest screened thread count). CPPWRF runs with output.wrf_timing = true (WRF's timing
 lines; tools/bench/bench_parse.py splits both models' times the same way) and output.diag_interval = 1000000 (no
 diag.csv reductions: WRF computes none); CPPWRF_MEMINFO=1 only in the warm-up runs. Every run is one JSON line of
-ROOT/out/raw_runs.jsonl (tools/bench/bench_exec.py's result with the parsed times).
+ROOT/out/raw_runs.jsonl (tools/bench/bench_exec.py's result with the parsed times, the block, the run's position in
+its block's order and the model before it). The order of the models in block k of case number i is row
+(k x cases + i) of a Williams design (run_order): over a regime's blocks every model runs first and right after
+every other model.
 """
 import glob
 import json
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -120,8 +130,9 @@ class Opt:
         self.proof = list(PROOF)
         self.layouts = "dm12,dm24,dm48,sm24x2,sm12x4,sm12x2,sm6x4,sm8x3".split(",")
         self.layout = None
-        self.screen_reps, self.reps, self.reps_on, self.cpu_reps, self.warmup = 1, 4, 3, 3, 1
+        self.screen_reps, self.reps, self.reps_on, self.cpu_reps, self.warmup = 2, 5, 3, 3, 1
         self.hist_min, self.pause, self.gpu, self.gpu_threads, self.proof_threads = 60, 3.0, "agent", 4, 8
+        self.cool_max, self.cool_delta, self.screen_min, self.warm_min = 90.0, 5.0, 30, 30
         self.gpu_bins, self.cpu_bins, self.nc0, self.keep = {}, {}, False, False
         self.np = NP
         i = 0
@@ -152,6 +163,10 @@ class Opt:
             elif k == "--warmup": self.warmup = int(v)  # noqa: E701
             elif k == "--hist-min": self.hist_min = int(v)  # noqa: E701
             elif k == "--pause": self.pause = float(v)  # noqa: E701
+            elif k == "--cool-max": self.cool_max = float(v)  # noqa: E701
+            elif k == "--cool-delta": self.cool_delta = float(v)  # noqa: E701
+            elif k == "--screen-min": self.screen_min = int(v)  # noqa: E701
+            elif k == "--warm-min": self.warm_min = int(v)  # noqa: E701
             elif k == "--gpu": self.gpu = v  # noqa: E701
             elif k == "--gpu-bin": self.gpu_bins.update([v.split("=", 1)])  # noqa: E701
             elif k == "--cpu-bin": self.cpu_bins.update([v.split("=", 1)])  # noqa: E701
@@ -186,15 +201,22 @@ class Opt:
         return b if b.startswith("/") else os.path.join(self.data, b)
 
 
+LOCK = threading.Lock()  # the proof phase runs several runs at a time: one writer at a time for the log, the records
+#                           and the run ids
+
+
 def log(o, msg):
-    with open(os.path.join(o.out, "paper.log"), "a") as f:
-        f.write(time.strftime("%H:%M:%S ") + msg + "\n")
-    print(time.strftime("%H:%M:%S ") + msg, flush=True)
+    with LOCK:
+        with open(os.path.join(o.out, "paper.log"), "a") as f:
+            f.write(time.strftime("%H:%M:%S ") + msg + "\n")
+        print(time.strftime("%H:%M:%S ") + msg, flush=True)
 
 
 def emit(o, rec, name="raw_runs.jsonl"):
-    with open(os.path.join(o.out, name), "a") as f:
-        f.write(json.dumps(rec) + "\n")
+    line = json.dumps(rec) + "\n"
+    with LOCK:
+        with open(os.path.join(o.out, name), "a") as f:
+            f.write(line)
 
 
 # ---- namelists (as tools/bench/bench_run.py)
@@ -274,7 +296,17 @@ def make_dir(R, base, sets, seconds, hist_min):
 
 # ---- the run directories
 def regimes(o):
-    return {"screen": None, "off": None, "on": o.hist_min}
+    """History setting of each regime (minutes between frames, None: only t = 0): screen (the layout screening),
+    warm (the warm-up runs), off and on (the timed blocks)."""
+    return {"screen": None, "warm": None, "off": None, "on": o.hist_min}
+
+
+def regime_seconds(o, regime, sec):
+    if regime == "screen":
+        return min(sec, o.screen_min * 60)
+    if regime == "warm":
+        return min(sec, o.warm_min * 60)
+    return sec
 
 
 def rdir(o, c, regime):
@@ -293,7 +325,7 @@ def prepare(o):
         sec = length_s(length)
         info[c] = dict(ok=True, base=b, length=length, seconds=sec, sets=sets, desc=desc)
         for reg, hm in regimes(o).items():
-            s = min(sec, 3600) if reg == "screen" else sec
+            s = regime_seconds(o, reg, sec)
             R = rdir(o, c, reg)
             nl = make_dir(R, b, sets, s, hm)
             t = subprocess.run([sys.executable, o.src + "/tools/wrf2cppwrf.py", R + "/namelist.input", "--real-dir", R,
@@ -304,10 +336,22 @@ def prepare(o):
                 log(o, f"{c} {reg}: wrf2cppwrf.py FAILED: {(t.stdout + t.stderr).strip().splitlines()[-1:]}")
             os.makedirs(f"{o.out}/logs/{c}", exist_ok=True)
             for f in ("namelist.input", "case.ini", "translate.log"):
-                shutil.copy(os.path.join(R, f), f"{o.out}/logs/{c}/{reg}.{f}")
+                if os.path.exists(os.path.join(R, f)):
+                    shutil.copy(os.path.join(R, f), f"{o.out}/logs/{c}/{reg}.{f}")
+        preread(b)
         log(o, f"{c}: prepared ({desc})")
     json.dump(info, open(o.out + "/cases.json", "w"), indent=1)
     return info
+
+
+def preread(d):
+    """Reads every input file of a run directory once (the page cache: the first timed run reads them as the others)."""
+    for f in os.listdir(d):
+        p = os.path.join(d, f)
+        if os.path.isfile(p) and not SKIP.match(f):
+            with open(p, "rb") as fh:
+                while fh.read(1 << 24):
+                    pass
 
 
 def cases_info(o):
@@ -328,8 +372,23 @@ def topology():
     return CORES
 
 
+BIND_OK = None
+
+
+def bind_ok():
+    """Whether this mpiexec (MPICH's Hydra) accepts -bind-to: probed once (an MPI without it runs unbound)."""
+    global BIND_OK
+    if BIND_OK is None:
+        try:
+            BIND_OK = subprocess.run("mpiexec -n 1 -bind-to core:1 true", shell=True, capture_output=True,
+                                     timeout=60).returncode == 0
+        except subprocess.TimeoutExpired:
+            BIND_OK = False
+    return BIND_OK
+
+
 def bind(n, pinned=True):
-    if not pinned or not shutil.which("mpiexec"):
+    if not pinned or not shutil.which("mpiexec") or not bind_ok():
         return ""
     k = topology() // n
     return f"-bind-to core:{k}" if k >= 1 else "-bind-to hwthread"
@@ -339,8 +398,10 @@ RUN_ID = [0]
 
 
 def new_id(o, tag):
-    RUN_ID[0] += 1
-    return f"{time.strftime('%H%M%S')}_{RUN_ID[0]:05d}_{tag}"
+    with LOCK:
+        RUN_ID[0] += 1
+        n = RUN_ID[0]
+    return f"{time.strftime('%H%M%S')}_{n:05d}_{tag}"
 
 
 def wrf_job(o, c, regime, prec, layout, rid, pinned=True):
@@ -361,8 +422,8 @@ def wrf_job(o, c, regime, prec, layout, rid, pinned=True):
                 os.remove(f"{R}/{f}")
                 os.symlink(os.path.realpath(f"{run}/{f}"), f"{R}/{f}")
     env = dict(OMP_NUM_THREADS=t, OMP_STACKSIZE="512M")
-    if m.group(1) == "sm" and pinned:
-        env.update(OMP_PROC_BIND="close", OMP_PLACES="cores")
+    if m.group(1) == "sm" and pinned:  # one place per core while the ranks' threads fit the cores, else per thread
+        env.update(OMP_PROC_BIND="close", OMP_PLACES="cores" if n * t <= topology() else "threads")
     cmd = f"ulimit -s unlimited; exec mpiexec -n {n} {bind(n, pinned)} ./wrf.exe"
     return dict(id=rid, cwd=R, cmd=cmd, env=env, log=R + "/wrf.log", timeout=6 * 3600, ranks=n, threads=t), None
 
@@ -380,8 +441,9 @@ def cpp_job(o, c, regime, build, rid, threads, kind, warm=False, env_extra=None,
            f"--set output.diag_interval=1000000")
     job = dict(id=rid, cwd=R, cmd=cmd, env=env, log=os.path.join(R, f"{rid}.log"), timeout=6 * 3600, out=out,
                threads=threads)
-    if kind == "gpu":
-        job.update(telemetry=True, csv=os.path.join(R, f"{rid}.gpu.csv"), pause=o.pause, pre_idle=1.5)
+    if kind == "gpu":  # the steady window of the energy: domain 1's first to last "Timing for main" line
+        job.update(telemetry=True, csv=os.path.join(R, f"{rid}.gpu.csv"), pause=o.pause, pre_idle=1.5,
+                   cool_max=o.cool_max, cool_delta=o.cool_delta, stamp=r"Timing for main: .* on domain +1:")
     return job
 
 
@@ -429,9 +491,13 @@ def finish(o, c, res, rec, kind, keep_out=False):
         p = res.get("log", "")
         text = open(p, errors="replace").read() if os.path.exists(p) else ""
         ok = res.get("exit") == 0 and "cppwrf: done" in text
-    tm = bench_parse.parse(text, "wrf" if kind == "wrf" else "cppwrf", res.get("wall"))
-    rec.update({k: res.get(k) for k in ("id", "exit", "wall", "t0", "t1", "load", "cpu_mhz", "rapl_j", "gpu", "cmd",
-                                        "env", "error") if k in res})
+    # the CUDA builds' steps overlap the host (CUDA graphs, bench_parse.py --overlap); a nested run waits inside
+    # domain 1's first step (the nest's frame at t = 0), so its step 1 holds its own device work
+    overlap = kind == "gpu" and len(rec.get("grid") or []) == 1
+    tm = bench_parse.parse(text, "wrf" if kind == "wrf" else "cppwrf", res.get("wall"), overlap)
+    rec.update({k: res.get(k) for k in ("id", "exit", "wall", "t0", "t1", "load", "cpu_mhz", "cpu_mhz_run", "cpu_share",
+                                        "clock_step_s", "cool", "stamps", "rapl_j", "gpu", "cmd", "env", "error")
+                if k in res})
     rec.update(ok=ok and tm.get("ok", False), timing=tm)
     mem = re.findall(r"cppwrf: device memory ([^:]*): ([0-9]+) MiB used", text)
     if mem:
@@ -462,12 +528,12 @@ def finish(o, c, res, rec, kind, keep_out=False):
 
 
 def run_model(o, c, phase, model, regime, block=None, warm=False, layout=None, threads=None, kind=None, build=None,
-              keep_out=False, pinned=True, env_extra=None, tag=None):
+              keep_out=False, pinned=True, env_extra=None, tag=None, extra=None):
     kind, build = (kind, build) if kind else MODELS[model]
     info = cases_info(o)[c]
     rid = new_id(o, f"{c}_{tag or model}_{regime}")
     rec = dict(phase=phase, case=c, model=tag or model, build=build, kind=kind, regime=regime, block=block, warmup=warm,
-               sim_seconds=info[regime]["seconds"], grid=info[regime]["grid"])
+               sim_seconds=info[regime]["seconds"], grid=info[regime]["grid"], **(extra or {}))
     if kind == "wrf":
         job, why = wrf_job(o, c, regime, build, layout, rid, pinned)
         rec["layout"] = layout
@@ -486,8 +552,43 @@ def run_model(o, c, phase, model, regime, block=None, warm=False, layout=None, t
     return rec, (res["cwd"] if kind == "wrf" else job.get("out"))
 
 
+# ---- the order of the runs
+def williams(n):
+    """A Williams design for n treatments: rows in which every treatment takes every position and immediately follows
+    every other treatment equally often (n rows for even n, 2 n for odd n)."""
+    first, lo, hi = [0], 1, n - 1
+    while len(first) < n:
+        first.append(lo)
+        lo += 1
+        if len(first) < n:
+            first.append(hi)
+            hi -= 1
+    rows = [[(x + i) % n for x in first] for i in range(n)]
+    if n % 2:
+        rows += [list(reversed(r)) for r in rows]
+    return rows
+
+
+def run_order(models, k, ci, ncases, present=None):
+    """The models of block k of case number ci in the order of row (k ncases + ci) of a Williams design over
+    `models` (the regime's full list); models not in `present` are left out of that block. Over the blocks and
+    cases of a regime every model runs first and right after every other model."""
+    rows = williams(len(models))
+    row = rows[(k * ncases + ci) % len(rows)]
+    seq = [models[i] for i in row]
+    return [m for m in seq if present is None or m in present]
+
+
+def best_steady(rec):
+    t = rec.get("timing") or {}
+    return t.get("step_s")
+
+
 # ---- screening
 def screen(o):
+    """WRF's layouts and CPPWRF CPU's thread counts, history off, screen_min simulated minutes: one warm-up run of
+    each model at the first layout (not counted), then screen_reps rounds, each over every layout in a rotated order;
+    the layout with the smallest median seconds per step (steady) is chosen."""
     info = cases_info(o)
     best = load_best(o)
     for c in o.cases:
@@ -496,28 +597,37 @@ def screen(o):
         wrfm = [m for m in o.models if MODELS[m][0] == "wrf"]
         if wrfm and not o.layout:
             res = {}
+            for m in wrfm:
+                run_model(o, c, "screen", m, "screen", block=-1, warm=True, layout=o.layouts[0])
             for rep in range(o.screen_reps):
                 lays = o.layouts[rep % len(o.layouts):] + o.layouts[:rep % len(o.layouts)]
+                if rep % 2:
+                    lays = lays[::-1]
                 for lay in lays:
-                    for m in wrfm:
+                    for m in (wrfm if (rep + o.layouts.index(lay)) % 2 == 0 else wrfm[::-1]):
                         rec, _ = run_model(o, c, "screen", m, "screen", block=rep, layout=lay)
-                        if rec.get("ok"):
-                            res.setdefault((m, lay), []).append(rec["timing"]["stepping"])
+                        if rec.get("ok") and best_steady(rec):
+                            res.setdefault((m, lay), []).append(best_steady(rec))
             for m in wrfm:
-                cand = [(sorted(v)[len(v) // 2], lay) for (mm, lay), v in res.items() if mm == m]
+                cand = [(statistics.median(v), lay) for (mm, lay), v in res.items() if mm == m]
                 if cand:
                     best[f"{c}:{m}"] = min(cand)[1]
-                    log(o, f"{c} {m}: fastest layout {best[f'{c}:{m}']} ({min(cand)[0]:.2f} s per screened run)")
+                    log(o, f"{c} {m}: fastest layout {best[f'{c}:{m}']} ({min(cand)[0]:.4f} s per step, median of "
+                        f"the screened runs)")
         elif wrfm:
             for m in wrfm:
                 best[f"{c}:{m}"] = o.layout
         if "cpu_fp64" in o.models:
-            cand = []
-            for t in sorted({min(topology(), o.np), o.np}):
-                rec, _ = run_model(o, c, "screen", "cpu_fp64", "screen", block=0, threads=t)
-                if rec.get("ok"):
-                    cand.append((rec["timing"]["stepping"], t))
-            if cand:
+            res = {}
+            ths = sorted({min(topology(), o.np), o.np})
+            run_model(o, c, "screen", "cpu_fp64", "screen", block=-1, warm=True, threads=ths[0])
+            for rep in range(o.screen_reps):
+                for t in (ths if rep % 2 == 0 else ths[::-1]):
+                    rec, _ = run_model(o, c, "screen", "cpu_fp64", "screen", block=rep, threads=t)
+                    if rec.get("ok") and best_steady(rec):
+                        res.setdefault(t, []).append(best_steady(rec))
+            if res:
+                cand = [(statistics.median(v), t) for t, v in res.items()]
                 best[f"{c}:cpu_fp64"] = min(cand)[1]
                 log(o, f"{c} cpu_fp64: fastest thread count {min(cand)[1]}")
         json.dump(best, open(o.out + "/best.json", "w"), indent=1)
@@ -531,35 +641,40 @@ def load_best(o):
 
 # ---- the timed blocks
 def timed(o):
+    """The warm-up (every model of every case once, warm_min simulated minutes, history off, not counted), the
+    history-off blocks and the history-on blocks; within a regime the order of block k of case number ci is row
+    (k ncases + ci) of a Williams design over the regime's models (run_order)."""
     info = cases_info(o)
     best = load_best(o)
     if any(MODELS[m][0] == "gpu" for m in o.models) and not gpu_ready(o):
         log(o, "the GPU side is not ready after 2 h: no GPU runs (--gpu none)")
         o.gpu = "none"
-    plan = [("off", o.warmup + o.reps, o.warmup), ("on", o.reps_on, 0)]
-    for regime, nblocks, nwarm in plan:
+    cs = [c for c in o.cases if info.get(c, {}).get("ok")]
+    on_models = [m for m in o.models if m != "cpu_fp64"] + (["gpu_fp32_nc0"] if o.nc0 and "gpu_fp32" in o.models
+                                                            else [])
+    plan = [("warm", o.models, 1 if o.warmup else 0, None), ("off", o.models, o.reps, "cpu"), ("on", on_models,
+                                                                                            o.reps_on, None)]
+    for regime, models, nblocks, limit in plan:
         for k in range(nblocks):
-            warm = k < nwarm
+            block = k if regime == "on" else k + 1 if regime == "off" else 0
             last_on = regime == "on" and k == nblocks - 1
-            for c in o.cases:
-                if not info.get(c, {}).get("ok"):
-                    continue
-                ms = [m for m in o.models if not (m == "cpu_fp64" and (regime == "on" or k < nwarm or
-                                                                         k >= nwarm + o.cpu_reps))]
-                if regime == "on" and o.nc0 and "gpu_fp32" in ms:
-                    ms.append("gpu_fp32_nc0")
-                r = k % max(1, len(ms))
-                for m in ms[r:] + ms[:r]:  # the order turns by one model each block
+            for ci, c in enumerate(cs):
+                present = [m for m in models if not (limit and m == "cpu_fp64" and k >= o.cpu_reps)]
+                order = run_order(models, k, ci, len(cs), present)
+                prev = None
+                for pos, m in enumerate(order):
+                    extra = dict(pos=pos, prev=prev, order=order)
+                    prev = m
                     if m == "gpu_fp32_nc0":
-                        run_model(o, c, "timed", "gpu_fp32", regime, block=k, warm=warm, tag="gpu_fp32_nc0",
-                                  env_extra=dict(CPPWRF_NC_THREADS=0))
+                        run_model(o, c, "timed", "gpu_fp32", regime, block=block, tag="gpu_fp32_nc0",
+                                  env_extra=dict(CPPWRF_NC_THREADS=0), extra=extra)
                         continue
                     kind = MODELS[m][0]
                     lay = best.get(f"{c}:{m}", o.layout or "dm24") if kind == "wrf" else None
                     th = best.get(f"{c}:cpu_fp64") if kind == "cpu" else None
                     keep = last_on and m in ("wrf_r4", "wrf_r4t", "wrf_r8", "gpu_fp32", "gpu_fp32id", "gpu_fp64")
-                    rec, out = run_model(o, c, "timed", m, regime, block=k, warm=warm, layout=lay, threads=th,
-                                         keep_out=keep)
+                    rec, out = run_model(o, c, "timed", m, regime, block=block, warm=regime == "warm", layout=lay,
+                                         threads=th, keep_out=keep, extra=extra)
                     if keep and rec.get("ok"):
                         keep_output(o, c, m, out)
 
@@ -589,7 +704,6 @@ def proof(o):
             jobs.append((est, c, p, kind, build, 1 if kind == "wrf" else o.proof_threads))
     jobs.sort(reverse=True)  # the longest first
     free, running = o.np, []
-    import threading
     lock = threading.Lock()
 
     def work(c, p, kind, build, ncpu):
@@ -643,15 +757,17 @@ def verify(o):
     sys.path.insert(0, o.src + "/tests/verify")
     import exact
     info = cases_info(o)
-    exact_pairs = [  # (A, B, what, global attributes compared)
-        ("gpu_fp64", "cpu_fp64", "CPPWRF GPU FP64 vs CPPWRF CPU FP64", True),
+    exact_pairs = [  # (A, B, what): every variable, frame and attribute; the global attributes but TITLE
+        ("gpu_fp64", "cpu_fp64", "CPPWRF GPU FP64 vs CPPWRF CPU FP64"),
         ("cpu_fp64_hwlog", "wrf_r8_dm1", "CPPWRF CPU FP64 (this CPU's libmvec log) vs WRF real*8 in one process "
-         "(this runtime)", False),
+         "(this runtime)"),
+        ("cpu_fp64", "cpu_fp64_hwlog", "CPPWRF CPU FP64 (Intel's libmvec log, the default) vs CPPWRF CPU FP64 (this "
+         "CPU's log): the two builds differ in the vector log and log10 only; identical on Intel"),
         ("cpu_fp64", "wrf_r8_dm1", "CPPWRF CPU FP64 (Intel's libmvec log, the default) vs WRF real*8 in one process "
-         "(this runtime; identical on Intel, differs on AMD by the vector log, docs/STATUS.md)", False),
-        ("gpu_fp32id", "cpu_fp32", "CPPWRF GPU FP32 identity vs CPPWRF CPU FP32", True),
+         "(this runtime; identical on Intel, differs on AMD by the vector log, docs/STATUS.md)"),
+        ("gpu_fp32id", "cpu_fp32", "CPPWRF GPU FP32 identity vs CPPWRF CPU FP32"),
         ("cpu_fp32", "wrf_r4_dm1", "CPPWRF CPU FP32 vs WRF real*4 in one process (this runtime; informative on AMD, "
-         "see PROTOCOL.md)", False),
+         "see PROTOCOL.md)"),
     ]
     acc_pairs = [("gpu_fp32", "gpu_fp64", "fp32-r8"), ("wrf_r4_dm1", "gpu_fp64", "r4-r8"),
                  ("gpu_fp32id", "gpu_fp64", "fp32id-r8"), ("wrf_r4", "gpu_fp64", "r4best-r8"),
@@ -662,7 +778,7 @@ def verify(o):
         K = os.path.join(o.root, "keep", c)
         nd = len(info[c]["on"]["grid"])
         doms = [f"d{i:02d}" for i in range(1, nd + 1)]
-        for a, b, what, ga in exact_pairs:
+        for a, b, what in exact_pairs:
             if not (os.path.isdir(f"{K}/{a}") and os.path.isdir(f"{K}/{b}")):
                 continue
             rec = dict(kind="exact", case=c, a=a, b=b, what=what, domains={})
@@ -672,8 +788,10 @@ def verify(o):
                     rec["domains"][d] = dict(error=f"no files ({len(fa)} / {len(fb)})")
                     continue
                 try:
-                    bad, n = exact.compare_stream(fa, fb, global_atts=ga)
-                    rec["domains"][d] = dict(frames=n, identical=not bad, differ={k: str(v)[:200] for k, v in bad.items()},
+                    bad, n = exact.compare_stream(fa, fb, global_atts=True)
+                    rec["domains"][d] = dict(frames=n, identical=not bad,
+                                             values_identical=not [k for k in bad if k != "(metadata)"],
+                                             differ={k: str(v)[:200] for k, v in bad.items()},
                                              sha256_a=sha_list(fa), sha256_b=sha_list(fb))
                 except Exception as e:  # noqa: BLE001 - a comparison that fails is a result line
                     rec["domains"][d] = dict(error=f"{type(e).__name__}: {e}")
@@ -688,6 +806,9 @@ def verify(o):
             if not (os.path.isdir(f"{K}/{a}") and os.path.isdir(f"{K}/{b}")):
                 continue
             for d in doms:
+                fout = f"{acc}/{c}_{d}_{pair}.jsonl"
+                if os.path.exists(fout):  # compare appends: a rerun of verify starts the file again
+                    os.remove(fout)
                 r = subprocess.run([sys.executable, o.src + "/tools/verify/fp32_accuracy.py", "compare", f"{K}/{a}",
                                     f"{K}/{b}", "--domain", d, "--case", c, "--pair", pair, "--out",
                                     f"{acc}/{c}_{d}_{pair}.jsonl"], capture_output=True, text=True)
@@ -767,10 +888,17 @@ FRAME_S = {  # seconds per history frame with history on (docs/PERF.md: wall on 
 }
 
 
+COOL_S = 30  # the estimate's cool-down after a GPU run that follows a GPU run (the wait ends at idle + 5 C, at most 90 s)
+
+
 def plan(o):
     """The runs and a session estimate from the G4 times of docs/PERF.md (EST, FRAME_S): a guide, not a promise."""
     tot, lines, proof_long, proof_cpu = 0.0, [], 0.0, 0.0
     nwrf = sum(1 for m in o.models if MODELS[m][0] == "wrf")
+    on_models = [m for m in o.models if m != "cpu_fp64"] + (["gpu_fp32_nc0"] if o.nc0 and "gpu_fp32" in o.models
+                                                            else [])
+    gpu = lambda m: m.startswith("gpu")  # noqa: E731
+    cs = [c for c in o.cases if EST.get(c)]
     for c in o.cases:
         base, length, sets, desc = o.case_defs[c]
         h = length_s(length) / 3600
@@ -778,19 +906,31 @@ def plan(o):
         if not e:
             lines.append(f"{c}: {desc}; no estimate")
             continue
+        ci = cs.index(c)
+        e = dict(e, gpu_fp32_nc0=e["gpu_fp32"])
+        hs, hw = min(h, o.screen_min / 60), min(h, o.warm_min / 60)
+        run = lambda m, hh: e[m] * hh + e["init"] + (o.pause + 2 if gpu(m) else 0)  # noqa: E731
         lay = 0 if o.layout else len(o.layouts) * o.screen_reps
-        s_screen = lay * 1.3 * sum(e[m] + e["init"] for m in o.models if MODELS[m][0] == "wrf")
+        n_screen = (lay + (1 if lay else 0)) * nwrf
+        s_screen = (lay + (1 if lay else 0)) * sum(1.3 * e[m] * hs + e["init"] for m in o.models if MODELS[m][0] == "wrf")
         if "cpu_fp64" in o.models:
-            s_screen += 2 * (1.2 * e["cpu_fp64"] + e["init"])
-        noff = o.warmup + o.reps
-        per = {m: e[m] * h + e["init"] + (o.pause + 2 if MODELS[m][0] == "gpu" else 0) for m in o.models}
+            nt = len({min(G4_VCPUS // 2, o.np), o.np})
+            s_screen += (1 + nt * o.screen_reps) * (1.2 * e["cpu_fp64"] * hs + e["init"])
+            n_screen += 1 + nt * o.screen_reps
+        s_warm = sum(run(m, hw) for m in o.models) if o.warmup else 0
         frames = h * 60 / o.hist_min + 1
-        s_off = sum(per[m] * noff for m in o.models if m != "cpu_fp64") + per.get("cpu_fp64", 0) * o.cpu_reps
-        s_on = sum((per[m] + FRAME_S[c].get(m, 0) * frames) * o.reps_on for m in o.models if m != "cpu_fp64")
-        if o.nc0 and "gpu_fp32" in o.models:
-            s_on += (per["gpu_fp32"] + 3 * FRAME_S[c]["gpu_fp32"] * frames) * o.reps_on
-        runs = noff * sum(1 for m in o.models if m != "cpu_fp64") + o.reps_on * sum(1 for m in o.models if m != "cpu_fp64")
-        runs += o.cpu_reps if "cpu_fp64" in o.models else 0
+        s_off = sum(run(m, h) * (o.cpu_reps if m == "cpu_fp64" else o.reps) for m in o.models)
+        s_on = sum((run(m, h) + FRAME_S[c].get("gpu_fp32" if m == "gpu_fp32_nc0" else m, 0) * frames *
+                    (3 if m == "gpu_fp32_nc0" else 1)) * o.reps_on for m in on_models)
+        cool = 0
+        for regime, models, nb in (("off", o.models, o.reps), ("on", on_models, o.reps_on)):
+            for k in range(nb):
+                pres = [m for m in models if not (regime == "off" and m == "cpu_fp64" and k >= o.cpu_reps)]
+                order = run_order(models, k, ci, len(cs), pres)
+                cool += sum(1 for x, y in zip(order, order[1:]) if gpu(x) and gpu(y))
+        s_cool = cool * max(0, COOL_S - o.pause)
+        runs = len(o.models) * (1 if o.warmup else 0) + sum(o.cpu_reps if m == "cpu_fp64" else o.reps for m in o.models)
+        runs += o.reps_on * len(on_models)
         for p in o.proof:
             if PROOF[p][0] == "wrf":
                 proof_long = max(proof_long, e.get(p, 100) * h)
@@ -798,14 +938,17 @@ def plan(o):
                 t = e.get(p, e["cpu_fp64"]) * h * G4_VCPUS / o.proof_threads * 0.7
                 proof_cpu += t * o.proof_threads
                 proof_long = max(proof_long, t)
-        tot += s_screen + s_off + s_on
-        lines.append(f"{c}: {desc}\n    {lay * nwrf} screening runs ({s_screen / 60:.0f} min), {runs} timed runs: history "
-                     f"off {s_off / 60:.0f} min ({o.warmup} warm-up + {o.reps} blocks), history on {s_on / 60:.0f} min "
-                     f"({o.reps_on} blocks)")
+        tot += s_screen + s_warm + s_off + s_on + s_cool
+        lines.append(f"{c}: {desc}\n    {n_screen} screening runs ({o.screen_min} min, {s_screen / 60:.0f} min), "
+                     f"{runs} timed runs: warm-up {s_warm / 60:.0f} min ({o.warm_min} min each), history off "
+                     f"{s_off / 60:.0f} min ({o.reps} blocks), history on {s_on / 60:.0f} min ({o.reps_on} blocks), "
+                     f"{cool} GPU cool-downs ({s_cool / 60:.0f} min)")
     s_proof = max(proof_long, proof_cpu / (G4_VCPUS - 8))
     setup = 1800  # the b30ec5b session: WRF's four builds 13 min, CUDA builds 1-2 min each, data and WPS
-    lines.append(f"G4 estimate: screening and timed blocks {tot / 3600:.1f} h, proof runs {s_proof / 3600:.1f} h (in "
-                 f"parallel on the CPU), set-up and builds {setup / 3600:.1f} h, comparisons and report 0.3 h: "
+    if "wrf_r4t" in o.models:
+        setup += 420  # the tuned dmpar and dm+sm builds
+    lines.append(f"G4 estimate: screening, warm-up and timed blocks {tot / 3600:.1f} h, proof runs {s_proof / 3600:.1f} h "
+                 f"(after the timed blocks, several at a time on the CPU), set-up and builds {setup / 3600:.1f} h, comparisons and report 0.3 h: "
                  f"{(tot + s_proof + setup) / 3600 + 0.3:.1f} h")
     print("\n".join(lines))
 
@@ -844,7 +987,8 @@ def make_large(argv):
     open(R + "/namelist.input", "w").write(nl)
     os.symlink(wrf + "/WRF-r8/main/real.exe", R + "/real.exe")
     t0 = time.monotonic()
-    rc = subprocess.run(f"ulimit -s unlimited; exec mpiexec -n 16 {bind(16)} ./real.exe > real.log 2>&1", shell=True,
+    n = max(1, min(16, topology()))
+    rc = subprocess.run(f"ulimit -s unlimited; exec mpiexec -n {n} {bind(n)} ./real.exe > real.log 2>&1", shell=True,
                         cwd=R).returncode
     text = open(R + "/rsl.error.0000", errors="replace").read() if os.path.exists(R + "/rsl.error.0000") else ""
     ok = rc == 0 and "SUCCESS COMPLETE REAL_EM" in text and os.path.exists(R + "/wrfbdy_d01")
