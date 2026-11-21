@@ -68,6 +68,10 @@ class WrfHistory {
   // start_domain of a domain whose nest opened during the run (med_nest_initial: start_domain(nest), then
   // start_domain(parent)): start_em's slope arrays and laplacian again from the blended / fed-back terrain
   void restart_slopes();
+  // med_nest_initial's start_domain(parent) after the feedback (start_em.F:1620-1621, topo_wind = 0, not a
+  // restart): CTOPO = CTOPO2 = 1 again on a parent without column physics (the fed-back average of ones is
+  // 1 + 1 ulp in double precision); the parent's frames before its first step's feedback hold 1, as WRF's
+  void start_domain_ctopo();
   // med_nest_initial's start_domain(parent) after the feedback at the parent's first step (itimestep = 0:
   // start_em runs phy_init again, mediation_integrate.F:856, start_em.F:246-247, 1033): landuse_init's fields of
   // the history (THC; without column physics also ALBBCK, ALBEDO, ZNT, Z0, EMISS, EMBCK, MAVAIL) from the fed-back

@@ -7,7 +7,10 @@
 //      'Warning: too many input landuse types' (module_sf_noahlsm.F:2436-2438), as wrf.exe does on MODIS input
 //      whose lake category 21 stays land without ISLAKE (VEGPARM.TBL lists 20 MODIS categories);
 //  (b) the Kain-Fritsch codes (QG(1) < 0, ISTOP = 1) raised in a kernel stop with WRF's messages;
-//  (c) a physical snowpack raises nothing, and fatal_check clears the flag after a stop.
+//  (c) a physical snowpack raises nothing, and fatal_check clears the flag after a stop;
+//  (d) of several codes raised in one call the smallest stops the run, whatever the threads' order (an atomic
+//      minimum): a large domain whose last column raises the smallest code; a decomposed run (tiles in this process)
+//      stops every worker with the smallest code any worker raised (tile::hooks.first_code), as one patch does.
 // The kernels run on the backend of the build (CPU or CUDA device flag).
 #include <cstdio>
 #include <cstring>
@@ -21,6 +24,7 @@
 #include "core/backend.hpp"
 #include "core/field.hpp"
 #include "core/precision.hpp"
+#include "core/tiles.hpp"
 #include "phys/driver/noah_ice.hpp"
 #include "phys/lsm_noah/noah.hpp"
 #include "phys/lsm_noah/noah_tables.hpp"
@@ -79,6 +83,12 @@ struct KSeaice {
 struct KRaise {
   int code;
   CPPWRF_HD void operator()(int, int) const { raise_fatal(code); }
+};
+
+// every column raises 9 + (i + j) % 5, the last one (nx - 1, ny - 1) 3
+struct KRaiseMany {
+  int nx, ny;
+  CPPWRF_HD void operator()(int i, int j) const { raise_fatal(i == nx - 1 && j == ny - 1 ? 3 : 9 + (i + j) % 5); }
 };
 
 // Noah land SFLX on one column: every real view points into a zeroed scratch block except SNEQV and
@@ -186,6 +196,31 @@ int main() {
   CHECK(stop_code([] { column_for(one, KGlacial{real(0.2), real(0.8)}); }) == 0, "glacial ok");
   CHECK(stop_code([] { column_for(one, KSeaice{real(0.2), real(0.8)}); }) == 0, "sea ice ok");
   CHECK(stop_code([] {}) == 0, "flag cleared");
+  // (d) the smallest of the codes raised in one call, on every run of it
+  for (int rep = 0; rep < 20; ++rep)
+    CHECK(stop_code([] { column_for(Range2D{0, 97, 0, 89}, KRaiseMany{97, 89}); }) == 3, "smallest code (rep %d)", rep);
+  CHECK(stop_code([] {}) == 0, "flag cleared after the smallest code");
+  {  // 2 x 2 tiles: worker t raises codes[t]; every worker stops with the smallest, 2 (worker 2's)
+    tile::Options o;
+    o.px = 2;
+    o.py = 2;
+    for (int rep = 0; rep < 10; ++rep) {
+      const int codes[4] = {7, 5, 2, 9};
+      std::vector<int> got(4, -1);
+      tile::run(o, [&](int t) {
+        got[std::size_t(t)] = stop_code([&] { raise_fatal(codes[t]); });
+        return 0;
+      });
+      for (int t = 0; t < 4; ++t) CHECK(got[std::size_t(t)] == 2, "tile %d stopped with %d (rep %d)", t, got[std::size_t(t)], rep);
+      std::vector<int> none(4, -1);  // no code raised: no worker stops, the flags are clear
+      tile::run(o, [&](int t) {
+        none[std::size_t(t)] = stop_code([] {});
+        return 0;
+      });
+      for (int t = 0; t < 4; ++t) CHECK(none[std::size_t(t)] == 0, "tile %d without a code (rep %d)", t, rep);
+    }
+  }
+  CHECK(stop_code([] {}) == 0, "flag cleared after the tiles");
   std::printf("%s (%d failures)\n", fails ? "FAILED" : "OK", fails);
   return fails ? 1 : 0;
 }

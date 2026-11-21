@@ -845,6 +845,7 @@ void set_hooks(bool multi) {
   hooks.wrap = &wrap_hook;
   hooks.sum = &sum_hook;
   hooks.line = &line_hook;
+  hooks.first_code = &first_code;
 }
 
 }  // namespace

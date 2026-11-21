@@ -429,6 +429,9 @@ struct Hooks {
   // to different workers (a periodic direction with several patches along it; collective). false: the caller
   // copies the line itself.
   bool (*line)(const void* data, int axis, int dst, int src, int t0, int t1) = nullptr;
+  // the smallest non-zero fatal code over the workers (collective; every worker calls fatal_check at the same
+  // points); 0: none
+  int (*first_code)(int code) = nullptr;
 };
 inline Hooks hooks;
 // halo exchange of the fields whose allocations hold these pointers (views' data); see tile::exchange (field.hpp)
@@ -812,10 +815,11 @@ template <class... K> void parallel_fused(const Part<K>&... parts) {
 #endif
 
 // WRF's wrf_error_fatal inside a physics kernel. A kernel cannot stop the run: it records the
-// condition (raise_fatal; the first code wins, atomic on host and device) and the host calls
-// fatal_check() right after the physics call, which prints WRF's FATAL block and throws FatalError.
-// The device flag is local to each CUDA translation unit: call fatal_check() in the file that
-// launches the kernel.
+// condition (raise_fatal: an atomic minimum on host and device, so that of several codes raised in one call the
+// smallest is reported whatever the order of the threads; a decomposed run takes the smallest over its workers,
+// tile::hooks.first_code) and the host calls fatal_check() right after the physics call, which prints WRF's FATAL
+// block and throws FatalError. The device flag is local to each CUDA translation unit: call fatal_check() in the
+// file that launches the kernel.
 enum FatalCode : int {
   kFatalNone = 0,
   kFatalSnowDensity = 1,  // Noah land / sea ice / glacial ice: SNEQV / SNOWH > 1
@@ -852,12 +856,20 @@ namespace detail {
 static __device__ int fatal_code_dev;
 }
 #endif
+// the flag becomes the smallest non-zero code raised (codes are positive; 0: none)
 CPPWRF_HD inline void raise_fatal(int code) {
 #if defined(__CUDA_ARCH__)
-  atomicCAS(&detail::fatal_code_dev, 0, code);
+  int old = *static_cast<volatile int*>(&detail::fatal_code_dev);
+  while (old == 0 || code < old) {
+    const int seen = atomicCAS(&detail::fatal_code_dev, old, code);
+    if (seen == old) break;
+    old = seen;
+  }
 #else
-  int expected = 0;
-  __atomic_compare_exchange_n(&fatal_code_host, &expected, code, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED);
+  int old = __atomic_load_n(&fatal_code_host, __ATOMIC_RELAXED);
+  while ((old == 0 || code < old) &&
+         !__atomic_compare_exchange_n(&fatal_code_host, &old, code, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+  }
 #endif
 }
 #if defined(CPPWRF_USE_CUDA) && defined(__CUDACC__)
@@ -878,7 +890,12 @@ static inline void fatal_check() {
   }
   detail::fatal_flush();
 #endif
-  int code = __atomic_exchange_n(&fatal_code_host, 0, __ATOMIC_RELAXED);
+  // A decomposed run (tile::hooks.first_code): the flags are read, the smallest code over the workers is taken,
+  // and only then cleared. The flags are shared by the tiles of one process (and of one device), never lowered
+  // by a read, and every worker reads them after its own kernels and before the collective: every worker gets
+  // the smallest code raised by any worker in this call. Nothing raised: nothing to clear.
+  int code = tile::hooks.first_code ? __atomic_load_n(&fatal_code_host, __ATOMIC_RELAXED)
+                                    : __atomic_exchange_n(&fatal_code_host, 0, __ATOMIC_RELAXED);
 #if defined(CPPWRF_USE_CUDA) && defined(__CUDACC__)
   int dcode = 0;
   const int zero = 0;
@@ -886,11 +903,23 @@ static inline void fatal_check() {
   cudaMemcpyFromSymbolAsync(&dcode, detail::fatal_code_dev, sizeof(int), 0, cudaMemcpyDeviceToHost, s);
   cudaStreamSynchronize(s);
   if (dcode != 0) {
-    cudaMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, cudaMemcpyHostToDevice, s);
-    cudaStreamSynchronize(s);
-    if (code == 0) code = dcode;
+    if (!tile::hooks.first_code) {
+      cudaMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, cudaMemcpyHostToDevice, s);
+      cudaStreamSynchronize(s);
+    }
+    if (code == 0 || dcode < code) code = dcode;
   }
 #endif
+  if (tile::hooks.first_code) {
+    code = tile::hooks.first_code(code);
+    if (code != 0) {
+      __atomic_store_n(&fatal_code_host, 0, __ATOMIC_RELAXED);
+#if defined(CPPWRF_USE_CUDA) && defined(__CUDACC__)
+      cudaMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, cudaMemcpyHostToDevice, s);
+      cudaStreamSynchronize(s);
+#endif
+    }
+  }
   if (code != 0) fatal_stop(code);
 }
 

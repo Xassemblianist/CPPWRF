@@ -13,6 +13,16 @@ resumes across versions from WRF's wrfrst files.
   not sold. Nothing else changes.
 
 ### Fixed
+- A two-way parent without column physics wrote CTOPO / CTOPO2 of its t = 0 frame from the initial feedback (1 + 1 ulp
+  in double precision at the 1064 fed-back points of N2) where WRF's start_domain(parent) resets them to 1
+  (start_em.F:1620-1621); visible only where an `iofields_filename` puts them in a history or auxiliary stream (the
+  Registry writes them to restart files only). N2 for 3 minutes with `+:h:0:ctopo,ctopo2`: both domains' wrfout
+  files identical to WRF r8's.
+- Fatal stops: of several codes raised in one physics call the smallest stops the run (an atomic minimum on host
+  and device), not the first thread's; a decomposed run (tiles, MPI ranks) takes the smallest over its workers at
+  each check (`tile::first_code`, which docs/MPI.md described but nothing called), so every worker count and layout
+  stops with the same code and message as one patch. A decomposed CUDA run reads each check at once. No other
+  result changes.
 - CPPWRF's own restart files (format version 6; version 5 files are refused) continue the uninterrupted run also in
   the alarms and attributes of the WRF files: a run resumed from `restart_<step>.nc` wrote START_DATE and
   WRF_ALARM_SECS_TIL_NEXT_RING_55 from the restart time instead of the start of the run that wrote the file (also
