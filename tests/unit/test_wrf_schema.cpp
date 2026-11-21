@@ -87,6 +87,14 @@ int main() {
     check(cons("physics_suite = 'bogus', " + ok) == "Unrecognized physics suite", "physics_suite 'bogus': fatal");
     check(cons("physics_suite = 'tropical', " + ok).empty() && cons("physics_suite = 'None', " + ok).empty(),
           "physics_suite tropical / None with explicit options: consistent");
+    // TRIM drops the trailing blanks only: ' conus' and 'co nus' are unknown, 'conus  ' is CONUS
+    check(cons("physics_suite = ' conus', " + ok) == "Unrecognized physics suite" &&
+              cons("physics_suite = 'co nus', " + ok) == "Unrecognized physics suite" &&
+              cons("physics_suite = 'conus  ', " + ok).empty(),
+          "physics_suite: leading and inner blanks fatal, trailing ones not");
+    check(cppwrf::wrf_io::physics_suite_option("'Tropical '", "cu_physics", -1) == 16 &&
+              cppwrf::wrf_io::physics_suite_option("' conus'", "cu_physics", -1) == -1,
+          "physics_suite_option: the suite after TRIM");
   }
   // module_check_a_mundo.F:1852-1890: cu_used / gwd_used when any domain uses the scheme; a nest without cumulus
   // or GWDO keeps the cumulus tendencies (restart) and the GWDO fields (history, restart)

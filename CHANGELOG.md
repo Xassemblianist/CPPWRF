@@ -57,6 +57,28 @@ resumes across versions from WRF's wrfrst files.
   work budget among the tiles as MPI ranks do (launch sizes only, the values do not change).
 - `CPPWRF_VM_DUMP` with `run.tiles` or MPI ranks stops with an error (it read past the patch's fields).
 - The unit tests link `${CMAKE_DL_LIBS}` (test_glibc_mathf's dlopen on glibc < 2.34).
+- A run resumed from CPPWRF's own restart file with another `restart.interval` kept the file's PrevRingTime with the
+  new interval (5 steps of 60 s with 3 min, resumed from the 5-min file with 1 min: a ring every step with -60 s to
+  the next one in the wrfrst files); the file now also records its interval, and another one sets the alarm as a run
+  resumed from WRF's file has it (RingTime = the restart time + WRF_ALARM_SECS_TIL_NEXT_RING_51, PrevRingTime = the
+  restart time). Another `phys.auxhist3_interval` with `output_diagnostics = 1` is refused there (CLWRF's sums, or the
+  means just finished, belong to the file's interval; resume from the wrfrst file instead). Tests restart_resume,
+  restart_alarm (resumed from the native file with 30 s and 0: the rings of WRF's rule).
+- A run resumed from wrfrst files wrote STEPRA from the namelist's `radt`, not `phys.radt` (and STEPFG without grid
+  nudging from the namelist's `fgdt`, not `fdda.fgdt`): the configuration's values where it has them, as ra_init /
+  fg_init (test restart_resume: `phys.radt = 2`, STEPRA 2).
+- The single-layer UCM with LCZ classes beyond URBPARM.TBL and FRC_URB2D 0 or missing (WPS without NUDAPT) stopped
+  with the generic urban input error before WRF's message; it now stops with WRF's ("USING 10 WUDAPT LCZ WITHOUT
+  URBPARM_LCZ.TBL") as for a given fraction.
+- `physics_suite`: TRIM drops trailing blanks only, so `' conus'` or `'co nus'` is "Unrecognized physics suite" as in
+  WRF (they were taken as CONUS); cppwrf_real checks the suite before it reads the physics options (an unknown suite
+  without `sf_surface_physics` stopped on `sf_surface_physics = -1`); the translator keeps a quoted value's leading
+  blanks (unit and translator tests).
+- `tools/wrf2cppwrf.py`: iofields_filename lines are split as WRF's get_fieldstr (an empty field swallows the next
+  `:`), the stream type of a line with a bad operation still counts, the stream id is read also on a line without a
+  field list (`+:i:++0`, `+:i::tsk`: WRF's read error), and only ASCII digits are digits (`²` crashed the translator)
+  (translator tests).
+- `run.tiles` with `--check`: the reference run counts among the processes sharing its GPU's work budget.
 
 ## 1.2.1 (2026-11-21)
 

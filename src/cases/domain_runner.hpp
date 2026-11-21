@@ -101,6 +101,7 @@ class DomainRunner {
   long run_start_step_ = 0;
   // CPPWRF's own restart file: the restart alarm's PrevRingTime and one-shot RingTime there (< 0: none)
   double native_rst_prev_ = -1.0, native_rst_ring_time_ = -1.0;
+  bool native_rst_iv_same_ = true;  // CPPWRF's own file: of a run with this restart interval
   int aux3_ring_at_start_ = -1;
   bool aux3_write_ = false;
   bool aux3_due(long n) const { return aux3_iv_ > 0 && n > aux3_ref_ && (n - aux3_ref_) % aux3_iv_ == 0; }

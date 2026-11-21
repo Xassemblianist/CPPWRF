@@ -339,6 +339,7 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   meta.scalars.emplace_back("AUX3_IV_CFG", double(aux3_cfg_iv_));
   meta.scalars.emplace_back("RST_PREV", rst_prev_);
   meta.scalars.emplace_back("RST_RING_TIME", rst_ring_time_);
+  meta.scalars.emplace_back("RST_IV_CFG", rst_iv_s_);
   meta.scalars.emplace_back("AUX4_FIRST_S", aux4_first_s_);
   meta.scalars.emplace_back("AUX4_READ", aux4_read_step_ == step ? 1.0 : 0.0);
   meta.scalars.emplace_back("AUX10_FIRST_S", aux10_first_s_);
@@ -608,13 +609,25 @@ void DomainRunner::load_restart_file(const std::string& path) {
     if (std::lround(meta.scalar("AUX3_IV_CFG", -1.0)) == aux3_cfg_iv_) {
       aux3_iv_ = std::lround(meta.scalar("AUX3_IV", double(aux3_iv_)));
       aux3_ref_ = std::lround(meta.scalar("AUX3_REF", double(aux3_ref_)));
+    } else if (m_.suite && m_.suite->options().output_diagnostics == 1) {
+      // CLWRF's sums (or the means and deviations of an interval just finished) belong to the file's interval: a run
+      // with another one would add to them (clwrf_output_calc's reinit / finish steps follow the new interval)
+      throw std::runtime_error(path + ": phys.auxhist3_interval differs from that of the run that wrote the file, "
+                               "with output_diagnostics = 1 (the CLWRF statistics of its interval): keep the interval "
+                               "or resume from the run's wrfrst file");
     } else {
       aux3_ref_ = native_run_start;
     }
     // the restart alarm as the run that wrote the file has it (its PrevRingTime, a pending one-shot RingTime of a
     // wrfrst resume): the resumed run rings where the uninterrupted one rings
-    native_rst_prev_ = meta.scalar("RST_PREV", double(meta.step) * g.dt);
-    native_rst_ring_time_ = meta.scalar("RST_RING_TIME", -1.0);
+    // A restart interval changed in this run's configuration (restart.* are not among the recorded options): the
+    // alarm as a run resumed from WRF's file has it (input_wrf: RingTime = the restart time +
+    // WRF_ALARM_SECS_TIL_NEXT_RING_51 of the file, PrevRingTime = the restart time)
+    native_rst_iv_same_ = std::abs(meta.scalar("RST_IV_CFG", rst_iv_s_) - rst_iv_s_) <= 1e-9 * std::max(1.0, rst_iv_s_);
+    if (native_rst_iv_same_) {
+      native_rst_prev_ = meta.scalar("RST_PREV", double(meta.step) * g.dt);
+      native_rst_ring_time_ = meta.scalar("RST_RING_TIME", -1.0);
+    }
     aux4_first_s_ = meta.scalar("AUX4_FIRST_S", aux4_first_s_);
     if (meta.scalar("AUX4_READ", 0.0) != 0.0) aux4_read_step_ = meta.step;
     aux10_first_s_ = meta.scalar("AUX10_FIRST_S", aux10_first_s_);
@@ -644,7 +657,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
         rst_ring_time_ = meta.time_sec + double(rsecs);
       }
     }
-    if (!wrf_file) rst_ring_time_ = native_rst_ring_time_;
+    if (!wrf_file && native_rst_iv_same_) rst_ring_time_ = native_rst_ring_time_;
   }
   if (m_.nsteps < start_step) {
     throw std::runtime_error("run.run_time (" + std::to_string(m_.run_time) + "s / step " + std::to_string(m_.nsteps) +
@@ -969,6 +982,7 @@ bool DomainRunner::start() {
   start_step = 0;
   run_start_step_ = 0;
   native_rst_prev_ = -1.0;
+  native_rst_iv_same_ = true;
 #ifdef CPPWRF_HAVE_NETCDF
   if (!restart_file.empty()) {
     load_restart_file(restart_file);

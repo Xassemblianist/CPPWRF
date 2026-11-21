@@ -198,6 +198,11 @@ int main(int argc, char** argv) {
         if (e != sc.entries().end() && e->second == "1" && vals.size() > 1)
           throw std::runtime_error("real: error while reading namelist " + grp + ": " + key + " takes one value");
       }
+    {  // setup_physics_suite stops on an unknown physics_suite before the options are set from it
+      WrfConfig c0(nl, sc.defaults(), 1, &sc.entries());
+      if (!cppwrf::wrf_io::physics_suite_known(c0.get("physics_suite")))
+        throw std::runtime_error("real: Unrecognized physics suite (check_a_mundo)");
+    }
     const RealOptions o1 = RealOptions::from_namelist(nl, sc, 1);
     if (o1.interval_seconds <= 0) throw std::runtime_error("real: namelist value for interval_seconds must be > 0");
     {  // verification tiers (io/option_tiers.hpp): options below verified need &cppwrf allow_unverified = .true.

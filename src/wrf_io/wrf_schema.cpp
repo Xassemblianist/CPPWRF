@@ -102,11 +102,35 @@ double WrfConfig::num(const std::string& name, int dom) const {
 
 bool WrfConfig::logical(const std::string& name, int dom) const { return is_true(get(name, dom)); }
 
+namespace {
+// setup_physics_suite's change_to_lower_case(TRIM(physics_suite)): the namelist value without its quotes (a doubled
+// quote is one), the trailing blanks dropped (leading and inner ones stay), lower case
+std::string physics_suite_name(const std::string& raw) {
+  std::string s = raw;
+  if (s.size() >= 2 && (s.front() == '\'' || s.front() == '"') && s.back() == s.front()) {
+    const char q = s.front();
+    std::string in;
+    for (std::size_t i = 1; i + 1 < s.size(); ++i) {
+      in += s[i];
+      if (s[i] == q && i + 2 < s.size() && s[i + 1] == q) ++i;
+    }
+    s = in;
+  }
+  while (!s.empty() && s.back() == ' ') s.pop_back();
+  for (char& ch : s)
+    if (ch >= 'A' && ch <= 'Z') ch = char(ch - 'A' + 'a');
+  return s;
+}
+}  // namespace
+
+bool physics_suite_known(const std::string& suite) {
+  const std::string t = physics_suite_name(suite);
+  return t == "none" || t == "conus" || t == "tropical";
+}
+
 int physics_suite_option(std::string suite, const std::string& option, int value) {
   if (value != -1) return value;
-  suite.erase(std::remove_if(suite.begin(), suite.end(), [](char ch) { return ch == '\'' || ch == '"' || ch == ' '; }),
-              suite.end());
-  suite = to_lower(suite);
+  suite = physics_suite_name(suite);
   static const std::map<std::string, std::map<std::string, int>> suites = {
       {"conus", {{"mp_physics", 8}, {"cu_physics", 6}, {"ra_lw_physics", 4}, {"ra_sw_physics", 4},
                  {"bl_pbl_physics", 2}, {"sf_sfclay_physics", 2}, {"sf_surface_physics", 2}}},
@@ -120,12 +144,8 @@ int physics_suite_option(std::string suite, const std::string& option, int value
 
 std::string physics_domain_consistency(const WrfConfig& c, int max_dom) {
   const std::string suite = c.get("physics_suite");
-  {  // setup_physics_suite (module_check_a_mundo.F:3143-3201): 'none', 'CONUS', 'tropical', else fatal
-    std::string t = suite;
-    t.erase(std::remove_if(t.begin(), t.end(), [](char ch) { return ch == '\'' || ch == '"' || ch == ' '; }), t.end());
-    t = to_lower(t);
-    if (t != "none" && t != "conus" && t != "tropical") return "Unrecognized physics suite";
-  }
+  // setup_physics_suite (module_check_a_mundo.F:3138-3201): 'none', 'CONUS', 'tropical', else fatal
+  if (!physics_suite_known(suite)) return "Unrecognized physics suite";
   auto opt = [&](const char* o, int id) {
     const int v = c.integer(o, id);
     return std::string(o) == "gwd_opt" ? v : physics_suite_option(suite, o, v);

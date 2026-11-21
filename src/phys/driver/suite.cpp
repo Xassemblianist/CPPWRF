@@ -906,14 +906,14 @@ struct KUrbanInit {
     utype(i, j) = ut;
     if (ut > 0) {
       // HGT_URB2D > 0: NUDAPT morphology (not ported); LP, LB, HGT, MH, STDH, LF are 0 otherwise (WrfHistory)
-      // a class beyond the table: WRF reads FRC_URB_TBL past its categories only when FRC_URB2D is not in (0, 1]
-      // (else phy_init stops on the LCZ classes, init_urban below)
-      const bool frc_ok = frc(i, j) > real(0) && frc(i, j) <= real(1.);
-      if (hgt(i, j) > real(0.) || (ut > icate && !frc_ok)) {
+      if (hgt(i, j) > real(0.)) {
         raise_fatal(kFatalUrbanInput);
         return;
       }
-      if (!frc_ok) frc(i, j) = frc_tbl[ut - 1];
+      // a class beyond the table: WRF reads FRC_URB_TBL past its categories when FRC_URB2D is not in (0, 1], and
+      // phy_init then stops on the classes beyond the table (init_urban below); the fraction is not used
+      const bool frc_ok = frc(i, j) > real(0) && frc(i, j) <= real(1.);
+      if (!frc_ok) frc(i, j) = ut <= icate ? frc_tbl[ut - 1] : real(0.);
     } else {
       frc(i, j) = real(0.);
     }
