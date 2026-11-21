@@ -13,7 +13,8 @@ General Public License for more details. You should have received a copy of the 
 Public License along with this program (file LICENSE). If not, see <https://www.gnu.org/licenses/>.
 
 Every source file carries the tag `SPDX-License-Identifier: GPL-3.0-or-later`. The notices below apply in
-addition to that licence to the parts of CPPWRF that are derived from other works.
+addition to that licence to the parts of CPPWRF that are derived from other works. The parts derived from RRTMG / RRTM (AER) and
+Noah-MP (UCAR) are an exception: see "Schemes inside WRF with their own terms" below.
 
 ## WRF
 
@@ -77,6 +78,14 @@ included in WRF.
 and, on scholarly works associated with it: "The Noah-MP modeling system was developed at the National Center for
 Atmospheric Research (NCAR) with collaborations from university partners. NCAR is sponsored by the United States
 National Science Foundation."
+
+**These parts are not under the GPL.** The terms above do not allow the AER and UCAR code, or works containing it,
+to be sold (AER: "as long as it is not sold"; UCAR: "You shall not sell, license or transfer for a fee the Software,
+or any work that in any manner contains the Software"), which the GPL does not allow a licence to require. The files
+derived from them (`src/phys/ra_rrtmg_lw`, `src/phys/ra_rrtmg_sw`, `src/phys/ra_rrtmg_common`, `data/rrtmg`,
+`src/phys/ra_rrtm_lw`, `src/phys/lsm_noahmp`) therefore remain under AER's and UCAR's terms, whatever their SPDX tag
+says, and so does any copy of CPPWRF that contains them: CPPWRF, as distributed here, may be used, modified and
+redistributed free of charge, but not sold. The rest of CPPWRF's own code is under the GPL as stated above.
 
 ## wrf-python
 

@@ -7,6 +7,11 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+### Documentation
+- NOTICE.md: the parts derived from RRTMG / RRTM (AER) and Noah-MP (UCAR) stay under their own terms, which do not
+  allow selling them or a work that contains them; a copy of CPPWRF with them may be redistributed free of charge,
+  not sold. Nothing else changes.
+
 ### Fixed
 - CPPWRF's own restart files (format version 6; version 5 files are refused) continue the uninterrupted run also in
   the alarms and attributes of the WRF files: a run resumed from `restart_<step>.nc` wrote START_DATE and
