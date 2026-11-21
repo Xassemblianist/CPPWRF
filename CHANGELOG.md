@@ -7,6 +7,65 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+## 1.2.1 (2026-11-21)
+
+### Added
+- CUDA builds with `CPPWRF_MPI`: a rank's device is chosen by its rank among the ranks of its node, not by its global
+  rank: `CPPWRF_RANK_DEVICES=d0,d1,...` gives node-local rank `r` device `d[r mod n]` (an entry that is not a device
+  number stops the run with an error); without it the ranks of a node spread over the visible devices
+  (`r mod count`); with one visible device nothing changes. Rank 0 prints the mapping unless every rank is on
+  device 0. The ranks of a node that share a device divide its work-buffer budget, and every rank sizes the column
+  physics' work buffer (and NSSL's row work space) for its own patch instead of the whole domain. Results unchanged
+  (test_rank_device; docs/MPI.md).
+
+### Fixed
+- Tiles (`run.tiles`) with the cumulus diagnostics (`cu_diag = 1`: Grell-Freitas, Grell-3D): convtrans_prep's
+  averaging counter (module_convtrans_prep.F's SAVE stepave_count) was one for the process, so the tile threads raced
+  on it and counted once per tile; at the end of an averaging period QC_CU / QI_CU / RAINCV_B took another divisor
+  than in the run without tiles (with cu_rad_feedback, RRTMG's clouds and all fields after it). It is now one per
+  tile thread, which gives the run without tiles (WRF's own numtiles > 1 counts once per tile; the references run one
+  tile). New suite case real_a05g_r8_fp64_cpu_1h_t2x2. MPI ranks were not affected.
+- `CPPWRF_KTIME=1` with tiles: the tile threads updated the kernel-time table without a lock (it could crash); the
+  debug flag of `CPPWRF_VM_DUMP` was shared by the tile threads.
+- The FP64 builds no longer contain glibc 2.41's float functions (src/core/glibc_mathf_host.cpp came in through the
+  core library); they call the host's libm, as documented. The FP64 results are unchanged.
+- `cppwrf_real --precision float` uses glibc 2.41's float functions in every x86-64 build, not only in the FP32
+  builds (one `cppwrf_real` is installed into a prefix: that of the flavour installed last).
+- test_glibc_mathf compared the ports with themselves (the executable's own expf ... from the core library); it now
+  looks the system libm's functions up in libm.so.6. The ctest `fp32_host_libm` also rejects libmvec vector variants
+  of the ported functions (none are imported).
+- Noah (`sf_surface_physics = 2`) with the NLCD40 land use: IVGTYP's urban categories 23 and 25 become 24 before
+  LSMINIT, as WRF's lsm_init does (the Noah tables, SNOALB with `rdmaxalb = false`, the urban model, the IVGTYP of
+  the history); CPPWRF kept 23 and 25. Two-way nest feedback with NLCD40 and Noah is refused (the model keeps no
+  LU_INDEX apart from the remapped IVGTYP for phy_init after the feedback).
+- `cppwrf_real` stops as real.exe does (check_nml_consistency) when a nest's `sf_surface_physics`,
+  `sf_sfclay_physics`, `ra_lw_physics` or `ra_sw_physics` differs from domain 1's, or its `bl_pbl_physics`,
+  `cu_physics` or `gwd_opt` differs and is not 0; it wrote the files.
+- The single-layer urban model stops as WRF's phy_init does with `use_wudapt_lcz = 1` when no urban point of the
+  domain has an LCZ class above 3 (URBPARM_LCZ.TBL with the 3 old urban classes); it ran.
+- `tools/wrf2cppwrf.py`: `iofields_filename` changes of the input stream `i:10` (wrffdda, grid_fdda) are an error as
+  those of `i:0` and `i:4`; with `--format native` the model read wrffdda whole without a word.
+- `phys.num_soil_layers` follows `sf_surface_physics` as WRF's set_physics_rconfigs does (5 for the slab, 4 for Noah
+  and Noah-MP, 6 or 9 for RUC); without the key the slab and RUC took 4 and read the 5- or 6-layer soil fields into
+  4-layer arrays. Another value is replaced, with a note (the translator writes WRF's value).
+- CPPWRF's own restart files (`restart_<step>.nc`, format version 5; version 4 files are refused): a run resumed from
+  one now continues the uninterrupted run bit for bit also with `bucket_mm` / `bucket_J`, `prec_acc_dt`,
+  `output_diagnostics`, `grid_fdda` (the interpolation weight and the end of the nudging), the Grell-Freitas /
+  Grell-3D cumulus averaging (convtrans_prep's counter), `sst_update` and `grid_fdda` at a read time (the record was
+  read again), Noah-MP's CROPCAT and land-point flag, and REFL_10CM in the native snapshots. The resumed run counted
+  solve_em's curr_secs2 from the restart step, as wrf.exe's run resumed from a wrfrst file does (which stays so).
+- A run resumed from wrfrst files takes the history's phy_init fields (THC, LU_STATE; without column physics also
+  ALBBCK, ALBEDO, ZNT, EMISS, Z0, EMBCK, MAVAIL) from the restart file, as wrf.exe does (its landuse_init runs only
+  when not restarting). They came from wrfinput_d01, so a two-way nested parent whose fed-back land use differs from
+  its wrfinput wrote its wrfinput values into the resumed run's wrfout and wrfrst files (and a run resumed from those
+  started from them: the slab's THC).
+
+### Changed
+- `phys.sst_update = 1` needs `phys.auxinput4_interval` (WRF stops without an auxinput4 interval); the
+  configuration's default was 360 minutes. The translator writes it.
+- `time.interval_seconds` of the adaptive time step defaults to the wrfbdy file's interval (it was 21600 s; a value
+  that differs from the file's was and is an error).
+
 ## 1.2.0 (2026-11-21)
 
 ### Added

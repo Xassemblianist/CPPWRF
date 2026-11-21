@@ -320,7 +320,22 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
       meta.scalars.emplace_back("DECLIN", double(m_.suite->rad_->declin()));
       meta.scalars.emplace_back("SOLCON", double(m_.suite->rad_->solcon()));
     }
+    // and what the run carries that WRF's restart stream does not (a run resumed from this file goes on as this
+    // one): the step its curr_secs2 counts from (buckets, prec_acc_dt, CLWRF, the FDDA interpolation),
+    // convtrans_prep's averaging counter
+    meta.scalars.emplace_back("RUN_START_STEP", double(m_.suite->run_start_step));
+    meta.scalars.emplace_back("STEPAVE_COUNT", double(phys::driver::PhysicsSuite::convtrans_stepave_count()));
   }
+  // the alarms as this run has them: history and auxhist3 (a run resumed from a wrfrst file has the file's), the
+  // auxinput4 / auxinput10 schedules and whether this step's record was read before this file was written
+  meta.scalars.emplace_back("HIST_IV", double(hist_iv_));
+  meta.scalars.emplace_back("HIST_REF", double(hist_ref_));
+  meta.scalars.emplace_back("AUX3_IV", double(aux3_iv_));
+  meta.scalars.emplace_back("AUX3_REF", double(aux3_ref_));
+  meta.scalars.emplace_back("AUX4_FIRST_S", aux4_first_s_);
+  meta.scalars.emplace_back("AUX4_READ", aux4_read_step_ == step ? 1.0 : 0.0);
+  meta.scalars.emplace_back("AUX10_FIRST_S", aux10_first_s_);
+  meta.scalars.emplace_back("AUX10_READ", aux10_read_step_ == step ? 1.0 : 0.0);
 
   const io_netcdf::DType dt = sizeof(real) == 8 ? io_netcdf::DType::F64 : io_netcdf::DType::F32;
   std::vector<std::vector<real>> bufs;
@@ -379,6 +394,9 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
       add_field2("qnwfa2d", rk->physics()->qnwfa2d);
       add_field2("qnifa2d", rk->physics()->qnifa2d);
     }
+    // REFL_10CM (Registry hdu: not in WRF's restart stream) of the last history step, which the native snapshots
+    // show until the next one
+    if (rk->physics()->refl_10cm.layout().total > 0) add_field3("refl_10cm", rk->physics()->refl_10cm);
     if (rk->physics()->p3()) {  // Registry rusd: TH_OLD, QV_OLD; RE_CLOUD / RE_ICE (r) without RRTMG's coupling
       add_field3("th_old", rk->physics()->th_old);
       add_field3("qv_old", rk->physics()->qv_old);
@@ -535,6 +553,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
       reg_field2("qnwfa2d", rk->physics()->qnwfa2d);
       reg_field2("qnifa2d", rk->physics()->qnifa2d);
     }
+    if (!wrf_file && rk->physics()->refl_10cm.layout().total > 0) reg_field3("refl_10cm", rk->physics()->refl_10cm);
   }
 
   struct TargetI { phys::driver::IntField2* f; size_t buf_idx; };
@@ -556,6 +575,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
     throw std::runtime_error("tmn_update: resume from the wrfrst file of the run, not " + path);
   if (m_.adapt && !wrf_file)  // the adaptive state (LAST_DT_SEC, ...) is in WRF's restart stream only
     throw std::runtime_error("time.adaptive: resume from the wrfrst file of the run, not " + path);
+  long native_run_start = 0;  // CPPWRF's own file: the step the run that wrote it started at
   if (wrf_file) {
     read_wrfrst(path, meta, vars);
     meta.dx = g.dx; meta.dy = g.dy;
@@ -565,7 +585,18 @@ void DomainRunner::load_restart_file(const std::string& path) {
     if (m_.suite) {  // the scalars save_restart_file stores (WRF's wrfrst: NSTEPS, DECLIN, SOLCON below)
       m_.suite->nsteps = int(std::lround(meta.scalar("NSTEPS", 0.0)));
       if (m_.suite->rad_) m_.suite->rad_->set_solar(meta.scalar("DECLIN", 0.0), meta.scalar("SOLCON", 0.0));
+      native_run_start = std::lround(meta.scalar("RUN_START_STEP", double(meta.step)));
+      phys::driver::PhysicsSuite::set_convtrans_stepave_count(int(std::lround(meta.scalar("STEPAVE_COUNT", 0.0))));
     }
+    // the alarms of the run that wrote the file (save_restart_file)
+    hist_iv_ = std::lround(meta.scalar("HIST_IV", double(hist_iv_)));
+    hist_ref_ = std::lround(meta.scalar("HIST_REF", double(hist_ref_)));
+    aux3_iv_ = std::lround(meta.scalar("AUX3_IV", double(aux3_iv_)));
+    aux3_ref_ = std::lround(meta.scalar("AUX3_REF", double(aux3_ref_)));
+    aux4_first_s_ = meta.scalar("AUX4_FIRST_S", aux4_first_s_);
+    if (meta.scalar("AUX4_READ", 0.0) != 0.0) aux4_read_step_ = meta.step;
+    aux10_first_s_ = meta.scalar("AUX10_FIRST_S", aux10_first_s_);
+    if (meta.scalar("AUX10_READ", 0.0) != 0.0) aux10_read_step_ = meta.step;
   }
 
   if (meta.nx != g.nx || meta.ny != g.ny || meta.nz != g.nz) {
@@ -711,7 +742,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
     for (size_t k = 0; k < hw.size(); ++k) hw[k] = int(std::lround(bufs[t.buf_idx][k]));
     t.f->upload(tile::local_part(*t.f, hw));
   }
-  if (m_.suite) m_.suite->restarted(start_step);
+  if (m_.suite) m_.suite->restarted(start_step, wrf_file, native_run_start);
   if (rk && rk->physics()) rk->physics()->itimestep = start_step;
 }
 #endif
@@ -916,6 +947,7 @@ bool DomainRunner::start() {
     load_restart_file(restart_file);
     if (wrfout_)
       wrfout_->set_restart_time(m_.adapt ? wrf_time::real_time<double>(m_.sim_offset) : double(start_step) * g.dt);
+    if (wrfout_ && is_wrfrst(restart_file)) wrfout_->phy_init_from_restart(restart_file);
     // med_before_solve_io writes an auxiliary history stream whose alarm the restart file left ringing
     if (aux3_write_ && wrfout_ && aux3_ring_at_start_ == 1) {
       wrfout_->set_exact_time(elapsed(start_step), m_.adapt != nullptr);
@@ -932,7 +964,8 @@ bool DomainRunner::start() {
   }
   if (aux10_on()) {  // set_timekeeping: StopTime = the run's start + auxinput10_end_h (none without an end)
     const int end_h = m_.suite->options().fdda.end_h;
-    aux10_stop_s_ = end_h > 0 ? double(start_step) * g.dt + double(end_h) * 3600.0 : -1.0;
+    // the run's start: this one's, or (resumed from CPPWRF's own file) that of the run that wrote the file
+    aux10_stop_s_ = end_h > 0 ? double(m_.suite->run_start_step) * g.dt + double(end_h) * 3600.0 : -1.0;
     if (wrfout_)
       wrfout_->set_auxinput10_alarm(double(m_.suite->options().fdda.interval_m) * 60.0, aux10_first_s_, aux10_stop_s_);
   }

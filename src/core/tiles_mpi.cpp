@@ -8,6 +8,7 @@
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <exception>
 #include <stdexcept>
@@ -117,24 +118,59 @@ int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body) {
         throw std::runtime_error("run.ranks = " + t + " needs " + std::to_string(o.px * o.py) + " MPI ranks, this run has " +
                                  std::to_string(n));
     }
-#if defined(CPPWRF_USE_CUDA)
-    // the rank's device: CPPWRF_RANK_DEVICES=d0,d1,... (rank r takes entry r mod the count); default the current one
-    if (const char* e = std::getenv("CPPWRF_RANK_DEVICES"); e && *e) {
-      std::vector<int> dev;
-      for (const char* p = e; *p;) {
-        dev.push_back(std::atoi(p));
-        while (*p && *p != ',') ++p;
-        if (*p == ',') ++p;
-      }
-      if (!dev.empty()) {
-        const cudaError_t ce = cudaSetDevice(dev[std::size_t(rank) % dev.size()]);
-        if (ce != cudaSuccess) throw std::runtime_error(std::string("MPI: cudaSetDevice: ") + cudaGetErrorString(ce));
-      }
-    }
-#endif
     if (rank == 0) std::printf("cppwrf: %d MPI ranks as %d x %d patches\n", n, o.px, o.py);
     // the log is the writer's (rank 0); errors of every rank go to stderr
     else if (!std::freopen("/dev/null", "w", stdout)) throw std::runtime_error("MPI: cannot silence a rank's stdout");
+#if defined(CPPWRF_USE_CUDA)
+    // the rank's device, by its rank among the ranks of its node (core/tiles.hpp rank_device; docs/MPI.md)
+    {
+      MPI_Comm node = MPI_COMM_NULL;
+      check(MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &node),
+            "MPI_Comm_split_type");
+      int local = 0, nlocal = 1;
+      MPI_Comm_rank(node, &local);
+      MPI_Comm_size(node, &nlocal);
+      int count = 0;
+      if (cudaGetDeviceCount(&count) != cudaSuccess) count = 0;
+      std::string err;
+      int dev = -1;
+      try {
+        dev = rank_device(std::getenv("CPPWRF_RANK_DEVICES"), local, count);
+      } catch (const std::exception& e) {
+        err = e.what();
+      }
+      if (err.empty() && dev >= 0) {
+        const cudaError_t ce = cudaSetDevice(dev);
+        if (ce != cudaSuccess) err = std::string("MPI: cudaSetDevice(") + std::to_string(dev) + "): " + cudaGetErrorString(ce);
+      }
+      // the node's ranks on this rank's device (by its UUID: the ranks may see the devices under other numbers)
+      cudaDeviceProp prop{};
+      int cur = 0;
+      if (err.empty() && (cudaGetDevice(&cur) != cudaSuccess || cudaGetDeviceProperties(&prop, cur) != cudaSuccess))
+        err = "MPI: cannot query the rank's CUDA device";
+      std::vector<char> ids(std::size_t(nlocal) * sizeof(prop.uuid));
+      MPI_Allgather(&prop.uuid, int(sizeof(prop.uuid)), MPI_BYTE, ids.data(), int(sizeof(prop.uuid)), MPI_BYTE, node);
+      MPI_Comm_free(&node);
+      if (!err.empty()) throw std::runtime_error(err);
+      int share = 0;
+      for (int r = 0; r < nlocal; ++r)
+        share += std::memcmp(&ids[std::size_t(r) * sizeof(prop.uuid)], &prop.uuid, sizeof(prop.uuid)) == 0;
+      set_device_work_share(share);
+      // rank 0 names the mapping unless every rank is on device 0
+      std::vector<int> devs(std::size_t(n), 0);
+      MPI_Gather(&cur, 1, MPI_INT, devs.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+      if (rank == 0) {
+        bool all0 = true;
+        for (int d : devs) all0 = all0 && d == 0;
+        if (!all0) {
+          std::string s;
+          for (int r = 0; r < n; ++r)
+            s += (r ? ", " : "") + std::to_string(r) + ": " + std::to_string(devs[std::size_t(r)]);
+          std::printf("cppwrf: CUDA device of each rank (rank: device) %s\n", s.c_str());
+        }
+      }
+    }
+#endif
     detail::install_hooks();
     MpiComm comm;
     rc = detail::run_worker(comm, rank, o, body);

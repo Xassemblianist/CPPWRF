@@ -1190,9 +1190,11 @@ class WrfTranslator:
                        "without a directory).")
 
     def check_iofields_input(self):
-        """iofields_filename lines for the input streams i:0 (wrfinput) and i:4 (wrflowinp): WRF's input_wrf then reads
-        other fields (frame/module_domain.F modify_io_masks1); CPPWRF reads those files whole. Read as WRF does: up to
-        the first blank line, lines with a '#' skipped, the first character of the operation and stream fields."""
+        """iofields_filename lines for the input streams i:0 (wrfinput), i:4 (wrflowinp) and i:10 (wrffdda,
+        auxinput10): WRF's input_wrf then reads other fields (frame/module_domain.F modify_io_masks1); CPPWRF reads
+        those files whole (the model checks it only when it writes WRF's files, not with --format native). Read as WRF
+        does: up to the first blank line, lines with a '#' skipped, the first character of the operation and stream
+        fields."""
         for d, name in enumerate(self.get_opt_list("time_control", "iofields_filename")[:max(1, self._max_dom)]):
             name = str(name).strip()
             if not name or name == "NONE_SPECIFIED":
@@ -1214,9 +1216,9 @@ class WrfTranslator:
                     continue
                 sid = f[2][:3].replace(" ", "")  # READ(strmid(1:3),'(I3)')
                 if f[0][:1] in ("+", "-") and f[1][:1].lower() == "i" and \
-                        (sid == "" or sid.lstrip("+").isdigit() and int(sid) in (0, 4)):
+                        (sid == "" or sid.lstrip("+").isdigit() and int(sid) in (0, 4, 10)):
                     self.error(f"Domain d{d + 1:02d}: iofields_filename {name}: input stream changes ({line.strip()}) are "
-                               "not supported (CPPWRF reads wrfinput and wrflowinp whole).")
+                               "not supported (CPPWRF reads wrfinput, wrflowinp and wrffdda whole).")
 
     def check_option_tiers(self, sections: Dict[str, Dict[str, Any]]):
         """Options below the verified tier (data/option_tiers.txt): a warning each; &cppwrf allow_unverified goes to

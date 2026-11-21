@@ -12,8 +12,8 @@
 
 namespace cppwrf::vmdump {
 
-inline bool& on() {
-  static bool v = false;
+inline bool& on() {  // per host thread: the tiles of run.tiles set it in their own time steps
+  thread_local bool v = false;
   return v;
 }
 

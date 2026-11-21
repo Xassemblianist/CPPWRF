@@ -89,7 +89,7 @@ reproduces the references (made on Intel) on either vendor's CPUs.
 glibc's float functions differ between versions: 2.40 and 2.41 replaced several with CORE-MATH's correctly rounded
 ones, and a CPU FP32 build on Ubuntu 24.04 (glibc 2.39) calling its own libm differed from WRF real*4 from t = 0 (P1:
 W at 204905 of 476595 points, 1 ulp). The FP32 builds therefore do not call libm's float functions: the executables
-`cppwrf` and `cppwrf_real` of an FP32 build (CPU, and the host code of the CUDA builds) define them
+`cppwrf` of an FP32 build (CPU, and the host code of the CUDA builds) and `cppwrf_real` of every x86-64 build define them
 (src/core/glibc_mathf_host.cpp), so every call in the program, `std::exp(float)`, `libm::exp(float)`, the scalar
 iterations of the vectorised loops, the `sincosf` g++ makes of a sinf and a cosf of one argument, table and
 initialisation code, computes glibc 2.41's result (src/core/glibc_mathf.hpp):
@@ -103,7 +103,7 @@ initialisation code, computes glibc 2.41's result (src/core/glibc_mathf.hpp):
 tools/glibc_mathf_proof.cpp makes the comparison (also built without `-march`, where `fma()` is libm's exact fma: the
 same results); the libm compared is Debian's 2.41-12, whose sinhf takes the CORE-MATH exceptional case
 x = 0x1.250bfep-11 that the 2.41 tarball's code misses (the port follows the libm). The ctest `fp32_host_libm` checks
-that `cppwrf` imports none of these functions (`nm -D --undefined-only`). Calls with constant arguments are folded by
+that `cppwrf` imports none of these functions and no libmvec vector variant of them (`nm -D --undefined-only`). Calls with constant arguments are folded by
 g++ (correctly rounded) as before. Still libm's: sqrtf, fmodf, roundf, lroundf, llroundf, fminf, fmaxf, strtof
 (exact or correctly rounded by definition, the same in every version), and the double functions (exp, log, pow, sin,
 cos, atan, tanh, log10, tgamma, the complex cabs / clog / csqrt of the radar reflectivity, libmvec's 2-lane exp and

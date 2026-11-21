@@ -485,6 +485,9 @@ void device_memory_report(const char* when);
 // having N MiB when it has more (the buffers of a smaller GPU on a larger one, or a GPU shared with other
 // processes). CPU build: 0.
 std::size_t device_work_budget();
+// The processes that share this process's device (mpi_run: the ranks of the node on the same device): the budget
+// above is divided by it. Default 1. CPU build: no effect.
+void set_device_work_share(int processes);
 
 // One model time step (dyn::RK3::step). CUDA: the step's launches and device copies are captured into CUDA graphs
 // and replayed (an instantiated graph per domain and segment, updated with the new launch parameters), so the

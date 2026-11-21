@@ -59,6 +59,31 @@ std::string iofields_file(const std::string& name, const std::string& text) {
 }  // namespace
 
 int main() {
+  // check_nml_consistency (module_check_a_mundo.F:753-943, after setup_physics_suite): the cross-domain physics checks
+  // real.exe and wrf.exe stop on (cppwrf_real: physics_domain_consistency)
+  {
+    auto cons = [](const std::string& physics, const std::string& dynamics = "") {
+      const Namelist nl = Namelist::parse("&domains\n max_dom = 2,\n/\n&physics\n" + physics + "\n/\n&dynamics\n" +
+                                          dynamics + "\n/\n");
+      const WrfConfig c(nl, schema().defaults(), 1, &schema().entries());
+      return physics_domain_consistency(c, 2);
+    };
+    const std::string ok = "sf_surface_physics = 2, 2, sf_sfclay_physics = 1, 1, ra_lw_physics = 4, 4, "
+                           "ra_sw_physics = 4, 4, bl_pbl_physics = 1, 0, cu_physics = 1, 0,";
+    check(cons(ok, "gwd_opt = 1, 0,").empty(), "equal physics, nest PBL / cumulus / GWDO 0: consistent");
+    check(cons("physics_suite = 'CONUS', sf_surface_physics = -1, 2, cu_physics = -1, 6,").empty(),
+          "physics_suite CONUS: -1 is the suite's scheme on every domain");
+    const std::pair<std::string, std::string> bad[] = {
+        {"sf_surface_physics = 2, 4,", "sf_surface_physics must be equal for all domains"},
+        {"sf_sfclay_physics = 1, 2,", "sf_sfclay_physics must be equal for all domains"},
+        {"ra_lw_physics = 4, 1,", "ra_lw_physics must be equal for all domains"},
+        {"ra_sw_physics = 4, 1,", "ra_sw_physics must be equal for all domains"},
+        {"bl_pbl_physics = 1, 2,", "bl_pbl_physics must be equal for all domains (or = zero)"},
+        {"cu_physics = 1, 6,", "cu_physics must be equal for all domains (or = zero)"},
+        {"cu_physics = 0, 1,", "cu_physics must be equal for all domains (or = zero)"}};
+    for (const auto& [p, msg] : bad) check(cons(p) == msg, p + " -> " + msg);
+    check(cons("", "gwd_opt = 1, 3,") == "gwd_opt must be equal for all domains (or = zero)", "gwd_opt = 1, 3: fatal");
+  }
   // module_check_a_mundo.F:1852-1890: cu_used / gwd_used when any domain uses the scheme; a nest without cumulus
   // or GWDO keeps the cumulus tendencies (restart) and the GWDO fields (history, restart)
   {

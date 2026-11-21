@@ -118,6 +118,22 @@ int physics_suite_option(std::string suite, const std::string& option, int value
   return o == it->second.end() ? value : o->second;
 }
 
+std::string physics_domain_consistency(const WrfConfig& c, int max_dom) {
+  const std::string suite = c.get("physics_suite");
+  auto opt = [&](const char* o, int id) {
+    const int v = c.integer(o, id);
+    return std::string(o) == "gwd_opt" ? v : physics_suite_option(suite, o, v);
+  };
+  for (int id = 2; id <= max_dom; ++id) {
+    if (!c.logical("grid_allowed", id)) continue;
+    for (const char* o : {"sf_surface_physics", "sf_sfclay_physics", "ra_lw_physics", "ra_sw_physics"})
+      if (opt(o, id) != opt(o, 1)) return std::string(o) + " must be equal for all domains";
+    for (const char* o : {"bl_pbl_physics", "gwd_opt", "cu_physics"})
+      if (opt(o, id) != opt(o, 1) && opt(o, id) != 0) return std::string(o) + " must be equal for all domains (or = zero)";
+  }
+  return "";
+}
+
 void derive_config(WrfConfig& c, int max_dom, bool real_exe) {
   const std::string suite = c.get("physics_suite");
   // a domain's physics option after setup_physics_suite (-1: the suite's scheme; no suite: no package)

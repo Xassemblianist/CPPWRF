@@ -1,6 +1,6 @@
 # CPPWRF: status and verification
 
-Version 1.2.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
+Version 1.2.1 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
@@ -467,3 +467,9 @@ surface analysis nudging (grid_sfdda, needs OBSGRID's wrfsfdda_d0N), observation
 and runs on several GPUs or several nodes (docs/MPI.md, section 6). Options without a port are rejected by `tools/wrf2cppwrf.py` and by the model with an
 error; docs/USER_GUIDE.md, "Rejected Options and Why", lists each with its reason. Noah-MP with nests is rejected because wrf.exe 4.8.0 aborts with it (heap corruption in the nest run's
 first history output).
+
+Restart and input limits that remain (each refused with an error):
+- the single-layer urban model resumed from any restart file (WRF's urban_var_init on a restart is not ported);
+- CPPWRF's own restart files (`restart_<step>.nc`) with nests, the adaptive time step or `tmn_update`: resume from
+  the run's wrfrst files;
+- two-way nest feedback with Noah and the NLCD40 land use (phy_init after the feedback).

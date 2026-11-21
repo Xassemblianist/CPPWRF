@@ -1,6 +1,6 @@
 # CPPWRF
 
-Version 1.2.0 ([release notes](docs/RELEASE_NOTES.md)).
+Version 1.2.1 ([release notes](docs/RELEASE_NOTES.md)).
 
 CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static nesting,
 `real.exe` and `ideal.exe`. One source tree builds for the CPU (OpenMP) and for NVIDIA GPUs (CUDA), in FP64
@@ -10,7 +10,7 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** For v1.2.0 all 338 CUDA FP64 checks matched WRF at tolerance 0 on the Colab G4, and the CUDA FP32 identity build matched WRF real*4 in all 44 cases. For v1.1.0 all 338 CUDA FP64 checks of the
+- **GPU, FP64: bit-identical to WRF too.** For v1.2.1 (as for v1.2.0) all 338 CUDA FP64 checks matched WRF at tolerance 0 on the Colab G4, and the CUDA FP32 identity build matched WRF real*4 in all 44 cases. For v1.1.0 all 338 CUDA FP64 checks of the
   suite (319 cases, 18 restart checks and the Straka check) matched WRF at tolerance 0 on the Colab G4 (RTX PRO 6000
   Blackwell, sm_120, CUDA 13.0); earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
 - **CPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations, among

@@ -12,6 +12,7 @@
 // Every other surface field starts at zero (WRF allocates grid fields zeroed).
 #include <cmath>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -288,9 +289,18 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   // check_a_mundo: mp_physics = 28 has its own fog settling, grav_settling is reset to 0
   if (cfg.get_int("phys.mp_physics", 0) == 28) o.grav_settling = 0;
   o.cu_physics = int(cfg.get_int("phys.cu_physics", 0));
-  // set_physics_rconfigs (module_check_a_mundo.F:3588-3589): 5 layers without a land surface model (the translator
-  // accepts only 5 then; real.exe writes 5-layer TSLB / SMOIS); Noah / Noah-MP: 4
-  o.num_soil_layers = int(cfg.get_int("phys.num_soil_layers", o.sf_surface_physics == 0 ? 5 : 4));
+  // set_physics_rconfigs (module_check_a_mundo.F:3586-3603) sets num_soil_layers from domain 1's land surface model
+  // whatever the namelist says: 5 without one and for the slab (real.exe writes 5-layer TSLB / SMOIS), 4 for Noah and
+  // Noah-MP, 6 or 9 for RUC (another value: 6). The translator writes that value; another one in the configuration
+  // is replaced as wrf.exe replaces it (the wrfinput soil fields have that many layers)
+  {
+    const int lsm = o.sf_surface_physics, given = int(cfg.get_int("phys.num_soil_layers", -1));
+    const int wrf = lsm == 0 || lsm == 1 ? 5 : lsm == 3 ? (given == 6 || given == 9 ? given : 6) : 4;
+    if (given != -1 && given != wrf && tile::writer())
+      std::cerr << "cppwrf: NOTE: phys.num_soil_layers = " << given << " is set to " << wrf
+                << " for sf_surface_physics = " << lsm << ", as wrf.exe does (set_physics_rconfigs)" << std::endl;
+    o.num_soil_layers = wrf;
+  }
   o.bldt = cfg.get_double("phys.bldt", 0.0);
   o.cudt = cfg.get_double("phys.cudt", 0.0);
   // check_a_mundo (module_check_a_mundo.F:2156-2174): the adaptive time step runs BMJ, the SAS schemes and Tiedtke
@@ -502,12 +512,20 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   put_const(su.ust, o.sf_sfclay_physics == 2 || o.sf_sfclay_physics == 4 ? 0.1 : 0.0001);  // myjsfcinit, qnsesfcinit
   put_const(su.dx2d, g.dx);
   put_const(su.ctopo, 1.0); put_const(su.ctopo2, 1.0);
+  // IVGTYP = NINT(LU_INDEX); lsm_init (module_physics_init.F:3438-3448) then gives Noah with the NLCD40 land use one
+  // urban category: 23 and 25 become 24 (before LSMINIT, the urban model and every later use of IVGTYP; landuse_init
+  // reads LU_INDEX)
+  const bool nlcd40_noah = o.sf_surface_physics == 2 && o.mminlu == "NLCD40";
+  auto ivgtyp_of = [nlcd40_noah](double lu_index) {
+    const int v = int(std::lround(lu_index));
+    return nlcd40_noah && (v == 23 || v == 25) ? 24 : v;
+  };
   {
     std::vector<int> h(su.ivgtyp.layout().total, 0), hs(su.isltyp.layout().total, 0);
     const Layout& Li = su.ivgtyp.layout();
     for (int j = Li.j0(); j < Li.j1(); ++j)  // the points the allocation holds (a decomposed run: the patch's)
       for (int i = Li.i0(); i < Li.i1(); ++i) {
-        h[su.ivgtyp.layout().index(i, j, 0)] = int(std::lround(lu[i + std::size_t(nx) * j]));
+        h[su.ivgtyp.layout().index(i, j, 0)] = ivgtyp_of(lu[i + std::size_t(nx) * j]);
         hs[su.isltyp.layout().index(i, j, 0)] = int(std::lround(isl[i + std::size_t(nx) * j]));
       }
     su.ivgtyp.upload(h);
@@ -573,8 +591,8 @@ void init_real_physics(const io::Config& cfg, Model& m) {
       throw std::runtime_error("real physics: cannot read the Noah tables from " + o.table_dir);
     if (!rdmaxalb)
       for (std::size_t p = 0; p < n2; ++p)  // WRF real*4: MAXALB(IVGTYP)*0.01 in REAL
-        snoalb[p] = std::is_same_v<real, float> ? double(real(nt.maxalb[int(std::lround(lu[p])) - 1]) * real(0.01))
-                                                : nt.maxalb[int(std::lround(lu[p])) - 1] * 0.01;
+        snoalb[p] = std::is_same_v<real, float> ? double(real(nt.maxalb[ivgtyp_of(lu[p]) - 1]) * real(0.01))
+                                                : nt.maxalb[ivgtyp_of(lu[p]) - 1] * 0.01;
     put2(su.snoalb, snoalb);
     std::vector<double> sh2o(n2 * ns);
     for (std::size_t p = 0; p < n2; ++p) {
@@ -667,6 +685,12 @@ void phy_init_after_feedback(const io::Config& cfg, Model& m) {
   const phys::driver::SuiteOptions& o = su.options();
   if (o.sf_surface_physics == 3 || o.sf_surface_physics == 4 || su.urb_)  // not ported for nests (refused)
     throw std::runtime_error("phy_init after the nest feedback: RUC, Noah-MP and the UCM are not ported for nests");
+  // the model keeps no LU_INDEX of its own (IVGTYP stands for it below): Noah's NLCD40 remapping of IVGTYP (23, 25 ->
+  // 24, init_real_physics) would give landuse_init other categories than WRF's fed-back LU_INDEX
+  if (o.sf_surface_physics == 2 && o.mminlu == "NLCD40")
+    throw std::runtime_error("two-way nest feedback with Noah (sf_surface_physics = 2) and the NLCD40 land use is not "
+                             "supported (phy_init after the feedback needs the fed-back LU_INDEX, which CPPWRF does not "
+                             "keep apart from the remapped IVGTYP)");
   const Grid& g = m.g;
   const int nx = g.nx;
   const std::size_t n2 = std::size_t(nx) * g.ny;

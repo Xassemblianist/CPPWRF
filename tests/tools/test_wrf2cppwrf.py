@@ -1571,6 +1571,23 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertNotIn("radt", sec["phys"])
         self.assertEqual(sec["d02"]["phys_radt"], 3)
 
+    def test_iofields_input_streams(self):
+        # modify_io_masks1 changes what input_wrf reads from any input stream; CPPWRF reads wrfinput (i:0), wrflowinp
+        # (i:4) and wrffdda (i:10) whole, also with --format native (no WrfHistory to check it): an error each;
+        # output stream changes (h:0, ...) and other input streams pass
+        with tempfile.TemporaryDirectory() as d:
+            for line, bad in (("-:i:10:q_ndg_old,q_ndg_new", True), ("+:i:4:sst", True), ("-:i:0:tsk", True),
+                              ("+:i:010:u_ndg_old", True), ("-:h:0:rainc", False), ("+:i:11:sst", False)):
+                path = os.path.join(d, "iof.txt")
+                with open(path, "w") as f:
+                    f.write(line + "\n")
+                t, _ = self.translate(self.FULL.replace("&time_control /",
+                                                        f"&time_control iofields_filename = '{path}' /"))
+                hit = [e for e in t.errors if "input stream changes" in e]
+                self.assertEqual(bool(hit), bad, (line, t.errors))
+                if bad:
+                    self.assertIn("wrffdda", hit[0])
+
     def test_urban_canopy(self):
         # sf_urban_physics = 1 (single-layer UCM) with Noah on one domain, URBPARM.TBL or URBPARM_LCZ.TBL
         # (use_wudapt_lcz = 1); BEP / BEP+BEM, other land surfaces, distributed drag,

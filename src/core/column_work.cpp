@@ -33,7 +33,10 @@ void grow(std::size_t bytes) {
 }
 }  // namespace
 
-void column_work_reserve(const Range2D& r, std::size_t bytes_per_col) {
+void column_work_reserve(const Range2D& r0, std::size_t bytes_per_col) {
+  // the worker's own columns (a decomposed run): column_work_chunks launches those only
+  Range2D r = r0;
+  tile::clip(r);
   if (r.i1 <= r.i0 || r.j1 <= r.j0 || bytes_per_col == 0) return;
   const int ni = r.i1 - r.i0, nj = r.j1 - r.j0;
   const std::size_t bpc = detail::column_work_bpc(bytes_per_col);

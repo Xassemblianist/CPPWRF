@@ -46,6 +46,7 @@ struct Model {
   std::map<std::string, std::vector<double>> init_out;
   std::unique_ptr<dyn::RK3> rk;  // null when nsteps == 0
   std::unique_ptr<dyn::LateralBC> bc;  // real data: specified lateral boundaries
+  double bdy_interval_s = 0.0;          // real data: the wrfbdy interval (seconds)
   std::unique_ptr<dyn::DiffusionDriver> diff;
   std::unique_ptr<phys::driver::PhysicsSuite> suite;  // column physics (sfclay/LSM/PBL), null: off  // WRF diff_opt 1 / sixth-order diffusion (null: off)
   // Called before step n (1-based) of the time loop: boundary interval switching (real data).

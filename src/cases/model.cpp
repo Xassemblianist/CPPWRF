@@ -199,7 +199,9 @@ static void init_adaptive(const io::Config& cfg, Model& m, const std::string& cn
   o.history_interval_s = int(cfg.get_int("time.history_interval_s", 3600));
   if (o.step_to_output_time && o.history_interval_s <= 0)
     throw std::runtime_error("time.adaptive with step_to_output_time needs time.history_interval_s > 0");
-  o.interval_seconds = int(cfg.get_int("time.interval_seconds", 21600));
+  // WRF's interval_seconds is the namelist's that real.exe wrote the wrfbdy file with (real_case.cpp checks a given
+  // value against the file): without the key, the file's interval
+  o.interval_seconds = int(cfg.get_int("time.interval_seconds", m.bdy_interval_s > 0 ? std::lround(m.bdy_interval_s) : 10800));
   if (o.interval_seconds <= 0) throw std::runtime_error("time.interval_seconds must be > 0");
   m.adapt = std::make_unique<AdaptTimeStep>(o);
   // MAXVAL(grid%msftx), MAXVAL(grid%msfty): the input's map factors (the memory halo of a serial WRF is 0)
@@ -454,6 +456,11 @@ Model Model::build(const io::Config& cfg) {
     if (!m.suite && cfg.get_int("phys.sst_update", 0) != 0)
       throw std::runtime_error("phys.sst_update = 1 without surface-layer, land-surface, PBL or cumulus physics is not "
                                "supported (wrflowinp is read with the column physics suite only)");
+    // check_a_mundo (module_check_a_mundo.F:1474-1495): sst_update = 1 with no auxinput4_interval (Registry default 0)
+    // is fatal in WRF; the configuration has no default interval either
+    if (m.suite && cfg.get_int("phys.sst_update", 0) == 1 && !cfg.has("phys.auxinput4_interval"))
+      throw std::runtime_error("phys.sst_update = 1 needs phys.auxinput4_interval (minutes between the wrflowinp "
+                               "records; WRF stops without an auxinput4 interval)");
     // topo_wind (start_em's CTOPO / CTOPO2), slope_rad and topo_shading are ported with the real-data column physics
     if (!m.suite && (cfg.get_int("phys.topo_wind", 0) != 0 || cfg.get_int("phys.slope_rad", 0) != 0 ||
                      cfg.get_int("phys.topo_shading", 0) != 0))

@@ -217,6 +217,9 @@ int main(int argc, char** argv) {
       WrfConfig c1(nl, sc.defaults(), 1, &sc.entries());
       if (c1.integer("vert_refine_fact") != 1)
         throw std::runtime_error("real: vert_refine_fact (ndown) is not ported");
+      // check_nml_consistency's fatal cross-domain physics checks (real.exe stops before writing any file)
+      const std::string inconsistent = cppwrf::wrf_io::physics_domain_consistency(c1, o1.max_dom);
+      if (!inconsistent.empty()) throw std::runtime_error("real: " + inconsistent + " (check_nml_consistency)");
       for (int id = 1; id <= o1.max_dom; ++id) {
         for (const char* opt : {"vert_refine_method", "tracer_opt", "chem_opt"})
           if (c1.integer(opt, id) != 0)
