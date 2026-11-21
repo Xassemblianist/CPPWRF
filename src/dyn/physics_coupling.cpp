@@ -265,9 +265,12 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     refl_10cm = Field3(g, Stagger::M, "refl_10cm");  // compute_radar_ref: always with mp_physics 18
     nssl_zero_ = Field3(g, Stagger::M, "nssl_zero");
     const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
-    // phy_init: nssl_2mom_init (mp_init's call for mp_physics 18), once per domain
+    // phy_init: nssl_2mom_init (mp_init's call for mp_physics 18), once per domain; the work space for the worker's
+    // rows (step: nssl_->run over mp_own's rows, one thread per row)
+    const tile::PatchBox ob = tile::own_box(g);
+    const int rows = std::max(1, std::min(g.ny - sy, ob.j1) - std::max(sy, ob.j0));
     nssl_ = std::make_shared<const phys::mp_nssl::NsslScheme<real>>(phys::mp_nssl::NsslConfig{}, g.nx - 2 * sx, g.nz,
-                                                                    g.ny - 2 * sy);
+                                                                    rows);
   }
   if (p_.do_radar_ref == 1 && (p_.mp_physics == 6 || thompson())) refl_10cm = Field3(g, Stagger::M, "refl_10cm");
   if (thompson()) {

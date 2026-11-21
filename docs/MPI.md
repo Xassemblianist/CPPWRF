@@ -155,7 +155,7 @@ cmake -B build-mpi -DCMAKE_BUILD_TYPE=Release -DCPPWRF_DOUBLE=ON -DCPPWRF_ENABLE
 cmake --build build-mpi -j --target cppwrf
 OMP_NUM_THREADS=4 mpirun -np 6 build-mpi/cppwrf CONFIG.ini                    # 2 x 3 patches (P <= Q, most square)
 CPPWRF_RANKS=3x2 OMP_NUM_THREADS=4 mpirun -np 6 build-mpi/cppwrf CONFIG.ini   # or run.ranks = 3x2
-# CUDA with MPI ranks: all ranks on one GPU, or CPPWRF_RANK_DEVICES=d0,d1,... (rank r on device d[r mod n])
+# CUDA with MPI ranks: a node's ranks over its GPUs (local rank r on device r mod count), or CPPWRF_RANK_DEVICES
 cmake -B build-cuda-mpi -DCMAKE_BUILD_TYPE=Release -DCPPWRF_DOUBLE=ON -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_MPI=ON
 mpirun -np 2 build-cuda-mpi/cppwrf CONFIG.ini
 # tiles: the same decomposition as host threads of one process, any build
@@ -167,6 +167,17 @@ CPPWRF_TILES=2x2 build/cppwrf CONFIG.ini
   standard error, and an error on any rank ends the run (`MPI_Abort`).
 - A patch must be at least 3 points wide. A 2-D (x-z) domain needs `Nx1`, a y-z domain `1xN`.
 - A nested run uses the same `P x Q` for every domain.
+- CUDA builds: each rank takes a device by its rank among the ranks of its node (`MPI_Comm_split_type` with
+  `MPI_COMM_TYPE_SHARED`), not by its global rank. With `CPPWRF_RANK_DEVICES=d0,d1,...` (non-negative device numbers
+  below the count the rank sees, else the run stops with an error) node-local rank `r` takes `d[r mod n]`; without it
+  and with several visible devices `r mod count`; with one visible device (also when the launcher gives each rank its
+  own through `CUDA_VISIBLE_DEVICES`) every rank stays on device 0, as one process. Rank 0 prints the mapping
+  (`cppwrf: CUDA device of each rank ...`) unless every rank is on device 0. The device is a rank's context only:
+  results do not depend on it.
+- CUDA builds: K ranks of a node on one device (counted by the device's UUID) each size their work buffers (the
+  column physics' work arrays, RRTMG's batch scratch: `device_work_budget`) for 1 / K of the budget of one process,
+  and every rank sizes the column work buffer for its own patch's columns. Both only change how many columns a launch
+  takes; every column is computed by itself, so the values do not change.
 - The run prints `cppwrf: peak host memory: ... MiB the writer (rank 0), ... MiB the largest other rank, ... MiB in all`.
 - The MPI binary without `mpirun`, or with one rank, is the one-process program.
 - Debugging: `CPPWRF_TILE_TRACE=1` prints every message of the collectives; `CPPWRF_TILE_CHECK=1` (tiles, CPU
@@ -200,6 +211,14 @@ Ubuntu MPICH package (4.2.0, built for PMIx) starts every process as a world of 
 "2 rank" runs there were two one-process runs writing the same files. A CPPWRF_MPI build now stops when
 `CPPWRF_RANKS` asks for several ranks and the process is alone, and `tools/colab/mpi_gpu.sh` uses the runtime's
 Open MPI (whose `mpirun` starts two ranks there); that run has not been made.
+
+**Several CUDA FP64 ranks on one GPU** (the workstation's RTX 2060, 6 GB; MPICH 5.0.2 from its PyPI wheel, whose
+`mpirun` starts real ranks): P1 and P4, 3 steps, with 2 ranks (1 x 2) and 4 ranks (2 x 2), each with
+`CPPWRF_RANK_DEVICES` unset and set to `0,0`: every snapshot and diag.csv (without its wall-time column) is
+byte-identical to the CUDA run with one process, whose snapshots are the CPU build's. P4 with 4 ranks on the 6 GB GPU
+needs the per-rank work buffers (section 4): before them each rank reserved the column work buffer for the whole
+domain, the four ranks held 5417 MiB after the set-up and rank 1 stopped for lack of device memory; with them they
+hold 4333 MiB (2 ranks: 3471 MiB instead of 3831 MiB).
 
 **Deliberate one-line bugs** (a test counts only if a bug makes it fail):
 
@@ -244,9 +263,8 @@ WRF's own results depend on its rank layout (docs/PERF.md); CPPWRF's do not, whi
 
 ## 6. What has not been proved
 
-Several GPUs and several nodes were not available; every run above is on one machine. A CUDA build has not run
-as several MPI ranks at all (section 5): its decomposition is proved with thread tiles on one GPU only, and MPI
-itself only with MPICH on the CPU build. Open MPI has not run.
+Several GPUs and several nodes were not available; every run above is on one machine. A CUDA build has run as
+several MPI ranks on one GPU only (section 5), with MPICH. Open MPI has not run.
 The design should hold there because (a) a rank's GPU is its own CUDA context and stream as a tile's is
 (`CPPWRF_RANK_DEVICES` only changes which device the context is on), (b) the transport
 carries bytes and nothing in the numerical path depends on where a rank runs, (c) the result is independent of

@@ -45,6 +45,11 @@ bool mpi_start(int* argc, char*** argv);
 int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body);
 void mpi_finish();
 void mpi_abort(int code);  // an error outside mpi_run: MPI_Abort (no-op without MPI)
+// The CUDA device of an MPI rank (mpi_run, CUDA builds): `local` is the rank among the ranks of its node, `count`
+// the devices it sees, `spec` CPPWRF_RANK_DEVICES ("d0,d1,...", null or empty when unset). With spec: d[local mod n];
+// without it and several devices: local mod count; else -1 (the current device, as one process). Throws on an entry
+// that is not a non-negative integer, or not below count when count > 0.
+int rank_device(const char* spec, int local, int count);
 
 int id();       // the calling worker's patch (0 without a decomposition, -1 for the check's reference run)
 int count();    // the workers (1 without a decomposition)
