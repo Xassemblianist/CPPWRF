@@ -1172,6 +1172,13 @@ void WrfHistory::restart_slopes() {
   for (const char* f : {"TOPOSLPX", "TOPOSLPY", "LAP_HGT", "SLOPE", "SLP_AZI"}) fed_.erase(f);
 }
 
+void WrfHistory::start_domain_ctopo() {
+  // a decomposed run: the writer's code (fed_ is the writer's)
+  const tile::Service svc;
+  if (svc.served()) return;
+  for (const char* f : {"CTOPO", "CTOPO2"}) fed_.erase(f);  // phy_init_'s 1 (a resumed run: its restart file's)
+}
+
 void WrfHistory::keep_ht_coarse() {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;

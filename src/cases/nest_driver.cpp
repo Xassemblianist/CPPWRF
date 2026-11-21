@@ -966,6 +966,10 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       doms[i].model.suite->ctopo.fill_host([](int, int, int) { return 1.0; });
       doms[i].model.suite->ctopo2.fill_host([](int, int, int) { return 1.0; });
     }
+#ifdef CPPWRF_HAVE_NETCDF
+    // without column physics the history holds CTOPO / CTOPO2 (the feedback's values until start_domain)
+    if (doms[i].runner->history()) doms[i].runner->history()->start_domain_ctopo();
+#endif
   };
   for (int i = 0; i < max_dom; ++i)
     for (int c_idx : doms[i].children)

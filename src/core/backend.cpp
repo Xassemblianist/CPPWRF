@@ -251,7 +251,9 @@ void StepScope::end() {
 namespace detail {
 int* fatal_poll_slot(void (*reset)()) {
   Graphs& gs = graphs();
-  if (!gs.in_step) return nullptr;
+  // a decomposed run reads its flags at once: the smallest code over the workers (tile::hooks.first_code) is a
+  // collective of every check
+  if (!gs.in_step || tile::hooks.first_code) return nullptr;
   // a stop raised by host code (a kernel run on the host): the checks before this one come first, as before
   if (int hc = __atomic_exchange_n(&fatal_code_host, 0, __ATOMIC_RELAXED)) {
     sync_begin();
