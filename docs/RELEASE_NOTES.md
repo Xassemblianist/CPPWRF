@@ -92,7 +92,7 @@ the GPU proofs:
 | Differential tests against WRF's compiled Fortran (`ctest -L diff`) | PASS 32 / 32 |
 | ctest | PASS 35 / 35 |
 | Host-libm independence: Colab G4, NVIDIA RTX PRO 6000 Blackwell Server Edition (sm_120), CUDA 13.0, binaries built on Ubuntu 24.04 (gcc 13.3, glibc 2.39), 2026-11-21 | `cpu_sp` 44 / 44 and `cuda_sp_id` 44 / 44 at tolerance 0 |
-| GPU: Colab G4 at 0bc4652 | [G4 PENDING] |
+| GPU: Colab G4 at 0bc4652 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-21 | CUDA FP64 338 / 338 at tolerance 0 (319 cases, 18 restart checks, Straka); CUDA FP32 identity (`cuda_sp_id`) 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 37 / 37 (FP64) and 38 / 38 (FP32); device glibc math proof identical |
 
 How the suite counts relate (`tests/verify/wrf_suite.py --list` at 0bc4652): the suite defines 927 cases, 477 CPU
 FP64, 319 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart
@@ -102,6 +102,9 @@ cases outside `--slow`, the 18 CPU restart checks and the Straka check; the 154 
 
 ## Known limitations
 
+- **Tiles with the cumulus diagnostics:** `run.tiles` (host threads of one process) together with `cu_diag = 1`
+  (Grell-Freitas, Grell-3D) shares one process-wide counter of convtrans_prep's averaging between the tile threads;
+  such a run is not checked and should not be used. One tile, or MPI ranks, are not affected.
 - **The fast CUDA FP32 build** (the default) is not bit-identical to anything: FMA contraction and CUDA's math
   library. It is checked against WRF with measured tolerances (docs/FP32_ACCURACY.md).
 - **On the identity build's device** hypotf is CUDA's (no FP32 code calls it).
