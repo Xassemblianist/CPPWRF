@@ -236,6 +236,9 @@ struct RrtmgSwTablesOf {
 #pragma pack(pop)
 
 using RrtmgSwTables = RrtmgSwTablesOf<rb>;  // the tables in the build's real (WRF's rb)
+// the dumps' sizes (data/rrtmg/README.md): packed in every compiler pass (g++, nvcc's host and device passes)
+static_assert(sizeof(RrtmgSwTablesOf<double>) == 841044 && sizeof(RrtmgSwTablesOf<float>) == 421500);
+static_assert(alignof(RrtmgSwTablesOf<double>) == 1 && alignof(RrtmgSwTablesOf<float>) == 1);
 
 
 // Loads the tables dump (tests/phys/ra_rrtmg_sw/dump_sw_tables.f90, data/rrtmg/rrtmg_sw_tables.bin)
