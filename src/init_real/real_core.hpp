@@ -16,11 +16,13 @@
 #include <emmintrin.h>
 extern "C" __m128d _ZGVbN2v_log(__m128d);
 extern "C" __m128d _ZGVbN2v_exp(__m128d);
-extern "C" __m128 _ZGVbN4v_logf(__m128);
-extern "C" __m128 _ZGVbN4v_expf(__m128);
 #define CPPWRF_INIT_LIBMVEC 1
 #endif
 #include "core/libmvec_x86.hpp"  // the double log as Intel's libmvec on any x86-64 CPU (CPPWRF_PORTABLE_LOG)
+// the float logf / expf as glibc 2.41's libmvec (_ZGVbN4v_logf, _ZGVbN4v_expf; their masked lanes through glibc 2.41's
+// scalar functions, core/glibc_mathf_host.cpp in cppwrf_real), not the host's: --precision float does not depend on
+// the installed glibc
+#include "core/libmvec_f4.hpp"
 
 namespace cppwrf::init_real {
 
@@ -66,14 +68,14 @@ inline double vexp(double x, int i, int n) {
 }
 inline float vlog(float x, int i, int n) {
 #if defined(CPPWRF_INIT_LIBMVEC)
-  if (vec_lane<float>(i, n)) return _mm_cvtss_f32(_ZGVbN4v_logf(_mm_set1_ps(x)));
+  if (vec_lane<float>(i, n)) return mvec4::logf(x);
 #endif
   (void)i; (void)n;
   return std::log(x);
 }
 inline float vexp(float x, int i, int n) {
 #if defined(CPPWRF_INIT_LIBMVEC)
-  if (vec_lane<float>(i, n)) return _mm_cvtss_f32(_ZGVbN4v_expf(_mm_set1_ps(x)));
+  if (vec_lane<float>(i, n)) return mvec4::expf(x);
 #endif
   (void)i; (void)n;
   return std::exp(x);

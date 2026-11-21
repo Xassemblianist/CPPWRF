@@ -1205,6 +1205,7 @@ class WrfTranslator:
                 lines = open(path, errors="replace").read().split("\n")
             except OSError:
                 continue  # the model reports it (ignore_iofields_warning)
+            strm = None  # WRF's strmtyp_int keeps the last known stream type over a line with an unknown one
             for line in lines:
                 line = line.rstrip("\r")[:8000]
                 if not line.rstrip(" "):
@@ -1214,9 +1215,17 @@ class WrfTranslator:
                 f = line.split(":")  # get_fieldstr: op and stream type at most 2 characters, stream id at most 4
                 if len(f) < 4 or len(f[0]) > 2 or len(f[1]) > 2 or len(f[2]) > 4:
                     continue
-                sid = f[2][:3].replace(" ", "")  # READ(strmid(1:3),'(I3)')
-                if f[0][:1] in ("+", "-") and f[1][:1].lower() == "i" and \
-                        (sid == "" or sid.lstrip("+").isdigit() and int(sid) in (0, 4, 10)):
+                t = f[1][:1].lower()
+                if t in ("h", "i"):
+                    strm = t
+                sid = f[2][:3].replace(" ", "")  # READ(strmid(1:3),'(I3)'): blanks ignored, one sign
+                k = 1 if sid[:1] in ("+", "-") else 0
+                if sid and (k == len(sid) or not sid[k:].isdigit()):
+                    self.error(f"Domain d{d + 1:02d}: iofields_filename {name}: bad stream id '{f[2]}' "
+                               f"({line.strip()}; a Fortran read error in WRF).")
+                    continue
+                istrm = int(sid) if sid else 0
+                if f[0][:1] in ("+", "-") and strm == "i" and istrm in (0, 4, 10):
                     self.error(f"Domain d{d + 1:02d}: iofields_filename {name}: input stream changes ({line.strip()}) are "
                                "not supported (CPPWRF reads wrfinput, wrflowinp and wrffdda whole).")
 
@@ -2170,6 +2179,9 @@ class WrfTranslator:
                     iv = self.get_opt("time_control", "auxinput4_interval", 0)
                     if not iv:
                         self.error("WRF sst_update = 1 needs auxinput4_interval (minutes).")
+                    if any(v is not None and v < 0 for v in
+                           self.get_opt_list("time_control", "auxinput4_interval")[:max(1, max_dom)]):
+                        self.error("WRF auxinput4_interval < 0 is not supported.")
                     sections["phys"]["sst_update"] = 1
                     sections["phys"]["auxinput4_interval"] = iv
                     # Registry default auxinput4_d<domain>_<date> (one file per time): the model reads one file

@@ -488,6 +488,9 @@ std::size_t device_work_budget();
 // The processes that share this process's device (mpi_run: the ranks of the node on the same device): the budget
 // above is divided by it. Default 1. CPU build: no effect.
 void set_device_work_share(int processes);
+// That count (1 by default and in the CPU build): fixed work-space sizes of one process (the RRTMG batch's minimum
+// columns, NSSL's rows) are divided by it as well
+int device_work_share();
 
 // One model time step (dyn::RK3::step). CUDA: the step's launches and device copies are captured into CUDA graphs
 // and replayed (an instantiated graph per domain and segment, updated with the new launch parameters), so the

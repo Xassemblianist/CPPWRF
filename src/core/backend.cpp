@@ -383,6 +383,7 @@ namespace {
 int work_share = 1;  // set_device_work_share
 }  // namespace
 void set_device_work_share(int processes) { work_share = processes > 1 ? processes : 1; }
+int device_work_share() { return work_share; }
 std::size_t device_work_budget() {
   static const std::size_t cap = [] {
     const char* e = std::getenv("CPPWRF_DEVICE_MEMORY_MIB");
@@ -436,6 +437,7 @@ const char* backend_name() { return "cpu"; }
 void device_memory_report(const char*) {}
 std::size_t device_work_budget() { return 0; }
 void set_device_work_share(int) {}
+int device_work_share() { return 1; }
 StepScope::StepScope(const void*) {}
 StepScope::~StepScope() {}
 void StepScope::end() {}

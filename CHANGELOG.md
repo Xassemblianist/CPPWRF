@@ -7,6 +7,42 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+### Fixed
+- CPPWRF's own restart files (format version 6; version 5 files are refused) continue the uninterrupted run also in
+  the alarms and attributes of the WRF files: a run resumed from `restart_<step>.nc` wrote START_DATE and
+  WRF_ALARM_SECS_TIL_NEXT_RING_55 from the restart time instead of the start of the run that wrote the file (also
+  without column physics, whose start step the file did not carry); with a `restart.interval` that is not a multiple
+  of `time.dt` its restart alarm counted from its first ring (5 min resumed at 2 min with 100 s and dt 60 s: 4, 6 min
+  instead of 4, 5 min); the file now carries the alarm's PrevRingTime and one-shot RingTime. A resumed run with
+  another `output.out_interval` or `phys.auxhist3_interval` kept the file's history / auxhist3 alarm and ignored the
+  new interval (CLWRF's statistics then used the new one): the alarm now rings at the new interval from the start of
+  the run that wrote the file, where CLWRF's period counts from.
+- A run resumed from wrfrst files takes STEPRA / STEPBL / STEPCU / STEPFG, FCX / GCX and LANDUSE_ISICE from its own
+  options as wrf.exe's phy_init and start_em do, not from the file (P1 resumed with `phys.bldt = 2`: STEPBL 1 in the
+  next wrfrst file, now 2); a two-way parent writes the phy_init fields of its wrfrst file (TOPOSLPX, SLOPE, CTOPO, ...)
+  instead of those of the initial feedback, which med_nest_initial of a restart does not run.
+- `phys.sst_update = 1`: domain 1 with `phys.auxinput4_interval = 0` and runs of `run.run_time = 0` without the
+  interval stop as WRF does (they ran without reading wrflowinp, or with a 360-minute alarm in the wrfrst files); an
+  interval below 0 is refused (model and translator).
+- WRF's files of a run without a namelist entry `interval_seconds` take `time.interval_seconds` or the wrfbdy interval
+  (WE_JUST_D01_LBC, DTBC), not the Registry default 10800 s.
+- The single-layer UCM with `use_wudapt_lcz = 0` and WUDAPT LCZ classes stops with WRF's message ("USING 10 WUDAPT LCZ
+  WITHOUT URBPARM_LCZ.TBL") instead of the generic urban input error; a class beyond the table is refused after it.
+- cppwrf_real stops on a `physics_suite` other than none, CONUS or tropical ("Unrecognized physics suite"), also when
+  every physics option is given (unit test).
+- `tools/wrf2cppwrf.py`: iofields_filename lines `-:i:-0:...` (stream 0) and lines of an unknown stream type after an
+  input line (WRF keeps the stream type) are refused like the other input stream changes; a stream id such as `++0`
+  is an error instead of a translator crash (translator tests).
+- `cppwrf_real --precision float` computed its vectorised logf / expf with the host's libmvec (`_ZGVbN4v_logf`,
+  `_ZGVbN4v_expf` imported in every x86-64 build): now with CPPWRF's port of glibc 2.41's libmvec, as the model; the
+  ctest `fp32_host_libm_real` checks that cppwrf_real imports none of the float functions or their vector variants.
+- `CPPWRF_RANK_DEVICES`: only the entry a rank takes must be below the number of devices it sees (a list for a node
+  with more devices stopped the ranks of a smaller node; unit test). K processes or tiles on one GPU also divide the
+  RRTMG batch's minimum of 2048 columns and NSSL's 1 GiB row work space by K; `run.tiles` on one GPU now divides the
+  work budget among the tiles as MPI ranks do (launch sizes only, the values do not change).
+- `CPPWRF_VM_DUMP` with `run.tiles` or MPI ranks stops with an error (it read past the patch's fields).
+- The unit tests link `${CMAKE_DL_LIBS}` (test_glibc_mathf's dlopen on glibc < 2.34).
+
 ## 1.2.1 (2026-11-21)
 
 ### Added

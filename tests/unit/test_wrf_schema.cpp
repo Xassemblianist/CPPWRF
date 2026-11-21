@@ -83,6 +83,10 @@ int main() {
         {"cu_physics = 0, 1,", "cu_physics must be equal for all domains (or = zero)"}};
     for (const auto& [p, msg] : bad) check(cons(p) == msg, p + " -> " + msg);
     check(cons("", "gwd_opt = 1, 3,") == "gwd_opt must be equal for all domains (or = zero)", "gwd_opt = 1, 3: fatal");
+    // setup_physics_suite: an unknown suite is fatal also when every option is given
+    check(cons("physics_suite = 'bogus', " + ok) == "Unrecognized physics suite", "physics_suite 'bogus': fatal");
+    check(cons("physics_suite = 'tropical', " + ok).empty() && cons("physics_suite = 'None', " + ok).empty(),
+          "physics_suite tropical / None with explicit options: consistent");
   }
   // module_check_a_mundo.F:1852-1890: cu_used / gwd_used when any domain uses the scheme; a nest without cumulus
   // or GWDO keeps the cumulus tendencies (restart) and the GWDO fields (history, restart)

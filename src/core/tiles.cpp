@@ -743,15 +743,17 @@ int rank_device(const char* spec, int local, int count) {
     if (e.empty() || e.size() > 9 || e.find_first_not_of("0123456789") != std::string::npos)
       throw std::runtime_error("CPPWRF_RANK_DEVICES=" + s + ": the entries are CUDA device numbers (non-negative "
                                "integers separated by commas), not '" + e + "'");
-    const int v = std::stoi(e);
-    if (count > 0 && v >= count)
-      throw std::runtime_error("CPPWRF_RANK_DEVICES=" + s + ": device " + e + ", but the rank sees " +
-                               std::to_string(count) + " CUDA device" + (count == 1 ? "" : "s"));
-    d.push_back(v);
+    d.push_back(std::stoi(e));
     if (q == s.size()) break;
     p = q + 1;
   }
-  return d[std::size_t(local) % d.size()];
+  // only the entry this rank takes must be one of its devices (the ranks of other nodes may see more)
+  const int v = d[std::size_t(local) % d.size()];
+  if (count > 0 && v >= count)
+    throw std::runtime_error("CPPWRF_RANK_DEVICES=" + s + ": device " + std::to_string(v) + " for node-local rank " +
+                             std::to_string(local) + ", but the rank sees " + std::to_string(count) + " CUDA device" +
+                             (count == 1 ? "" : "s"));
+  return v;
 }
 
 namespace {
@@ -1346,6 +1348,11 @@ int run(const Options& o, const std::function<int(int)>& body) {
   if (!o.devices.empty())
     for (int t = 0; t < set.n; ++t) dev[std::size_t(t)] = o.devices[std::size_t(t) % o.devices.size()];
   set.all.init(set.n + (o.check ? 1 : 0));
+  {  // the tiles on one device share its work budget as ranks do (device_work_budget, device_work_share)
+    int most = 1;
+    for (int d : dev) most = std::max(most, int(std::count(dev.begin(), dev.end(), d)));
+    set_device_work_share(most);
+  }
   S = &set;
   set_hooks(true);
   if (o.check) hooks.check = &check_hook;
@@ -1393,6 +1400,7 @@ int run(const Options& o, const std::function<int(int)>& body) {
   for (std::thread& x : th) x.join();
   hooks = Hooks{};
   S = nullptr;
+  set_device_work_share(1);
   if (set.err && set.err_root) std::rethrow_exception(set.err);
   for (int r : rc)
     if (r != 0) return r;

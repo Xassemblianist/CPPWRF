@@ -6,7 +6,8 @@ WRF's AUXINPUT4 / AUXINPUT10 alarm rings at the first step at or past each inter
 then finds no wrflowinp / wrffdda record of that time and stops ("Could not find matching time in input file",
 share/input_wrf.F). The model refuses such a configuration at its start; the same configuration with an interval that
 is a multiple of dt runs. dt = 32 s divides the boundary interval (21600 s) but not 180 min (10800 s); 360 min is a
-multiple of it.
+multiple of it. sst_update = 1 with auxinput4_interval = 0 on domain 1, or without it (also with run_time = 0), is
+fatal in WRF (check_a_mundo) and refused.
 
   input_interval_test.py CPPWRF_BINARY WORK_DIR   (from the repository root; exit 77 without
                                                    ${CPPWRF_WRF_RUNS}/run_SU1_r8/steps; the grid_fdda run that goes on
@@ -50,6 +51,11 @@ def main():
     run("sst_update_180min", su1, ["phys.auxinput4_interval=180"],
         "phys.auxinput4_interval (10800 s) is not a multiple of time.dt (32 s)")
     run("sst_update_360min", su1, [], None)
+    # check_a_mundo: auxinput4_interval = 0 on domain 1 is fatal; no interval is fatal also without time steps
+    run("sst_update_0min", su1, ["phys.auxinput4_interval=0"], "phys.auxinput4_interval = 0 on domain 1")
+    run("sst_update_no_interval_run_time_0", "configs/real_p1_r8.ini",
+        ["real.dir=" + os.path.join(runs, "run_SU1_r8", "steps"), "phys.sst_update=1", "run.run_time=0"],
+        "phys.sst_update = 1 needs phys.auxinput4_interval")
     # grid_fdda: the check comes before the model opens wrffdda_d01, so SU1's inputs serve; the run that goes on needs
     # FD1's analyses
     fdda = ["fdda.grid_fdda=1", "fdda.gfdda_end_h=6", "fdda.guv=0.0003"]

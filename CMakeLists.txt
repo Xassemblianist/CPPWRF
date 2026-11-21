@@ -326,6 +326,12 @@ endif()
 if(TARGET cppwrf_real AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   target_sources(cppwrf_real PRIVATE ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
   target_include_directories(cppwrf_real PRIVATE ${CMAKE_SOURCE_DIR}/src)
+  # cppwrf_real imports none of them either, nor their libmvec variants (its vectorised logf / expf: libmvec_f4.hpp)
+  set(_gfr expf logf powf sinf cosf sincosf tanf atanf atan2f asinf acosf sinhf tanhf log10f erff tgammaf)
+  string(REPLACE ";" "|" _gfr "${_gfr}")
+  add_test(NAME fp32_host_libm_real
+           COMMAND bash -c "! nm -D --undefined-only \"$1\" | grep -E \" (_ZGV[A-Za-z0-9]*_)?(${_gfr})(@|$)\"" _ $<TARGET_FILE:cppwrf_real>)
+  set_tests_properties(fp32_host_libm_real PROPERTIES LABELS unit)
 endif()
 
 # Unit tests (tests/unit/*.cpp; tests/unit/io belongs to cppwrf_io)
@@ -334,7 +340,7 @@ foreach(src ${CPPWRF_UNIT_TESTS})
   get_filename_component(name ${src} NAME_WE)
   add_executable(${name} ${src})
   cppwrf_device_sources(${src})
-  target_link_libraries(${name} PRIVATE cppwrf_core)
+  target_link_libraries(${name} PRIVATE cppwrf_core ${CMAKE_DL_LIBS})  # dlopen (test_glibc_mathf; glibc < 2.34: libdl)
   add_test(NAME ${name} COMMAND ${name} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   # OpenMP threads that spin while waiting stall the tests for hours on a loaded machine
   set_tests_properties(${name} PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
@@ -363,6 +369,12 @@ if(TARGET cppwrf)
   add_test(NAME input_interval COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/input_interval_test.py
            $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/input_interval WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(input_interval PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                       ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
+  # runs resumed from CPPWRF's own restart file and from a wrfrst file with changed intervals
+  # (tests/verify/restart_resume_test.py; P1, skipped without ${CPPWRF_WRF_RUNS}/run_P1_r8/steps)
+  add_test(NAME restart_resume COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/restart_resume_test.py
+           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/restart_resume WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(restart_resume PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                        ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 endif()
 

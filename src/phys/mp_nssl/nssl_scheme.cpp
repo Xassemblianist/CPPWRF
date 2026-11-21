@@ -89,9 +89,11 @@ NsslScheme<Real>::NsslScheme(const NsslConfig& c, int nx_row, int nz, int max_ro
   impl_->dmem.push_back(impl_->dparams);
   copy_to_dev(impl_->dparams, dp.get(), sizeof(NsslParams<Real>));
   impl_->wbytes = work_bytes(nx_row, nz);
-  // rows per launch: up to a 1 GiB work space, no more rows than the domain has
+  // rows per launch: up to a 1 GiB work space (1 / K of it for K processes or tiles on one device), no more rows
+  // than the domain has
+  const std::size_t space = (std::size_t(1) << 30) / std::size_t(device_work_share());
   impl_->rows = int(std::min<std::size_t>(std::size_t(std::max(1, std::min(4096, max_rows))),
-                                          std::max<std::size_t>(1, (std::size_t(1) << 30) / impl_->wbytes)));
+                                          std::max<std::size_t>(1, space / impl_->wbytes)));
   impl_->work = static_cast<char*>(dev_alloc(impl_->wbytes * std::size_t(impl_->rows)));
   impl_->dmem.push_back(impl_->work);
 }

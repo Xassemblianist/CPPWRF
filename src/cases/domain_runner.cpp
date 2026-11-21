@@ -323,15 +323,22 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
     // and what the run carries that WRF's restart stream does not (a run resumed from this file goes on as this
     // one): the step its curr_secs2 counts from (buckets, prec_acc_dt, CLWRF, the FDDA interpolation),
     // convtrans_prep's averaging counter
-    meta.scalars.emplace_back("RUN_START_STEP", double(m_.suite->run_start_step));
     meta.scalars.emplace_back("STEPAVE_COUNT", double(phys::driver::PhysicsSuite::convtrans_stepave_count()));
   }
-  // the alarms as this run has them: history and auxhist3 (a run resumed from a wrfrst file has the file's), the
-  // auxinput4 / auxinput10 schedules and whether this step's record was read before this file was written
+  // the step the run started at (also without column physics: the history's START_DATE and alarm 55 count from it)
+  meta.scalars.emplace_back("RUN_START_STEP", double(run_start_step_));
+  // the alarms as this run has them: history and auxhist3 (a run resumed from a wrfrst file has the file's) with the
+  // intervals of its configuration (output.out_interval, phys.auxhist3_interval), the restart alarm's PrevRingTime
+  // and pending one-shot RingTime, the auxinput4 / auxinput10 schedules and whether this step's record was read
+  // before this file was written
   meta.scalars.emplace_back("HIST_IV", double(hist_iv_));
   meta.scalars.emplace_back("HIST_REF", double(hist_ref_));
+  meta.scalars.emplace_back("HIST_IV_CFG", double(out_iv_));
   meta.scalars.emplace_back("AUX3_IV", double(aux3_iv_));
   meta.scalars.emplace_back("AUX3_REF", double(aux3_ref_));
+  meta.scalars.emplace_back("AUX3_IV_CFG", double(aux3_cfg_iv_));
+  meta.scalars.emplace_back("RST_PREV", rst_prev_);
+  meta.scalars.emplace_back("RST_RING_TIME", rst_ring_time_);
   meta.scalars.emplace_back("AUX4_FIRST_S", aux4_first_s_);
   meta.scalars.emplace_back("AUX4_READ", aux4_read_step_ == step ? 1.0 : 0.0);
   meta.scalars.emplace_back("AUX10_FIRST_S", aux10_first_s_);
@@ -585,14 +592,29 @@ void DomainRunner::load_restart_file(const std::string& path) {
     if (m_.suite) {  // the scalars save_restart_file stores (WRF's wrfrst: NSTEPS, DECLIN, SOLCON below)
       m_.suite->nsteps = int(std::lround(meta.scalar("NSTEPS", 0.0)));
       if (m_.suite->rad_) m_.suite->rad_->set_solar(meta.scalar("DECLIN", 0.0), meta.scalar("SOLCON", 0.0));
-      native_run_start = std::lround(meta.scalar("RUN_START_STEP", double(meta.step)));
       phys::driver::PhysicsSuite::set_convtrans_stepave_count(int(std::lround(meta.scalar("STEPAVE_COUNT", 0.0))));
     }
-    // the alarms of the run that wrote the file (save_restart_file)
-    hist_iv_ = std::lround(meta.scalar("HIST_IV", double(hist_iv_)));
-    hist_ref_ = std::lround(meta.scalar("HIST_REF", double(hist_ref_)));
-    aux3_iv_ = std::lround(meta.scalar("AUX3_IV", double(aux3_iv_)));
-    aux3_ref_ = std::lround(meta.scalar("AUX3_REF", double(aux3_ref_)));
+    native_run_start = std::lround(meta.scalar("RUN_START_STEP", double(meta.step)));
+    // the alarms of the run that wrote the file (save_restart_file). A history or auxhist3 interval changed in this
+    // run's configuration (output.out_interval, phys.auxhist3_interval are not among the recorded options): that
+    // alarm rings at the new interval from the start of the run that wrote the file, where CLWRF's curr_secs2
+    // (output_diagnostics) counts from
+    if (std::lround(meta.scalar("HIST_IV_CFG", -1.0)) == out_iv_) {
+      hist_iv_ = std::lround(meta.scalar("HIST_IV", double(hist_iv_)));
+      hist_ref_ = std::lround(meta.scalar("HIST_REF", double(hist_ref_)));
+    } else {
+      hist_ref_ = native_run_start;
+    }
+    if (std::lround(meta.scalar("AUX3_IV_CFG", -1.0)) == aux3_cfg_iv_) {
+      aux3_iv_ = std::lround(meta.scalar("AUX3_IV", double(aux3_iv_)));
+      aux3_ref_ = std::lround(meta.scalar("AUX3_REF", double(aux3_ref_)));
+    } else {
+      aux3_ref_ = native_run_start;
+    }
+    // the restart alarm as the run that wrote the file has it (its PrevRingTime, a pending one-shot RingTime of a
+    // wrfrst resume): the resumed run rings where the uninterrupted one rings
+    native_rst_prev_ = meta.scalar("RST_PREV", double(meta.step) * g.dt);
+    native_rst_ring_time_ = meta.scalar("RST_RING_TIME", -1.0);
     aux4_first_s_ = meta.scalar("AUX4_FIRST_S", aux4_first_s_);
     if (meta.scalar("AUX4_READ", 0.0) != 0.0) aux4_read_step_ = meta.step;
     aux10_first_s_ = meta.scalar("AUX10_FIRST_S", aux10_first_s_);
@@ -622,6 +644,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
         rst_ring_time_ = meta.time_sec + double(rsecs);
       }
     }
+    if (!wrf_file) rst_ring_time_ = native_rst_ring_time_;
   }
   if (m_.nsteps < start_step) {
     throw std::runtime_error("run.run_time (" + std::to_string(m_.run_time) + "s / step " + std::to_string(m_.nsteps) +
@@ -742,6 +765,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
     for (size_t k = 0; k < hw.size(); ++k) hw[k] = int(std::lround(bufs[t.buf_idx][k]));
     t.f->upload(tile::local_part(*t.f, hw));
   }
+  run_start_step_ = wrf_file ? start_step : native_run_start;
   if (m_.suite) m_.suite->restarted(start_step, wrf_file, native_run_start);
   if (rk && rk->physics()) rk->physics()->itimestep = start_step;
 }
@@ -869,6 +893,7 @@ bool DomainRunner::start() {
     if (a3 < 0 || (a3 > 0 && st != std::floor(st)))
       throw std::runtime_error("phys.auxhist3_interval must be >= 0 and a multiple of time.dt (minutes)");
     aux3_iv_ = std::lround(st);
+    aux3_cfg_iv_ = aux3_iv_;
     aux3_ref_ = 0;
     aux3_write_ = cfg_.get_bool("output.auxhist3", false);
     if (aux3_write_ && (!write_wrfout_ || aux3_iv_ <= 0))
@@ -934,7 +959,7 @@ bool DomainRunner::start() {
       }
     };
     if (m_.suite && m_.suite->options().sst_update == 1)
-      check_iv(cfg_.get_double("phys.auxinput4_interval", 360.0) * 60.0, "phys.auxinput4_interval", "wrflowinp");
+      check_iv(cfg_.get_double("phys.auxinput4_interval", 0.0) * 60.0, "phys.auxinput4_interval", "wrflowinp");
     if (aux10_on())
       check_iv(double(m_.suite->options().fdda.interval_m) * 60.0, "fdda.gfdda_interval_m", "wrffdda");
   }
@@ -942,11 +967,14 @@ bool DomainRunner::start() {
   check_config_keys(cfg_);  // a key no code reads (misspelled, wrong section, not ported) is an error
 
   start_step = 0;
+  run_start_step_ = 0;
+  native_rst_prev_ = -1.0;
 #ifdef CPPWRF_HAVE_NETCDF
   if (!restart_file.empty()) {
     load_restart_file(restart_file);
     if (wrfout_)
-      wrfout_->set_restart_time(m_.adapt ? wrf_time::real_time<double>(m_.sim_offset) : double(start_step) * g.dt);
+      // the start of this run (a wrfrst resume), or of the run that wrote CPPWRF's own file (START_DATE, alarm 55)
+      wrfout_->set_restart_time(m_.adapt ? wrf_time::real_time<double>(m_.sim_offset) : double(run_start_step_) * g.dt);
     if (wrfout_ && is_wrfrst(restart_file)) wrfout_->phy_init_from_restart(restart_file);
     // med_before_solve_io writes an auxiliary history stream whose alarm the restart file left ringing
     if (aux3_write_ && wrfout_ && aux3_ring_at_start_ == 1) {
@@ -955,7 +983,8 @@ bool DomainRunner::start() {
     }
   }
 #endif
-  rst_prev_ = double(start_step) * g.dt;  // the alarm's PrevRingTime starts at the run's start (ESMF_Clock.F90:773)
+  // the alarm's PrevRingTime starts at the run's start (ESMF_Clock.F90:773); CPPWRF's own file: as it was there
+  rst_prev_ = native_rst_prev_ >= 0.0 ? native_rst_prev_ : double(start_step) * g.dt;
   if (m_.adapt) {
     rst_iv_t_ = wrf_time::make(std::llround(rst_iv_s_));
     if (rst_iv_s_ != std::floor(rst_iv_s_)) throw std::runtime_error("restart.interval must be whole seconds");
@@ -1151,7 +1180,7 @@ void DomainRunner::before_step(long n) {
 // a WRF restart file rings first as the file says (load_restart_file)
 bool DomainRunner::aux4_due(long s) const {
   if (s == start_step && start_step > 0 && aux4_ring_at_start_ >= 0) return aux4_ring_at_start_ == 1;
-  const double t = double(s) * m_.g.dt, iv = cfg_.get_double("phys.auxinput4_interval", 360.0) * 60.0;
+  const double t = double(s) * m_.g.dt, iv = cfg_.get_double("phys.auxinput4_interval", 0.0) * 60.0;
   return iv > 0 && t >= aux4_first_s_ - 1e-6 &&
          std::fabs((t - aux4_first_s_) - iv * std::round((t - aux4_first_s_) / iv)) < 1e-6;
 }

@@ -782,10 +782,11 @@ run_time = 7200
 restart_file = out/real/restart_000060.nc   # or .../wrfrst_d01_2026-10-12_01:00:00
 ```
 
-CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 5: the scalars NSTEPS,
+CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 6: the scalars NSTEPS,
 DECLIN and SOLCON as `SCALAR_<name>` attributes; WW, WW_M, PHP, ALT; in a run of one patch the halo points of every
 field as `HALO_<name>`; the step the run started at, convtrans_prep's averaging counter and the history, auxhist3,
-auxinput4 and auxinput10 alarms; REFL_10CM and Noah-MP's land-point flag, which WRF's restart stream leaves out; so
+auxinput4 and auxinput10 alarms with the configured history / auxhist3 intervals, the restart alarm's PrevRingTime and
+one-shot RingTime; REFL_10CM and Noah-MP's land-point flag, which WRF's restart stream leaves out; so
 that a run resumed from the file continues the uninterrupted one bit for bit, also between two radiation, PBL or
 cumulus calls, within a bucket, `prec_acc_dt`, `auxhist3` (output_diagnostics), FDDA or cumulus averaging period), the commit of the sources
 (`CPPWRF_COMMIT`) and the run's options (`CPPWRF_OPTIONS`: every configuration key except `[run]`, `[restart]`,
@@ -804,7 +805,11 @@ The restart alarm of a resumed run is WRF's: input_wrf sets its first ring to th
 step (ESMF_ClockAdvance). With a `restart.interval` that is not a multiple of `time.dt` a resumed run therefore writes
 its restart files at other times than the uninterrupted run (dt 50 s, interval 120 s, resumed at 150 s: 250, 400, 500,
 650 s instead of 250, 400, 500, 600 s), and with `restart.interval = 0` it still writes one set at that first ring, as
-WRF does. CPPWRF's own `restart_<step>.nc` (format version 2) carries the same attribute and resumes the same way.
+WRF does. A run resumed from CPPWRF's own `restart_<step>.nc` continues the uninterrupted run instead: the same restart
+times, and wrfrst files equal to its files (variables and attributes: START_DATE and the alarms count from the start of
+the run that wrote the file). With another `output.out_interval` or `phys.auxhist3_interval` than that run, the history
+or auxhist3 alarm rings at the new interval counted from that run's start (CLWRF's statistics period counts from there
+too).
 
 When resuming, pre-restart rows in `diag.csv` are preserved automatically.
 

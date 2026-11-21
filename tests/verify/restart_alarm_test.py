@@ -13,8 +13,9 @@ run resumed from the file of 150 s: 250, 400, 500, 650 s (WRF_ALARM_SECS_TIL_NEX
 with restart_interval = 0: one file, of 250 s (1700000000: the forever interval).
 
 The test runs em_quarter_ss (11 x 11 cells, dt 12 s, restart interval 20 s, 144 s), resumes it from its wrfrst file
-of 24 s and from its own restart_000002.nc, and compares the times of the wrfrst files of the three runs, and the
-seconds to the next ring they carry, with that rule.
+of 24 s and compares the times of the wrfrst files, and the seconds to the next ring they carry, with that rule. The
+run resumed from CPPWRF's own restart_000002.nc continues the uninterrupted run: the same rings and wrfrst files
+(variables and global attributes).
 
   restart_alarm_test.py CPPWRF_BINARY WORK_DIR     (from the repository root; exit 77 without
                                                     ${CPPWRF_WRF_REF}/run_qss/input_sounding or without NetCDF)
@@ -103,11 +104,23 @@ def main():
     # resumed from 150 s with restart_interval = 0 writes one wrfrst file, of 250 s, with 1700000000 seconds to go)
     _, got = run("resumed_iv0", ["--set", f"run.restart_file={first[0]}", "--set", "restart.interval=0"])
     check(f"run resumed from {t0} s with restart.interval = 0", got, wrf_rings(dt, 0, t_end, t0, secs))
-    # CPPWRF's own restart file of that time carries the same WRF_ALARM_SECS_TIL_NEXT_RING_51: the same schedule
+    # CPPWRF's own restart file of that time carries the alarm as the run has it (PrevRingTime): the resumed run
+    # rings where the uninterrupted one rings, and its wrfrst files are the uninterrupted run's (every variable and
+    # global attribute: START_DATE and alarm 55 count from the start of the run that wrote the file)
     native = os.path.join(d, f"restart_{t0 // dt:06d}.nc")
-    _, got = run("resumed_native", ["--set", f"run.restart_file={native}"])
+    dn, got = run("resumed_native", ["--set", f"run.restart_file={native}"])
     check(f"run resumed from {t0} s (CPPWRF's restart file), (time, seconds to the next ring)", got,
-          wrf_rings(dt, iv, t_end, t0, secs))
+          [x for x in want if x[0] > t0])
+    import netCDF4
+    for f in sorted(glob.glob(os.path.join(dn, "wrfrst_d01_*"))):
+        with netCDF4.Dataset(f) as b, netCDF4.Dataset(os.path.join(d, os.path.basename(f))) as a:
+            a.set_auto_maskandscale(False)
+            b.set_auto_maskandscale(False)
+            atts = sorted(k for k in set(a.ncattrs()) | set(b.ncattrs())
+                          if k not in a.ncattrs() or k not in b.ncattrs() or str(a.getncattr(k)) != str(b.getncattr(k)))
+            vs = sorted(n for n in a.variables if n not in b.variables or
+                        a.variables[n][:].tobytes() != b.variables[n][:].tobytes())
+            check(f"{os.path.basename(f)} of the native resume: differing attributes, variables", (atts, vs), ([], []))
     return 1 if fails else 0
 
 

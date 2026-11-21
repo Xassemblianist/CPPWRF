@@ -65,6 +65,9 @@ int main() {
   expect_throw(" 1", 0, 2);
   expect_throw("99999999999", 0, 2);
   expect_throw("2", 0, 2);  // not below the visible count
+  // only the entry the rank takes is checked against its count (a node with fewer devices than the list names)
+  expect("0,1,2,3", 1, 2, 1);
+  expect_throw("0,1,2,3", 2, 2);
   if (fails) {
     std::printf("test_rank_device: %d failures\n", fails);
     return 1;
