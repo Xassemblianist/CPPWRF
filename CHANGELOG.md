@@ -16,6 +16,23 @@ resumes across versions from WRF's wrfrst files.
   physics' work buffer (and NSSL's row work space) for its own patch instead of the whole domain. Results unchanged
   (test_rank_device; docs/MPI.md).
 
+### Fixed
+- Tiles (`run.tiles`) with the cumulus diagnostics (`cu_diag = 1`: Grell-Freitas, Grell-3D): convtrans_prep's
+  averaging counter (module_convtrans_prep.F's SAVE stepave_count) was one for the process, so the tile threads raced
+  on it and counted once per tile; at the end of an averaging period QC_CU / QI_CU / RAINCV_B took another divisor
+  than in the run without tiles (with cu_rad_feedback, RRTMG's clouds and all fields after it). It is now one per
+  tile thread, which gives the run without tiles (WRF's own numtiles > 1 counts once per tile; the references run one
+  tile). New suite case real_a05g_r8_fp64_cpu_1h_t2x2. MPI ranks were not affected.
+- `CPPWRF_KTIME=1` with tiles: the tile threads updated the kernel-time table without a lock (it could crash); the
+  debug flag of `CPPWRF_VM_DUMP` was shared by the tile threads.
+- The FP64 builds no longer contain glibc 2.41's float functions (src/core/glibc_mathf_host.cpp came in through the
+  core library); they call the host's libm, as documented. The FP64 results are unchanged.
+- `cppwrf_real --precision float` uses glibc 2.41's float functions in every x86-64 build, not only in the FP32
+  builds (one `cppwrf_real` is installed into a prefix: that of the flavour installed last).
+- test_glibc_mathf compared the ports with themselves (the executable's own expf ... from the core library); it now
+  looks the system libm's functions up in libm.so.6. The ctest `fp32_host_libm` also rejects libmvec vector variants
+  of the ported functions (none are imported).
+
 ## 1.2.0 (2026-11-21)
 
 ### Added

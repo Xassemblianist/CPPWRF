@@ -96,6 +96,11 @@ file(GLOB CPPWRF_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/src/core/*.cpp
   ${CMAKE_SOURCE_DIR}/src/dyn/*.cpp
   ${CMAKE_SOURCE_DIR}/src/cases/*.cpp)
+# glibc 2.41's float functions (src/core/glibc_mathf_host.cpp) belong to the FP32 builds on x86-64 only (below): the
+# FP64 builds call the host's libm as before
+if(CPPWRF_DOUBLE OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  list(REMOVE_ITEM CPPWRF_SOURCES ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
+endif()
 # Column physics used by the dycore (P1/P2 suite: sfclayrev + Noah + YSU + KF and its driver glue)
 list(APPEND CPPWRF_SOURCES
   ${CMAKE_SOURCE_DIR}/src/phys/driver/suite.cpp
@@ -310,14 +315,17 @@ if(NOT CPPWRF_DOUBLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   if(TARGET cppwrf)
     target_sources(cppwrf PRIVATE ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
     string(REPLACE ";" "|" _gfh "${CPPWRF_GLIBCF_HOST_FUNCS}")
+    # also no libmvec vector variant of them (_ZGVbN4v_expf ...: a loop g++ vectorised with the host's libmvec)
     add_test(NAME fp32_host_libm
-             COMMAND bash -c "! nm -D --undefined-only \"$1\" | grep -E \" (${_gfh})(@|$)\"" _ $<TARGET_FILE:cppwrf>)
+             COMMAND bash -c "! nm -D --undefined-only \"$1\" | grep -E \" (_ZGV[A-Za-z0-9]*_)?(${_gfh})(@|$)\"" _ $<TARGET_FILE:cppwrf>)
     set_tests_properties(fp32_host_libm PROPERTIES LABELS unit)
   endif()
-  if(TARGET cppwrf_real)
-    target_sources(cppwrf_real PRIVATE ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
-    target_include_directories(cppwrf_real PRIVATE ${CMAKE_SOURCE_DIR}/src)
-  endif()
+endif()
+# cppwrf_real (both precisions at run time, --precision float in any build): glibc 2.41's float functions in every
+# x86-64 build, so that its single-precision files do not depend on the flavour installed last into a prefix
+if(TARGET cppwrf_real AND CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  target_sources(cppwrf_real PRIVATE ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
+  target_include_directories(cppwrf_real PRIVATE ${CMAKE_SOURCE_DIR}/src)
 endif()
 
 # Unit tests (tests/unit/*.cpp; tests/unit/io belongs to cppwrf_io)
