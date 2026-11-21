@@ -78,9 +78,9 @@ Proof that this equals the serial fill: the serial fill is `value(i, j) = s_x s_
 maps `m` and signs `s` per direction (the wall face keeps its value). The exchange delivers every interior point of
 the window; each pass then applies one direction's map to rows/columns that already hold the serial values.
 
-GPU: pack and unpack are kernels. The bytes are staged through pinned host buffers by default (works with any
-MPI); a CUDA-aware MPI may take the device buffers (`CPPWRF_MPI_CUDA_AWARE=1`, **unproved**: no such MPI and no
-second GPU are available to us).
+GPU: pack and unpack are kernels. The bytes are staged through ordinary (pageable) host buffers, which works with
+any MPI. Pinned staging buffers and handing device buffers to a CUDA-aware MPI are not implemented yet; several GPUs
+have not been run (no second GPU is available to us).
 
 Rejected: one-sided pulls from the neighbours' arrays (P03's `cudaMemcpy3D` between tiles' copies): needs every
 worker's memory in one address space.
