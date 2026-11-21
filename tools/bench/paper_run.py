@@ -25,12 +25,12 @@ OPTIONS (defaults: the Colab G4 session of tools/bench/colab_paper.sh):
   --src DIR           CPPWRF's source tree (default: the one of this script)
   --cases C1,C2,...   the cases (default C1,C2,C3,C4); --case NAME=BASE:LENGTH[:SECTION.key=VALUE;...] adds or
                       replaces one (BASE: a directory, or a name under --data; LENGTH: 24h, 6h, 3m, ...)
-  --models M,...      the timed models (default wrf_r4,wrf_r8,gpu_fp32,gpu_fp32id,gpu_fp64,cpu_fp64)
+  --models M,...      the timed models (default wrf_r4,wrf_r4t,wrf_r8,gpu_fp32,gpu_fp32id,gpu_fp64,cpu_fp64)
   --proof P,...       the proof runs (default wrf_r8_dm1,wrf_r4_dm1,cpu_fp64,cpu_fp64_hwlog,cpu_fp32)
   --layouts L,...     WRF's layouts to screen (default dm12,dm24,dm48,sm24x2,sm12x4,sm12x2,sm6x4,sm8x3; dmN: N
                       ranks, smNxT: N ranks x T threads of the dm+sm build); --layout dm24 skips the screening
   --screen-reps N     repetitions of each screened layout (default 1, interleaved)
-  --reps N            timed blocks with history off after the warm-up block (default 5)
+  --reps N            timed blocks with history off after the warm-up block (default 4)
   --reps-on N         timed blocks with history on (default 3, no warm-up: the history-off blocks warmed up)
   --cpu-reps N        CPPWRF CPU FP64 runs with history off, in blocks 1 .. N (default 3, no own warm-up)
   --warmup N          warm-up blocks before the history-off blocks (default 1; not counted)
@@ -45,8 +45,8 @@ OPTIONS (defaults: the Colab G4 session of tools/bench/colab_paper.sh):
   --nc0               also time CPPWRF GPU FP32 with HDF5's own deflate filter (CPPWRF_NC_THREADS=0), history on
   --keep              keep every run directory (default: only the outputs the comparisons need)
 
-Models: wrf_r4 / wrf_r8 (WRF v4.8.0 real*4 / real*8 at the fastest screened layout; not in the default list:
-wrf_r4t, real*4 with FCOPTIM = -O3 -march=native -funroll-loops, builds WRF-r4t / WRF-r4tsm), gpu_fp32 (CUDA FP32, the fast
+Models: wrf_r4 / wrf_r8 (WRF v4.8.0 real*4 / real*8 at the fastest screened layout), wrf_r4t (real*4 with
+FCOPTIM = -O3 -march=native -funroll-loops, builds WRF-r4t / WRF-r4tsm), gpu_fp32 (CUDA FP32, the fast
 default build "cuda"), gpu_fp32id (CUDA FP32 identity build "cuda_sp_id"), gpu_fp64 ("cuda_dp"), cpu_fp64
 (CPU FP64 "cpu-dp" at the fastest screened thread count). CPPWRF runs with output.wrf_timing = true (WRF's timing
 lines; tools/bench/bench_parse.py splits both models' times the same way) and output.diag_interval = 1000000 (no
@@ -71,16 +71,16 @@ NP = os.cpu_count() or 1
 
 # name: (base, length, namelist changes, description)
 CASES = {
-    "C1": ("run_P4_72h_r8", "24h", ["physics.radt=15"],
+    "C1": ("run_FP2_P4_24h_r8", "24h", ["physics.radt=15"],
            "P4 physics (WSM6, KF, YSU, revised MM5 surface layer, Noah, RRTMG LW/SW) with radt 15 min, 119 x 89 x 44 "
            "at 15 km, dt 60 s, 24 h from 2026-10-12 00 UTC (a whole day and night)"),
     "C2": ("@Lday", "6h", ["physics.radt=15"],
            "L: 359 x 269 x 44 at 15 km (4.25 M cells, WPS + real.exe on the runtime), P4 physics with radt 15 min, "
            "6 h from 2026-10-12 06 UTC (daytime: 08:20 - 14:20 local solar time at 35 E)"),
-    "C3": ("run_P4_72h_r8", "6h", ["physics.mp_physics=10"],
+    "C3": ("run_FP2_P4_24h_r8", "6h", ["physics.mp_physics=10"],
            "MORR: P4 with Morrison two-moment microphysics (mp_physics 10) and radiation every minute (radt 1), "
            "119 x 89 x 44, 6 h from 00 UTC"),
-    "C4": ("run_N3_24h_r8", "6h", [],
+    "C4": ("run_N3h_r8", "6h", [],
            "N3: two-way nest (d02 120 x 90 x 44 at 5 km, ratio 3, feedback, smooth_option 2), P4 physics with "
            "radt 1 on both domains, 6 h from 00 UTC"),
 }
@@ -89,7 +89,7 @@ MODELS = {  # name: (kind, build)
     "gpu_fp32": ("gpu", "cuda"), "gpu_fp32id": ("gpu", "cuda_sp_id"), "gpu_fp64": ("gpu", "cuda_dp"),
     "cpu_fp64": ("cpu", "cpu-dp"),
 }
-DEFAULT_MODELS = ["wrf_r4", "wrf_r8", "gpu_fp32", "gpu_fp32id", "gpu_fp64", "cpu_fp64"]
+DEFAULT_MODELS = ["wrf_r4", "wrf_r4t", "wrf_r8", "gpu_fp32", "gpu_fp32id", "gpu_fp64", "cpu_fp64"]
 PROOF = {  # name: (kind, build)
     "wrf_r8_dm1": ("wrf", "r8"), "wrf_r4_dm1": ("wrf", "r4"),
     "cpu_fp64": ("cpu", "cpu-dp"), "cpu_fp64_hwlog": ("cpu", "cpu-dp-hwlog"), "cpu_fp32": ("cpu", "cpu-sp"),
@@ -120,7 +120,7 @@ class Opt:
         self.proof = list(PROOF)
         self.layouts = "dm12,dm24,dm48,sm24x2,sm12x4,sm12x2,sm6x4,sm8x3".split(",")
         self.layout = None
-        self.screen_reps, self.reps, self.reps_on, self.cpu_reps, self.warmup = 1, 5, 3, 3, 1
+        self.screen_reps, self.reps, self.reps_on, self.cpu_reps, self.warmup = 1, 4, 3, 3, 1
         self.hist_min, self.pause, self.gpu, self.gpu_threads, self.proof_threads = 60, 3.0, "agent", 4, 8
         self.gpu_bins, self.cpu_bins, self.nc0, self.keep = {}, {}, False, False
         self.np = NP

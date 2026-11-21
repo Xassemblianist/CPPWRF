@@ -10,7 +10,7 @@ in this directory; `tools/bench/colab_paper.sh` runs the whole protocol in one C
 
 | Session | Runtime | What | Estimate | Compute units |
 |---|---|---|---|---|
-| 1 (required) | Colab G4: AMD EPYC 9B45 (24 cores, 48 vCPUs) + RTX PRO 6000 Blackwell (96 GB) | WRF v4.8.0 and every CPPWRF build, cases C1-C4 | 7.1 h (`paper_run.py plan`), at most 10 h | about 71, at most 100 (10.05 per hour in November 2026) |
+| 1 (required) | Colab G4: AMD EPYC 9B45 (24 cores, 48 vCPUs) + RTX PRO 6000 Blackwell (96 GB) | WRF v4.8.0 (stock and tuned real*4) and every CPPWRF build, cases C1-C4 | 7.9 h (`paper_run.py plan --nc0`), at most 10 h | about 79, at most 100 (10.05 per hour in November 2026) |
 | 2 (optional) | Colab L4, then Colab A100 | CPPWRF's three CUDA builds against its CPU builds, cases C1, C2 | about 2-3 h each (not measured) | `colab usage`'s rate x hours (the L4 and A100 rates were not checked here) |
 
 The estimate comes from the G4 times of docs/PERF.md (stepping per simulated hour of every model, WRF in one
@@ -21,15 +21,17 @@ option set. The job stops waiting after 11 hours (`--hours`).
 ## Cases
 
 Every case is a configuration the suite already proves bit-identical in FP64 (docs/STATUS.md), run longer than the
-suite does. Inputs are the suite's (no new data tars), except C2, which is made on the runtime as the older
-benchmark's large domain L.
+suite does. Inputs are existing data tars on Drive (and the GitHub release cppwrf-data data-v1): fp2_data.tar's
+run_FP2_P4_24h_r8 (real.exe inputs of P4's domain with boundaries for 24 h; its wrfinput is run_P4_r8's) for C1 and
+C3, n3_data.tar's run_N3h_r8 (the suite's N3 inputs, boundaries valid for 6 h) for C4. C2 is made on the runtime as
+the older benchmark's large domain L (its tables and namelist from run_FP2_P4_24h_r8).
 
 | Case | Configuration | Grid (cells) | Steps | Length | Why | Verified before (suite) |
 |---|---|---|---|---|---|---|
-| C1 | P4 physics (WSM6, Kain-Fritsch, YSU, revised MM5 surface layer, Noah, RRTMG LW/SW) with radt 15 min; inputs of the 72 h reference (run_P4_72h_r8) | 119 x 89 x 44 (466 k) | 1440 | 24 h from 2026-10-12 00 UTC | a whole day: the shortwave works for 11 h; the production radiation step | FP64 24 h / 72 h (radt 1); FP32 identity 1 h (radt 1) |
+| C1 | P4 physics (WSM6, Kain-Fritsch, YSU, revised MM5 surface layer, Noah, RRTMG LW/SW) with radt 15 min; run_FP2_P4_24h_r8 | 119 x 89 x 44 (466 k) | 1440 | 24 h from 2026-10-12 00 UTC | a whole day: the shortwave works for 11 h; the production radiation step | FP64 24 h / 72 h (radt 1, the long-run inputs); FP32 identity 1 h (radt 1) |
 | C2 | the daytime large domain: 15 km Lambert at 39 N 35 E (tools/bench/namelist.wps), WPS 4.6.0 + GFS 0.25 degree (6 h and 12 h forecasts of 2026-10-12 00 UTC) + real.exe of WRF real*8; P4 physics with radt 15 min | 359 x 269 x 44 (4.25 M) | 360 | 6 h from 06 UTC (08:20 - 14:20 local solar time) | a GPU-sized domain; full sun | FP64: the older benchmark's L (same domain, night) against WRF in one process on a G4 |
-| C3 | MORR: P4 with Morrison two-moment microphysics (mp_physics 10), radiation every minute (radt 1); the 72 h inputs | 119 x 89 x 44 | 360 | 6 h from 00 UTC | physics-heavy: radiation every step and a two-moment scheme | FP64 1 h; FP32 identity 1 h |
-| C4 | N3: two-way nest, d02 120 x 90 x 44 at 5 km (ratio 3, feedback, smooth_option 2), P4 physics with radt 1 on both domains; the 24 h inputs (run_N3_24h_r8) | 466 k + 475 k | 360 + 1080 | 6 h from 00 UTC | nesting and its feedback | FP64 24 h; FP32 identity 1 h |
+| C3 | MORR: P4 with Morrison two-moment microphysics (mp_physics 10), radiation every minute (radt 1); run_FP2_P4_24h_r8 | 119 x 89 x 44 | 360 | 6 h from 00 UTC | physics-heavy: radiation every step and a two-moment scheme | FP64 1 h; FP32 identity 1 h |
+| C4 | N3: two-way nest, d02 120 x 90 x 44 at 5 km (ratio 3, feedback, smooth_option 2), P4 physics with radt 1 on both domains; run_N3h_r8 | 466 k + 475 k | 360 + 1080 | 6 h from 00 UTC | nesting and its feedback | FP64 1 h (and 24 h from the long-run inputs); FP32 identity 1 h |
 
 Sunrise at 39 N 35 E on 12 October is about 03:45 UTC, so C3 and C4 have about 2 h of daylight at their end, C1 a
 whole day, C2 only daylight. A Thompson or MYNN physics-heavy case is not in session 1: its WRF real*8 reference
@@ -45,9 +47,9 @@ All builds are made on the runtime from the commit under test (`git archive`) an
   glibc 2.41: the toolchain of the suite's references): dmpar (option 34) and dm+sm (35), real*4 and real*8
   (`configure -r8`), stock flags (`FCOPTIM = -O2 -ftree-vectorize -funroll-loops`, no `-march`). The compile is
   retried with `-j 4` and `-j 1` when WRF's parallel make loses a module (the c9c95c5 session's real*4 dmpar link).
-  Optional (`--models ...,wrf_r4t`): WRF real*4 tuned for the CPU, `FCOPTIM = -O3 -march=native -funroll-loops`
-  (FMA contraction allowed, gfortran's default), dmpar and dm+sm; it answers "how much of the speed-up is
-  compiler flags". With it and `--reps 4` the estimate is 7.9 h.
+  Also WRF real*4 tuned for the CPU (model `wrf_r4t`, in session 1 by default): `FCOPTIM = -O3 -march=native
+  -funroll-loops` (FMA contraction allowed, gfortran's default), dmpar and dm+sm, screened like the others; it
+  answers "how much of the speed-up is compiler flags". `--models` without wrf_r4t leaves it out.
 - CPPWRF CUDA on the runtime's Ubuntu (CUDA 13): `cuda` (FP32, the fast default: FMA, CUDA's math), `cuda_sp_id`
   (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`: the CPU FP32 build's bits), `cuda_dp` (FP64, `--fmad=false`, glibc's math on
   the device).
@@ -123,7 +125,8 @@ threads at their default (`CPPWRF_NC_THREADS`: the hardware threads).
 ## Repetitions and order
 
 - History off: 1 warm-up block (not counted: page cache, the GPU's module load and clocks; it records
-  `CPPWRF_MEMINFO`), then 5 timed blocks. History on: 3 timed blocks (the history-off blocks warmed up).
+  `CPPWRF_MEMINFO`), then 4 timed blocks (`--reps 4`: with the tuned WRF, 5 blocks take the estimate from 7.9 h
+  to 8.5 h, too close to 10 h). History on: 3 timed blocks (the history-off blocks warmed up).
 - A block runs every model of every case once. Within a case the order of the models turns by one each block
   (block k starts with model k), so no model always runs first or after the same neighbour; WRF and CPPWRF of one
   block share the machine's state of that moment.
@@ -200,17 +203,24 @@ layout screening).
 
 ## Commands
 
-Session 1 (the release manager, on the workstation with the Colab CLI and the bucket):
+No cloud bucket and no gcloud. The workstation needs the Colab CLI and the rclone remote cppwrf-drive; the runtime
+gets only that remote's section (deleted at the end). `tools/bench/paper_job.sh` on the runtime streams each data
+tar from Drive (`rclone cat | tar x`), else from the GitHub release data-v1 (512 MiB parts checked against its
+SHA256SUMS). The results come back with `colab download` and are also copied to
+`cppwrf-drive:cppwrf-g4results/paper_<date>/` (paper.tar.gz, results.tar.gz), from where the launcher takes them
+if the download fails. `--dry-run` prints the job's arguments, the estimate and where each data tar is, and starts
+nothing.
 
-    CPPWRF_GCP_BUCKET=<bucket> tools/bench/colab_paper.sh --gpu G4 --save-lday -- --nc0
+Session 1 (the release manager, on the workstation):
 
-`--save-lday` puts C2's inputs on Drive (paper_lday_data.tar) for session 2. With the tuned WRF:
-`... -- --nc0 --models wrf_r4,wrf_r4t,wrf_r8,gpu_fp32,gpu_fp32id,gpu_fp64,cpu_fp64 --reps 4`.
+    tools/bench/colab_paper.sh --gpu G4 --save-lday -- --nc0
 
-Session 2 (after session 1 with `--save-lday`):
+`--save-lday` puts C2's inputs on Drive (cppwrf-data/paper_lday_data.tar) for session 2.
 
-    CPPWRF_GCP_BUCKET=<bucket> tools/bench/colab_paper.sh --gpu L4 --data-lday
-    CPPWRF_GCP_BUCKET=<bucket> tools/bench/colab_paper.sh --gpu A100 --data-lday
+Session 2 (after session 1):
+
+    tools/bench/colab_paper.sh --gpu L4 --data-lday
+    tools/bench/colab_paper.sh --gpu A100 --data-lday
 
 (`--set gpu` is the default off the G4: cases C1, C2; models gpu_fp32, gpu_fp32id, gpu_fp64; proof CPU FP64 and
 CPU FP32 with half the vCPUs each; no WRF builds unless C2's inputs must be made.)
@@ -231,7 +241,7 @@ Locally, a dry run of the pipeline (P1, 3 steps; no WRF executables, so WRF's ru
   and 3-9 % (WRF at its best layout); single WRF runs at other layouts varied up to 15 % (docs/PERF.md).
 - The screening runs each layout once for 1 h: a layout within that noise of the fastest may be chosen; the
   screening table is printed.
-- WRF is built with GNU compilers only (stock flags; the tuned real*4 build optional); Intel, NVIDIA or AMD Fortran
+- WRF is built with GNU compilers only (stock flags, and the tuned real*4 build); Intel, NVIDIA or AMD Fortran
   compilers are not measured. WRF uses no I/O quilting and no parallel NetCDF.
 - WRF runs on the G4's CPU only; its cost on a CPU-only runtime is an assumption (`--cpu-rate`), not a measurement.
 - Single GPU; CPPWRF's multi-GPU MPI runs are not part of this protocol (docs/MPI.md).
@@ -240,5 +250,5 @@ Locally, a dry run of the pipeline (P1, 3 steps; no WRF executables, so WRF's ru
   the same runs is GPU identity build = CPU FP32 build, with the WRF real*4 identity from the suite.
 - The physics-heavy case is Morrison with radiation every minute; Thompson / MYNN cases need the r8d8 WRF build
   and cached tables (later).
-- C3 and C4 start at 00 UTC (the suite's inputs) and are mostly night; C1 covers a whole day and C2 is daytime.
+- C3 and C4 start at 00 UTC (the existing inputs) and are mostly night; C1 covers a whole day and C2 is daytime.
 - Session 2's CPUs differ from the G4's (and its WRF is not run): its numbers are CPPWRF GPU builds across GPUs.

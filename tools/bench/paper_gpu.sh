@@ -5,7 +5,7 @@
 #
 #   paper_gpu.sh STAMP
 #
-# Builds CPPWRF's three CUDA binaries from /content/cpu/src.tar.gz, each the release build of README.md for this
+# Builds CPPWRF's three CUDA binaries from /content/in/src.tar.gz, each the release build of README.md for this
 # GPU: cuda (FP32, the fast default), cuda_sp_id (FP32 with -DCPPWRF_CUDA_FP32_IDENTITY=ON: the CPU FP32 build's
 # bits) and cuda_dp (FP64); waits until the chroot job has written STAMP into /opt/paper/body_started; links
 # /opt/paper, /opt/job and /opt/wrfbench to the chroot's (the jobs name chroot paths); writes the GPU side's manifest
@@ -24,7 +24,7 @@ for i in $(seq 20); do  # the chroot job installs debootstrap at the same time: 
     apt-get -o DPkg::Lock::Timeout=600 -qq install -y libnetcdf-dev >> $G/apt.log 2>&1 && break
   sleep 30
 done
-mkdir -p $G/src && tar xzf /content/cpu/src.tar.gz -C $G/src
+mkdir -p $G/src && tar xzf /content/in/src.tar.gz -C $G/src
 st=
 for b in cuda:OFF:OFF cuda_sp_id:OFF:ON cuda_dp:ON:OFF; do
   n=${b%%:*} r=${b#*:}
@@ -34,7 +34,7 @@ for b in cuda:OFF:OFF cuda_sp_id:OFF:ON cuda_dp:ON:OFF; do
   st="$st $n=$? (${n}_build_s=$((SECONDS - t0)))"
 done
 until [ "$(cat $P/body_started 2> /dev/null)" = "$STAMP" ]; do
-  [ -e /content/cpu/done ] && exit 0
+  [ -e /content/paper_job/done ] && exit 0
   sleep 10
 done
 trap 'touch $P/gpu_exit' EXIT

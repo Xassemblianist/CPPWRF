@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 # The chroot side of tools/bench/colab_paper.sh (the paper benchmark, tools/bench/PROTOCOL.md) in the Debian 13
-# chroot of tools/colab/remote_chroot_job.sh (gcc / gfortran 14.2, glibc 2.41, MPICH, the GCP VMs' NetCDF):
+# chroot that tools/bench/paper_job.sh makes (gcc / gfortran 14.2, glibc 2.41, MPICH, Debian's NetCDF):
 #
 #   paper_body.sh J SET CASES STAMP [PAPER_RUN_OPTION ...]
 #
@@ -9,7 +9,7 @@
 # - WRF v4.8.0 from the official release source with WRF's configure for GNU and MPICH, real*4 and real*8
 #   (configure -r8), dmpar (option 34) and dm+sm (35): WRF-r4, WRF-r8, WRF-r4sm, WRF-r8sm (compile -j 12, then -j 4
 #   and -j 1 when WRF's parallel make loses a module);
-# - with wrf_r4t in the options' --models: WRF-r4t and WRF-r4tsm, real*4 with configure.wrf's FCOPTIM set to
+# - WRF-r4t and WRF-r4tsm (unless --models leaves out wrf_r4t): real*4 with configure.wrf's FCOPTIM set to
 #   -O3 -march=native -funroll-loops (WRF tuned for this CPU; FMA contraction allowed, as gfortran's default);
 # - CPPWRF's CPU builds: cpu-dp (FP64, the release build: -march=native, CPPWRF_PORTABLE_LIBMVEC on), cpu-dp-hwlog
 #   (CPPWRF_PORTABLE_LIBMVEC off: this CPU's libmvec log, as the WRF builds here) and cpu-sp (FP32);
@@ -109,7 +109,8 @@ build_cpu() {  # NAME DOUBLE PORTABLE_LIBMVEC
 LDAY=$J/data/wrf_runs/run_Lday
 NEED_L=0; case ",$CASES," in *,C2,*) [ -s $LDAY/wrfbdy_d01 ] || NEED_L=1 ;; esac
 WRFS="r4 r8 r4sm r8sm"; [ "$SET" = full ] || WRFS=; [ "$SET" = full ] || [ $NEED_L = 0 ] || WRFS=r8
-case " $* " in *wrf_r4t*) WRFS="$WRFS r4t r4tsm" ;; esac  # the tuned real*4 builds (--models ...,wrf_r4t)
+# the tuned real*4 builds: in the default models of SET full, or when --models names wrf_r4t
+case " $* " in *wrf_r4t*) WRFS="$WRFS r4t r4tsm" ;; *--models*) ;; *) [ "$SET" = full ] && WRFS="$WRFS r4t r4tsm" ;; esac
 B "WRF builds: ${WRFS:-none}; large domain to make: $NEED_L"
 ( [ -z "$WRFS" ] && exit 0; wrf_src || exit 1
   for n in $WRFS; do
@@ -144,7 +145,7 @@ B "builds done ($((SECONDS - t0)) s)"
 cd $J/src || exit 1
 if [ $NEED_L = 1 ]; then
   if [ -f $W/wps_day/met_ok ] && [ -x $W/WRF-r8/main/real.exe ]; then
-    python3 tools/bench/paper_run.py make-large --base $J/data/wrf_runs/run_P4_r8 --met $W/wps_day --out $W/run_Lday \
+    python3 tools/bench/paper_run.py make-large --base $J/data/wrf_runs/run_FP2_P4_24h_r8 --met $W/wps_day --out $W/run_Lday \
       --start 2026-10-12_06 --end 2026-10-12_12 --wrf $W >> $P/out/make_large.log 2>&1
     B "C2: run_Lday $(tail -1 $P/out/make_large.log)"
   else B "C2: no WPS or real.exe: no large domain"; echo "PAPER_L_FAILED" >> $J/setup.out; fi

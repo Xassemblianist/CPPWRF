@@ -94,7 +94,7 @@ FP64, 19 -> 165 s FP32) and was reverted; NSSL keeps 1.1's launch. The CUDA FP32
 (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) costs 3 % of kernel time on P4 on an RTX 2060 (docs/FP32_IDENTITY.md).
 
 **The paper benchmark** (tools/bench/PROTOCOL.md, `tools/bench/colab_paper.sh`) replaces these 1-hour runs for the
-paper: 6 h to 24 h cases, WRF's layouts screened, a warm-up and 5 interleaved timed repetitions with medians and
+paper: 6 h to 24 h cases, WRF's layouts screened, a warm-up and 4 interleaved timed repetitions with medians and
 quartiles, one timing parser for both models (output.wrf_timing), GPU power, the build manifest, the bit identity
 checked on the timed runs' outputs. It has not run yet. Two details of the runs above that it changes: CPPWRF wrote a
 restart file at the last step (the namelists' restart_interval = 1440 made tools/wrf2cppwrf.py give it a [restart]
