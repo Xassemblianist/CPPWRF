@@ -87,6 +87,13 @@ derived from them (`src/phys/ra_rrtmg_lw`, `src/phys/ra_rrtmg_sw`, `src/phys/ra_
 says, and so does any copy of CPPWRF that contains them: CPPWRF, as distributed here, may be used, modified and
 redistributed free of charge, but not sold. The rest of CPPWRF's own code is under the GPL as stated above.
 
+**Additional permission (GNU GPL version 3, section 7).** As the copyright holder of CPPWRF's own code, Ömer Kaan
+Yılmaz grants this additional permission: you may convey CPPWRF's own code combined with the parts listed above that
+are derived from AER's RRTMG / RRTM and UCAR's Noah-MP, with those parts under AER's and UCAR's terms instead of the
+GPL. The permission covers only those parts; everything else stays under the GPL, and a copy that contains those
+parts may not be sold, as their terms require. You may remove this permission from your copies of CPPWRF's own code
+(section 7 of the GPL).
+
 ## wrf-python
 
 `python/cppwrf/post/wrfpy.py` and `frame.py` (cppwrf-post's diagnostics) are a numpy port of the Fortran routines
