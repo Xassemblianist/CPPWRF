@@ -1,6 +1,6 @@
 # CPPWRF
 
-Version 1.1.1 ([release notes](docs/RELEASE_NOTES.md)).
+Version 1.2.0 ([release notes](docs/RELEASE_NOTES.md)).
 
 CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static nesting,
 `real.exe` and `ideal.exe`. One source tree builds for the CPU (OpenMP) and for NVIDIA GPUs (CUDA), in FP64
@@ -10,11 +10,15 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** For v1.1.0 all 338 CUDA FP64 checks of the suite (319 cases, 18
-  restart checks and the Straka check) matched WRF at tolerance 0 on the Colab G4 (RTX PRO 6000 Blackwell, sm_120,
-  CUDA 13.0); earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
-- **GPU, FP32:** the fast mode, compared with WRF by relative L2 error; its 44 suite runs are within their measured
-  tolerances.
+- **GPU, FP64: bit-identical to WRF too.** For v1.2.0: [G4 PENDING]. For v1.1.0 all 338 CUDA FP64 checks of the
+  suite (319 cases, 18 restart checks and the Straka check) matched WRF at tolerance 0 on the Colab G4 (RTX PRO 6000
+  Blackwell, sm_120, CUDA 13.0); earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
+- **CPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations, among
+  them P1-P4, Thompson, MYNN, WDM6, Morrison, Noah-MP and the nests N1 / N3; on the GPU too with the opt-in build
+  `-DCPPWRF_CUDA_FP32_IDENTITY=ON`. The result does not depend on the host's libm. See
+  [docs/FP32_IDENTITY.md](docs/FP32_IDENTITY.md).
+- **GPU, FP32:** the default CUDA FP32 build is the fast mode, compared with WRF by relative L2 error; its 44 suite
+  runs are within their measured tolerances.
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
 
@@ -60,9 +64,10 @@ without a port is reported as an error and never silently ignored. Still missing
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
-- **Model runs against WRF** (`tests/verify/wrf_suite.py`): 342 CPU FP64 checks on every push (323 cases, 18
-  restart checks and the Straka check; 154 more cases run with `--slow`), all passing at main 78e46c2, and 338
-  CUDA FP64 checks per release on a GPU, all passing for v1.1.0. They cover
+- **Model runs against WRF** (`tests/verify/wrf_suite.py`): on every push 342 CPU FP64 checks against WRF real*8
+  (323 cases, 18 restart checks and the Straka check; 154 more cases run with `--slow`) and 44 CPU FP32 cases
+  against WRF real*4, all passing at tolerance 0 at main 0bc4652, and the CUDA FP64 checks and the CUDA FP32 identity
+  cases once per release on a GPU. They cover
   real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
   at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are
   compared with WRF's in every variable and output time.
@@ -72,7 +77,8 @@ without a port is reported as an error and never silently ignored. Still missing
 To be bit-identical, the port must repeat WRF's arithmetic exactly. That means the order of every sum, the
 constants gfortran folds, the halo schedule, and the glibc vector math (libmvec) that gfortran calls. On the
 GPU, CPPWRF runs a device port of the same glibc functions and turns FMA contraction off. The CPU result is
-the same on Intel and AMD processors (`CPPWRF_PORTABLE_LIBMVEC`).
+the same on Intel and AMD processors (`CPPWRF_PORTABLE_LIBMVEC`). The FP32 builds carry glibc 2.41's float functions
+in the executable, so their result does not depend on the host's glibc version.
 
 ## Performance
 
@@ -80,7 +86,7 @@ WRF v4.8.0 and CPPWRF ran on one Google Colab G4 runtime: an AMD EPYC 9B45 (24 c
 NVIDIA RTX PRO 6000 Blackwell (96 GB). WRF was built there from the release source with its own GNU `configure`
 (MPI, and MPI + OpenMP), in real*4 and real*8; its fastest of five process layouts counts. Each run is 1 simulated
 hour with the same namelist and inputs (CPPWRF main c9c95c5, 2026-11-16, before RRTMG computed in single precision
-in CUDA FP32 builds; no new benchmark was run for 1.1.0). The table gives the stepping time in seconds per simulated hour, without
+in CUDA FP32 builds; no new benchmark was run for 1.1 or 1.2). The table gives the stepping time in seconds per simulated hour, without
 start-up and history output ([docs/PERF.md](docs/PERF.md) has the wall times, other layouts and memory):
 
 | Case | WRF real*4, best layout | WRF real*8, best layout | CPPWRF GPU FP32 | CPPWRF GPU FP64 |
@@ -115,6 +121,14 @@ cmake --build build -j "$(nproc)"
 # GPU build, FP64 (bit-identical to WRF real*8 and to the CPU build)
 cmake -S . -B build-gpu-dp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON
 cmake --build build-gpu-dp -j "$(nproc)"
+
+# CPU build, FP32 (bit-identical to WRF real*4 on the cases of docs/FP32_IDENTITY.md)
+cmake -S . -B build-cpu-sp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF
+cmake --build build-cpu-sp -j "$(nproc)"
+
+# GPU build, FP32 identity (the CPU FP32 build's results on the GPU; slower than the fast mode)
+cmake -S . -B build-gpu-sp-id -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON
+cmake --build build-gpu-sp-id -j "$(nproc)"
 ```
 
 You need a C++20 compiler, CMake >= 3.24, OpenMP and NetCDF-C; the CUDA toolkit >= 12.1 and a GPU of compute
@@ -152,10 +166,12 @@ with WRF's `input_sounding`) and the suite's real-data cases, which read the WRF
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): building, the way from WPS to wrfout, the translator, every supported
   and rejected option, nests, GPU runs, restarts, output streams, configuration keys
 - [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md): versions and the verified scope of
-  v1.1.0 (and of v1.0.0)
+  v1.2.0 (and of the earlier releases)
 - [docs/STATUS.md](docs/STATUS.md): what is ported, how it is verified, every case and result
 - [docs/PERF.md](docs/PERF.md): the benchmark against WRF, the GPU profile and the performance roadmap
-- [docs/FP32_ACCURACY.md](docs/FP32_ACCURACY.md): how close GPU FP32 is to WRF real*8, against stock WRF real*4
+- [docs/FP32_IDENTITY.md](docs/FP32_IDENTITY.md): the FP32 builds that are bit-identical to WRF real*4
+- [docs/FP32_ACCURACY.md](docs/FP32_ACCURACY.md): how close the fast GPU FP32 build is to WRF real*8, against stock
+  WRF real*4
 - [docs/PHYSICS_SUITE.md](docs/PHYSICS_SUITE.md), [docs/PHYSICS_DRIVER.md](docs/PHYSICS_DRIVER.md),
   [docs/PHYSICS_INTERFACE.md](docs/PHYSICS_INTERFACE.md): the physics port
 - [docs/NESTING.md](docs/NESTING.md), [docs/NEST_NUMERICS.md](docs/NEST_NUMERICS.md): nesting

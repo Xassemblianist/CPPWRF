@@ -1,3 +1,133 @@
+# CPPWRF 1.2.0 release notes
+
+CPPWRF 1.2.0 is a C++20 / CUDA port of WRF-ARW v4.8.0. As before, the CPU FP64 and CUDA FP64 builds reproduce WRF
+v4.8.0 real*8 bit for bit in every verified configuration, and their results are unchanged from 1.1.1. New in this
+release: the FP32 build is bit-identical to WRF v4.8.0 real*4 on 24 configurations, on the CPU and, with an opt-in
+CUDA build, on the GPU, and its result no longer depends on the host's libm. It covers 31 commits (not counting
+merges) from `v1.1.1` (7629981) to `main` 0bc4652. The 1.1.1 notes follow below.
+
+## Highlights
+
+- **FP32 bit-identical to WRF real*4.** The CPU FP32 build (`-DCPPWRF_DOUBLE=OFF`) gives the output of stock WRF
+  v4.8.0 real*4 (gfortran, WRF's default real*4 build), every history variable and every bit, on 24 configurations:
+  P1, P2, P3, P4, P9, Noah-MP (NMP1), Thompson (P6), MYNN, the aerosol-aware Thompson (C01), WDM6, WDM5, Morrison
+  with hail and with graupel (MORR, MORG), the gravity wave drag (G2), the one-way nest N1, the two-way nest N3,
+  monotonic advection on N3 (MON3), Kessler, ACM2 + Pleim-Xiu, QNSE, Tiedtke, New Tiedtke, the Dudhia shortwave and
+  the slab LSM. docs/FP32_IDENTITY.md is the full description: the method, the build switches, the case list, the
+  ported glibc functions and what is not identical yet.
+- **The same bits on the GPU:** the CUDA FP32 identity build (`-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF
+  -DCPPWRF_CUDA_FP32_IDENTITY=ON`) gives the CPU FP32 build's results, and so WRF real*4's on these configurations.
+  It turns FMA contraction off in every kernel and runs glibc 2.41's float functions on the device. On an RTX 2060
+  it costs 3 % of kernel time on P4. The default CUDA FP32 build stays the fast one, checked against measured
+  tolerances (docs/FP32_ACCURACY.md).
+- **FP32 independent of the host's libm:** the FP32 executables define glibc 2.41's float functions themselves
+  (src/core/glibc_mathf_host.cpp), each proven equal to glibc 2.41's libm on every float input. Binaries built on
+  Ubuntu 24.04 (glibc 2.39) reproduce the WRF real*4 references, which were made against Debian 13's glibc 2.41.
+- **GPU performance work with the same results:** fewer kernels and less memory traffic in the RK3 step, the vertical
+  solve, the nest feedback, Noah, RRTMG LW and the surface driver (Changed). FP64 output is bit-identical to before.
+
+## Added
+
+- **CPU FP32 identity with WRF v4.8.0 real*4.** The FP32 build rounds where WRF real*4 rounds: start_em's base state,
+  the lateral boundary coefficients, Noah's initialisation, history T, the initialisation constants of WSM6,
+  Thompson, WDM5 / WDM6 and Morrison, the MYNN surface layer's tables, moist_physics_prep_em's R_v/R_d, the nest start
+  (blend_terrain, adjust_tempqv, press_adj) and the feedback (copy_fcn's average, sm121, smdsm). gfortran's vectorised
+  loops call glibc libmvec's 4-lane SSE4 float functions (expf, logf, powf, sinf, cosf, atanf); CPPWRF ports them lane
+  by lane (src/core/libmvec_f4.hpp) and calls them for the same loop iterations.
+- **Suite backend `cpu_sp`** (`tests/verify/wrf_suite.py --cpu-sp BIN`): 44 cases, the 24 configurations above at
+  1 h and 20 of them also over 3 minutes with history every step, compared with WRF real*4 history files at
+  tolerance 0. New data tars fp32id_data.tar, fp32id2_data.tar, fp32id3_data.tar and fp32id4_data.tar hold the WRF
+  real*4 references.
+- **CUDA FP32 identity build**, CMake option `CPPWRF_CUDA_FP32_IDENTITY` (default `OFF`; needs `CPPWRF_ENABLE_CUDA=ON`,
+  `CPPWRF_DOUBLE=OFF` and `CPPWRF_CUDA_GLIBC_MATH=ON`): `--fmad=false` in every kernel, glibc 2.41's scalar float
+  functions on the device (from libm's FMA variants and from CORE-MATH's correctly rounded sources), glibc's double
+  functions as in the CUDA FP64 build, libmvec's 4-lane float functions with the CPU build's lane rule, and
+  `Reducer::sum` in the CPU build's order. It installs as the `gpu-fp32` flavour.
+- **Suite backend `cuda_sp_id`** (`--cuda-sp-id BIN`): the 44 `cpu_sp` cases on the GPU (`..._cuda_id...`) against
+  the same WRF real*4 references at tolerance 0.
+- **Proofs of the math ports:** tools/glibc_mathf_proof.cpp (each port against glibc 2.41's libm on every float input,
+  2^32 pairs plus special values for powf and atan2f), tools/glibc_mathf_proof_cuda.cu (the device against the host),
+  test_libmvec_f4 and test_glibc_mathf in ctest; the ctest `fp32_host_libm` checks that the FP32 `cppwrf` imports none
+  of the float functions it defines.
+
+## Changed
+
+- **GPU performance** (the same operations in the same order; FP64 bit-identical on the Colab G4, 338 / 338 checks at
+  b2d320c):
+  - KWSolve carries the neighbour level of w in a register; pi = 4 atan(1) is computed once on the host.
+  - An RK3 step with microphysics and lateral boundaries runs calc_p_rho_phi once, as WRF's solve_em does.
+  - The nest feedback synchronises the device only when CUDA graphs are off.
+  - Noah reads its parameter tables through a device pointer instead of a by-value copy in the kernel arguments.
+  - RRTMG LW's batch kernel forms the band sums and the level fluxes in registers.
+  - The surface driver no longer zeroes u_phytmp / v_phytmp.
+
+  On the G4 the 1 h stepping times stayed within a second (P4 FP64 9 s; N3 FP64 16 -> 15 s; P4 FP32 3 s; N2 FP32
+  3 -> 2 s); the gains showed on the smaller RTX 2060. A change of NSSL's kernel launch in the same work made NSSL
+  3 to 8 times slower on the G4 (P4N18 1 h: 47 -> 135 s FP64, 19 -> 165 s FP32) and was reverted: NSSL keeps 1.1's
+  launch. No new benchmark was run; the numbers of docs/PERF.md and README.md are those of 1.1.
+- **FP32 results:** the FP32 builds now round as WRF real*4 does in the places listed under Added, so their output
+  differs from 1.1.1's. The fast CUDA FP32 build shares these code paths; its suite tolerances are unchanged. The
+  FP64 builds are unchanged.
+
+## Fixed
+
+- **FP32 results depended on the host's libm.** glibc 2.40 and 2.41 replaced several float functions with CORE-MATH's
+  correctly rounded ones; an FP32 build on Ubuntu 24.04 (glibc 2.39) differed from WRF real*4 from t = 0. The FP32
+  executables (`cppwrf`, `cppwrf_real`; the CPU build and the host code of the CUDA builds) now define glibc 2.41's
+  expf, logf, powf, sinf, cosf, sincosf, tanf, atanf, atan2f, asinf, acosf, sinhf, tanhf, log10f, erff and tgammaf
+  themselves. On a Colab G4 (Ubuntu-built binaries: gcc 13.3, glibc 2.39) the FP32 cases failed before this change
+  and pass after it.
+
+## Verification
+
+Full CPU CI on 0bc4652 (GitHub-hosted runners, Debian 13 container, run 44860146094), all exact (tolerance 0), and
+the GPU proofs:
+
+| Check | Result |
+|---|---|
+| `tests/verify/wrf_suite.py`: CPU FP64 against WRF v4.8.0 real*8 and CPU FP32 (`cpu_sp`) against WRF v4.8.0 real*4, at tolerance 0 | PASS 386, FAIL 0, SKIP 0 (342 CPU FP64 checks and the 44 `cpu_sp` cases) |
+| WRF output files (wrfout / wrfrst values, attributes, metadata) | PASS 42 |
+| Ideal-case output files | PASS 14 |
+| Differential tests against WRF's compiled Fortran (`ctest -L diff`) | PASS 32 / 32 |
+| ctest | PASS 35 / 35 |
+| Host-libm independence: Colab G4, NVIDIA RTX PRO 6000 Blackwell Server Edition (sm_120), CUDA 13.0, binaries built on Ubuntu 24.04 (gcc 13.3, glibc 2.39), 2026-11-21 | `cpu_sp` 44 / 44 and `cuda_sp_id` 44 / 44 at tolerance 0 |
+| GPU: Colab G4 at 0bc4652 | [G4 PENDING] |
+
+How the suite counts relate (`tests/verify/wrf_suite.py --list` at 0bc4652): the suite defines 927 cases, 477 CPU
+FP64, 319 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart
+configurations, each with a CPU and a CUDA FP64 check. The CI's 342 CPU FP64 checks are, as in 1.1, the 323 CPU FP64
+cases outside `--slow`, the 18 CPU restart checks and the Straka check; the 154 slow CPU cases run on request. The
+`cuda_sp_id` cases also all passed on an RTX 2060 (sm_75) during development (docs/FP32_IDENTITY.md).
+
+## Known limitations
+
+- **The fast CUDA FP32 build** (the default) is not bit-identical to anything: FMA contraction and CUDA's math
+  library. It is checked against WRF with measured tolerances (docs/FP32_ACCURACY.md).
+- **On the identity build's device** hypotf (no FP32 code calls it) and the optional radar reflectivity's complex
+  logarithm are CUDA's.
+- **FP32 identity needs a WRF real*4 reference:** only the configurations of docs/FP32_IDENTITY.md are checked bit for
+  bit. Other configurations are checked against WRF real*8 with tolerances, or not at all in FP32.
+- **Not covered by FP32 identity:** moving nests, more than two domains, vertical refinement, restarts, and the
+  options listed in docs/FP32_IDENTITY.md, "What is not identical yet".
+- **The WRF reference compiler:** the references are gfortran builds of WRF; WRF built with other compilers (or with
+  AVX2, whose loops call 8-lane functions) is not covered.
+- **MPI:** several GPUs and several nodes have not been run. Several MPI ranks on one GPU are not proved
+  (docs/MPI.md).
+- The limitations of 1.1.0 below otherwise hold (scheme scope, the N3 72 h comparison, the options not ported).
+
+## Outlook
+
+Next come a new benchmark report against WRF on current hardware, runs on several GPUs, and later a port to AMD GPUs
+through HIP.
+
+## Requirements
+
+As 1.1.0: a C++20 compiler, CMake >= 3.24, OpenMP and NetCDF-C. For the GPU builds, the CUDA toolkit >= 12.1 and an
+NVIDIA GPU of compute capability 7.0 or later. An MPI library for `-DCPPWRF_MPI=ON`. Python 3 with `netCDF4` and
+`numpy` for the tools.
+
+---
+
 # CPPWRF 1.1.1 release notes
 
 CPPWRF 1.1.1 is a fix release of 1.1.0. Model results are unchanged: the CPU FP64 and CUDA FP64 builds give the same

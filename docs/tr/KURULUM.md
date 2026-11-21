@@ -14,7 +14,7 @@ Aynı kaynak ağacından dört ayrı derleme ("flavour") çıkar. İstediğiniz 
 | `cpu-fp64` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON` | WRF v4.8.0 real*8 ile bit bit aynı sonuç. GPU gerekmez. |
 | `gpu-fp64` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON` | Yine WRF real*8 ile bit bit aynı, ama tek bir NVIDIA GPU'da ve çok daha hızlı. |
 | `gpu-fp32` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF` | En hızlısı. WRF real*8'den, WRF'nin kendi real*4 derlemesi kadar ayrılır. |
-| `cpu-fp32` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF` | Doğrulama paketinin dışında. |
+| `cpu-fp32` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF` | docs/FP32_IDENTITY.md'deki vakalarda WRF v4.8.0 real*4 ile bit bit aynı sonuç. GPU gerekmez. |
 
 ## Gerekli paketler
 
@@ -65,14 +65,22 @@ CUDA derlemesi uzun sürer ve iş başına birkaç GB bellek ister. Bellek azsa 
 | `CPPWRF_NATIVE` | `ON` | `-march=native`. Başka işlemcilerde çalışacak ikili dosyalar için `OFF` verin; sonuçlar değişmez. |
 | `CPPWRF_PORTABLE_LIBMVEC` | `ON` | glibc'nin vektör `log` / `log10` işlevlerini her işlemcide Intel'deki gibi hesaplar. |
 | `CPPWRF_CUDA_GLIBC_MATH` | `ON` | FP64 GPU derlemesinde glibc'nin matematik işlevlerini GPU'da çalıştırır. |
+| `CPPWRF_CUDA_FP32_IDENTITY` | `OFF` | Yalnız CUDA FP32: `ON`, CPU FP32 derlemesinin sonucunu GPU'da bit bit aynen verir (docs/FP32_IDENTITY.md'deki vakalarda WRF real*4'ünkü); hızlı kipten biraz yavaştır. `gpu-fp32` adıyla kurulur. |
 
-Son iki seçenek neden var? WRF'nin sonucu, matematik işlevlerinin son bitine kadar nasıl yuvarlandığına bağlıdır:
+Son üç seçenek neden var? WRF'nin sonucu, matematik işlevlerinin son bitine kadar nasıl yuvarlandığına bağlıdır:
 
 - **`CPPWRF_PORTABLE_LIBMVEC`:** gfortran, vektörleştirdiği döngülerde glibc'nin libmvec kitaplığını çağırır.
   libmvec'in `log` işlevi Intel'de ve AMD'de son bitte farklı sonuç verir. Başvuru WRF koşuları Intel'de yapıldı,
   bu yüzden `ON`, AMD'de de Intel'deki sonucu üretir.
 - **`CPPWRF_CUDA_GLIBC_MATH`:** CUDA'nın kendi matematik kitaplığı glibc ile aynı yuvarlamayı yapmaz. `ON`, glibc'nin
   algoritmalarını GPU'ya taşır; `gpu-fp64`'ü WRF ile bit bit aynı yapan budur ve FP64 süresine en çok %7 ekler.
+- **`CPPWRF_CUDA_FP32_IDENTITY`:** FP32 GPU derlemesinde her çekirdekte FMA birleştirmesini kapatır ve glibc 2.41'in
+  float işlevlerini GPU'da çalıştırır; böylece `gpu-fp32`, `cpu-fp32` ile bit bit aynı sonucu verir. RTX 2060'ta P4'te
+  çekirdek süresine %3 ekler. Varsayılan `OFF` hızlı kiptir.
+
+FP32 derlemeleri float işlevleri için sistemin libm'ini çağırmaz: glibc 2.41'inkiler (her girdide aynı olduğu
+kanıtlanmış hâlleriyle) programın içindedir. Bu yüzden `cpu-fp32` başka glibc sürümlerinde de WRF real*4'ün bitlerini
+verir (Ubuntu 24.04'te, glibc 2.39 ile derlenmiş ikili dosyalarla denendi).
 
 `-ffast-math`, `-Ofast`, `--use_fast_math` gibi sonucu değiştiren bayraklar yapılandırma hatası verir.
 
@@ -114,7 +122,7 @@ sürümünden etkilenmez.
 
 ## Hazır paketler ve kapsayıcılar
 
-- **Sürüm paketleri.** Her derleme için bir `.tar.gz` vardır, ör. `cppwrf-1.1.1-cpu-fp64-linux-x86_64.tar.gz`.
+- **Sürüm paketleri.** Her derleme için bir `.tar.gz` vardır, ör. `cppwrf-1.2.0-cpu-fp64-linux-x86_64.tar.gz`.
   Açıp `bin/` dizinini kullanmanız yeterli. Debian 13'te derlendikleri için glibc 2.38+, GCC 13.2+ libstdc++ ve
   Debian 13'ün NetCDF kitaplığı (`libnetcdf22`) gerekir. GPU paketleri ayrıca uygun bir NVIDIA sürücüsü (CUDA 12.8
   için 570+) ve CUDA çalışma kitaplığı (`libcudart`) ister.

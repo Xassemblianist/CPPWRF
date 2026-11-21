@@ -84,6 +84,15 @@ The later FP32 changes (WRF real*4's constants and precisions) and the fixes of 
 (CUDA FP64 suite at tolerance 0, CUDA FP32 suite within tolerances, Colab G4 at fb158f3), not for their speed. A new
 benchmark will come with a later release.
 
+**Release 1.2.0: no new benchmark either;** the numbers above stay. The GPU changes of 1.2.0 (CHANGELOG.md, 1.2.0,
+Changed: KWSolve's register carry, one calc_p_rho_phi per RK3 step with microphysics and boundaries, the nest
+feedback's synchronisation, Noah's tables by device pointer, RRTMG LW's band sums in registers, the surface driver)
+keep the results (CUDA FP64 at tolerance 0 on the G4, 338 / 338 at b2d320c). On the G4 the 1 h stepping times stayed
+within a second (P4 FP64 9 s, N3 FP64 16 -> 15 s, P4 FP32 3 s, N2 FP32 3 -> 2 s); the gains showed on the smaller
+RTX 2060. A change of NSSL's launch in the same work made NSSL 3 to 8 times slower on the G4 (P4N18 1 h: 47 -> 135 s
+FP64, 19 -> 165 s FP32) and was reverted; NSSL keeps 1.1's launch. The CUDA FP32 identity build
+(`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) costs 3 % of kernel time on P4 on an RTX 2060 (docs/FP32_IDENTITY.md).
+
 The tables below are the first run (b30ec5b).
 
 Stepping time, in seconds per simulated hour (history off):

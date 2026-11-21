@@ -1,15 +1,16 @@
 # CPPWRF: status and verification
 
-Version 1.1.1 (docs/RELEASE_NOTES.md: the verified scope of the release).
+Version 1.2.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
-(at main 78e46c2, version 1.1.0: 839 cases, 477 CPU FP64, 319 CUDA FP64 and 43 CUDA FP32, and 18 restart
-configurations. The CPU CI runs 342 checks, i.e. the 323 CPU FP64 cases outside `--slow`, 18 restart checks and the
-Straka check, all passing; the 154 slow CPU cases are the 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases.
-The Colab G4 ran all 319 CUDA FP64 cases, the 18 GPU restart checks and the GPU Straka check, 338 checks, all passing
-at tolerance 0, and the 43 CUDA FP32 cases with restart_p1_fp32_cuda, 44 runs within their tolerances) and
-`tests/verify/run_wrf_files_test.sh` (WRF output files).
+(at main 0bc4652, version 1.2.0: 927 cases, 477 CPU FP64, 319 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`, against
+WRF real*4) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart configurations. The CPU CI runs 386 checks, i.e.
+the 323 CPU FP64 cases outside `--slow`, 18 restart checks, the Straka check and the 44 `cpu_sp` cases, all passing at
+0bc4652; the 154 slow CPU cases are the 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases. For 1.1.0 the
+Colab G4 ran all 319 CUDA FP64 cases, the 18 GPU restart checks and the GPU Straka check, 338 checks, all passing
+at tolerance 0, and the 43 CUDA FP32 cases with restart_p1_fp32_cuda, 44 runs within their tolerances; the 1.2.0 GPU
+run is in docs/RELEASE_NOTES.md) and `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
 
@@ -80,7 +81,9 @@ table has no row. A whole-model proof removes the option's row.
    compare CPPWRF's wrfout files with WRF's at tolerance 0 (tests/verify/exact.py: NaN equals only NaN, -0
    differs from +0) in every variable the reference holds, every reference frame up to the case's time, types and
    attributes, and check that the configuration sets the options of the reference run's namelist.input; so do the
-   CUDA FP64 cases. The FP32 cases compare fields by relative L2 over the domain. The comparators' own test
+   CUDA FP64 cases. The CPU FP32 cases (`cpu_sp`) and their GPU twins (`cuda_sp_id`, the CUDA FP32 identity build)
+   compare with WRF real*4's history files in the same way, at tolerance 0 (section "FP32 against WRF real*4"
+   below). The fast CUDA FP32 cases compare fields by relative L2 over the domain. The comparators' own test
    (tests/verify/selftest.py: one ulp, NaN, -0, a missing variable or frame must fail) runs before the VM suite.
 3. **WRF output files** (`tests/verify/run_wrf_files_test.sh`, ctest `wrf_files_vs_wrf`): the
    wrfout and wrfrst files of the CPU FP64 runs, and the runs resumed from WRF's restart files,
@@ -271,7 +274,9 @@ tests/phys/libmvec_intel.cpp, whose `_ZGVbN2v_log` / `_ZGVbN2v_log10` are these 
 (on Intel identical to libmvec), so WRF's side gives Intel's bits on AMD too (with libmvec's own log / log10 it
 differed on AMD EPYC by 1 ulp in KF, Noah-MP, the MYNN surface layer and the WSM6 / Thompson reflectivity).
 The full CPU suite therefore runs on AMD CPUs: on every push to main on GitHub-hosted runners (AMD EPYC; for 1.1.0
-at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 33/33, all exact), and
+at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 33/33, all exact; for
+1.2.0 at 0bc4652, in a Debian 13 container: suite PASS 386 with the 44 `cpu_sp` cases, WRF output files 42, ideal
+files 14, `ctest -L diff` 32/32, ctest 35/35, all exact), and
 on the AMD CPU of Colab's G4 runtime (`tools/colab/colab_suite.sh --gpu G4 --any-cpu --jobs 12 --threads 4`: the CPU
 suite, the output files, ideal files, differential and ctest tests); the Intel L4 runtime and the GCP VMs stay
 possible.
@@ -376,6 +381,22 @@ feedback 0, parent_time_step_ratio 2, per-domain cu_physics (cumulus off on d02)
 and N3gc nests, whose dx below 15 km takes the scheme's log scale factor, is bit-identical. (WRF leaves RQCBLTEN / RQIBLTEN of runs without qc / qi
 and LH with isfflx 0 uninitialised; they are not compared.)
 
+### FP32 against WRF real*4
+
+The CPU FP32 build (`-DCPPWRF_DOUBLE=OFF`) is bit-identical to stock WRF v4.8.0 real*4 (gfortran 14.2, glibc 2.41,
+the default real*4 build) on 24 configurations: P1, P2, P3, P4, P9, NMP1 (Noah-MP), P6 (Thompson), MYNN, C01
+(aerosol-aware Thompson), D6 (WDM6), D5 (WDM5), MORR and MORG (Morrison with hail / graupel), G2 (GWDO), the nests N1
+(one-way) and N3 (two-way, P4 physics), MON3 (monotonic advection on N3), KESSKF (Kessler), ACM7 (ACM2 + Pleim-Xiu),
+Q4 (QNSE), T6 (Tiedtke), P7 (New Tiedtke), DUD4 (Dudhia shortwave) and SLAB1 (5-layer slab LSM). The 44 `cpu_sp`
+cases run each of them for 1 h and 20 of them also for 3 minutes with history every step, every variable of the WRF
+real*4 history at tolerance 0. The CUDA FP32 identity build (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`: no FMA contraction,
+glibc 2.41's float functions on the device) gives the same bits on the GPU: the 44 `cuda_sp_id` cases pass on an RTX
+2060 (sm_75) and on a Colab G4 (sm_120). The FP32 executables define glibc 2.41's float functions themselves
+(src/core/glibc_mathf_host.cpp), so binaries built on Ubuntu 24.04 (glibc 2.39) pass these cases too. The default
+CUDA FP32 build stays the fast one, compared by relative L2 (below and docs/FP32_ACCURACY.md). docs/FP32_IDENTITY.md
+has the method, the case table, the proofs of the ported functions, the cost and what is not identical yet (moving
+nests, more than two domains, restarts, configurations without a WRF real*4 reference, other compilers for WRF).
+
 ### Verification coverage
 
 Option values that CPPWRF accepts and whose code paths are checked at model level against WRF (the coverage audit of
@@ -423,7 +444,8 @@ Stepping time in seconds per simulated hour, history off (rerun at main c9c95c5,
 
 GPU FP32 is 5.1 to 10.3 times faster than WRF real*4, GPU FP64 3.1 to 6.0 times faster than WRF real*8 (docs/PERF.md
 has the first run and the layouts). This run predates RRTMG in single precision in CUDA FP32 builds; no new benchmark
-was run for 1.1.0 (docs/PERF.md says what was and was not measured again).
+was run for 1.1.0 or 1.2.0 (docs/PERF.md says what was and was not measured again; 1.2.0's GPU changes left the G4's
+1 h stepping times within a second, docs/RELEASE_NOTES.md).
 
 Agreement in these runs:
 - The CPU FP64 output is bit-identical to the suite's WRF real*8 references for P4 and N3 (both domains).

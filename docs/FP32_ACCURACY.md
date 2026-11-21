@@ -13,7 +13,7 @@ The measure is the ratio, per case, variable and output time,
 
 R <= 1: CPPWRF FP32 is at least as close to the double-precision answer as WRF's own single-precision build.
 
-The CPU FP32 build is a different matter: on the cases of docs/FP32_IDENTITY.md it is bit-identical to WRF real*4,
+The CPU FP32 build is a different matter: since 1.2.0, on the cases of docs/FP32_IDENTITY.md it is bit-identical to WRF real*4,
 and so is the CUDA FP32 identity build (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`), at a cost in speed; this page is about the
 fast CUDA FP32 build, the default.
 

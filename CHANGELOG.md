@@ -7,47 +7,62 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+## 1.2.0 (2026-11-21)
+
 ### Added
-- CPU FP32 builds bit-identical to WRF v4.8.0 real*4 on P1 and P4 (Kain-Fritsch, WSM6, RRTMG; 3 minutes with
-  history every step, and 1 h) and P2, P3, P9 (1 h): base state, boundary coefficients, Noah init, history T, WSM6's init
-  products and moist_physics_prep_em's R_v/R_d rounded where WRF real*4 rounds them, and glibc libmvec's 4-lane SSE4
-  expf / logf / powf / sinf / cosf ported lane by lane for the iterations WRF's vectorised loops give them
-  (src/core/libmvec_f4.hpp, test_libmvec_f4; sinf / cosf for radiation_driver's COSZEN). The suite's CPU FP32 backend
-  `cpu_sp` (`--cpu-sp`) compares them at tolerance 0: `real_p1_fp32_cpu`, `real_p1_fp32_cpu_1h`,
-  `real_p2_fp32_cpu_1h`, `real_p3_fp32_cpu_1h`, `real_p9_fp32_cpu_1h`, `real_p4_fp32_cpu`, `real_p4_fp32_cpu_1h`
-  (new data tar fp32id_data.tar), and Noah-MP NMP1 (1 h, `real_nmp1_fp32_cpu_1h`: the MOST resistances' four logarithms
-  through the 4-lane logf) and Thompson P6 (3 minutes and 1 h, `real_p6_fp32_cpu`, `real_p6_fp32_cpu_1h`, new data tar
-  fp32id2_data.tar: thompson_init's constants, coefficients and table builders in REAL where WRF real*4 has them,
-  the runtime's rain slope and sedimentation powers scalar). docs/FP32_IDENTITY.md. FP64 and CUDA results unchanged.
-- CPU FP32 bit-identical to WRF v4.8.0 real*4 on MYNN (MYNN surface layer + MYNN-EDMF PBL + RRTMG; 3 minutes with
-  history every step and 1 h: `real_mynn_fp32_cpu`, `real_mynn_fp32_cpu_1h`) and on the aerosol-aware Thompson C01
-  (mp_physics 28: `real_c01_fp32_cpu`, `real_c01_fp32_cpu_1h`), new data tar fp32id3_data.tar. glibc libmvec's
-  4-lane atanf (`_ZGVbN4v_atanf`) ported (test_libmvec_f4 `all`: expf, logf, sinf, cosf, atanf over every float input,
-  0 differ; the device proof covers it too); the MYNN psi tables as the real*4 build vectorises them (entry 0 a
-  constant, entries 1 .. 1000 four lanes at a time), powf(x, 0.5) in their scalar fallback, MYNN-EDMF's plume powers
-  through the 4-lane powf; thompson_init's QNWFA / QNIFA profiles and QNWFA2D emission in REAL (heights, folded
-  -ALOG constants, 4-lane expf from k = 2). FP64 results unchanged.
-- CPU FP32 bit-identical to WRF v4.8.0 real*4 on WDM6 / WDM5 (`real_p4d6_fp32_cpu`, `real_p4d5_fp32_cpu`), Morrison
-  with hail and graupel (`real_morr_fp32_cpu`, `real_morg_fp32_cpu`), GWDO (`real_g2_fp32_cpu`), the one-way nest N1
-  and the two-way nest N3 with the P4 physics (`real_n1_fp32_cpu`, `real_n3_fp32_cpu`), monotonic advection on N3
-  (`real_mon3_fp32_cpu`), Kessler, ACM2 + Pleim-Xiu, QNSE, Tiedtke, New Tiedtke, the Dudhia shortwave and the slab
-  LSM (`real_kesskf_`, `real_acm7_`, `real_q4_`, `real_t6_`, `real_p7_`, `real_dud4_`, `real_slab1_fp32_cpu`), each
-  3 minutes with history every step and 1 h (`..._1h`), new data tar fp32id4_data.tar; their `cuda_sp_id` twins are
-  identical on an RTX 2060. wdm6init's and MORR_TWO_MOMENT_INIT's folded powers and products in REAL (all their module
-  variables compared with WRF real*4's), WDM's (24.)**(.3333333) and (actr*1.E-6)**3; the nest start (start_em's base
-  state with max_dom > 1, blend_terrain, adjust_tempqv, press_adj) and the feedback (copy_fcn's average, sm121,
-  smdsm) in REAL; on the device in the CUDA identity mode glibc 2.41's correctly rounded tanf and atan2f (CORE-MATH
-  ports in src/core/glibc_mathf.hpp, proven equal to the host on every float input / a pair sweep). FP64 results
-  unchanged.
-- CUDA FP32 identity mode, CMake option `CPPWRF_CUDA_FP32_IDENTITY` (CUDA, FP32; default OFF): the CPU FP32 build's
-  results on the GPU, bit for bit. `--fmad=false` in every kernel; on the device glibc 2.41's scalar float functions
-  (src/core/glibc_mathf.hpp: expf, logf, powf, sinf, cosf from libm's FMA variants, atanf, tanhf, log10f from
-  CORE-MATH; proven against the system libm over every float input, tools/glibc_mathf_proof.cpp, and device against
-  host, tools/glibc_mathf_proof_cuda.cu), glibc's double functions as in the CUDA FP64 build, and libmvec's 4-lane
-  float functions with the CPU build's lane rule; `Reducer::sum` in the CPU build's order. The suite's backend
-  `cuda_sp_id` (`--cuda-sp-id`) runs every `cpu_sp` case on the GPU against the same WRF real*4 references at
-  tolerance 0 (`real_p1_fp32_cuda_id`, ..., `real_p6_fp32_cuda_id_1h`). The default fast CUDA FP32 build, FP64 and
-  the CPU builds are unchanged.
+- CPU FP32 builds (`-DCPPWRF_DOUBLE=OFF`) bit-identical to WRF v4.8.0 real*4 (gfortran, the default real*4 build)
+  on 24 configurations, every history variable at tolerance 0 (docs/FP32_IDENTITY.md):
+  - P1 and P4 (Kain-Fritsch, WSM6, RRTMG; 3 minutes with history every step, and 1 h) and P2, P3, P9 (1 h): start_em's
+    base state, al and p, the lbc_fcx_gcx relaxation coefficients, Noah init (SNOALB, snow albedo, the TSLB freezing
+    test), history T, WSM6's mp_wsm6_init products and moist_physics_prep_em's R_v/R_d rounded where WRF real*4 rounds
+    them (new data tar fp32id_data.tar).
+  - Noah-MP NMP1 (1 h; the MOST resistances' four logarithms through the 4-lane logf) and Thompson P6 (3 minutes and
+    1 h; thompson_init's constants, coefficients and table builders in REAL where WRF real*4 has them, the runtime's
+    rain slope and sedimentation powers scalar; new data tar fp32id2_data.tar).
+  - MYNN (MYNN surface layer + MYNN-EDMF PBL + RRTMG) and the aerosol-aware Thompson C01 (mp_physics 28), 3 minutes
+    and 1 h: the MYNN psi tables as the real*4 build vectorises them (entry 0 a constant, entries 1 .. 1000 four lanes
+    at a time), powf(x, 0.5) in their scalar fallback, MYNN-EDMF's plume powers through the 4-lane powf;
+    thompson_init's QNWFA / QNIFA profiles and QNWFA2D emission in REAL (new data tar fp32id3_data.tar).
+  - WDM6 / WDM5, Morrison with hail and with graupel, GWDO, the one-way nest N1, the two-way nest N3 with the P4
+    physics, monotonic advection on N3 (MON3), Kessler, ACM2 + Pleim-Xiu, QNSE, Tiedtke, New Tiedtke, the Dudhia
+    shortwave and the slab LSM, each 3 minutes and 1 h (new data tar fp32id4_data.tar): wdm6init's and
+    MORR_TWO_MOMENT_INIT's folded powers and products in REAL (all their module variables compared with WRF real*4's),
+    WDM's (24.)**(.3333333) and (actr*1.E-6)**3; the nest start (start_em's base state with max_dom > 1,
+    blend_terrain, adjust_tempqv, press_adj) and the feedback (copy_fcn's average, sm121, smdsm) in REAL.
+  - glibc 2.41 libmvec's 4-lane SSE4 float functions (`_ZGVbN4v_expf`, `_ZGVbN4v_logf`, `_ZGVbN4vv_powf` with Intel's
+    rcpps table, `_ZGVbN4v_sinf`, `_ZGVbN4v_cosf`, `_ZGVbN4v_atanf`) ported lane by lane (src/core/libmvec_f4.hpp,
+    tables from tools/libmvec_f4_tables.py) and called for the iterations WRF's vectorised loops give them
+    (test_libmvec_f4 `all`: expf, logf, sinf, cosf and atanf over every float input, 0 differ).
+- The suite's CPU FP32 backend `cpu_sp` (`tests/verify/wrf_suite.py --cpu-sp BIN`): 44 cases (`real_*_fp32_cpu`,
+  `real_*_fp32_cpu_1h`) against WRF real*4 history files at tolerance 0; each also checks its configuration against
+  the reference's namelist.
+- CUDA FP32 identity build, CMake option `CPPWRF_CUDA_FP32_IDENTITY` (CUDA, FP32; default OFF): the CPU FP32 build's
+  results on the GPU, bit for bit. `--fmad=false --ftz=false --prec-div=true --prec-sqrt=true` in every kernel; on
+  the device glibc 2.41's scalar float functions (src/core/glibc_mathf.hpp: expf, logf, powf, sinf, cosf from libm's
+  FMA variants; atanf, atan2f, tanf, tanhf, log10f, asinf, acosf, sinhf, erff, tgammaf from CORE-MATH's correctly
+  rounded sources), glibc's double functions as in the CUDA FP64 build, libmvec's 4-lane float functions with the CPU
+  build's lane rule, and `Reducer::sum` in the CPU build's order. Proofs: tools/glibc_mathf_proof.cpp (each port
+  against the system libm over every float input, 2^32 pairs plus special values for powf and atan2f) and
+  tools/glibc_mathf_proof_cuda.cu (device against host, RTX 2060), sampled in every build by test_glibc_mathf. The
+  suite's backend `cuda_sp_id` (`--cuda-sp-id BIN`) runs the 44 `cpu_sp` cases on the GPU (`real_*_fp32_cuda_id*`)
+  against the same references at tolerance 0. Cost on an RTX 2060 (P4, 10 steps): kernel time +3 %. The default
+  fast CUDA FP32 build is unchanged.
+
+### Changed
+- GPU performance, the same operations in the same order (FP64 bit-identical on the Colab G4: 338 / 338 at b2d320c):
+  KWSolve's Thomas sweeps carry the neighbour level of w in a register and pi = 4 atan(1) is computed once on the
+  host; an RK3 step with microphysics and lateral boundaries runs one interior calc_p_rho_phi (no second one after
+  spec_bdy_final, as solve_em); the nest feedback synchronises the device only when CUDA graphs are off; the Noah
+  parameter tables by device pointer instead of a by-value copy in the kernel arguments; RRTMG LW's batch kernel
+  KLwLevel forms the band sums and the level fluxes in registers; the surface driver no longer zeroes u_phytmp /
+  v_phytmp and KSfcPrep fills only the levels the surface layer schemes read. On the G4 the 1 h stepping times were
+  unchanged within a second (P4 FP64 9 s, N3 FP64 16 -> 15 s, P4 FP32 3 s, N2 FP32 3 -> 2 s); the gains showed on an
+  RTX 2060. No new benchmark: docs/PERF.md's numbers stay.
+- NSSL microphysics keeps 1.1's launch (the row on the launch's second index): a launch with the row on the first
+  index, tried in the same work, was 3-8x slower on the G4 (real_p4n18 1 h: 47 -> 135 s FP64, 19 -> 165 s FP32) and
+  was reverted.
+- FP32 results change where the FP32 builds now round as WRF real*4 does (Added); the fast CUDA FP32 build shares
+  these code paths, its suite tolerances are unchanged. FP64 results are unchanged.
 
 ### Fixed
 - FP32 results no longer depend on the host's libm: they were WRF real*4's only on a host with glibc 2.41 (Debian 13,
@@ -55,12 +70,16 @@ resumes across versions from WRF's wrfrst files.
   rounded ones), and an Ubuntu 24.04 build (glibc 2.39) differed from t = 0. The FP32 builds' executables (`cppwrf`,
   `cppwrf_real`; CPU, and the host code of the CUDA builds) define glibc 2.41's float functions themselves
   (src/core/glibc_mathf_host.cpp), in place of libm's for every call: expf, logf, powf, sinf, cosf, sincosf, tanf,
-  atanf, atan2f, asinf, acosf, sinhf, tanhf, log10f, erff, tgammaf. New ports of asinf, acosf, erff, tgammaf and
-  sinhf (CORE-MATH, glibc 2.41) in src/core/glibc_mathf.hpp, also on the device of the CUDA identity build (they were
-  CUDA's there); each port equals glibc 2.41's libm on every float input (tools/glibc_mathf_proof.cpp, also built
-  without `-march`) and the device equals the host (tools/glibc_mathf_proof_cuda.cu, RTX 2060). The ctest
-  `fp32_host_libm` checks that `cppwrf` imports none of them. Results on a glibc 2.41 host, FP64 and the fast CUDA
-  FP32 build unchanged.
+  atanf, atan2f, asinf, acosf, sinhf, tanhf, log10f, erff, tgammaf. Each port equals glibc 2.41's libm on every float
+  input (tools/glibc_mathf_proof.cpp, also built without `-march`) and the device equals the host
+  (tools/glibc_mathf_proof_cuda.cu, RTX 2060). The ctest `fp32_host_libm` checks that `cppwrf` imports none of them.
+  Proven on a Colab G4 with binaries built on Ubuntu 24.04 (gcc 13.3, glibc 2.39): `cpu_sp` 44 / 44 and `cuda_sp_id`
+  44 / 44 at tolerance 0.
+
+### Verification
+- CPU CI on 0bc4652 (GitHub-hosted runners, Debian 13 container, run 44860146094), all exact: suite PASS 386, FAIL 0,
+  SKIP 0 (the 342 CPU FP64 checks and the 44 `cpu_sp` cases), WRF output files 42, ideal files 14, differential tests
+  32 / 32, ctest 35 / 35.
 
 ## 1.1.1 (2026-11-20)
 

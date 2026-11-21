@@ -49,7 +49,12 @@ updates, branches, constants and defaults. Every result is checked against WRF i
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
 - **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all 338 CUDA FP64 checks of the suite for v1.1.0 on the RTX PRO 6000 Blackwell of a Colab G4, earlier
   subsets on NVIDIA L4 and A100).
-- **GPU, FP32**: the fast mode; its distance from WRF real*8 is that of stock WRF real*4 for most physics suites,
+- **CPU, FP32** (`-DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default real*4
+  build) on 24 configurations, the 44 `cpu_sp` cases of the suite (P1-P4, P9, Noah-MP, Thompson, MYNN, WDM6,
+  Morrison, the nests N1 / N3 and more); the CUDA FP32 identity build (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) gives the same
+  bits on the GPU. The FP32 executables carry glibc 2.41's float functions, so the result does not depend on the
+  host's libm (docs/FP32_IDENTITY.md).
+- **GPU, FP32**: the fast mode (the default CUDA FP32 build); its distance from WRF real*8 is that of stock WRF real*4 for most physics suites,
   and in the first hour of single runs with ACM2 / Pleim-Xiu, Morrison or the skin SST up to about twice it, as a
   rounding draw rather than a defect (docs/FP32_ACCURACY.md). Use it for forecasts and
   ensembles on GPUs with slow FP64; use FP64 when the answer must be WRF real*8's (verification, comparisons with
@@ -509,6 +514,9 @@ CPU build.
   batch kernels, Thompson and the physics drivers). Its difference from WRF real*8 is of the size of stock WRF
   real*4's (docs/FP32_ACCURACY.md: the measurement, its method and tools/verify/fp32_accuracy.py, which compares any
   two sets of wrfout files).
+- **FP32 identity** (`-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON`): the CPU FP32 build's results bit for bit,
+  and so WRF real*4's on the cases of docs/FP32_IDENTITY.md. No FMA contraction and glibc 2.41's float functions on
+  the device; on an RTX 2060 it costs 3 % of kernel time on P4. It installs as the `gpu-fp32` flavour.
 - **Memory:** a kernel's local arrays are reserved by CUDA for every thread the GPU can hold at once, so that part
   of the footprint grows with the GPU (the largest frame is 10.8-12.4 KB per thread in FP64 and 4.2-11 KB in FP32:
   0.4 GB on an RTX 2060, 3 GB on an RTX PRO 6000). The large per-column arrays of the column physics live in a

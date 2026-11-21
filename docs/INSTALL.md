@@ -14,7 +14,7 @@ One source tree gives up to four builds, called *flavours*. They can be installe
 | `cpu-fp64` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON` | Bit-identical to WRF v4.8.0 real*8. Runs on any x86-64 machine with OpenMP. |
 | `gpu-fp64` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON` | Bit-identical to WRF real*8 and to `cpu-fp64`. Runs on one NVIDIA GPU, about 3 to 5 times faster than WRF real*8. |
 | `gpu-fp32` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF` | The fast mode. It is as close to WRF real*8 as WRF's own real*4 build is. |
-| `cpu-fp32` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF` | Not part of the verification suite. |
+| `cpu-fp32` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF` | Bit-identical to WRF v4.8.0 real*4 on the cases of docs/FP32_IDENTITY.md. Runs on any x86-64 machine with OpenMP. |
 
 ## 2. Packages
 
@@ -75,11 +75,12 @@ GB per job on the large physics sources.
 | `CPPWRF_NATIVE` | `ON` | `-march=native`. Use `OFF` for binaries that must run on other CPUs. The values are the same either way. |
 | `CPPWRF_PORTABLE_LIBMVEC` | `ON` | See "The glibc-math options" below. |
 | `CPPWRF_CUDA_GLIBC_MATH` | `ON` | See "The glibc-math options" below. |
+| `CPPWRF_CUDA_FP32_IDENTITY` | `OFF` | CUDA FP32 only. `ON`: the CPU FP32 build's results on the GPU, bit for bit (WRF real*4's on the cases of docs/FP32_IDENTITY.md), a little slower than the fast mode. It installs as `gpu-fp32`. |
 | `CMAKE_INSTALL_PREFIX` | `/usr/local` | Where `cmake --install` puts the files. |
 
 ### The glibc-math options and why they exist
 
-WRF's results depend on the exact rounding of its math functions. Two options make CPPWRF repeat that rounding:
+WRF's results depend on the exact rounding of its math functions. Three options make CPPWRF repeat that rounding:
 
 - **`CPPWRF_PORTABLE_LIBMVEC`.** gfortran calls glibc's vector math library, libmvec, in vectorised loops. libmvec's
   `log` and `log10` use an approximate reciprocal instruction whose last bit differs between Intel and AMD CPUs. The
@@ -89,6 +90,13 @@ WRF's results depend on the exact rounding of its math functions. Two options ma
 - **`CPPWRF_CUDA_GLIBC_MATH`** (CUDA FP64 builds only). `ON` runs ports of glibc's `exp`, `log`, `pow` and the other
   math functions on the GPU instead of CUDA's math library. That is what makes `gpu-fp64` bit-identical to WRF.
   It costs 0 to 7 % of the FP64 time. `OFF` uses CUDA's math library, which agrees with WRF to roundoff only.
+- **`CPPWRF_CUDA_FP32_IDENTITY`** (CUDA FP32 builds only; needs `CPPWRF_CUDA_GLIBC_MATH=ON`). `ON` turns FMA
+  contraction off in every kernel and runs glibc 2.41's float functions on the GPU, so `gpu-fp32` gives the same bits
+  as `cpu-fp32`. On an RTX 2060 it costs 3 % of kernel time on P4. The default `OFF` is the fast mode.
+
+The FP32 builds do not call the host's libm for float functions: the executables carry glibc 2.41's (each proven
+equal on every input), so `cpu-fp32` gives WRF real*4's bits with other glibc versions too (proven with binaries built on Ubuntu 24.04,
+glibc 2.39).
 
 The CMake files also refuse flags that change results: `-ffast-math`, `-Ofast`, `-ffp-contract=fast`, and on the GPU
 `--use_fast_math`, `-ftz=true`, `-prec-div=false` and `-prec-sqrt=false`. They set `-ffp-contract=off` and nvcc's
@@ -146,8 +154,8 @@ NetCDF file, so it does not depend on the NetCDF or HDF5 version.
 
 ## 6. Release tarballs
 
-A release has one tarball per flavour, for example `cppwrf-1.1.1-cpu-fp64-linux-x86_64.tar.gz` and
-`cppwrf-1.1.1-gpu-fp32-sm80-86-89-90-120-linux-x86_64.tar.gz`. Unpack one anywhere and use its `bin/`; it has the
+A release has one tarball per flavour, for example `cppwrf-1.2.0-cpu-fp64-linux-x86_64.tar.gz` and
+`cppwrf-1.2.0-gpu-fp32-sm80-86-89-90-120-linux-x86_64.tar.gz`. Unpack one anywhere and use its `bin/`; it has the
 layout of section 4. The binaries are built portably (`CPPWRF_NATIVE=OFF`) on Debian 13 and need:
 
 - **glibc 2.38 or later** and the **libstdc++ of GCC 13.2 or later** (`GLIBCXX_3.4.32`). Debian 13 and Ubuntu 24.04
@@ -180,8 +188,9 @@ cd case && apptainer run --nv ../cppwrf-cuda.sif --mode gpu-fp64
 - The CUDA images build both GPU precisions and the CPU build. `CUDA_ARCHS` (a build argument) chooses the
   architectures.
 - The CUDA image is Ubuntu 24.04 (glibc 2.39). The proofs of bit identity ran on Debian 13 (glibc 2.41), and the host
-  code calls glibc's libm. In that image, check `gpu-fp64` against `cpu-fp64` with `cppwrf-compare` before relying
-  on bit identity with WRF.
+  code of the FP64 builds calls glibc's libm. In that image, check `gpu-fp64` against `cpu-fp64` with `cppwrf-compare`
+  before relying on bit identity with WRF. The FP32 builds carry glibc 2.41's float functions and do not depend on
+  the image's libm.
 - Pin the base images by digest for reproducible images.
 
 A Spack recipe is in `packaging/spack` (`spack repo add packaging/spack; spack install cppwrf +cuda cuda_arch=89`).
