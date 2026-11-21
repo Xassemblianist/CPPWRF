@@ -493,7 +493,7 @@ const char* fatal_message(int code) {
              "driver gives it the undefined U10_URB2D, PSIM_URB2D, ... of a point lsm skips)";
     case kFatalUrbanInput:
       return "sf_urban_physics = 1: urban morphology input (HGT_URB2D > 0, NUDAPT: the UCM reads an undefined U10 and "
-             "SW then) or an LCZ land-use category beyond the categories of URBPARM.TBL is not supported";
+             "SW then) is not supported";
     case kFatalRucVilka: return " crash in surface energy budget ";
     default: return "unknown fatal condition in a physics kernel";
   }

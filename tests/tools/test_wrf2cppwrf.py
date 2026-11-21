@@ -1311,6 +1311,9 @@ class TestValidationAndWarnings(unittest.TestCase):
         for fragment, expected_err in [
                 ("&physics mp_physics = -1 /", "needs a physics_suite"),
                 ("&physics physics_suite = 'arctic' /", "not recognized"),
+                # setup_physics_suite: TRIM drops the trailing blanks only
+                ("&physics physics_suite = ' conus' /", "not recognized"),
+                ("&physics physics_suite = 'co nus' /", "not recognized"),
                 ("&dynamics gwd_opt = 3 /", "gwd_opt = 3"),
                 ("&physics sf_sfclay_physics = 1, sf_surface_physics = 2, fractional_seaice = 2 /",
                  "fractional_seaice = 2"),
@@ -1594,7 +1597,13 @@ class TestWrfNamelistSemantics(unittest.TestCase):
             # READ(strmid,'(I3)'): -0 is stream 0; a line of an unknown stream type keeps the last known one
             # (strmtyp_int); ++0 is a Fortran read error
             for text, want in (("-:i:-0:tsk\n", "input stream changes"), ("+:i:11:sst\n-:x:10:u_ndg_old\n", "input stream changes"),
-                               ("+:h:0:rainc\n-:x:10:u_ndg_old\n", None), ("+:i:++0:tsk\n", "bad stream id")):
+                               ("+:h:0:rainc\n-:x:10:u_ndg_old\n", None), ("+:i:++0:tsk\n", "bad stream id"),
+                               # get_fieldstr: the stream type of a line with a bad operation still counts; a
+                               # missing field list is no error, the stream id is still read (++0, ':ts' of
+                               # '+:i::tsk': read errors); ':0' of '+:i::0:tsk' too; Unicode digits are no digits
+                               ("+++:i:11:sst\n-:x:0:tsk\n", "input stream changes"), ("+:i:++0\n", "bad stream id"),
+                               ("+:i::tsk\n", "bad stream id"), ("+:i::0:tsk\n", "bad stream id"),
+                               ("+:i:\u00b2:tsk\n", "bad stream id"), ("+:i:0\n", None)):
                 path = os.path.join(d, "iof.txt")
                 with open(path, "w") as f:
                     f.write(text)

@@ -792,8 +792,8 @@ restart_file = out/real/restart_000060.nc   # or .../wrfrst_d01_2026-10-12_01:00
 CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 6: the scalars NSTEPS,
 DECLIN and SOLCON as `SCALAR_<name>` attributes; WW, WW_M, PHP, ALT; in a run of one patch the halo points of every
 field as `HALO_<name>`; the step the run started at, convtrans_prep's averaging counter and the history, auxhist3,
-auxinput4 and auxinput10 alarms with the configured history / auxhist3 intervals, the restart alarm's PrevRingTime and
-one-shot RingTime; REFL_10CM and Noah-MP's land-point flag, which WRF's restart stream leaves out; so
+auxinput4 and auxinput10 alarms with the configured history / auxhist3 / restart intervals, the restart alarm's
+PrevRingTime and one-shot RingTime; REFL_10CM and Noah-MP's land-point flag, which WRF's restart stream leaves out; so
 that a run resumed from the file continues the uninterrupted one bit for bit, also between two radiation, PBL or
 cumulus calls, within a bucket, `prec_acc_dt`, `auxhist3` (output_diagnostics), FDDA or cumulus averaging period), the commit of the sources
 (`CPPWRF_COMMIT`) and the run's options (`CPPWRF_OPTIONS`: every configuration key except `[run]`, `[restart]`,
@@ -815,8 +815,10 @@ its restart files at other times than the uninterrupted run (dt 50 s, interval 1
 WRF does. A run resumed from CPPWRF's own `restart_<step>.nc` continues the uninterrupted run instead: the same restart
 times, and wrfrst files equal to its files (variables and attributes: START_DATE and the alarms count from the start of
 the run that wrote the file). With another `output.out_interval` or `phys.auxhist3_interval` than that run, the history
-or auxhist3 alarm rings at the new interval counted from that run's start (CLWRF's statistics period counts from there
-too).
+or auxhist3 alarm rings at the new interval counted from that run's start; with `output_diagnostics = 1` another
+`phys.auxhist3_interval` is refused (CLWRF's sums belong to the file's interval: resume from the wrfrst file). With
+another `restart.interval` the restart alarm is that of a run resumed from WRF's file (first ring at the restart time
+plus the file's `WRF_ALARM_SECS_TIL_NEXT_RING_51`).
 
 When resuming, pre-restart rows in `diag.csv` are preserved automatically.
 

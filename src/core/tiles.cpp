@@ -1349,9 +1349,12 @@ int run(const Options& o, const std::function<int(int)>& body) {
   if (!o.devices.empty())
     for (int t = 0; t < set.n; ++t) dev[std::size_t(t)] = o.devices[std::size_t(t) % o.devices.size()];
   set.all.init(set.n + (o.check ? 1 : 0));
-  {  // the tiles on one device share its work budget as ranks do (device_work_budget, device_work_share)
+  {  // the tiles on one device share its work budget as ranks do (device_work_budget, device_work_share); the
+    // check's reference run works on this thread's device as well
+    std::vector<int> on = dev;
+    if (o.check) on.push_back(current_device());
     int most = 1;
-    for (int d : dev) most = std::max(most, int(std::count(dev.begin(), dev.end(), d)));
+    for (int d : on) most = std::max(most, int(std::count(on.begin(), on.end(), d)));
     set_device_work_share(most);
   }
   S = &set;

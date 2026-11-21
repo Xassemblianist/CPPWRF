@@ -325,11 +325,18 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
     const double m = wc_->num(opt);
     return double(std::max(1L, std::lround(m * 60. / g.dt)));
   };
-  phy_init_["STEPRA"] = {stepn("radt")};
+  // the configuration's radt / fgdt where it has them (a resumed run with another radt: ra_init's STEPRA of that one),
+  // else the namelist's
+  auto stepc = [&](const char* key, const char* opt) {
+    if (!cfg.has(key)) return stepn(opt);
+    return double(std::max(1L, std::lround(cfg.get_double(key, 0.0) * 60. / g.dt)));
+  };
+  phy_init_["STEPRA"] = {stepc("phys.radt", "radt")};
   phy_init_["STEPBL"] = {m_.suite ? double(m_.suite->stepbl) : stepn("bldt")};
   phy_init_["STEPCU"] = {m_.suite ? double(m_.suite->stepcu) : stepn("cudt")};
   // fg_init (phy_init, every run): STEPFG = max(nint(FGDT*60./DT), 1)
-  phy_init_["STEPFG"] = {m_.suite && m_.suite->options().fdda.grid_fdda == 1 ? double(m_.suite->stepfg) : stepn("fgdt")};
+  phy_init_["STEPFG"] = {m_.suite && m_.suite->options().fdda.grid_fdda == 1 ? double(m_.suite->stepfg)
+                                                                              : stepc("fdda.fgdt", "fgdt")};
   phy_init_["LAST_STEP_UPDATED"] = {-1.0};
   phy_init_["MIN_PTCHSZ"] = {double(std::min(g.nx, g.ny * jrep_) + 1)};  // x-z runs: WRF's e_sn = 3
   {  // lbc_fcx_gcx (spec_exp = 0): only specified and nested domains; ideal domains keep the input's zeros

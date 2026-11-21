@@ -15,7 +15,7 @@ with restart_interval = 0: one file, of 250 s (1700000000: the forever interval)
 The test runs em_quarter_ss (11 x 11 cells, dt 12 s, restart interval 20 s, 144 s), resumes it from its wrfrst file
 of 24 s and compares the times of the wrfrst files, and the seconds to the next ring they carry, with that rule. The
 run resumed from CPPWRF's own restart_000002.nc continues the uninterrupted run: the same rings and wrfrst files
-(variables and global attributes).
+(variables and global attributes); with another restart interval it rings as a run resumed from the wrfrst file.
 
   restart_alarm_test.py CPPWRF_BINARY WORK_DIR     (from the repository root; exit 77 without
                                                     ${CPPWRF_WRF_REF}/run_qss/input_sounding or without NetCDF)
@@ -111,6 +111,12 @@ def main():
     dn, got = run("resumed_native", ["--set", f"run.restart_file={native}"])
     check(f"run resumed from {t0} s (CPPWRF's restart file), (time, seconds to the next ring)", got,
           [x for x in want if x[0] > t0])
+    # with another restart.interval (30 s, 0) the file's PrevRingTime is of no use: the alarm of a run resumed from
+    # WRF's file, from the restart time and the file's seconds to the next ring
+    for iv2 in (30, 0):
+        _, got = run(f"resumed_native_iv{iv2}", ["--set", f"run.restart_file={native}", "--set", f"restart.interval={iv2}"])
+        check(f"run resumed from {t0} s (CPPWRF's restart file) with restart.interval = {iv2}", got,
+              wrf_rings(dt, iv2, t_end, t0, secs))
     import netCDF4
     for f in sorted(glob.glob(os.path.join(dn, "wrfrst_d01_*"))):
         with netCDF4.Dataset(f) as b, netCDF4.Dataset(os.path.join(d, os.path.basename(f))) as a:

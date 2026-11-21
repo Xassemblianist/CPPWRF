@@ -146,9 +146,31 @@ def _load_option_tiers() -> List[Dict[str, Any]]:
 OPTION_TIERS = _load_option_tiers()
 
 
+def wrf_get_fieldstr(ix: int, c: str, instr: str, noutstr: int) -> Tuple[bool, str]:
+    """frame/module_domain.F get_fieldstr: field ix (1-based) of instr between separators c; a separator search starts
+    two characters after the previous separator (an empty field swallows the next separator). (False, "") when there is
+    no such field or it is longer than noutstr + 1 characters (as src/wrf_io/wrf_schema.cpp)."""
+    n = len(instr.rstrip(" "))  # LEN(TRIM(instr))
+    dexes, prev = [1], 1
+    while len(dexes) < 1000:  # MAX_DEXES
+        p = instr.find(c, prev - 1) if prev <= n else -1
+        if 0 <= p < n:
+            dexes.append(p + 2)
+            prev = dexes[-1] + 1
+        else:
+            dexes.append(n + 2)
+    if ix < 1 or ix >= len(dexes):
+        return False, ""
+    a, b = dexes[ix - 1], dexes[ix]
+    if (b - 2) - a > noutstr or a == b:
+        return False, ""
+    return True, instr[a - 1:b - 2] if b - 1 > a else ""
+
+
 # -----------------------------------------------------------------------------
 # Fortran Namelist Tokenizer and Parser (f90nml-free)
 # -----------------------------------------------------------------------------
+
 
 class NamelistParseError(Exception):
     """Raised when namelist parsing fails."""
@@ -274,8 +296,8 @@ def _parse_scalar_value(s: str) -> Any:
         except ValueError:
             pass
             
-    # Fallback to string as-is
-    return s.strip()
+    # Fallback to string as-is (a quoted value keeps its leading blanks, as WRF's namelist read)
+    return s.rstrip(" ")
 
 
 _NULL = object()  # a null value of list-directed input (",," or "3*"): the element keeps its value
@@ -1212,20 +1234,24 @@ class WrfTranslator:
                     break
                 if "#" in line:
                     continue
-                f = line.split(":")  # get_fieldstr: op and stream type at most 2 characters, stream id at most 4
-                if len(f) < 4 or len(f[0]) > 2 or len(f[1]) > 2 or len(f[2]) > 4:
-                    continue
-                t = f[1][:1].lower()
+                # modify_io_masks1: the stream type and id are taken before the field list is checked
+                ok1, op = wrf_get_fieldstr(1, ":", line, 1)
+                ok2, t = wrf_get_fieldstr(2, ":", line, 1)
+                t = t[:1].lower()
                 if t in ("h", "i"):
                     strm = t
-                sid = f[2][:3].replace(" ", "")  # READ(strmid(1:3),'(I3)'): blanks ignored, one sign
+                ok3, f3 = wrf_get_fieldstr(3, ":", line, 3)
+                sid = f3[:3].replace(" ", "")  # READ(strmid,'(I3)'): CHARACTER*3, blanks ignored, one sign
                 k = 1 if sid[:1] in ("+", "-") else 0
-                if sid and (k == len(sid) or not sid[k:].isdigit()):
-                    self.error(f"Domain d{d + 1:02d}: iofields_filename {name}: bad stream id '{f[2]}' "
+                if sid and (k == len(sid) or any(ch not in "0123456789" for ch in sid[k:])):
+                    self.error(f"Domain d{d + 1:02d}: iofields_filename {name}: bad stream id '{f3}' "
                                f"({line.strip()}; a Fortran read error in WRF).")
                     continue
                 istrm = int(sid) if sid else 0
-                if f[0][:1] in ("+", "-") and strm == "i" and istrm in (0, 4, 10):
+                ok4, _ = wrf_get_fieldstr(4, ":", line, 8000)
+                if not (ok1 and ok2 and ok3 and ok4):
+                    continue  # WRF: "Problem reading", the line changes nothing
+                if op[:1] in ("+", "-") and strm == "i" and istrm in (0, 4, 10):
                     self.error(f"Domain d{d + 1:02d}: iofields_filename {name}: input stream changes ({line.strip()}) are "
                                "not supported (CPPWRF reads wrfinput, wrflowinp and wrffdda whole).")
 
@@ -1262,7 +1288,7 @@ class WrfTranslator:
 
     def apply_physics_suite(self):
         """WRF setup_physics_suite: the -1 physics options take the values of physics_suite (CONUS, tropical)."""
-        suite = str(self.get_opt("physics", "physics_suite", "none")).strip().lower()
+        suite = str(self.get_opt("physics", "physics_suite", "none")).rstrip(" ").lower()  # TRIM: trailing only
         phys = self.nml.setdefault("physics", {})
         # frame/module_configure.F: every domain runs the microphysics of the highest domain, mp_physics(max_dom)
         if self._max_dom > 1 and len(phys.get("mp_physics", [])) >= self._max_dom:
