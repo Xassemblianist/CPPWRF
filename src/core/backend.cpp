@@ -27,7 +27,6 @@ namespace ktime {
 namespace {
 struct Table {
   std::map<std::string, std::pair<double, long>> t;  // kernel type -> (seconds, launches)
-  std::chrono::steady_clock::time_point t0;
   ~Table() {
     if (t.empty()) return;
     std::vector<std::pair<std::string, std::pair<double, long>>> v(t.begin(), t.end());
@@ -47,6 +46,8 @@ struct Table {
   }
 };
 Table& table() { static Table tb; return tb; }
+std::mutex table_m;  // the tile threads of run.tiles share the table
+thread_local std::chrono::steady_clock::time_point t0;  // each its own launch
 }  // namespace
 bool on() {
   static const bool enabled = [] { const char* e = std::getenv("CPPWRF_KTIME"); return e && *e && *e != '0'; }();
@@ -54,12 +55,14 @@ bool on() {
 }
 void begin() {
   ck(cudaDeviceSynchronize(), "ktime");
-  table().t0 = std::chrono::steady_clock::now();
+  t0 = std::chrono::steady_clock::now();
 }
 void end(const char* kernel_type) {
   ck(cudaDeviceSynchronize(), "ktime");
+  const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  std::lock_guard<std::mutex> lk(table_m);
   auto& e = table().t[kernel_type];
-  e.first += std::chrono::duration<double>(std::chrono::steady_clock::now() - table().t0).count();
+  e.first += dt;
   e.second += 1;
 }
 }  // namespace ktime

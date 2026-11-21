@@ -48,6 +48,9 @@ _TILED = [
     ("real_n3_r8_fp64_cpu", "2x2"),
     ("real_d0v_r8_fp64_cpu", "3x2"),
     ("real_d0_r8_fp64_cpu_6h", "4x2"),  # Tiedtke's row flag across the patches of a row (it matters after 1 - 2 h)
+    # Grell-Freitas with cu_rad_feedback: convtrans_prep's averaging counter (one per tile thread) at the end of the
+    # first 30-minute period, QC_CU / QI_CU into RRTMG
+    ("real_a05g_r8_fp64_cpu_1h", "2x2"),
     ("ideal_quarter_ss_k2_fp64_cpu", "2x2"),
     ("ideal_squall2d_x_fp64_cpu", "3x1"),
     ("ideal_squall2d_y_fp64_cpu", "1x3"),

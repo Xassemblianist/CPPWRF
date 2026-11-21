@@ -7,6 +7,16 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+### Fixed
+- Tiles (`run.tiles`) with the cumulus diagnostics (`cu_diag = 1`: Grell-Freitas, Grell-3D): convtrans_prep's
+  averaging counter (module_convtrans_prep.F's SAVE stepave_count) was one for the process, so the tile threads raced
+  on it and counted once per tile; at the end of an averaging period QC_CU / QI_CU / RAINCV_B took another divisor
+  than in the run without tiles (with cu_rad_feedback, RRTMG's clouds and all fields after it). It is now one per
+  tile thread, which gives the run without tiles (WRF's own numtiles > 1 counts once per tile; the references run one
+  tile). New suite case real_a05g_r8_fp64_cpu_1h_t2x2. MPI ranks were not affected.
+- `CPPWRF_KTIME=1` with tiles: the tile threads updated the kernel-time table without a lock (it could crash); the
+  debug flag of `CPPWRF_VM_DUMP` was shared by the tile threads.
+
 ## 1.2.0 (2026-11-21)
 
 ### Added
