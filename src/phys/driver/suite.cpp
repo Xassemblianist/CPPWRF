@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-#include "phys/ra_rrtmg_common/rrtmg_real.hpp"
 #include "phys/driver/suite.hpp"
 #include "phys/driver/topo.hpp"
+#include "phys/ra_rrtmg_common/parkind.hpp"
 
 #include "core/tiles.hpp"
 #include "core/vm_dump.hpp"
@@ -802,8 +802,8 @@ IntField2* PhysicsSuite::bucket_int(const std::string& name) {
 
 void PhysicsSuite::init_radiation(const std::vector<double>& xlat, const std::vector<double>& xlong) {
   if (!radiation_on()) return;
-  rad_ = std::make_unique<RadiationDriver>(g_, o_.rad, std::vector<::cppwrf::phys::rr>(xlat.begin(), xlat.end()),
-                                             std::vector<::cppwrf::phys::rr>(xlong.begin(), xlong.end()));
+  rad_ = std::make_unique<RadiationDriver>(g_, o_.rad, std::vector<::cppwrf::phys::rb>(xlat.begin(), xlat.end()),
+                                             std::vector<::cppwrf::phys::rb>(xlong.begin(), xlong.end()));
 }
 
 void PhysicsSuite::init_topo(const std::vector<double>& ht, const std::vector<double>& msftx,
@@ -844,8 +844,8 @@ void PhysicsSuite::topo_shading_step() {
                           : (o_.rad.radt == 0 ? 1 : std::max(1, int(std::lround(o_.rad.radt * 60. / g_.dt))));
   if (!(itimestep == 1 || itimestep % stepra == 1 + o_.rad.ra_call_offset)) return;
   TopoFields& t = *topo_;
-  const rr julian = wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());
-  rr declin = 0, solcon = 0;
+  const rb julian = wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());
+  rb declin = 0, solcon = 0;
   radconst(julian, declin, solcon);
   const real xtime = real(clock_xtime()), radfrq = real(o_.rad.radt);
   const real xt24 = std::fmod(xtime + radfrq * real(0.5), real(1440.));

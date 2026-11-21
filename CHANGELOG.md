@@ -504,13 +504,13 @@ tolerance 0, CUDA FP32 suite 44 runs within their measured tolerances, ctest 35/
   REAL(KIND=R8SIZE) tables and DOUBLE PRECISION process rates in double, MSKF's momentum transport in REAL(r8), P3's
   double temporaries, WSM / WDM rgmma in single precision, grid%julian from the double day of year and the CLWRF trace
   gases in double, and WRF real*4's single-precision constants and products (small_step's cof, sfclayrev's 1./1.1,
-  x**2.0, NSSL's dgam, Noah-MP groundwater, RRTMG SW heatfac). RRTMG (`rr`), WSM6's literals, the nest SINT and the
+  x**2.0, NSSL's dgam, Noah-MP groundwater, RRTMG SW heatfac). RRTMG (`rb`), WSM6's literals, the nest SINT and the
   `vm` atan / sin / cos / log10 are single precision in CPU FP32 builds too. FP64 output is unchanged; the GPU FP32
   values of the suite moved (docs/FP32_ACCURACY.md, section 1.1.0).
 
 ### Performance
 - RRTMG LW / SW (and the radiation driver's RRTMG paths, Dudhia SW) compute in single precision in CUDA FP32 builds:
-  the type `rr` (src/phys/ra_rrtmg_common/rrtmg_real.hpp) is float there, as RRTMG's `rb` in WRF real*4, and double
+  RRTMG's real kind `rb` (src/phys/ra_rrtmg_common/parkind.hpp) is float there, as in WRF real*4, and double
   in CUDA FP64 and in every CPU build, whose results are unchanged (CUDA FP64 at tolerance 0, CPU FP32
   byte-identical). RRTM LW stays double. GPU FP32 output bytes change; its distance from WRF real*8 stays at WRF
   real*4's (P4 72 h, N3 24 h). GPU FP32 on the Colab G4: P4 72 h 2.0x, N3 24 h 1.65x faster than the GPU FP32

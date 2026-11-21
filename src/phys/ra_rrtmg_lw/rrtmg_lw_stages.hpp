@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-#include "phys/ra_rrtmg_common/rrtmg_real.hpp"
 // RRTMG_LWRAD (WRF module_ra_rrtmg_lw.F) for one column as independent stages, every per-column
 // array a strided view (src/phys/ra_rrtmg_common/strided.hpp):
 //   rrtmg_lw_prep     per column : RRTMG_LWRAD profiles, cloud properties, McICA subcolumns
@@ -20,6 +19,7 @@
 
 #include "core/backend.hpp"
 #include "phys/ra_rrtmg_common/kissvec.hpp"
+#include "phys/ra_rrtmg_common/parkind.hpp"
 #include "phys/ra_rrtmg_common/strided.hpp"
 #include "phys/ra_rrtmg_lw/rrtmg_lw_cldprmc.hpp"
 #include "phys/ra_rrtmg_lw/rrtmg_lw_rtrnmc.hpp"
@@ -31,9 +31,9 @@ namespace cppwrf::phys {
 
 // Constants of RRTMG_LWRAD / inirad (module data in WRF), device-copyable.
 struct RrtmgLwConsts {
-  rr pprof[60], tprof[60];  // standard profile above the model top
-  rr retab[95];             // ice effective radius table (reicalc)
-  rr o3ann[31], ppwrkh[32]; // inirad annual ozone and its pressure edges
+  rb pprof[60], tprof[60];  // standard profile above the model top
+  rb retab[95];             // ice effective radius table (reicalc)
+  rb o3ann[31], ppwrkh[32]; // inirad annual ozone and its pressure edges
 };
 void rrtmg_lw_fill_consts(RrtmgLwConsts& k);  // rrtmg_lw.cpp
 
@@ -41,9 +41,9 @@ void rrtmg_lw_fill_consts(RrtmgLwConsts& k);  // rrtmg_lw.cpp
 struct RrtmgLwCallConfig {
   int num_levels, nlayers;
   int o3input;
-  rr co2, n2o, ch4, cfc11, cfc12;
-  rr g;                    // gravmks of the water paths
-  rr heatfac;              // rrtmg_lw heatfac = grav*86400/(cp*100)
+  rb co2, n2o, ch4, cfc11, cfc12;
+  rb g;                    // gravmks of the water paths
+  rb heatfac;              // rrtmg_lw heatfac = grav*86400/(cp*100)
   int has_reqc, has_reqi, has_reqs;
   int icld, idcor, juldat;     // McICA overlap (cldovrlp), decorrelation length type, day of year
   int icloud;                  // icloud = 0: RRTMG_LWRAD keeps CLDFRA1D = 0 (a clear column)
@@ -79,13 +79,13 @@ struct LwLayout {
   CPPWRF_HD explicit LwLayout(int nl_, bool band_sums_ = true) : nl(nl_), band_sums(band_sums_) {
     views(nullptr, nullptr, 0, 1, &nd, &ni);
   }
-  CPPWRF_FORCEINLINE LwViews views(rr* d, int* ip, int col, int ncol, std::size_t* nd_out = nullptr,
+  CPPWRF_FORCEINLINE LwViews views(rb* d, int* ip, int col, int ncol, std::size_t* nd_out = nullptr,
                                    std::size_t* ni_out = nullptr) const {
     LwViews v{};
     const int L = nl, L1 = nl + 1, s = ncol;
     std::size_t od = 0, oi = 0;
     auto take = [&](std::size_t n) {
-      rr* q = d ? d + od * std::size_t(s) + col : nullptr;
+      rb* q = d ? d + od * std::size_t(s) + col : nullptr;
       od += n;
       return q;
     };
@@ -126,7 +126,7 @@ struct LwLayout {
 
 // Per-column inputs of RRTMG_LWRAD (k = 0 at the surface), model memory views.
 struct LwColumnIn {
-  rr tsk, emiss, xland, xice, snow, xlat;
+  rb tsk, emiss, xland, xice, snow, xlat;
   SD p8w, t8w, p3d, pi3d, dz8w, t3d, rho3d, qv3d, qc3d, qi3d, qs3d, cldfra3d, o33d;
   SD re_cloud, re_ice, re_snow;  // p == nullptr: has_req* = 0
   bool has_qc, has_qi, has_qs;   // F_QC, F_QI, F_QS (absent species are zero)
@@ -139,27 +139,27 @@ struct LwColumnIn {
 
 // inatm of rrtmg_lw: wkl holds the volume mixing ratios on entry, the column amounts on exit.
 CPPWRF_HD inline void rrtmg_lw_inatm(int nlayers, const LwViews& v) {
-  constexpr rr amd = rr(28.9660);
-  constexpr rr amw = rr(18.0160);
-  constexpr rr avogad = rr(6.02214199e23);
-  constexpr rr grav = rr(9.8066);
+  constexpr rb amd = rb(28.9660);
+  constexpr rb amw = rb(18.0160);
+  constexpr rb avogad = rb(6.02214199e23);
+  constexpr rb grav = rb(9.8066);
   for (int l = 0; l < nlayers; ++l) {
-    rr amm = (rr(1.0) - v.wkl[0][l]) * amd + v.wkl[0][l] * amw;
-    v.coldry[l] = (v.pz[l] - v.pz[l + 1]) * rr(1.0e3) * avogad / (rr(1.0e2) * grav * amm * (rr(1.0) + v.wkl[0][l]));
+    rb amm = (rb(1.0) - v.wkl[0][l]) * amd + v.wkl[0][l] * amw;
+    v.coldry[l] = (v.pz[l] - v.pz[l + 1]) * rb(1.0e3) * avogad / (rb(1.0e2) * grav * amm * (rb(1.0) + v.wkl[0][l]));
   }
-  rr amttl = rr(0.0);
-  rr wvttl = rr(0.0);
+  rb amttl = rb(0.0);
+  rb wvttl = rb(0.0);
   for (int l = 0; l < nlayers; ++l) {
-    rr summol = rr(0.0);
+    rb summol = rb(0.0);
     for (int imol = 1; imol < 7; ++imol) summol += v.wkl[imol][l];
-    v.wbrodl[l] = v.coldry[l] * (rr(1.0) - summol);
+    v.wbrodl[l] = v.coldry[l] * (rb(1.0) - summol);
     for (int imol = 0; imol < 7; ++imol) v.wkl[imol][l] = v.coldry[l] * v.wkl[imol][l];
     amttl = amttl + v.coldry[l] + v.wkl[0][l];  // WRF order: (amttl + coldry) + wkl
     wvttl += v.wkl[0][l];
-    for (int ix = 0; ix < 4; ++ix) v.wx[ix][l] = v.coldry[l] * v.wx[ix][l] * rr(1.0e-20);
+    for (int ix = 0; ix < 4; ++ix) v.wx[ix][l] = v.coldry[l] * v.wx[ix][l] * rb(1.0e-20);
   }
-  rr wvsh = (amw * wvttl) / (amd * amttl);
-  v.dscal[0] = wvsh * (rr(1.0e3) * v.pz[0]) / (rr(1.0e2) * grav);  // pwvcm
+  rb wvsh = (amw * wvttl) / (amd * amttl);
+  v.dscal[0] = wvsh * (rb(1.0e3) * v.pz[0]) / (rb(1.0e2) * grav);  // pwvcm
 }
 
 // ---- stage 1: per column ------------------------------------------------------------------------
@@ -168,11 +168,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
                                       const RrtmgLwTables& CPPWRF_RESTRICT tables,
                                       const RrtmgLwConsts& CPPWRF_RESTRICT kc, bool setcoef = true) {
   const int num_levels = c.num_levels, nlayers = c.nlayers;
-  constexpr rr deltap = rr(4.0);  // mb
-  const rr xland = in.xland;
-  auto qc_of = [&](int k) { return in.has_qc ? in.qc3d[k] : rr(0.0); };
-  auto qi_of = [&](int k) { return in.has_qi ? in.qi3d[k] : rr(0.0); };
-  auto qs_of = [&](int k) { return in.has_qs ? in.qs3d[k] : rr(0.0); };
+  constexpr rb deltap = rb(4.0);  // mb
+  const rb xland = in.xland;
+  auto qc_of = [&](int k) { return in.has_qc ? in.qc3d[k] : rb(0.0); };
+  auto qi_of = [&](int k) { return in.has_qi ? in.qi3d[k] : rb(0.0); };
+  auto qs_of = [&](int k) { return in.has_qs ? in.qs3d[k] : rb(0.0); };
 
   // cloud optics flags (RRTMG_LWRAD, icloud != 0)
   int inflglw = 2, iceflglw = 3;
@@ -185,110 +185,110 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
   if (p3case) { inflglw = 5; iceflglw = 5; }
 
   // CAM relcalc inputs
-  const rr landfrac = rr(2.0) - xland;
-  const rr landm = landfrac;
-  const rr snowh = rr(0.001) * in.snow;
-  const rr icefrac = in.xice;
-  constexpr rr rliqland = rr(8.0), rliqocean = rr(14.0), rliqice = rr(14.0), tmelt = rr(273.16);
+  const rb landfrac = rb(2.0) - xland;
+  const rb landm = landfrac;
+  const rb snowh = rb(0.001) * in.snow;
+  const rb icefrac = in.xice;
+  constexpr rb rliqland = rb(8.0), rliqocean = rb(14.0), rliqice = rb(14.0), tmelt = rb(273.16);
   // relcalc / reicalc at the layer temperature t (RRTMG_LWRAD passes them tlay)
-  auto relcalc = [&](rr t) {
-    rr reliq = rliqland + (rliqocean - rliqland) * std::min(rr(1.0), std::max(rr(0.0), (tmelt - t) * rr(0.05)));
-    reliq += (rliqocean - reliq) * std::min(rr(1.0), std::max(rr(0.0), snowh * rr(10.0)));
-    reliq += (rliqocean - reliq) * std::min(rr(1.0), std::max(rr(0.0), rr(1.0) - landm));
-    reliq += (rliqice - reliq) * std::min(rr(1.0), std::max(rr(0.0), icefrac));
+  auto relcalc = [&](rb t) {
+    rb reliq = rliqland + (rliqocean - rliqland) * std::min(rb(1.0), std::max(rb(0.0), (tmelt - t) * rb(0.05)));
+    reliq += (rliqocean - reliq) * std::min(rb(1.0), std::max(rb(0.0), snowh * rb(10.0)));
+    reliq += (rliqocean - reliq) * std::min(rb(1.0), std::max(rb(0.0), rb(1.0) - landm));
+    reliq += (rliqice - reliq) * std::min(rb(1.0), std::max(rb(0.0), icefrac));
     return reliq;
   };
-  auto reicalc = [&](rr t) {
-    int idx = static_cast<int>(t - rr(179.0));
+  auto reicalc = [&](rb t) {
+    int idx = static_cast<int>(t - rb(179.0));
     idx = std::min(std::max(idx, 1), 94);
-    const rr corr = t - static_cast<int>(t);
-    return kc.retab[idx - 1] * (rr(1.0) - corr) + kc.retab[idx] * corr;
+    const rb corr = t - static_cast<int>(t);
+    return kc.retab[idx - 1] * (rb(1.0) - corr) + kc.retab[idx] * corr;
   };
 
   // base layer vertical variables, gases, cloud physical properties
-  v.pz[0] = in.p8w[0] / rr(100.0);
+  v.pz[0] = in.p8w[0] / rb(100.0);
   v.tz[0] = in.t8w[0];
   for (int k = 0; k < num_levels; ++k) {
-    const rr t3 = in.t3d[k];
-    v.pavel[k] = in.p3d[k] / rr(100.0);
-    v.pz[k + 1] = in.p8w[k + 1] / rr(100.0);
-    const rr pdel = v.pz[k] - v.pz[k + 1];
+    const rb t3 = in.t3d[k];
+    v.pavel[k] = in.p3d[k] / rb(100.0);
+    v.pz[k + 1] = in.p8w[k + 1] / rb(100.0);
+    const rb pdel = v.pz[k] - v.pz[k + 1];
     v.tavel[k] = t3;
     v.tz[k + 1] = in.t8w[k + 1];
 
-    rr qv_val = std::max(in.qv3d[k], rr(1.0e-12));
-    v.wkl[0][k] = qv_val * rr(1.607793);  // h2ovmr
+    rb qv_val = std::max(in.qv3d[k], rb(1.0e-12));
+    v.wkl[0][k] = qv_val * rb(1.607793);  // h2ovmr
     v.wkl[1][k] = c.co2;
-    v.wkl[2][k] = rr(0.0);                // o3vmr below
+    v.wkl[2][k] = rb(0.0);                // o3vmr below
     v.wkl[3][k] = c.n2o;
-    v.wkl[4][k] = rr(0.0);                // co
+    v.wkl[4][k] = rb(0.0);                // co
     v.wkl[5][k] = c.ch4;
-    v.wkl[6][k] = rr(0.209488);           // o2
-    v.wx[0][k] = rr(0.093e-9);            // ccl4
+    v.wkl[6][k] = rb(0.209488);           // o2
+    v.wx[0][k] = rb(0.093e-9);            // ccl4
     v.wx[1][k] = c.cfc11;
     v.wx[2][k] = c.cfc12;
-    v.wx[3][k] = rr(0.169e-9);            // cfc22
+    v.wx[3][k] = rb(0.169e-9);            // cfc22
 
     // hydrometeors (max(0, q)) and effective radii
-    rr qc1 = std::max(rr(0.0), qc_of(k)), qi1 = std::max(rr(0.0), qi_of(k)), qs1 = std::max(rr(0.0), qs_of(k));
-    if (in.split3 && t3 < rr(273.15)) {  // module_ra_rrtmg_lw.F "For MP option 3" (WSM3)
+    rb qc1 = std::max(rb(0.0), qc_of(k)), qi1 = std::max(rb(0.0), qi_of(k)), qs1 = std::max(rb(0.0), qs_of(k));
+    if (in.split3 && t3 < rb(273.15)) {  // module_ra_rrtmg_lw.F "For MP option 3" (WSM3)
       qi1 = qc1;
-      qs1 = std::max(rr(0.0), in.qr3d[k]);
-      qc1 = rr(0.);
+      qs1 = std::max(rb(0.0), in.qr3d[k]);
+      qc1 = rb(0.);
     }
     // RRTMG_LWRAD reads CLDFRA3D only IF (ICLOUD .ne. 0) (module_ra_rrtmg_lw.F); bmj_rad_feedback sets CLDFRA with
     // icloud = 0 too
-    const rr cf3 = c.icloud != 0 ? in.cldfra3d[k] : rr(0.0);
-    rr recloud1d = rr(5.0), reice1d = rr(10.0), resnow1d = rr(10.0);
+    const rb cf3 = c.icloud != 0 ? in.cldfra3d[k] : rb(0.0);
+    rb recloud1d = rb(5.0), reice1d = rb(10.0), resnow1d = rb(10.0);
     if (hrc) {
-      rr r = std::max(rr(2.5), in.re_cloud[k] * rr(1.E6));
-      if (r <= rr(2.5) && cf3 > rr(0.) && (xland - rr(1.5)) > rr(0.)) r = rr(10.5);       // ocean
-      else if (r <= rr(2.5) && cf3 > rr(0.) && (xland - rr(1.5)) < rr(0.)) r = rr(7.5);   // land
+      rb r = std::max(rb(2.5), in.re_cloud[k] * rb(1.E6));
+      if (r <= rb(2.5) && cf3 > rb(0.) && (xland - rb(1.5)) > rb(0.)) r = rb(10.5);       // ocean
+      else if (r <= rb(2.5) && cf3 > rb(0.) && (xland - rb(1.5)) < rb(0.)) r = rb(7.5);   // land
       recloud1d = r;
     }
     if (hri) {
-      rr r = std::max(rr(5.), in.re_ice[k] * rr(1.E6));
-      if (r <= rr(5.) && cf3 > rr(0.)) {
-        int idx_rei = int(t3 - rr(179.));
+      rb r = std::max(rb(5.), in.re_ice[k] * rb(1.E6));
+      if (r <= rb(5.) && cf3 > rb(0.)) {
+        int idx_rei = int(t3 - rb(179.));
         idx_rei = std::min(std::max(idx_rei, 1), 75);
-        const rr corr = t3 - int(t3);
-        r = kc.retab[idx_rei - 1] * (rr(1.) - corr) + kc.retab[idx_rei] * corr;
-        r = std::max(r, rr(5.0));
+        const rb corr = t3 - int(t3);
+        r = kc.retab[idx_rei - 1] * (rb(1.) - corr) + kc.retab[idx_rei] * corr;
+        r = std::max(r, rb(5.0));
       }
       reice1d = r;
     }
-    if (hrs) resnow1d = std::max(rr(10.), in.re_snow[k] * rr(1.E6));
+    if (hrs) resnow1d = std::max(rb(10.), in.re_snow[k] * rb(1.E6));
     if (p3case) {
-      resnow1d = std::max(rr(10.), in.re_ice[k] * rr(1.E6));
+      resnow1d = std::max(rb(10.), in.re_ice[k] * rb(1.E6));
       qs1 = qi_of(k);
-      qi1 = rr(0.);
-      reice1d = rr(10.);
+      qi1 = rb(0.);
+      reice1d = rb(10.);
     }
     // relcalc / reicalc (the top model layer again below, after the buffer changed its temperature)
-    rr reliq = inflglw >= 3 ? recloud1d : relcalc(t3);
-    rr reice = iceflglw >= 4 ? reice1d : reicalc(t3);
+    rb reliq = inflglw >= 3 ? recloud1d : relcalc(t3);
+    rb reice = iceflglw >= 4 ? reice1d : reicalc(t3);
     if (iceflglw == 3) {  // Fu (1996) generalized effective size
-      reice = reice * rr(1.0315);
-      reice = std::min(rr(140.0), reice);
+      reice = reice * rb(1.0315);
+      reice = std::min(rb(140.0), reice);
     }
     // grid box and in-cloud water paths (g/m2), CAM method
-    rr gicewp = (qi1 + qs1) * pdel * rr(100.0) / c.g * rr(1000.0);
-    const rr gliqwp = qc1 * pdel * rr(100.0) / c.g * rr(1000.0);
-    rr cicewp = gicewp / std::max(rr(0.01), cf3);
-    const rr cliqwp = gliqwp / std::max(rr(0.01), cf3);
+    rb gicewp = (qi1 + qs1) * pdel * rb(100.0) / c.g * rb(1000.0);
+    const rb gliqwp = qc1 * pdel * rb(100.0) / c.g * rb(1000.0);
+    rb cicewp = gicewp / std::max(rb(0.01), cf3);
+    const rb cliqwp = gliqwp / std::max(rb(0.01), cf3);
     if (iceflglw >= 4) {
-      gicewp = qi1 * pdel * rr(100.0) / c.g * rr(1000.0);
-      cicewp = gicewp / std::max(rr(0.01), cf3);
+      gicewp = qi1 * pdel * rb(100.0) / c.g * rb(1000.0);
+      cicewp = gicewp / std::max(rb(0.01), cf3);
     }
-    rr csnowp = rr(0.0);
+    rb csnowp = rb(0.0);
     if (iceflglw == 5) {
-      rr snow_mass_factor = rr(0.99);
-      if (resnow1d > rr(130.)) {
-        snow_mass_factor = std::min(snow_mass_factor, (rr(130.0) / resnow1d) * (rr(130.0) / resnow1d));
-        resnow1d = rr(130.0);
+      rb snow_mass_factor = rb(0.99);
+      if (resnow1d > rb(130.)) {
+        snow_mass_factor = std::min(snow_mass_factor, (rb(130.0) / resnow1d) * (rb(130.0) / resnow1d));
+        resnow1d = rb(130.0);
       }
-      const rr gsnowp = qs1 * snow_mass_factor * pdel * rr(100.0) / c.g * rr(1000.0);
-      csnowp = gsnowp / std::max(rr(0.01), cf3);
+      const rb gsnowp = qs1 * snow_mass_factor * pdel * rb(100.0) / c.g * rb(1000.0);
+      csnowp = gsnowp / std::max(rb(0.01), cf3);
     }
     v.clwpth[k] = cliqwp;
     v.ciwpth[k] = cicewp;
@@ -298,8 +298,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
       v.cswpth[k] = csnowp;
       v.resnmc[k] = resnow1d;
     } else {
-      v.cswpth[k] = rr(0.);
-      v.resnmc[k] = rr(10.);
+      v.cswpth[k] = rb(0.);
+      v.resnmc[k] = rb(10.);
     }
     v.cldfrac[k] = cf3;
   }
@@ -307,13 +307,13 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
   // buffer layers above the model top (to 0 mb), Cavallo (2010)
   for (int L = num_levels; L < nlayers; ++L) {
     v.pz[L + 1] = v.pz[L] - deltap;
-    v.pavel[L] = rr(0.5) * (v.pz[L] + v.pz[L + 1]);
+    v.pavel[L] = rb(0.5) * (v.pz[L] + v.pz[L + 1]);
   }
-  v.pz[nlayers] = rr(0.00);
-  v.pavel[nlayers - 1] = rr(0.5) * (v.pz[nlayers - 1] + v.pz[nlayers]);
+  v.pz[nlayers] = rb(0.00);
+  v.pavel[nlayers - 1] = rb(0.5) * (v.pz[nlayers - 1] + v.pz[nlayers]);
   // standard profile temperatures at the column pressure levels, matched to the model top
   auto varint = [&](int L) {
-    const rr p_val = v.pz[L];
+    const rb p_val = v.pz[L];
     int klev = 59;
     if (kc.pprof[59] < p_val) {
       for (int LL = 1; LL < 60; ++LL) {
@@ -323,59 +323,59 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
         }
       }
     }
-    rr wght = rr(0.0);
-    rr vark = kc.tprof[klev];
-    rr vark1 = (klev < 59) ? kc.tprof[klev + 1] : kc.tprof[klev];
+    rb wght = rb(0.0);
+    rb vark = kc.tprof[klev];
+    rb vark1 = (klev < 59) ? kc.tprof[klev + 1] : kc.tprof[klev];
     if (klev < 59) wght = (p_val - kc.pprof[klev]) / (kc.pprof[klev + 1] - kc.pprof[klev]);
     return wght * (vark1 - vark) + vark;
   };
-  const rr vtop = varint(num_levels - 1);
+  const rb vtop = varint(num_levels - 1);
   for (int L = num_levels; L <= nlayers; ++L) {
     v.tz[L] = varint(L) + (v.tz[num_levels - 1] - vtop);
-    v.tavel[L - 1] = rr(0.5) * (v.tz[L] + v.tz[L - 1]);
+    v.tavel[L - 1] = rb(0.5) * (v.tz[L] + v.tz[L - 1]);
   }
   // RRTMG_LWRAD calls relcalc / reicalc after this adjustment: the top model layer's sizes use its new tlay
   {
     const int k = num_levels - 1;
     if (inflglw < 3) v.relqmc[k] = relcalc(v.tavel[k]);
-    if (iceflglw == 3) v.reicmc[k] = std::min(rr(140.0), reicalc(v.tavel[k]) * rr(1.0315));
+    if (iceflglw == 3) v.reicmc[k] = std::min(rb(140.0), reicalc(v.tavel[k]) * rb(1.0315));
   }
   for (int L = num_levels; L < nlayers; ++L) {
     for (int m = 0; m < 7; ++m) v.wkl[m][L] = v.wkl[m][num_levels - 1];
     for (int m = 0; m < 4; ++m) v.wx[m][L] = v.wx[m][num_levels - 1];
-    v.clwpth[L] = rr(0.0);
-    v.ciwpth[L] = rr(0.0);
-    v.cswpth[L] = rr(0.0);
-    v.relqmc[L] = rr(10.0);
-    v.reicmc[L] = rr(10.0);
-    v.resnmc[L] = rr(10.0);
-    v.cldfrac[L] = rr(0.0);
+    v.clwpth[L] = rb(0.0);
+    v.ciwpth[L] = rb(0.0);
+    v.cswpth[L] = rb(0.0);
+    v.relqmc[L] = rb(10.0);
+    v.reicmc[L] = rb(10.0);
+    v.resnmc[L] = rb(10.0);
+    v.cldfrac[L] = rb(0.0);
   }
 
   // ozone: inirad climatology, o3input = 2 CAM ozone on the model levels, shifted above (o3input = 2 reads the
   // climatology from level num_levels - 1 up only)
   for (int k = 0; k <= nlayers - 1; ++k) {
     if (c.o3input == 2 && k < num_levels - 1) continue;
-    rr o3 = rr(0.0);
-    const rr pr_k = v.pz[k], pr_k1 = v.pz[k + 1];
+    rb o3 = rb(0.0);
+    const rb pr_k = v.pz[k], pr_k1 = v.pz[k + 1];
     for (int jj = 0; jj < 31; ++jj) {
-      rr pb1 = (pr_k > kc.ppwrkh[jj]) ? (pr_k - kc.ppwrkh[jj]) : rr(0.0);
-      rr pb2 = (pr_k > kc.ppwrkh[jj + 1]) ? (pr_k - kc.ppwrkh[jj + 1]) : rr(0.0);
-      rr pt1 = (pr_k1 > kc.ppwrkh[jj]) ? (pr_k1 - kc.ppwrkh[jj]) : rr(0.0);
-      rr pt2 = (pr_k1 > kc.ppwrkh[jj + 1]) ? (pr_k1 - kc.ppwrkh[jj + 1]) : rr(0.0);
+      rb pb1 = (pr_k > kc.ppwrkh[jj]) ? (pr_k - kc.ppwrkh[jj]) : rb(0.0);
+      rb pb2 = (pr_k > kc.ppwrkh[jj + 1]) ? (pr_k - kc.ppwrkh[jj + 1]) : rb(0.0);
+      rb pt1 = (pr_k1 > kc.ppwrkh[jj]) ? (pr_k1 - kc.ppwrkh[jj]) : rb(0.0);
+      rb pt2 = (pr_k1 > kc.ppwrkh[jj + 1]) ? (pr_k1 - kc.ppwrkh[jj + 1]) : rb(0.0);
       o3 += (pb2 - pb1 - pt2 + pt1) * kc.o3ann[jj];
     }
     v.o3mmr[k] = o3 / (pr_k - pr_k1);
   }
-  constexpr rr amdo = rr(0.603461);
+  constexpr rb amdo = rb(0.603461);
   for (int k = 0; k < nlayers; ++k) {
-    rr o3vmr;
+    rb o3vmr;
     if (c.o3input == 2) {
       if (k < num_levels) {
         o3vmr = in.o33d[k];
       } else {
         o3vmr = in.o33d[num_levels - 1] - v.o3mmr[num_levels - 1] * amdo + v.o3mmr[k] * amdo;
-        if (o3vmr <= rr(0.)) o3vmr = v.o3mmr[k] * amdo;
+        if (o3vmr <= rb(0.)) o3vmr = v.o3mmr[k] * amdo;
       }
     } else {
       o3vmr = v.o3mmr[k] * amdo;
@@ -391,7 +391,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
   // icld = 0: mcica_subcol_lw returns at once and inatm keeps its zeroed cloud arrays, a clear column
   bool any_cloud = false;
   for (int ilev = 0; ilev < nlayers; ++ilev) {
-    if (c.icld != 0 && RSD(v.cldfrac)[ilev] >= rr(1.0e-20)) any_cloud = true;
+    if (c.icld != 0 && RSD(v.cldfrac)[ilev] >= rb(1.0e-20)) any_cloud = true;
   }
 #if defined(__CUDA_ARCH__)
   const bool run_mcica = __any_sync(__activemask(), any_cloud);
@@ -401,30 +401,30 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
   std::uint64_t icld_mask_lo = 0, icld_mask_hi = 0;
   if (run_mcica && any_cloud) {
     KissRng rng;
-    rng.init_from_pressure(RSD(v.pavel)[0] * rr(100.0), RSD(v.pavel)[1] * rr(100.0), RSD(v.pavel)[2] * rr(100.0),
-                           RSD(v.pavel)[3] * rr(100.0));
+    rng.init_from_pressure(RSD(v.pavel)[0] * rb(100.0), RSD(v.pavel)[1] * rb(100.0), RSD(v.pavel)[2] * rb(100.0),
+                           RSD(v.pavel)[3] * rb(100.0));
     rng.permute(150);
     // layer mid-point heights from dz8w (exponential overlaps): above the model top the top layer's dz
-    rr hgt[kMcicaMaxLayers];
-    rr zo_inv = rr(0.0);
+    rb hgt[kMcicaMaxLayers];
+    rb zo_inv = rb(0.0);
     if (c.icld == 4 || c.icld == 5) {
-      rr dzsum = rr(0.0), dz = rr(0.0);
+      rb dzsum = rb(0.0), dz = rb(0.0);
       for (int k = 0; k < nlayers; ++k) {
         if (k < num_levels) dz = in.dz8w[k];
-        hgt[k] = dzsum + rr(0.5) * dz;
+        hgt[k] = dzsum + rb(0.5) * dz;
         dzsum = dzsum + dz;
       }
-      zo_inv = rr(1.0) / mcica_decorr_len(c.idcor, c.juldat, in.xlat);
+      zo_inv = rb(1.0) / mcica_decorr_len(c.idcor, c.juldat, in.xlat);
     }
-    auto cldf_of = [&](int l) { const rr cf = RSD(v.cldfrac)[l]; return cf < rr(1.0e-20) ? rr(0.0) : cf; };
+    auto cldf_of = [&](int l) { const rb cf = RSD(v.cldfrac)[l]; return cf < rb(1.0e-20) ? rb(0.0) : cf; };
     auto alpha_of = [&](int l) {
-      if (c.icld == 5 && cldf_of(l) == rr(0.0) && cldf_of(l - 1) > rr(0.0)) return rr(0.0);
+      if (c.icld == 5 && cldf_of(l) == rb(0.0) && cldf_of(l - 1) > rb(0.0)) return rb(0.0);
       return libm::exp(-(hgt[l] - hgt[l - 1]) * zo_inv);
     };
     // cloudy subcolumns get the layer's in-cloud paths (cldprmc reads them through cldfmc)
     mcica_subcolumns(c.icld, rng, 140, nlayers, cldf_of, alpha_of, [&](int isubcol, int ilev, bool cld) {
-      if (cldf_of(ilev) > rr(0.0)) {
-        v.cldfmc[isubcol][ilev] = cld ? rr(1.0) : rr(0.0);
+      if (cldf_of(ilev) > rb(0.0)) {
+        v.cldfmc[isubcol][ilev] = cld ? rb(1.0) : rb(0.0);
         if (cld) {
           if (ilev < 64) icld_mask_lo |= (std::uint64_t(1) << ilev);
           else icld_mask_hi |= (std::uint64_t(1) << (ilev - 64));
@@ -462,7 +462,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
 }
 
 // ---- stage 1b (GPU batch): setcoef for layer lay after rrtmg_lw_prep(..., false); laytrop counted into iscal[0]
-CPPWRF_FORCEINLINE void rrtmg_lw_setcoef_stage(int lay, rr tsk, const LwViews& v,
+CPPWRF_FORCEINLINE void rrtmg_lw_setcoef_stage(int lay, rb tsk, const LwViews& v,
                                                const RrtmgLwTables& CPPWRF_RESTRICT tables) {
   const bool lower = rrtmg_lw_setcoef_layer(
       lay, 1, v.pavel, v.tavel, v.tz, tsk, v.semiss, v.coldry, v.wkl, v.wbrodl, v.jp, v.jt, v.jt1, v.planklay,
@@ -517,11 +517,11 @@ struct LwGpointStore {
   SD2 taug, fracs, cldfmc, taucmc;
   SD gu0, gcu0;
   int igc;
-  CPPWRF_FORCEINLINE void down(int l, rr radld, rr radclrd, int iclddn) const {
+  CPPWRF_FORCEINLINE void down(int l, rb radld, rb radclrd, int iclddn) const {
     taug[l][igc] = radld;
     if (iclddn == 1) fracs[l][igc] = radclrd;
   }
-  CPPWRF_FORCEINLINE void up(int lev, rr radlu, rr radclru, int iclddn) const {
+  CPPWRF_FORCEINLINE void up(int lev, rb radlu, rb radclru, int iclddn) const {
     if (lev == 0) {
       gu0[igc] = radlu;
       gcu0[igc] = radclru;
@@ -535,8 +535,8 @@ template <int MAX_LAY = RRTMG_LW_SWEEP_MAX>
 CPPWRF_FORCEINLINE void rrtmg_lw_gpointstage(int nlayers, int igc, const LwViews& v,
                                              const RrtmgLwTables& CPPWRF_RESTRICT tables) {
   const int iband = tables.ngb[igc] - 1;
-  const rr reflect = rr(1.0) - CSD(v.semiss)[iband];
-  const rr pbnd = CSD(v.plankbnd)[iband];
+  const rb reflect = rb(1.0) - CSD(v.semiss)[iband];
+  const rb pbnd = CSD(v.plankbnd)[iband];
   LwGpointStore st{v.taug, v.fracs, v.cldfmc, v.taucmc, v.gu0, v.gcu0, igc};
 #if defined(__CUDA_ARCH__)
   const bool fast_clear = __all_sync(__activemask(), CSI(v.iscal)[4] == 0);
@@ -560,14 +560,14 @@ CPPWRF_FORCEINLINE void rrtmg_lw_bandsum_level(int nlayers, int lev, const LwVie
   // rtrnmc's iclddn after the down sweep's layer lev (a cloudy layer at or above it) and at the end of it
   const int top_cld_plus1 = CSI(v.iscal)[4];
   const int cld_dn = top_cld_plus1 > lev ? 1 : 0, cld_col = top_cld_plus1 > 0 ? 1 : 0;
-  constexpr rr pi = rr(3.14159265358979323846);
-  constexpr rr fluxfac = pi * rr(2.0e4);
-  constexpr rr wtdiff = rr(0.5);
-  rr tu = rr(0.0), td = rr(0.0), tuc = rr(0.0), tdc = rr(0.0);
+  constexpr rb pi = rb(3.14159265358979323846);
+  constexpr rb fluxfac = pi * rb(2.0e4);
+  constexpr rb wtdiff = rb(0.5);
+  rb tu = rb(0.0), td = rb(0.0), tuc = rb(0.0), tdc = rb(0.0);
   for (int iband = 0; iband < 16; ++iband) {
     const int igc0 = iband == 0 ? 0 : tables.ngs[iband - 1];
     const int igc1 = tables.ngs[iband];
-    rr u = rr(0.0), d = rr(0.0), cu = rr(0.0), cd = rr(0.0);
+    rb u = rb(0.0), d = rb(0.0), cu = rb(0.0), cd = rb(0.0);
     for (int igc = igc0; igc < igc1; ++igc) {
       if (lev < nlayers) {
         d += CSD(v.taug[lev])[igc];
@@ -584,13 +584,13 @@ CPPWRF_FORCEINLINE void rrtmg_lw_bandsum_level(int nlayers, int lev, const LwVie
       }
     }
     // rrtmg_lw_accum
-    const rr dw = tables.delwave[iband];
-    rr uflux = u * wtdiff;
-    rr dflux = d * wtdiff;
+    const rb dw = tables.delwave[iband];
+    rb uflux = u * wtdiff;
+    rb dflux = d * wtdiff;
     tu += uflux * dw;
     td += dflux * dw;
-    rr uclfl = cu * wtdiff;
-    rr dclfl = cd * wtdiff;
+    rb uclfl = cu * wtdiff;
+    rb dclfl = cd * wtdiff;
     tuc += uclfl * dw;
     tdc += dclfl * dw;
   }
@@ -604,7 +604,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_bandsum_level(int nlayers, int lev, const LwVie
 
 // ---- stage 4: per level -------------------------------------------------------------------------
 CPPWRF_FORCEINLINE void rrtmg_lw_level(int lev, const LwViews& v, const RrtmgLwTables& CPPWRF_RESTRICT tables) {
-  rr tu, td, tuc, tdc, fn, fnc;
+  rb tu, td, tuc, tdc, fn, fnc;
   rrtmg_lw_accum(lev, v.bu, v.bd, v.bcu, v.bcd, tables, tu, td, tuc, tdc, fn, fnc);
   v.totuflux[lev] = tu; v.totdflux[lev] = td; v.totuclfl[lev] = tuc; v.totdclfl[lev] = tdc;
   v.fnet[lev] = fn; v.fnetc[lev] = fnc;
@@ -612,7 +612,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_level(int lev, const LwViews& v, const RrtmgLwT
 
 // ---- stage 5: per column ------------------------------------------------------------------------
 struct LwColumnOut {
-  rr glw, olr, lwcf, lwupt, lwuptc, lwdnt, lwdntc, lwupb, lwupbc, lwdnb, lwdnbc;
+  rb glw, olr, lwcf, lwupt, lwuptc, lwdnt, lwdntc, lwupb, lwupbc, lwdnb, lwdnbc;
 };
 CPPWRF_FORCEINLINE LwColumnOut rrtmg_lw_finish(const RrtmgLwCallConfig& c, const LwViews& v, CSD pi3d,
                                                SD rthratenlw, SD rthratenlwc) {
@@ -631,8 +631,8 @@ CPPWRF_FORCEINLINE LwColumnOut rrtmg_lw_finish(const RrtmgLwCallConfig& c, const
   o.lwdnb = v.totdflux[0];
   o.lwdnbc = v.totdclfl[0];
   for (int k = 0; k < c.num_levels; ++k) {
-    rthratenlw[k] = (v.htr[k] / rr(86400.0)) / pi3d[k];
-    if (rthratenlwc.p) rthratenlwc[k] = (v.htrc[k] / rr(86400.0)) / pi3d[k];
+    rthratenlw[k] = (v.htr[k] / rb(86400.0)) / pi3d[k];
+    if (rthratenlwc.p) rthratenlwc[k] = (v.htrc[k] / rb(86400.0)) / pi3d[k];
   }
   return o;
 }

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-#include "phys/ra_rrtmg_common/rrtmg_real.hpp"
 
 #include "core/backend.hpp"
+#include "phys/ra_rrtmg_common/parkind.hpp"
 #include "phys/ra_rrtmg_common/strided.hpp"
 #include "phys/ra_rrtmg_lw/rrtmg_lw_tables.hpp"
 #include <algorithm>
@@ -10,7 +10,7 @@
 
 namespace cppwrf::phys {
 
-CPPWRF_HD inline rr get_chi_mls(const RrtmgLwTables& tables, int ispec, int ilev) {
+CPPWRF_HD inline rb get_chi_mls(const RrtmgLwTables& tables, int ispec, int ilev) {
   // ispec: 1..7, ilev: 1..59
   return tables.chi_mls[(ilev - 1) * 7 + (ispec - 1)];
 }
@@ -23,7 +23,7 @@ CPPWRF_HD inline bool rrtmg_lw_setcoef_layer(
     SD pavel,
     SD tavel,
     SD tz,
-    rr tbound,
+    rb tbound,
     SD semiss,
     SD coldry,
     SD2 wkl, // [7][nlayers]
@@ -70,39 +70,39 @@ CPPWRF_HD inline bool rrtmg_lw_setcoef_layer(
     SI indminor,
     const RrtmgLwTables& tables
 ) {
-  constexpr rr stpfac = rr(296.0) / rr(1013.0);
+  constexpr rb stpfac = rb(296.0) / rb(1013.0);
 
-  int indbound = static_cast<int>(tbound - rr(159.0));
+  int indbound = static_cast<int>(tbound - rb(159.0));
   if (indbound < 1) indbound = 1;
   else if (indbound > 180) indbound = 180;
-  rr tbndfrac = tbound - rr(159.0) - static_cast<rr>(indbound);
+  rb tbndfrac = tbound - rb(159.0) - static_cast<rb>(indbound);
 
-  int indlev0 = static_cast<int>(tz[0] - rr(159.0));
+  int indlev0 = static_cast<int>(tz[0] - rb(159.0));
   if (indlev0 < 1) indlev0 = 1;
   else if (indlev0 > 180) indlev0 = 180;
-  rr t0frac = tz[0] - rr(159.0) - static_cast<rr>(indlev0);
+  rb t0frac = tz[0] - rb(159.0) - static_cast<rb>(indlev0);
 
-  int indlay = static_cast<int>(tavel[lay] - rr(159.0));
+  int indlay = static_cast<int>(tavel[lay] - rb(159.0));
   if (indlay < 1) indlay = 1;
   else if (indlay > 180) indlay = 180;
-  rr tlayfrac = tavel[lay] - rr(159.0) - static_cast<rr>(indlay);
+  rb tlayfrac = tavel[lay] - rb(159.0) - static_cast<rb>(indlay);
 
-  int indlev = static_cast<int>(tz[lay + 1] - rr(159.0));
+  int indlev = static_cast<int>(tz[lay + 1] - rb(159.0));
   if (indlev < 1) indlev = 1;
   else if (indlev > 180) indlev = 180;
-  rr tlevfrac = tz[lay + 1] - rr(159.0) - static_cast<rr>(indlev);
+  rb tlevfrac = tz[lay + 1] - rb(159.0) - static_cast<rb>(indlev);
 
   // Planck function evaluations across the 16 bands
   for (int iband = 0; iband < 15; ++iband) {
     if (lay == 0) {
-      rr dbdtlev = tables.totplnk[iband * 181 + (indbound)] - tables.totplnk[iband * 181 + (indbound - 1)];
+      rb dbdtlev = tables.totplnk[iband * 181 + (indbound)] - tables.totplnk[iband * 181 + (indbound - 1)];
       plankbnd[iband] = semiss[iband] * (tables.totplnk[iband * 181 + (indbound - 1)] + tbndfrac * dbdtlev);
 
       dbdtlev = tables.totplnk[iband * 181 + (indlev0)] - tables.totplnk[iband * 181 + (indlev0 - 1)];
       planklev[0][iband] = tables.totplnk[iband * 181 + (indlev0 - 1)] + t0frac * dbdtlev;
     }
-    rr dbdtlev = tables.totplnk[iband * 181 + (indlev)] - tables.totplnk[iband * 181 + (indlev - 1)];
-    rr dbdtlay = tables.totplnk[iband * 181 + (indlay)] - tables.totplnk[iband * 181 + (indlay - 1)];
+    rb dbdtlev = tables.totplnk[iband * 181 + (indlev)] - tables.totplnk[iband * 181 + (indlev - 1)];
+    rb dbdtlay = tables.totplnk[iband * 181 + (indlay)] - tables.totplnk[iband * 181 + (indlay - 1)];
     planklay[lay][iband] = tables.totplnk[iband * 181 + (indlay - 1)] + tlayfrac * dbdtlay;
     planklev[lay + 1][iband] = tables.totplnk[iband * 181 + (indlev - 1)] + tlevfrac * dbdtlev;
   }
@@ -111,70 +111,70 @@ CPPWRF_HD inline bool rrtmg_lw_setcoef_layer(
   int iband = 15;
   if (istart == 16) {
     if (lay == 0) {
-      rr dbdtlev = tables.totplk16[indbound] - tables.totplk16[indbound - 1];
+      rb dbdtlev = tables.totplk16[indbound] - tables.totplk16[indbound - 1];
       plankbnd[iband] = semiss[iband] * (tables.totplk16[indbound - 1] + tbndfrac * dbdtlev);
 
       dbdtlev = tables.totplnk[iband * 181 + (indlev0)] - tables.totplnk[iband * 181 + (indlev0 - 1)];
       planklev[0][iband] = tables.totplk16[indlev0 - 1] + t0frac * dbdtlev;
     }
-    rr dbdtlev = tables.totplk16[indlev] - tables.totplk16[indlev - 1];
-    rr dbdtlay = tables.totplk16[indlay] - tables.totplk16[indlay - 1];
+    rb dbdtlev = tables.totplk16[indlev] - tables.totplk16[indlev - 1];
+    rb dbdtlay = tables.totplk16[indlay] - tables.totplk16[indlay - 1];
     planklay[lay][iband] = tables.totplk16[indlay - 1] + tlayfrac * dbdtlay;
     planklev[lay + 1][iband] = tables.totplk16[indlev - 1] + tlevfrac * dbdtlev;
   } else {
     if (lay == 0) {
-      rr dbdtlev = tables.totplnk[iband * 181 + (indbound)] - tables.totplnk[iband * 181 + (indbound - 1)];
+      rb dbdtlev = tables.totplnk[iband * 181 + (indbound)] - tables.totplnk[iband * 181 + (indbound - 1)];
       plankbnd[iband] = semiss[iband] * (tables.totplnk[iband * 181 + (indbound - 1)] + tbndfrac * dbdtlev);
 
       dbdtlev = tables.totplnk[iband * 181 + (indlev0)] - tables.totplnk[iband * 181 + (indlev0 - 1)];
       planklev[0][iband] = tables.totplnk[iband * 181 + (indlev0 - 1)] + t0frac * dbdtlev;
     }
-    rr dbdtlev = tables.totplnk[iband * 181 + (indlev)] - tables.totplnk[iband * 181 + (indlev - 1)];
-    rr dbdtlay = tables.totplnk[iband * 181 + (indlay)] - tables.totplnk[iband * 181 + (indlay - 1)];
+    rb dbdtlev = tables.totplnk[iband * 181 + (indlev)] - tables.totplnk[iband * 181 + (indlev - 1)];
+    rb dbdtlay = tables.totplnk[iband * 181 + (indlay)] - tables.totplnk[iband * 181 + (indlay - 1)];
     planklay[lay][iband] = tables.totplnk[iband * 181 + (indlay - 1)] + tlayfrac * dbdtlay;
     planklev[lay + 1][iband] = tables.totplnk[iband * 181 + (indlev - 1)] + tlevfrac * dbdtlev;
   }
 
   // Pressure and temperature interpolation factors
-  rr plog = libm::log(pavel[lay]);
-  jp[lay] = static_cast<int>(rr(36.0) - rr(5.0) * (plog + rr(0.04)));
+  rb plog = libm::log(pavel[lay]);
+  jp[lay] = static_cast<int>(rb(36.0) - rb(5.0) * (plog + rb(0.04)));
   if (jp[lay] < 1) jp[lay] = 1;
   else if (jp[lay] > 58) jp[lay] = 58;
   int jp1 = jp[lay] + 1;
 
-  rr fp = rr(5.0) * (tables.preflog[jp[lay] - 1] - plog);
+  rb fp = rb(5.0) * (tables.preflog[jp[lay] - 1] - plog);
 
-  jt[lay] = static_cast<int>(rr(3.0) + (tavel[lay] - tables.tref[jp[lay] - 1]) / rr(15.0));
+  jt[lay] = static_cast<int>(rb(3.0) + (tavel[lay] - tables.tref[jp[lay] - 1]) / rb(15.0));
   if (jt[lay] < 1) jt[lay] = 1;
   else if (jt[lay] > 4) jt[lay] = 4;
-  rr ft = ((tavel[lay] - tables.tref[jp[lay] - 1]) / rr(15.0)) - static_cast<rr>(jt[lay] - 3);
+  rb ft = ((tavel[lay] - tables.tref[jp[lay] - 1]) / rb(15.0)) - static_cast<rb>(jt[lay] - 3);
 
-  jt1[lay] = static_cast<int>(rr(3.0) + (tavel[lay] - tables.tref[jp1 - 1]) / rr(15.0));
+  jt1[lay] = static_cast<int>(rb(3.0) + (tavel[lay] - tables.tref[jp1 - 1]) / rb(15.0));
   if (jt1[lay] < 1) jt1[lay] = 1;
   else if (jt1[lay] > 4) jt1[lay] = 4;
-  rr ft1 = ((tavel[lay] - tables.tref[jp1 - 1]) / rr(15.0)) - static_cast<rr>(jt1[lay] - 3);
+  rb ft1 = ((tavel[lay] - tables.tref[jp1 - 1]) / rb(15.0)) - static_cast<rb>(jt1[lay] - 3);
 
-  rr water = wkl[0][lay] / coldry[lay];
-  rr scalefac = pavel[lay] * stpfac / tavel[lay];
+  rb water = wkl[0][lay] / coldry[lay];
+  rb scalefac = pavel[lay] * stpfac / tavel[lay];
 
-  if (plog > rr(4.56)) {
+  if (plog > rb(4.56)) {
     // Lower atmosphere
 
-    forfac[lay] = scalefac / (rr(1.0) + water);
-    rr factor = (rr(332.0) - tavel[lay]) / rr(36.0);
+    forfac[lay] = scalefac / (rb(1.0) + water);
+    rb factor = (rb(332.0) - tavel[lay]) / rb(36.0);
     indfor[lay] = std::min(2, std::max(1, static_cast<int>(factor)));
-    forfrac[lay] = factor - static_cast<rr>(indfor[lay]);
+    forfrac[lay] = factor - static_cast<rb>(indfor[lay]);
 
     selffac[lay] = water * forfac[lay];
-    factor = (tavel[lay] - rr(188.0)) / rr(7.2);
+    factor = (tavel[lay] - rb(188.0)) / rb(7.2);
     indself[lay] = std::min(9, std::max(1, static_cast<int>(factor) - 7));
-    selffrac[lay] = factor - static_cast<rr>(indself[lay] + 7);
+    selffrac[lay] = factor - static_cast<rb>(indself[lay] + 7);
 
     scaleminor[lay] = pavel[lay] / tavel[lay];
     scaleminorn2[lay] = (pavel[lay] / tavel[lay]) * (wbroad[lay] / (coldry[lay] + wkl[0][lay]));
-    factor = (tavel[lay] - rr(180.8)) / rr(7.2);
+    factor = (tavel[lay] - rb(180.8)) / rb(7.2);
     indminor[lay] = std::min(18, std::max(1, static_cast<int>(factor)));
-    minorfrac[lay] = factor - static_cast<rr>(indminor[lay]);
+    minorfrac[lay] = factor - static_cast<rb>(indminor[lay]);
 
     rat_h2oco2[lay] = get_chi_mls(tables, 1, jp[lay]) / get_chi_mls(tables, 2, jp[lay]);
     rat_h2oco2_1[lay] = get_chi_mls(tables, 1, jp[lay] + 1) / get_chi_mls(tables, 2, jp[lay] + 1);
@@ -191,33 +191,33 @@ CPPWRF_HD inline bool rrtmg_lw_setcoef_layer(
     rat_n2oco2[lay] = get_chi_mls(tables, 4, jp[lay]) / get_chi_mls(tables, 2, jp[lay]);
     rat_n2oco2_1[lay] = get_chi_mls(tables, 4, jp[lay] + 1) / get_chi_mls(tables, 2, jp[lay] + 1);
 
-    colh2o[lay] = rr(1.0e-20) * wkl[0][lay];
-    colco2[lay] = rr(1.0e-20) * wkl[1][lay];
-    colo3[lay]  = rr(1.0e-20) * wkl[2][lay];
-    coln2o[lay] = rr(1.0e-20) * wkl[3][lay];
-    colco[lay]  = rr(1.0e-20) * wkl[4][lay];
-    colch4[lay] = rr(1.0e-20) * wkl[5][lay];
-    colo2[lay]  = rr(1.0e-20) * wkl[6][lay];
-    if (colco2[lay] == rr(0.0)) colco2[lay] = rr(1.0e-32) * coldry[lay];
-    if (colo3[lay]  == rr(0.0)) colo3[lay]  = rr(1.0e-32) * coldry[lay];
-    if (coln2o[lay] == rr(0.0)) coln2o[lay] = rr(1.0e-32) * coldry[lay];
-    if (colco[lay]  == rr(0.0)) colco[lay]  = rr(1.0e-32) * coldry[lay];
-    if (colch4[lay] == rr(0.0)) colch4[lay] = rr(1.0e-32) * coldry[lay];
-    colbrd[lay] = rr(1.0e-20) * wbroad[lay];
+    colh2o[lay] = rb(1.0e-20) * wkl[0][lay];
+    colco2[lay] = rb(1.0e-20) * wkl[1][lay];
+    colo3[lay]  = rb(1.0e-20) * wkl[2][lay];
+    coln2o[lay] = rb(1.0e-20) * wkl[3][lay];
+    colco[lay]  = rb(1.0e-20) * wkl[4][lay];
+    colch4[lay] = rb(1.0e-20) * wkl[5][lay];
+    colo2[lay]  = rb(1.0e-20) * wkl[6][lay];
+    if (colco2[lay] == rb(0.0)) colco2[lay] = rb(1.0e-32) * coldry[lay];
+    if (colo3[lay]  == rb(0.0)) colo3[lay]  = rb(1.0e-32) * coldry[lay];
+    if (coln2o[lay] == rb(0.0)) coln2o[lay] = rb(1.0e-32) * coldry[lay];
+    if (colco[lay]  == rb(0.0)) colco[lay]  = rb(1.0e-32) * coldry[lay];
+    if (colch4[lay] == rb(0.0)) colch4[lay] = rb(1.0e-32) * coldry[lay];
+    colbrd[lay] = rb(1.0e-20) * wbroad[lay];
   } else {
     // Upper atmosphere
-    forfac[lay] = scalefac / (rr(1.0) + water);
-    rr factor = (tavel[lay] - rr(188.0)) / rr(36.0);
+    forfac[lay] = scalefac / (rb(1.0) + water);
+    rb factor = (tavel[lay] - rb(188.0)) / rb(36.0);
     indfor[lay] = 3;
-    forfrac[lay] = factor - rr(1.0);
+    forfrac[lay] = factor - rb(1.0);
 
     selffac[lay] = water * forfac[lay];
 
     scaleminor[lay] = pavel[lay] / tavel[lay];
     scaleminorn2[lay] = (pavel[lay] / tavel[lay]) * (wbroad[lay] / (coldry[lay] + wkl[0][lay]));
-    factor = (tavel[lay] - rr(180.8)) / rr(7.2);
+    factor = (tavel[lay] - rb(180.8)) / rb(7.2);
     indminor[lay] = std::min(18, std::max(1, static_cast<int>(factor)));
-    minorfrac[lay] = factor - static_cast<rr>(indminor[lay]);
+    minorfrac[lay] = factor - static_cast<rb>(indminor[lay]);
 
     rat_h2oco2[lay] = get_chi_mls(tables, 1, jp[lay]) / get_chi_mls(tables, 2, jp[lay]);
     rat_h2oco2_1[lay] = get_chi_mls(tables, 1, jp[lay] + 1) / get_chi_mls(tables, 2, jp[lay] + 1);
@@ -225,30 +225,30 @@ CPPWRF_HD inline bool rrtmg_lw_setcoef_layer(
     rat_o3co2[lay] = get_chi_mls(tables, 3, jp[lay]) / get_chi_mls(tables, 2, jp[lay]);
     rat_o3co2_1[lay] = get_chi_mls(tables, 3, jp[lay] + 1) / get_chi_mls(tables, 2, jp[lay] + 1);
 
-    colh2o[lay] = rr(1.0e-20) * wkl[0][lay];
-    colco2[lay] = rr(1.0e-20) * wkl[1][lay];
-    colo3[lay]  = rr(1.0e-20) * wkl[2][lay];
-    coln2o[lay] = rr(1.0e-20) * wkl[3][lay];
-    colco[lay]  = rr(1.0e-20) * wkl[4][lay];
-    colch4[lay] = rr(1.0e-20) * wkl[5][lay];
-    colo2[lay]  = rr(1.0e-20) * wkl[6][lay];
-    if (colco2[lay] == rr(0.0)) colco2[lay] = rr(1.0e-32) * coldry[lay];
-    if (colo3[lay]  == rr(0.0)) colo3[lay]  = rr(1.0e-32) * coldry[lay];
-    if (coln2o[lay] == rr(0.0)) coln2o[lay] = rr(1.0e-32) * coldry[lay];
-    if (colco[lay]  == rr(0.0)) colco[lay]  = rr(1.0e-32) * coldry[lay];
-    if (colch4[lay] == rr(0.0)) colch4[lay] = rr(1.0e-32) * coldry[lay];
-    colbrd[lay] = rr(1.0e-20) * wbroad[lay];
+    colh2o[lay] = rb(1.0e-20) * wkl[0][lay];
+    colco2[lay] = rb(1.0e-20) * wkl[1][lay];
+    colo3[lay]  = rb(1.0e-20) * wkl[2][lay];
+    coln2o[lay] = rb(1.0e-20) * wkl[3][lay];
+    colco[lay]  = rb(1.0e-20) * wkl[4][lay];
+    colch4[lay] = rb(1.0e-20) * wkl[5][lay];
+    colo2[lay]  = rb(1.0e-20) * wkl[6][lay];
+    if (colco2[lay] == rb(0.0)) colco2[lay] = rb(1.0e-32) * coldry[lay];
+    if (colo3[lay]  == rb(0.0)) colo3[lay]  = rb(1.0e-32) * coldry[lay];
+    if (coln2o[lay] == rb(0.0)) coln2o[lay] = rb(1.0e-32) * coldry[lay];
+    if (colco[lay]  == rb(0.0)) colco[lay]  = rb(1.0e-32) * coldry[lay];
+    if (colch4[lay] == rb(0.0)) colch4[lay] = rb(1.0e-32) * coldry[lay];
+    colbrd[lay] = rb(1.0e-20) * wbroad[lay];
   }
 
-  rr compfp = rr(1.0) - fp;
+  rb compfp = rb(1.0) - fp;
   fac10[lay] = compfp * ft;
-  fac00[lay] = compfp * (rr(1.0) - ft);
+  fac00[lay] = compfp * (rb(1.0) - ft);
   fac11[lay] = fp * ft1;
-  fac01[lay] = fp * (rr(1.0) - ft1);
+  fac01[lay] = fp * (rb(1.0) - ft1);
 
   selffac[lay] *= colh2o[lay];
   forfac[lay] *= colh2o[lay];
-  return plog > rr(4.56);
+  return plog > rb(4.56);
 }
 
 CPPWRF_HD inline void rrtmg_lw_setcoef(
@@ -257,7 +257,7 @@ CPPWRF_HD inline void rrtmg_lw_setcoef(
     SD pavel,
     SD tavel,
     SD tz,
-    rr tbound,
+    rb tbound,
     SD semiss,
     SD coldry,
     SD2 wkl, // [7][nlayers]
