@@ -1,6 +1,6 @@
 # CPPWRF
 
-Version 1.2.0 ([release notes](docs/RELEASE_NOTES.md)).
+Version 1.2.1 ([release notes](docs/RELEASE_NOTES.md)).
 
 CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static nesting,
 `real.exe` and `ideal.exe`. One source tree builds for the CPU (OpenMP) and for NVIDIA GPUs (CUDA), in FP64

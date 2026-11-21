@@ -7,6 +7,8 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+## 1.2.1 (2026-11-21)
+
 ### Added
 - CUDA builds with `CPPWRF_MPI`: a rank's device is chosen by its rank among the ranks of its node, not by its global
   rank: `CPPWRF_RANK_DEVICES=d0,d1,...` gives node-local rank `r` device `d[r mod n]` (an entry that is not a device

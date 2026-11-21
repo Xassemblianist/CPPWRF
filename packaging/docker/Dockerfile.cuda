@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # CPPWRF, CUDA builds: GPU FP32 (the fast mode) and GPU FP64 (bit-identical to WRF real*8 in CPPWRF's proofs), both in
 # one image (cppwrf-wrf --mode gpu-fp32 | gpu-fp64), and the CPU FP64 build. From the repository's top directory:
-#   docker build -f packaging/docker/Dockerfile.cuda -t cppwrf:1.2.0-cuda .
-#   docker run --rm --gpus all -v "$PWD/case:/work" cppwrf:1.2.0-cuda cppwrf-wrf --mode gpu-fp32
+#   docker build -f packaging/docker/Dockerfile.cuda -t cppwrf:1.2.1-cuda .
+#   docker run --rm --gpus all -v "$PWD/case:/work" cppwrf:1.2.1-cuda cppwrf-wrf --mode gpu-fp32
 # CUDA_ARCHS: the GPU architectures (sm_120 needs CUDA >= 12.8); the host needs an NVIDIA driver for this CUDA
 # version (12.8: >= 570). The proofs of bit identity ran on Debian 13 (glibc 2.41); this image is Ubuntu 24.04
 # (glibc 2.39), whose libm the host code calls: check its FP64 output against the CPU build (docs/INSTALL.md).

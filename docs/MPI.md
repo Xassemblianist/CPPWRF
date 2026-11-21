@@ -206,7 +206,7 @@ ranks): squall2d_x with 1, 2, 3 tiles, quarter_ss 2x2, 1x3, 3x1 and P4 2x1, 2x2 
 with one patch, whose snapshots and wrfout are the CPU build's. The CUDA build with `CPPWRF_MPI` compiles and
 links on the Colab runtime, and under `mpirun -np 1` 8 cuda_dp suite cases pass against the WRF references; the
 CUDA FP32 build as one process writes the base revision's files (5 of 6 cases every file; MYNN's native restart
-differs, a file that carries the build's commit). **Several MPI ranks on one GPU are not proved**: the runtime's
+differs, a file that carries the build's commit). **On the Colab runtime several MPI ranks on one GPU have not been run** (they were on the workstation, below): the runtime's
 Ubuntu MPICH package (4.2.0, built for PMIx) starts every process as a world of one under its own `mpirun`, so the
 "2 rank" runs there were two one-process runs writing the same files. A CPPWRF_MPI build now stops when
 `CPPWRF_RANKS` asks for several ranks and the process is alone, and `tools/colab/mpi_gpu.sh` uses the runtime's

@@ -1,3 +1,56 @@
+# CPPWRF 1.2.1 release notes
+
+CPPWRF 1.2.1 is a fix release of 1.2.0. The results of every verified configuration are unchanged: CPU FP64 and CUDA
+FP64 reproduce WRF v4.8.0 real*8 bit for bit, CPU FP32 and the CUDA FP32 identity build reproduce WRF v4.8.0 real*4
+on the configurations of docs/FP32_IDENTITY.md. What changes are runs outside the verified set that differed from
+WRF without a word: tiled runs with the cumulus diagnostics, runs resumed from CPPWRF's own restart files, a resumed
+two-way nest, and a few options CPPWRF accepted where WRF stops or does something else. It also makes several MPI
+ranks per node choose their GPU by node-local rank. It covers the commits from `v1.2.0` (db0ea0a) to `main`
+[MAIN PENDING]. The 1.2.0 notes follow below.
+
+## Fixed
+
+- **Tiles with the cumulus diagnostics** (`run.tiles` with `cu_diag = 1`, Grell-Freitas / Grell-3D): the tile
+  threads shared convtrans_prep's averaging counter; it is now one per tile thread and the tiled run equals the
+  untiled one (new suite case `real_a05g_r8_fp64_cpu_1h_t2x2`). The 1.2.0 limitation is gone.
+- **CPPWRF's own restart files** (`restart_<step>.nc`, now format version 5; version 4 files are refused): a resumed
+  run continues the uninterrupted one bit for bit also with buckets, `prec_acc_dt`, `output_diagnostics`,
+  `grid_fdda`, `sst_update`, the Grell-Freitas / Grell-3D averaging and Noah-MP's crop and land-point state.
+- **Runs resumed from wrfrst files** take the history's phy_init fields (THC, LU_STATE, ...) from the restart file,
+  as wrf.exe does; a resumed two-way nested parent wrote its wrfinput values before.
+- **Options as WRF:** Noah with NLCD40 remaps the urban categories 23 / 25 to 24; `cppwrf_real` stops on the
+  cross-domain physics mismatches real.exe stops on; the urban model stops on `use_wudapt_lcz = 1` without LCZ
+  classes; the translator rejects `iofields_filename` changes of `i:10`; `phys.num_soil_layers` follows
+  `sf_surface_physics` (the slab and RUC read 5- / 6-layer soil fields into 4-layer arrays before).
+- **Tooling:** the `CPPWRF_KTIME` table and the `CPPWRF_VM_DUMP` flag are thread-safe with tiles; the FP64 builds
+  call the host's float libm again (the glibc 2.41 ports belong to the FP32 executables and `cppwrf_real`);
+  test_glibc_mathf compares the ports with the system libm.
+
+## Changed
+
+- `phys.sst_update = 1` needs `phys.auxinput4_interval` (WRF stops without it; the translator writes it).
+- `time.interval_seconds` of the adaptive time step defaults to the wrfbdy file's interval.
+
+## Added
+
+- **MPI on CUDA:** a rank's GPU is chosen by its node-local rank (`CPPWRF_RANK_DEVICES=d0,d1,...` or round robin over
+  the visible devices); ranks that share a GPU split its work-buffer budget and size their buffers for their own
+  patch. Several ranks on one GPU were run on an RTX 2060 (P1 and P4, 2 and 4 ranks) and equal the one-rank run
+  (docs/MPI.md).
+
+## Verification
+
+| Where | Result |
+|---|---|
+| CPU CI at [MAIN PENDING] (GitHub-hosted runners, Debian 13 container) | [CI PENDING] |
+| GPU: Colab G4 at 4a57df7 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120) | [G4 PENDING] |
+
+## Known limitations
+
+As 1.2.0, without the tiles limitation; the restart limits that remain (the urban model's restart, CPPWRF's own
+restart files with nests, the adaptive time step or `tmn_update`, all refused with an error) are listed in
+docs/STATUS.md.
+
 # CPPWRF 1.2.0 release notes
 
 CPPWRF 1.2.0 is a C++20 / CUDA port of WRF-ARW v4.8.0. As before, the CPU FP64 and CUDA FP64 builds reproduce WRF
