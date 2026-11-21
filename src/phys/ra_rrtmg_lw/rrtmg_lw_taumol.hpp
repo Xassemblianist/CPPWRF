@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-#include "phys/ra_rrtmg_common/rrtmg_real.hpp"
 
 #include "core/backend.hpp"
+#include "phys/ra_rrtmg_common/parkind.hpp"
 #include "phys/ra_rrtmg_common/strided.hpp"
 #include "phys/ra_rrtmg_lw/rrtmg_lw_tables.hpp"
 #include "phys/ra_rrtmg_lw/rrtmg_lw_setcoef.hpp"
@@ -61,7 +61,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb01(
 ) {
   const auto& b = tables.b01;
   int ind0, ind1, inds, indf, indm;
-  rr pp, corradj, scalen2, tauself, taufor, taun2;
+  rb pp, corradj, scalen2, tauself, taufor, taun2;
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*1 + 1;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*1 + 1;
@@ -69,9 +69,9 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb01(
   indf = indfor[lay];
   indm = indminor[lay];
   pp = pavel[lay];
-  corradj =  rr(1.);
-  if (pp  <  rr(250.)) {
-  corradj = rr(1.) - rr(0.15) * (rr(250.)-pp) / rr(154.4);
+  corradj =  rb(1.);
+  if (pp  <  rb(250.)) {
+  corradj = rb(1.) - rb(0.15) * (rb(250.)-pp) / rb(154.4);
   }
   scalen2 = colbrd[lay] * scaleminorn2[lay];
 #pragma unroll 1
@@ -89,7 +89,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb01(
   indf = indfor[lay];
   indm = indminor[lay];
   pp = pavel[lay];
-  corradj =  rr(1.) - rr(0.15) * (pp / rr(95.6));
+  corradj =  rb(1.) - rb(0.15) * (pp / rb(95.6));
   scalen2 = colbrd[lay] * scaleminorn2[lay];
 #pragma unroll 1
   for (int ig = 1; ig <= 10; ++ig) {
@@ -151,14 +151,14 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb02(
 ) {
   const auto& b = tables.b02;
   int ind0, ind1, inds, indf;
-  rr pp, corradj, tauself, taufor;
+  rb pp, corradj, tauself, taufor;
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*1 + 1;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*1 + 1;
   inds = indself[lay];
   indf = indfor[lay];
   pp = pavel[lay];
-  corradj = rr(1.) - rr(.05) * (pp - rr(100.)) / rr(900.);
+  corradj = rb(1.) - rb(.05) * (pp - rb(100.)) / rb(900.);
 #pragma unroll 1
   for (int ig = 1; ig <= 12; ++ig) {
   tauself = selffac[lay] * (b.selfref[(ig - 1) * 10 + (inds - 1)] + selffrac[lay] * (b.selfref[(ig - 1) * 10 + (inds+1 - 1)] - b.selfref[(ig - 1) * 10 + (inds - 1)]));
@@ -228,20 +228,20 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb03(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b03;
   int ind0, ind1, inds, indf, indm;
   int js, js1, jmn2o, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_mn2o, specparm_mn2o, specmult_mn2o, fmn2o, chi_n2o, ratn2o, adjfac, adjcoln2o;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr tauself, taufor, n2om1, n2om2, absn2o;
-  rr refrat_planck_a, refrat_planck_b, refrat_m_a, refrat_m_b;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_mn2o, specparm_mn2o, specmult_mn2o, fmn2o, chi_n2o, ratn2o, adjfac, adjcoln2o;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb tauself, taufor, n2om1, n2om2, absn2o;
+  rb refrat_planck_a, refrat_planck_b, refrat_m_a, refrat_m_b;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 1, 9)/get_chi_mls(tables, 2, 9);
   refrat_planck_b = get_chi_mls(tables, 1, 13)/get_chi_mls(tables, 2, 13);
   refrat_m_a = get_chi_mls(tables, 1, 3)/get_chi_mls(tables, 2, 3);
@@ -250,45 +250,45 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb03(
   speccomb = colh2o[lay] + rat_h2oco2[lay]*colco2[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2oco2_1[lay]*colco2[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_mn2o = colh2o[lay] + refrat_m_a*colco2[lay];
   specparm_mn2o = colh2o[lay]/speccomb_mn2o;
   if (specparm_mn2o  >=  oneminus) specparm_mn2o = oneminus;
-  specmult_mn2o = rr(8.)*specparm_mn2o;
+  specmult_mn2o = rb(8.)*specparm_mn2o;
   jmn2o = 1 + static_cast<int>(specmult_mn2o);
-  fmn2o = std::fmod(specmult_mn2o, rr(1.0));
+  fmn2o = std::fmod(specmult_mn2o, rb(1.0));
   chi_n2o = coln2o[lay]/coldry[lay];
-  ratn2o = rr(1.e20)*chi_n2o/get_chi_mls(tables, 4, jp[lay]+1);
-  if (ratn2o  >  rr(1.5)) {
-  adjfac = rr(0.5)+libm::pow((ratn2o-rr(0.5)), rr(0.65));
-  adjcoln2o = adjfac*get_chi_mls(tables, 4, jp[lay]+1)*coldry[lay]*rr(1.e-20);
+  ratn2o = rb(1.e20)*chi_n2o/get_chi_mls(tables, 4, jp[lay]+1);
+  if (ratn2o  >  rb(1.5)) {
+  adjfac = rb(0.5)+libm::pow((ratn2o-rb(0.5)), rb(0.65));
+  adjcoln2o = adjfac*get_chi_mls(tables, 4, jp[lay]+1)*coldry[lay]*rb(1.e-20);
   } else {
   adjcoln2o = coln2o[lay];
   }
   speccomb_planck = colh2o[lay]+refrat_planck_a*colco2[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
   indm = indminor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -296,11 +296,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb03(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -309,16 +309,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb03(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -326,11 +326,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb03(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -339,8 +339,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb03(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -351,16 +351,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb03(
   n2om1 = b.ka_mn2o[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2o - 1)] + fmn2o * (b.ka_mn2o[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2o+1 - 1)] - b.ka_mn2o[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2o - 1)]);
   n2om2 = b.ka_mn2o[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2o - 1)] + fmn2o * (b.ka_mn2o[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2o+1 - 1)] - b.ka_mn2o[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2o - 1)]);
   absn2o = n2om1 + minorfrac[lay] * (n2om2 - n2om1);
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
@@ -373,43 +373,43 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb03(
   speccomb = colh2o[lay] + rat_h2oco2[lay]*colco2[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(4.)*(specparm);
+  specmult = rb(4.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2oco2_1[lay]*colco2[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(4.)*(specparm1);
+  specmult1 = rb(4.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fs1 = std::fmod(specmult1, rb(1.0));
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   speccomb_mn2o = colh2o[lay] + refrat_m_b*colco2[lay];
   specparm_mn2o = colh2o[lay]/speccomb_mn2o;
   if (specparm_mn2o  >=  oneminus) specparm_mn2o = oneminus;
-  specmult_mn2o = rr(4.)*specparm_mn2o;
+  specmult_mn2o = rb(4.)*specparm_mn2o;
   jmn2o = 1 + static_cast<int>(specmult_mn2o);
-  fmn2o = std::fmod(specmult_mn2o, rr(1.0));
+  fmn2o = std::fmod(specmult_mn2o, rb(1.0));
   chi_n2o = coln2o[lay]/coldry[lay];
-  ratn2o = rr(1.e20)*chi_n2o/get_chi_mls(tables, 4, jp[lay]+1);
-  if (ratn2o  >  rr(1.5)) {
-  adjfac = rr(0.5)+libm::pow((ratn2o-rr(0.5)), rr(0.65));
-  adjcoln2o = adjfac*get_chi_mls(tables, 4, jp[lay]+1)*coldry[lay]*rr(1.e-20);
+  ratn2o = rb(1.e20)*chi_n2o/get_chi_mls(tables, 4, jp[lay]+1);
+  if (ratn2o  >  rb(1.5)) {
+  adjfac = rb(0.5)+libm::pow((ratn2o-rb(0.5)), rb(0.65));
+  adjcoln2o = adjfac*get_chi_mls(tables, 4, jp[lay]+1)*coldry[lay]*rb(1.e-20);
   } else {
   adjcoln2o = coln2o[lay];
   }
   speccomb_planck = colh2o[lay]+refrat_planck_b*colco2[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(4.)*specparm_planck;
+  specmult_planck = rb(4.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-13)*5+(jt[lay]-1))*5 + js;
   ind1 = ((jp[lay]-12)*5+(jt1[lay]-1))*5 + js1;
   indf = indfor[lay];
@@ -474,49 +474,49 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb04(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b04;
   int ind0, ind1, inds, indf;
   int js, js1, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr tauself, taufor;
-  rr refrat_planck_a, refrat_planck_b;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb tauself, taufor;
+  rb refrat_planck_a, refrat_planck_b;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 1, 11)/get_chi_mls(tables, 2, 11);
   refrat_planck_b = get_chi_mls(tables, 3, 13)/get_chi_mls(tables, 2, 13);
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   speccomb = colh2o[lay] + rat_h2oco2[lay]*colco2[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2oco2_1[lay]*colco2[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_planck = colh2o[lay]+refrat_planck_a*colco2[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -524,11 +524,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb04(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -537,16 +537,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb04(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -554,11 +554,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb04(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -567,8 +567,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb04(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -576,16 +576,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb04(
   for (int ig = 1; ig <= 14; ++ig) {
   tauself = selffac[lay]* (b.selfref[(ig - 1) * 10 + (inds - 1)] + selffrac[lay] * (b.selfref[(ig - 1) * 10 + (inds+1 - 1)] - b.selfref[(ig - 1) * 10 + (inds - 1)]));
   taufor =  forfac[lay] * (b.forref[(ig - 1) * 4 + (indf - 1)] + forfrac[lay] * (b.forref[(ig - 1) * 4 + (indf+1 - 1)] - b.forref[(ig - 1) * 4 + (indf - 1)]));
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
@@ -598,29 +598,29 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb04(
   speccomb = colo3[lay] + rat_o3co2[lay]*colco2[lay];
   specparm = colo3[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(4.)*(specparm);
+  specmult = rb(4.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colo3[lay] + rat_o3co2_1[lay]*colco2[lay];
   specparm1 = colo3[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(4.)*(specparm1);
+  specmult1 = rb(4.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fs1 = std::fmod(specmult1, rb(1.0));
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   speccomb_planck = colo3[lay]+refrat_planck_b*colco2[lay];
   specparm_planck = colo3[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(4.)*specparm_planck;
+  specmult_planck = rb(4.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-13)*5+(jt[lay]-1))*5 + js;
   ind1 = ((jp[lay]-12)*5+(jt1[lay]-1))*5 + js1;
 #pragma unroll 1
@@ -628,13 +628,13 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb04(
   taug[lay][38+ig - 1] =  speccomb * (fac000 * b.kb[(ig - 1) * 1175 + (ind0 - 1)] + fac100 * b.kb[(ig - 1) * 1175 + (ind0+1 - 1)] + fac010 * b.kb[(ig - 1) * 1175 + (ind0+5 - 1)] + fac110 * b.kb[(ig - 1) * 1175 + (ind0+6 - 1)]) + speccomb1 * (fac001 * b.kb[(ig - 1) * 1175 + (ind1 - 1)] + fac101 * b.kb[(ig - 1) * 1175 + (ind1+1 - 1)] + fac011 * b.kb[(ig - 1) * 1175 + (ind1+5 - 1)] + fac111 * b.kb[(ig - 1) * 1175 + (ind1+6 - 1)]);
   fracs[lay][38+ig - 1] = b.fracrefb[(jpl - 1) * 14 + (ig - 1)] + fpl * (b.fracrefb[(jpl+1 - 1) * 14 + (ig - 1)]-b.fracrefb[(jpl - 1) * 14 + (ig - 1)]);
   }
-  taug[lay][38+8 - 1]=taug[lay][38+8 - 1]*rr(0.92);
-  taug[lay][38+9 - 1]=taug[lay][38+9 - 1]*rr(0.88);
-  taug[lay][38+10 - 1]=taug[lay][38+10 - 1]*rr(1.07);
-  taug[lay][38+11 - 1]=taug[lay][38+11 - 1]*rr(1.1);
-  taug[lay][38+12 - 1]=taug[lay][38+12 - 1]*rr(0.99);
-  taug[lay][38+13 - 1]=taug[lay][38+13 - 1]*rr(0.88);
-  taug[lay][38+14 - 1]=taug[lay][38+14 - 1]*rr(0.943);
+  taug[lay][38+8 - 1]=taug[lay][38+8 - 1]*rb(0.92);
+  taug[lay][38+9 - 1]=taug[lay][38+9 - 1]*rb(0.88);
+  taug[lay][38+10 - 1]=taug[lay][38+10 - 1]*rb(1.07);
+  taug[lay][38+11 - 1]=taug[lay][38+11 - 1]*rb(1.1);
+  taug[lay][38+12 - 1]=taug[lay][38+12 - 1]*rb(0.99);
+  taug[lay][38+13 - 1]=taug[lay][38+13 - 1]*rb(0.88);
+  taug[lay][38+14 - 1]=taug[lay][38+14 - 1]*rb(0.943);
   }
 }
 
@@ -686,20 +686,20 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb05(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b05;
   int ind0, ind1, inds, indf, indm;
   int js, js1, jmo3, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_mo3, specparm_mo3, specmult_mo3, fmo3;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr tauself, taufor, o3m1, o3m2, abso3;
-  rr refrat_planck_a, refrat_planck_b, refrat_m_a;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_mo3, specparm_mo3, specmult_mo3, fmo3;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb tauself, taufor, o3m1, o3m2, abso3;
+  rb refrat_planck_a, refrat_planck_b, refrat_m_a;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 1, 5)/get_chi_mls(tables, 2, 5);
   refrat_planck_b = get_chi_mls(tables, 3, 43)/get_chi_mls(tables, 2, 43);
   refrat_m_a = get_chi_mls(tables, 1, 7)/get_chi_mls(tables, 2, 7);
@@ -707,37 +707,37 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb05(
   speccomb = colh2o[lay] + rat_h2oco2[lay]*colco2[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2oco2_1[lay]*colco2[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_mo3 = colh2o[lay] + refrat_m_a*colco2[lay];
   specparm_mo3 = colh2o[lay]/speccomb_mo3;
   if (specparm_mo3  >=  oneminus) specparm_mo3 = oneminus;
-  specmult_mo3 = rr(8.)*specparm_mo3;
+  specmult_mo3 = rb(8.)*specparm_mo3;
   jmo3 = 1 + static_cast<int>(specmult_mo3);
-  fmo3 = std::fmod(specmult_mo3, rr(1.0));
+  fmo3 = std::fmod(specmult_mo3, rb(1.0));
   speccomb_planck = colh2o[lay]+refrat_planck_a*colco2[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
   indm = indminor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -745,11 +745,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb05(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -758,16 +758,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb05(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -775,11 +775,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb05(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -788,8 +788,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb05(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -800,16 +800,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb05(
   o3m1 = b.ka_mo3[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmo3 - 1)] + fmo3 * (b.ka_mo3[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmo3+1 - 1)]-b.ka_mo3[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmo3 - 1)]);
   o3m2 = b.ka_mo3[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmo3 - 1)] + fmo3 * (b.ka_mo3[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmo3+1 - 1)]-b.ka_mo3[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmo3 - 1)]);
   abso3 = o3m1 + minorfrac[lay]*(o3m2-o3m1);
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
@@ -822,29 +822,29 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb05(
   speccomb = colo3[lay] + rat_o3co2[lay]*colco2[lay];
   specparm = colo3[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(4.)*(specparm);
+  specmult = rb(4.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colo3[lay] + rat_o3co2_1[lay]*colco2[lay];
   specparm1 = colo3[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(4.)*(specparm1);
+  specmult1 = rb(4.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fs1 = std::fmod(specmult1, rb(1.0));
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   speccomb_planck = colo3[lay]+refrat_planck_b*colco2[lay];
   specparm_planck = colo3[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(4.)*specparm_planck;
+  specmult_planck = rb(4.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-13)*5+(jt[lay]-1))*5 + js;
   ind1 = ((jp[lay]-12)*5+(jt1[lay]-1))*5 + js1;
 #pragma unroll 1
@@ -905,14 +905,14 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb06(
 ) {
   const auto& b = tables.b06;
   int ind0, ind1, inds, indf, indm;
-  rr chi_co2, ratco2, adjfac, adjcolco2;
-  rr tauself, taufor, absco2;
+  rb chi_co2, ratco2, adjfac, adjcolco2;
+  rb tauself, taufor, absco2;
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   chi_co2 = colco2[lay]/(coldry[lay]);
-  ratco2 = rr(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
-  if (ratco2  >  rr(3.0)) {
-  adjfac = rr(2.0)+libm::pow((ratco2-rr(2.0)), rr(0.77));
-  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1)*coldry[lay]*rr(1.e-20);
+  ratco2 = rb(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
+  if (ratco2  >  rb(3.0)) {
+  adjfac = rb(2.0)+libm::pow((ratco2-rb(2.0)), rb(0.77));
+  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1)*coldry[lay]*rb(1.e-20);
   } else {
   adjcolco2 = colco2[lay];
   }
@@ -933,7 +933,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb06(
   for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
 #pragma unroll 1
   for (int ig = 1; ig <= 8; ++ig) {
-  taug[lay][68+ig - 1] = rr(0.0) + wx[2 - 1][lay] * b.cfc11adj[ig - 1] + wx[3 - 1][lay] * b.cfc12[ig - 1];
+  taug[lay][68+ig - 1] = rb(0.0) + wx[2 - 1][lay] * b.cfc11adj[ig - 1] + wx[3 - 1][lay] * b.cfc12[ig - 1];
   fracs[lay][68+ig - 1] = b.fracrefa[ig - 1];
   }
   }
@@ -987,66 +987,66 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb07(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b07;
   int ind0, ind1, inds, indf, indm;
   int js, js1, jmco2, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_mco2, specparm_mco2, specmult_mco2, fmco2;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr tauself, taufor, co2m1, co2m2, absco2;
-  rr chi_co2, ratco2, adjfac, adjcolco2;
-  rr refrat_planck_a, refrat_m_a;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_mco2, specparm_mco2, specmult_mco2, fmco2;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb tauself, taufor, co2m1, co2m2, absco2;
+  rb chi_co2, ratco2, adjfac, adjcolco2;
+  rb refrat_planck_a, refrat_m_a;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 1, 3)/get_chi_mls(tables, 3, 3);
   refrat_m_a = get_chi_mls(tables, 1, 3)/get_chi_mls(tables, 3, 3);
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   speccomb = colh2o[lay] + rat_h2oo3[lay]*colo3[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2oo3_1[lay]*colo3[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_mco2 = colh2o[lay] + refrat_m_a*colo3[lay];
   specparm_mco2 = colh2o[lay]/speccomb_mco2;
   if (specparm_mco2  >=  oneminus) specparm_mco2 = oneminus;
-  specmult_mco2 = rr(8.)*specparm_mco2;
+  specmult_mco2 = rb(8.)*specparm_mco2;
   jmco2 = 1 + static_cast<int>(specmult_mco2);
-  fmco2 = std::fmod(specmult_mco2, rr(1.0));
+  fmco2 = std::fmod(specmult_mco2, rb(1.0));
   chi_co2 = colco2[lay]/(coldry[lay]);
-  ratco2 = rr(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
-  if (ratco2  >  rr(3.0)) {
-  adjfac = rr(3.0)+libm::pow((ratco2-rr(3.0)), rr(0.79));
-  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1)*coldry[lay]*rr(1.e-20);
+  ratco2 = rb(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
+  if (ratco2  >  rb(3.0)) {
+  adjfac = rb(3.0)+libm::pow((ratco2-rb(3.0)), rb(0.79));
+  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1)*coldry[lay]*rb(1.e-20);
   } else {
   adjcolco2 = colco2[lay];
   }
   speccomb_planck = colh2o[lay]+refrat_planck_a*colo3[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
   indm = indminor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -1054,11 +1054,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb07(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -1067,16 +1067,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb07(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -1084,11 +1084,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb07(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -1097,8 +1097,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb07(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -1109,16 +1109,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb07(
   co2m1 = b.ka_mco2[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmco2 - 1)] + fmco2 * (b.ka_mco2[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmco2+1 - 1)] - b.ka_mco2[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmco2 - 1)]);
   co2m2 = b.ka_mco2[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmco2 - 1)] + fmco2 * (b.ka_mco2[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmco2+1 - 1)] - b.ka_mco2[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmco2 - 1)]);
   absco2 = co2m1 + minorfrac[lay] * (co2m2 - co2m1);
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
@@ -1129,10 +1129,10 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb07(
   }
   for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
   chi_co2 = colco2[lay]/(coldry[lay]);
-  ratco2 = rr(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
-  if (ratco2  >  rr(3.0)) {
-  adjfac = rr(2.0)+libm::pow((ratco2-rr(2.0)), rr(0.79));
-  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1)*coldry[lay]*rr(1.e-20);
+  ratco2 = rb(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
+  if (ratco2  >  rb(3.0)) {
+  adjfac = rb(2.0)+libm::pow((ratco2-rb(2.0)), rb(0.79));
+  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1)*coldry[lay]*rb(1.e-20);
   } else {
   adjcolco2 = colco2[lay];
   }
@@ -1145,12 +1145,12 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb07(
   taug[lay][76+ig - 1] = colo3[lay] * (fac00[lay] * b.kb[(ig - 1) * 235 + (ind0 - 1)] + fac10[lay] * b.kb[(ig - 1) * 235 + (ind0+1 - 1)] + fac01[lay] * b.kb[(ig - 1) * 235 + (ind1 - 1)] + fac11[lay] * b.kb[(ig - 1) * 235 + (ind1+1 - 1)]) + adjcolco2 * absco2;
   fracs[lay][76+ig - 1] = b.fracrefb[ig - 1];
   }
-  taug[lay][76+6 - 1]=taug[lay][76+6 - 1]*rr(0.92);
-  taug[lay][76+7 - 1]=taug[lay][76+7 - 1]*rr(0.88);
-  taug[lay][76+8 - 1]=taug[lay][76+8 - 1]*rr(1.07);
-  taug[lay][76+9 - 1]=taug[lay][76+9 - 1]*rr(1.1);
-  taug[lay][76+10 - 1]=taug[lay][76+10 - 1]*rr(0.99);
-  taug[lay][76+11 - 1]=taug[lay][76+11 - 1]*rr(0.855);
+  taug[lay][76+6 - 1]=taug[lay][76+6 - 1]*rb(0.92);
+  taug[lay][76+7 - 1]=taug[lay][76+7 - 1]*rb(0.88);
+  taug[lay][76+8 - 1]=taug[lay][76+8 - 1]*rb(1.07);
+  taug[lay][76+9 - 1]=taug[lay][76+9 - 1]*rb(1.1);
+  taug[lay][76+10 - 1]=taug[lay][76+10 - 1]*rb(0.99);
+  taug[lay][76+11 - 1]=taug[lay][76+11 - 1]*rb(0.855);
   }
 }
 
@@ -1204,14 +1204,14 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb08(
 ) {
   const auto& b = tables.b08;
   int ind0, ind1, inds, indf, indm;
-  rr tauself, taufor, absco2, abso3, absn2o;
-  rr chi_co2, ratco2, adjfac, adjcolco2;
+  rb tauself, taufor, absco2, abso3, absn2o;
+  rb chi_co2, ratco2, adjfac, adjcolco2;
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   chi_co2 = colco2[lay]/(coldry[lay]);
-  ratco2 = rr(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
-  if (ratco2  >  rr(3.0)) {
-  adjfac = rr(2.0)+libm::pow((ratco2-rr(2.0)), rr(0.65));
-  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1)*coldry[lay]*rr(1.e-20);
+  ratco2 = rb(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
+  if (ratco2  >  rb(3.0)) {
+  adjfac = rb(2.0)+libm::pow((ratco2-rb(2.0)), rb(0.65));
+  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1)*coldry[lay]*rb(1.e-20);
   } else {
   adjcolco2 = colco2[lay];
   }
@@ -1233,10 +1233,10 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb08(
   }
   for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
   chi_co2 = colco2[lay]/coldry[lay];
-  ratco2 = rr(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
-  if (ratco2  >  rr(3.0)) {
-  adjfac = rr(2.0)+libm::pow((ratco2-rr(2.0)), rr(0.65));
-  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1) * coldry[lay]*rr(1.e-20);
+  ratco2 = rb(1.e20)*chi_co2/get_chi_mls(tables, 2, jp[lay]+1);
+  if (ratco2  >  rb(3.0)) {
+  adjfac = rb(2.0)+libm::pow((ratco2-rb(2.0)), rb(0.65));
+  adjcolco2 = adjfac*get_chi_mls(tables, 2, jp[lay]+1) * coldry[lay]*rb(1.e-20);
   } else {
   adjcolco2 = colco2[lay];
   }
@@ -1301,66 +1301,66 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb09(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b09;
   int ind0, ind1, inds, indf, indm;
   int js, js1, jmn2o, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_mn2o, specparm_mn2o, specmult_mn2o, fmn2o;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr tauself, taufor, n2om1, n2om2, absn2o;
-  rr chi_n2o, ratn2o, adjfac, adjcoln2o;
-  rr refrat_planck_a, refrat_m_a;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_mn2o, specparm_mn2o, specmult_mn2o, fmn2o;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb tauself, taufor, n2om1, n2om2, absn2o;
+  rb chi_n2o, ratn2o, adjfac, adjcoln2o;
+  rb refrat_planck_a, refrat_m_a;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 1, 9)/get_chi_mls(tables, 6, 9);
   refrat_m_a = get_chi_mls(tables, 1, 3)/get_chi_mls(tables, 6, 3);
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   speccomb = colh2o[lay] + rat_h2och4[lay]*colch4[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2och4_1[lay]*colch4[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_mn2o = colh2o[lay] + refrat_m_a*colch4[lay];
   specparm_mn2o = colh2o[lay]/speccomb_mn2o;
   if (specparm_mn2o  >=  oneminus) specparm_mn2o = oneminus;
-  specmult_mn2o = rr(8.)*specparm_mn2o;
+  specmult_mn2o = rb(8.)*specparm_mn2o;
   jmn2o = 1 + static_cast<int>(specmult_mn2o);
-  fmn2o = std::fmod(specmult_mn2o, rr(1.0));
+  fmn2o = std::fmod(specmult_mn2o, rb(1.0));
   chi_n2o = coln2o[lay]/(coldry[lay]);
-  ratn2o = rr(1.e20)*chi_n2o/get_chi_mls(tables, 4, jp[lay]+1);
-  if (ratn2o  >  rr(1.5)) {
-  adjfac = rr(0.5)+libm::pow((ratn2o-rr(0.5)), rr(0.65));
-  adjcoln2o = adjfac*get_chi_mls(tables, 4, jp[lay]+1)*coldry[lay]*rr(1.e-20);
+  ratn2o = rb(1.e20)*chi_n2o/get_chi_mls(tables, 4, jp[lay]+1);
+  if (ratn2o  >  rb(1.5)) {
+  adjfac = rb(0.5)+libm::pow((ratn2o-rb(0.5)), rb(0.65));
+  adjcoln2o = adjfac*get_chi_mls(tables, 4, jp[lay]+1)*coldry[lay]*rb(1.e-20);
   } else {
   adjcoln2o = coln2o[lay];
   }
   speccomb_planck = colh2o[lay]+refrat_planck_a*colch4[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
   indm = indminor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -1368,11 +1368,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb09(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -1381,16 +1381,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb09(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -1398,11 +1398,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb09(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -1411,8 +1411,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb09(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -1423,16 +1423,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb09(
   n2om1 = b.ka_mn2o[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2o - 1)] + fmn2o * (b.ka_mn2o[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2o+1 - 1)] - b.ka_mn2o[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2o - 1)]);
   n2om2 = b.ka_mn2o[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2o - 1)] + fmn2o * (b.ka_mn2o[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2o+1 - 1)] - b.ka_mn2o[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2o - 1)]);
   absn2o = n2om1 + minorfrac[lay] * (n2om2 - n2om1);
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
@@ -1443,10 +1443,10 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb09(
   }
   for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
   chi_n2o = coln2o[lay]/(coldry[lay]);
-  ratn2o = rr(1.e20)*chi_n2o/get_chi_mls(tables, 4, jp[lay]+1);
-  if (ratn2o  >  rr(1.5)) {
-  adjfac = rr(0.5)+libm::pow((ratn2o-rr(0.5)), rr(0.65));
-  adjcoln2o = adjfac*get_chi_mls(tables, 4, jp[lay]+1)*coldry[lay]*rr(1.e-20);
+  ratn2o = rb(1.e20)*chi_n2o/get_chi_mls(tables, 4, jp[lay]+1);
+  if (ratn2o  >  rb(1.5)) {
+  adjfac = rb(0.5)+libm::pow((ratn2o-rb(0.5)), rb(0.65));
+  adjcoln2o = adjfac*get_chi_mls(tables, 4, jp[lay]+1)*coldry[lay]*rb(1.e-20);
   } else {
   adjcoln2o = coln2o[lay];
   }
@@ -1512,7 +1512,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb10(
 ) {
   const auto& b = tables.b10;
   int ind0, ind1, inds, indf;
-  rr tauself, taufor;
+  rb tauself, taufor;
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*1 + 1;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*1 + 1;
@@ -1589,7 +1589,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb11(
 ) {
   const auto& b = tables.b11;
   int ind0, ind1, inds, indf, indm;
-  rr scaleo2, tauself, taufor, tauo2;
+  rb scaleo2, tauself, taufor, tauo2;
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*1 + 1;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*1 + 1;
@@ -1670,48 +1670,48 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb12(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b12;
   int ind0, ind1, inds, indf;
   int js, js1, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr tauself, taufor;
-  rr refrat_planck_a;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb tauself, taufor;
+  rb refrat_planck_a;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 1, 10)/get_chi_mls(tables, 2, 10);
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   speccomb = colh2o[lay] + rat_h2oco2[lay]*colco2[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2oco2_1[lay]*colco2[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_planck = colh2o[lay]+refrat_planck_a*colco2[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -1719,11 +1719,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb12(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -1732,16 +1732,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb12(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -1749,11 +1749,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb12(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -1762,8 +1762,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb12(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -1771,16 +1771,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb12(
   for (int ig = 1; ig <= 8; ++ig) {
   tauself = selffac[lay]* (b.selfref[(ig - 1) * 10 + (inds - 1)] + selffrac[lay] * (b.selfref[(ig - 1) * 10 + (inds+1 - 1)] - b.selfref[(ig - 1) * 10 + (inds - 1)]));
   taufor = forfac[lay] * (b.forref[(ig - 1) * 4 + (indf - 1)] + forfrac[lay] * (b.forref[(ig - 1) * 4 + (indf+1 - 1)] - b.forref[(ig - 1) * 4 + (indf - 1)]));
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
@@ -1792,8 +1792,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb12(
   for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
 #pragma unroll 1
   for (int ig = 1; ig <= 8; ++ig) {
-  taug[lay][122+ig - 1] = rr(0.0);
-  fracs[lay][122+ig - 1] = rr(0.0);
+  taug[lay][122+ig - 1] = rb(0.0);
+  fracs[lay][122+ig - 1] = rb(0.0);
   }
   }
 }
@@ -1846,23 +1846,23 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb13(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b13;
   int ind0, ind1, inds, indf, indm;
   int js, js1, jmco2, jmco, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_mco2, specparm_mco2, specmult_mco2, fmco2;
-  rr speccomb_mco, specparm_mco, specmult_mco, fmco;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr tauself, taufor, co2m1, co2m2, absco2;
-  rr com1, com2, absco, abso3;
-  rr chi_co2, ratco2, adjfac, adjcolco2;
-  rr refrat_planck_a, refrat_m_a, refrat_m_a3;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_mco2, specparm_mco2, specmult_mco2, fmco2;
+  rb speccomb_mco, specparm_mco, specmult_mco, fmco;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb tauself, taufor, co2m1, co2m2, absco2;
+  rb com1, com2, absco, abso3;
+  rb chi_co2, ratco2, adjfac, adjcolco2;
+  rb refrat_planck_a, refrat_m_a, refrat_m_a3;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 1, 5)/get_chi_mls(tables, 4, 5);
   refrat_m_a = get_chi_mls(tables, 1, 1)/get_chi_mls(tables, 4, 1);
   refrat_m_a3 = get_chi_mls(tables, 1, 3)/get_chi_mls(tables, 4, 3);
@@ -1870,51 +1870,51 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb13(
   speccomb = colh2o[lay] + rat_h2on2o[lay]*coln2o[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2on2o_1[lay]*coln2o[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_mco2 = colh2o[lay] + refrat_m_a*coln2o[lay];
   specparm_mco2 = colh2o[lay]/speccomb_mco2;
   if (specparm_mco2  >=  oneminus) specparm_mco2 = oneminus;
-  specmult_mco2 = rr(8.)*specparm_mco2;
+  specmult_mco2 = rb(8.)*specparm_mco2;
   jmco2 = 1 + static_cast<int>(specmult_mco2);
-  fmco2 = std::fmod(specmult_mco2, rr(1.0));
+  fmco2 = std::fmod(specmult_mco2, rb(1.0));
   chi_co2 = colco2[lay]/(coldry[lay]);
-  ratco2 = rr(1.e20)*chi_co2/rr(3.55e-4);
-  if (ratco2  >  rr(3.0)) {
-  adjfac = rr(2.0)+libm::pow((ratco2-rr(2.0)), rr(0.68));
-  adjcolco2 = adjfac*rr(3.55e-4)*coldry[lay]*rr(1.e-20);
+  ratco2 = rb(1.e20)*chi_co2/rb(3.55e-4);
+  if (ratco2  >  rb(3.0)) {
+  adjfac = rb(2.0)+libm::pow((ratco2-rb(2.0)), rb(0.68));
+  adjcolco2 = adjfac*rb(3.55e-4)*coldry[lay]*rb(1.e-20);
   } else {
   adjcolco2 = colco2[lay];
   }
   speccomb_mco = colh2o[lay] + refrat_m_a3*coln2o[lay];
   specparm_mco = colh2o[lay]/speccomb_mco;
   if (specparm_mco  >=  oneminus) specparm_mco = oneminus;
-  specmult_mco = rr(8.)*specparm_mco;
+  specmult_mco = rb(8.)*specparm_mco;
   jmco = 1 + static_cast<int>(specmult_mco);
-  fmco = std::fmod(specmult_mco, rr(1.0));
+  fmco = std::fmod(specmult_mco, rb(1.0));
   speccomb_planck = colh2o[lay]+refrat_planck_a*coln2o[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
   indm = indminor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -1922,11 +1922,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb13(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -1935,16 +1935,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb13(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -1952,11 +1952,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb13(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -1965,8 +1965,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb13(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -1980,16 +1980,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb13(
   com1 = b.ka_mco[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmco - 1)] + fmco * (b.ka_mco[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmco+1 - 1)] - b.ka_mco[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmco - 1)]);
   com2 = b.ka_mco[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmco - 1)] + fmco * (b.ka_mco[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmco+1 - 1)] - b.ka_mco[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmco - 1)]);
   absco = com1 + minorfrac[lay] * (com2 - com1);
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
@@ -2059,7 +2059,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb14(
 ) {
   const auto& b = tables.b14;
   int ind0, ind1, inds, indf;
-  rr tauself, taufor;
+  rb tauself, taufor;
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*1 + 1;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*1 + 1;
@@ -2132,58 +2132,58 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb15(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b15;
   int ind0, ind1, inds, indf, indm;
   int js, js1, jmn2, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_mn2, specparm_mn2, specmult_mn2, fmn2;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr scalen2, tauself, taufor, n2m1, n2m2, taun2;
-  rr refrat_planck_a, refrat_m_a;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_mn2, specparm_mn2, specmult_mn2, fmn2;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb scalen2, tauself, taufor, n2m1, n2m2, taun2;
+  rb refrat_planck_a, refrat_m_a;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 4, 1)/get_chi_mls(tables, 2, 1);
   refrat_m_a = get_chi_mls(tables, 4, 1)/get_chi_mls(tables, 2, 1);
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   speccomb = coln2o[lay] + rat_n2oco2[lay]*colco2[lay];
   specparm = coln2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = coln2o[lay] + rat_n2oco2_1[lay]*colco2[lay];
   specparm1 = coln2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_mn2 = coln2o[lay] + refrat_m_a*colco2[lay];
   specparm_mn2 = coln2o[lay]/speccomb_mn2;
   if (specparm_mn2  >=  oneminus) specparm_mn2 = oneminus;
-  specmult_mn2 = rr(8.)*specparm_mn2;
+  specmult_mn2 = rb(8.)*specparm_mn2;
   jmn2 = 1 + static_cast<int>(specmult_mn2);
-  fmn2 = std::fmod(specmult_mn2, rr(1.0));
+  fmn2 = std::fmod(specmult_mn2, rb(1.0));
   speccomb_planck = coln2o[lay]+refrat_planck_a*colco2[lay];
   specparm_planck = coln2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
   indm = indminor[lay];
   scalen2 = colbrd[lay]*scaleminor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -2191,11 +2191,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb15(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -2204,16 +2204,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb15(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -2221,11 +2221,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb15(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -2234,8 +2234,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb15(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -2246,16 +2246,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb15(
   n2m1 = b.ka_mn2[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2 - 1)] + fmn2 * (b.ka_mn2[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2+1 - 1)] - b.ka_mn2[(ig - 1) * (19 * 9) + (indm - 1) * 9 + (jmn2 - 1)]);
   n2m2 = b.ka_mn2[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2 - 1)] + fmn2 * (b.ka_mn2[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2+1 - 1)] - b.ka_mn2[(ig - 1) * (19 * 9) + (indm+1 - 1) * 9 + (jmn2 - 1)]);
   taun2 = scalen2 * (n2m1 + minorfrac[lay] * (n2m2 - n2m1));
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
@@ -2267,8 +2267,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb15(
   for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
 #pragma unroll 1
   for (int ig = 1; ig <= 2; ++ig) {
-  taug[lay][136+ig - 1] = rr(0.0);
-  fracs[lay][136+ig - 1] = rr(0.0);
+  taug[lay][136+ig - 1] = rb(0.0);
+  fracs[lay][136+ig - 1] = rb(0.0);
   }
   }
 }
@@ -2321,48 +2321,48 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb16(
     const RrtmgLwTables& CPPWRF_RESTRICT tables,
     int lay0, int lay1  // layers [lay0, lay1) of the column
 ) {
-  constexpr rr oneminus = rr(1.0) - rr(1.0e-6);
+  constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
   const auto& b = tables.b16;
   int ind0, ind1, inds, indf;
   int js, js1, jpl;
-  rr speccomb, specparm, specmult, fs;
-  rr speccomb1, specparm1, specmult1, fs1;
-  rr speccomb_planck, specparm_planck, specmult_planck, fpl;
-  rr p, p4, fk0, fk1, fk2;
-  rr fac000, fac100, fac200, fac010, fac110, fac210;
-  rr fac001, fac101, fac201, fac011, fac111, fac211;
-  rr tauself, taufor;
-  rr refrat_planck_a;
-  rr tau_major, tau_major1;
+  rb speccomb, specparm, specmult, fs;
+  rb speccomb1, specparm1, specmult1, fs1;
+  rb speccomb_planck, specparm_planck, specmult_planck, fpl;
+  rb p, p4, fk0, fk1, fk2;
+  rb fac000, fac100, fac200, fac010, fac110, fac210;
+  rb fac001, fac101, fac201, fac011, fac111, fac211;
+  rb tauself, taufor;
+  rb refrat_planck_a;
+  rb tau_major, tau_major1;
   refrat_planck_a = get_chi_mls(tables, 1, 6)/get_chi_mls(tables, 6, 6);
   for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
   speccomb = colh2o[lay] + rat_h2och4[lay]*colch4[lay];
   specparm = colh2o[lay]/speccomb;
   if (specparm  >=  oneminus) specparm = oneminus;
-  specmult = rr(8.)*(specparm);
+  specmult = rb(8.)*(specparm);
   js = 1 + static_cast<int>(specmult);
-  fs = std::fmod(specmult, rr(1.0));
+  fs = std::fmod(specmult, rb(1.0));
   speccomb1 = colh2o[lay] + rat_h2och4_1[lay]*colch4[lay];
   specparm1 = colh2o[lay]/speccomb1;
   if (specparm1  >=  oneminus) specparm1 = oneminus;
-  specmult1 = rr(8.)*(specparm1);
+  specmult1 = rb(8.)*(specparm1);
   js1 = 1 + static_cast<int>(specmult1);
-  fs1 = std::fmod(specmult1, rr(1.0));
+  fs1 = std::fmod(specmult1, rb(1.0));
   speccomb_planck = colh2o[lay]+refrat_planck_a*colch4[lay];
   specparm_planck = colh2o[lay]/speccomb_planck;
   if (specparm_planck  >=  oneminus) specparm_planck=oneminus;
-  specmult_planck = rr(8.)*specparm_planck;
+  specmult_planck = rb(8.)*specparm_planck;
   jpl= 1 + static_cast<int>(specmult_planck);
-  fpl = std::fmod(specmult_planck, rr(1.0));
+  fpl = std::fmod(specmult_planck, rb(1.0));
   ind0 = ((jp[lay]-1)*5+(jt[lay]-1))*9 + js;
   ind1 = (jp[lay]*5+(jt1[lay]-1))*9 + js1;
   inds = indself[lay];
   indf = indfor[lay];
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   p = fs - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -2370,11 +2370,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb16(
   fac010 = fk0*fac10[lay];
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   p = -fs;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac000 = fk0*fac00[lay];
   fac100 = fk1*fac00[lay];
@@ -2383,16 +2383,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb16(
   fac110 = fk1*fac10[lay];
   fac210 = fk2*fac10[lay];
   } else {
-  fac000 = (rr(1.) - fs) * fac00[lay];
-  fac010 = (rr(1.) - fs) * fac10[lay];
+  fac000 = (rb(1.) - fs) * fac00[lay];
+  fac010 = (rb(1.) - fs) * fac10[lay];
   fac100 = fs * fac00[lay];
   fac110 = fs * fac10[lay];
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   p = fs1 - 1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -2400,11 +2400,11 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb16(
   fac011 = fk0*fac11[lay];
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   p = -fs1;
   p4 = ((p * p) * (p * p));  // gfortran p**4
   fk0 = p4;
-  fk1 = 1 - p - rr(2.0)*p4;
+  fk1 = 1 - p - rb(2.0)*p4;
   fk2 = p + p4;
   fac001 = fk0*fac01[lay];
   fac101 = fk1*fac01[lay];
@@ -2413,8 +2413,8 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb16(
   fac111 = fk1*fac11[lay];
   fac211 = fk2*fac11[lay];
   } else {
-  fac001 = (rr(1.) - fs1) * fac01[lay];
-  fac011 = (rr(1.) - fs1) * fac11[lay];
+  fac001 = (rb(1.) - fs1) * fac01[lay];
+  fac011 = (rb(1.) - fs1) * fac11[lay];
   fac101 = fs1 * fac01[lay];
   fac111 = fs1 * fac11[lay];
   }
@@ -2422,16 +2422,16 @@ CPPWRF_FORCEINLINE void rrtmg_lw_taugb16(
   for (int ig = 1; ig <= 2; ++ig) {
   tauself = selffac[lay]* (b.selfref[(ig - 1) * 10 + (inds - 1)] + selffrac[lay] * (b.selfref[(ig - 1) * 10 + (inds+1 - 1)] - b.selfref[(ig - 1) * 10 + (inds - 1)]));
   taufor =  forfac[lay] * (b.forref[(ig - 1) * 4 + (indf - 1)] + forfrac[lay] * (b.forref[(ig - 1) * 4 + (indf+1 - 1)] - b.forref[(ig - 1) * 4 + (indf - 1)]));
-  if (specparm  <  rr(0.125)) {
+  if (specparm  <  rb(0.125)) {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac200 * b.ka[(ig - 1) * 585 + (ind0+2 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+11 - 1)]);
-  } else if (specparm  >  rr(0.875)) {
+  } else if (specparm  >  rb(0.875)) {
   tau_major = speccomb * (fac200 * b.ka[(ig - 1) * 585 + (ind0-1 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac000 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac210 * b.ka[(ig - 1) * 585 + (ind0+8 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   } else {
   tau_major = speccomb * (fac000 * b.ka[(ig - 1) * 585 + (ind0 - 1)] + fac100 * b.ka[(ig - 1) * 585 + (ind0+1 - 1)] + fac010 * b.ka[(ig - 1) * 585 + (ind0+9 - 1)] + fac110 * b.ka[(ig - 1) * 585 + (ind0+10 - 1)]);
   }
-  if (specparm1  <  rr(0.125)) {
+  if (specparm1  <  rb(0.125)) {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac201 * b.ka[(ig - 1) * 585 + (ind1+2 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+11 - 1)]);
-  } else if (specparm1  >  rr(0.875)) {
+  } else if (specparm1  >  rb(0.875)) {
   tau_major1 = speccomb1 * (fac201 * b.ka[(ig - 1) * 585 + (ind1-1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac001 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac211 * b.ka[(ig - 1) * 585 + (ind1+8 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);
   } else {
   tau_major1 = speccomb1 * (fac001 * b.ka[(ig - 1) * 585 + (ind1 - 1)] + fac101 * b.ka[(ig - 1) * 585 + (ind1+1 - 1)] + fac011 * b.ka[(ig - 1) * 585 + (ind1+9 - 1)] + fac111 * b.ka[(ig - 1) * 585 + (ind1+10 - 1)]);

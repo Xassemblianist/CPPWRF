@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
-#include "phys/ra_rrtmg_common/rrtmg_real.hpp"
 // Device memory of the RRTMG batches (RrtmgLwBatch, RrtmgSwBatch), shared by every batch of the process: the
 // batches of all domains run one after another on the one launch stream (LW, then SW; domain after domain), so
 // one work buffer of the largest request serves them all, and a table set with the same contents is copied to
@@ -9,6 +8,8 @@
 // domain's last, smaller chunk reused the arrays of its full chunks with another stride, and on the CPU, where a
 // thread's workspace keeps the previous column's values).
 #include <cstddef>
+
+#include "phys/ra_rrtmg_common/parkind.hpp"
 
 namespace cppwrf::phys {
 
@@ -26,7 +27,7 @@ class RrtmgScratch {
   ~RrtmgScratch();
   RrtmgScratch(const RrtmgScratch&) = delete;
   RrtmgScratch& operator=(const RrtmgScratch&) = delete;
-  rr* d() const;
+  rb* d() const;
   int* i() const;
 };
 

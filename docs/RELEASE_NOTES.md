@@ -271,8 +271,8 @@ Pleim-Xiu, CLM and SSiB land surface models.
 
 ## Performance
 
-- **RRTMG in single precision (CUDA FP32 only).** RRTMG's arithmetic type `rr` (src/phys/ra_rrtmg_common/
-  rrtmg_real.hpp) is `float` in CUDA FP32 builds, as RRTMG's `rb` in WRF real*4, and `double` in CUDA FP64 and every
+- **RRTMG in single precision (CUDA FP32 only).** RRTMG's real kind `rb` (WRF's kind_rb, src/phys/ra_rrtmg_common/
+  parkind.hpp) is `float` in CUDA FP32 builds, as in WRF real*4, and `double` in CUDA FP64 and every
   CPU build. CUDA FP64 output is unchanged (tolerance 0), and CPU FP32 output was byte-identical at that change.
   GPU FP32 output bytes change. Its distance from WRF real*8 stays at WRF real*4's level (P4 72 h, N3 24 h). GPU
   FP32 on the Colab G4: P4 72 h 2.0x and N3 24 h 1.65x faster than the same build with RRTMG in double precision.
