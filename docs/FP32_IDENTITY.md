@@ -77,12 +77,37 @@ differs from a rerun of the same `wrf.exe` with the same inputs and namelist her
 (U at 176903 of 469920 points), with or without glibc's FMA variants; it was made by another run of WRF real*4 and
 is not used for the CPU FP32 cases.
 
-The platform is x86-64 Linux with glibc's libm and libmvec (2.41 here, CI's runners have Ubuntu's). WRF real*4 is
-built with gfortran 14.2 `-O2 -ftree-vectorize -funroll-loops` (SSE2, its configure default); CPPWRF with GCC and
-the suite's flags (`-march=skylake`, `CPPWRF_NATIVE=OFF` in CI). The functions CPPWRF ports are sequences of
-IEEE operations (expf, logf, sinf, cosf); glibc's powf starts from the SSE `rcpps` estimate, which differs between
-Intel and AMD, and the port reads Intel's values from a table instead of executing `rcpps`, so CPPWRF reproduces
-the references (made on Intel) on either vendor's runners.
+The platform is x86-64 Linux. The references are WRF real*4 runs on Debian 13, against its glibc 2.41's libm and
+libmvec; WRF real*4 is built with gfortran 14.2 `-O2 -ftree-vectorize -funroll-loops` (SSE2, its configure default),
+CPPWRF with GCC and the suite's flags (`-march=skylake`, `CPPWRF_NATIVE=OFF` in CI). The functions CPPWRF ports are
+sequences of IEEE operations (expf, logf, sinf, cosf); glibc's powf starts from the SSE `rcpps` estimate, which
+differs between Intel and AMD, and the port reads Intel's values from a table instead of executing `rcpps`, so CPPWRF
+reproduces the references (made on Intel) on either vendor's CPUs.
+
+### Independent of the host's libm
+
+glibc's float functions differ between versions: 2.40 and 2.41 replaced several with CORE-MATH's correctly rounded
+ones, and a CPU FP32 build on Ubuntu 24.04 (glibc 2.39) calling its own libm differed from WRF real*4 from t = 0 (P1:
+W at 204905 of 476595 points, 1 ulp). The FP32 builds therefore do not call libm's float functions: the executables
+`cppwrf` and `cppwrf_real` of an FP32 build (CPU, and the host code of the CUDA builds) define them
+(src/core/glibc_mathf_host.cpp), so every call in the program, `std::exp(float)`, `libm::exp(float)`, the scalar
+iterations of the vectorised loops, the `sincosf` g++ makes of a sinf and a cosf of one argument, table and
+initialisation code, computes glibc 2.41's result (src/core/glibc_mathf.hpp):
+
+| Function | glibc 2.41's implementation | Proof against glibc 2.41 (every float input) |
+|---|---|---|
+| expf, logf, powf, sinf, cosf | the FMA variants libm's ifuncs select (`__expf_fma`, ...), from libm's machine code | 0 differ (powf: 2^32 pairs + special values) |
+| sincosf | sinf's and cosf's results | 0 differ |
+| atanf, atan2f, tanf, tanhf, log10f, asinf, acosf, sinhf, erff, tgammaf | CORE-MATH (generic C, no FMA variants) | 0 differ (atan2f: 2^32 pairs + special values) |
+
+tools/glibc_mathf_proof.cpp makes the comparison (also built without `-march`, where `fma()` is libm's exact fma: the
+same results); the libm compared is Debian's 2.41-12, whose sinhf takes the CORE-MATH exceptional case
+x = 0x1.250bfep-11 that the 2.41 tarball's code misses (the port follows the libm). The ctest `fp32_host_libm` checks
+that `cppwrf` imports none of these functions (`nm -D --undefined-only`). Calls with constant arguments are folded by
+g++ (correctly rounded) as before. Still libm's: sqrtf, fmodf, roundf, lroundf, llroundf, fminf, fmaxf, strtof
+(exact or correctly rounded by definition, the same in every version), and the double functions (exp, log, pow, sin,
+cos, atan, tanh, log10, tgamma, the complex cabs / clog / csqrt of the radar reflectivity, libmvec's 2-lane exp and
+pow), which the FP64 builds call as well. The FP64 builds are unchanged.
 
 ## GPU: the identity build
 
@@ -94,7 +119,9 @@ FP32 build (the default) in:
   --prec-sqrt=true` stated explicitly;
 - math functions on the device: glibc's scalar float functions as Debian's glibc 2.41 computes them on CPUs with
   FMA (src/core/glibc_mathf.hpp: expf, logf, powf, sinf, cosf transcribed from libm's FMA variants with their
-  fused multiply-adds as fma(); atanf, atan2f, tanf, tanhf, log10f from CORE-MATH's correctly rounded sources),
+  fused multiply-adds as fma(); atanf, atan2f, tanf, tanhf, log10f, asinf, acosf, sinhf, erff, tgammaf from
+  CORE-MATH's correctly rounded sources; the same functions as the host's, section
+  [Independent of the host's libm](#independent-of-the-hosts-libm)),
   glibc's double functions and libmvec's 2-lane double functions as in the CUDA FP64 build
   (src/core/glibc_math.hpp), and libmvec's 4-lane float functions (src/core/libmvec_f4.hpp) with the CPU build's
   lane rule (iterations 0 .. 4*(n/4)-1 of the loop vectorised, the rest scalar);
@@ -104,10 +131,12 @@ FP32 build (the default) in:
 The kernels, launches and their order are the fast build's. Proof:
 
 - tools/glibc_mathf_proof.cpp: the ports against the system libm, every float input of expf, logf, sinf, cosf,
-  atanf, tanf, tanhf and log10f and 2^32 pseudo-random powf and atan2f pairs plus special values: 0 differ.
+  atanf, tanf, tanhf, log10f, asinf, acosf, sinhf, erff, tgammaf and sincosf and 2^32 pseudo-random powf and atan2f
+  pairs plus special values: 0 differ.
 - tools/glibc_mathf_proof_cuda.cu: the device against the host, every float input of the same functions and of the
   4-lane expf, logf, sinf, cosf, atanf, and 2^32 pairs of the scalar and the 4-lane powf: 0 differ (RTX 2060, sm_75);
-  tanf (every input) and atan2f (2^32 pairs) likewise (`proof_cuda 32 tanf,atan2f`).
+  tanf (every input) and atan2f (2^32 pairs) likewise (`proof_cuda 32 tanf,atan2f`), and asinf, acosf, sinhf, erff,
+  tgammaf (every input, `proof_cuda 32 asinf,acosf,erff,tgammaf,sinhf`).
   tests/unit/test_glibc_mathf.cpp repeats both checks on a sample in every build (the device part in CUDA builds).
 - The suite's backend `cuda_sp_id` (`tests/verify/wrf_suite.py --cuda-sp-id BIN`) runs every `cpu_sp` case on the
   GPU (names `..._cuda_id...`, e.g. `real_p4_fp32_cuda_id_1h`) against the same WRF real*4 references at tolerance 0.
@@ -166,12 +195,12 @@ FP64 (the glibc ports compute in double), will pay more; the fast build stays th
 ## What is not identical yet
 
 - The fast CUDA FP32 build (the default): FMA contraction and CUDA's math library; it stays measured in
-  docs/FP32_ACCURACY.md. The identity build covers the cases above only; a float function other than expf, logf,
-  powf, sinf, cosf, atanf, atan2f, tanf, tanhf and log10f (asinf, acosf, sinhf, erff, tgammaf, hypotf) is still
-  CUDA's on its device, and the optional radar reflectivity's complex logarithm is CUDA's.
+  docs/FP32_ACCURACY.md. The identity build covers the cases above only; hypotf (no FP32 code calls it) and the
+  optional radar reflectivity's complex logarithm are CUDA's on its device.
 - Schemes and options other than those of the cases above are not checked against WRF real*4: aerosol-aware Thompson
   (mp_physics 28) with aerosol input fields or wif_input_opt 2, the MYNN options other than the defaults
   (MYNNX1 / MYNNX2, SPP), WDM6 with hail_opt 1, the other microphysics, cumulus, PBL, surface and radiation schemes,
   nests other than N1 / N3 / MON3 (moving nests, more than two domains, vertical refinement), restarts. Each needs
   the same work: its WRF real*4 reference, the dumps, its vectorised loops, its REAL constants.
-- Other compilers or libm versions for WRF real*4 (Intel, AVX2 builds use the 8-lane functions): not covered.
+- Other compilers or libm versions for WRF real*4 (Intel, AVX2 builds use the 8-lane functions): not covered; the
+  references are WRF real*4 built against glibc 2.41, and CPPWRF computes glibc 2.41's float functions on any host.

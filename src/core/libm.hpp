@@ -2,7 +2,9 @@
 #pragma once
 // cppwrf::libm: the C math library as the kernels call it (host and device), with std::'s overloads and promotions.
 // CPU and CUDA FP32 builds: the std:: functions themselves (using-declarations: glibc's libm on the host, CUDA's math
-// library on the device, exactly as a call of std::exp).
+// library on the device, exactly as a call of std::exp). The FP32 builds' executables define glibc 2.41's float
+// functions themselves (core/glibc_mathf_host.cpp), so that a float call on the host computes those whatever libm the
+// host has.
 // CUDA FP64 build (CPPWRF_GLIBC_MATH, core/backend.hpp): the double functions are glibc's own algorithms
 // (core/glibc_math.hpp) on the device and on the host, so that the GPU computes what WRF's real*8 build and the CPU
 // build compute; float arguments still call std:: (CUDA's float functions on the device). Compile-time constants: gcc
@@ -49,8 +51,8 @@ using std::tgamma;
 #else
 #define CPPWRF_LM_CONST(x) __builtin_constant_p(x)
 #endif
-// one argument: float -> std:: (as before; the CUDA FP32 identity build: glibc's float function on the device for
-// the ported ones, Gf), double -> glibc (a host constant: std::, folded), integral -> double
+// one argument: float -> std:: (as before; the CUDA FP32 identity build: glibc's float function on the device, Gf),
+// double -> glibc (a host constant: std::, folded), integral -> double
 #if defined(CPPWRF_FP32_IDENTITY) && defined(__CUDA_ARCH__)
 #define CPPWRF_LM_FLOAT(F, Gf) return Gf(a);
 #else
@@ -66,16 +68,6 @@ using std::tgamma;
   CPPWRF_LM double F(T a) {                                             \
     return F(double(a));                                                \
   }
-#define CPPWRF_LM_FUNC1(F, G)                                          \
-  CPPWRF_LM float F(float a) { return std::F(a); }                     \
-  CPPWRF_LM double F(double a) {                                        \
-    if (CPPWRF_LM_CONST(a)) return std::F(a);                           \
-    return G(a);                                                        \
-  }                                                                     \
-  template <class T, std::enable_if_t<std::is_integral_v<T>, int> = 0> \
-  CPPWRF_LM double F(T a) {                                             \
-    return F(double(a));                                                \
-  }
 CPPWRF_LM_FUNC1F(exp, glibc::exp, glibcf::expf)
 CPPWRF_LM_FUNC1F(log, glibc::log, glibcf::logf)
 CPPWRF_LM_FUNC1F(log10, glibc::log10, glibcf::log10f)
@@ -83,13 +75,12 @@ CPPWRF_LM_FUNC1F(atan, glibc::atan, glibcf::atanf)
 CPPWRF_LM_FUNC1F(tanh, glibc::tanh, glibcf::tanhf)
 CPPWRF_LM_FUNC1F(sin, glibc::sin, glibcf::sinf)
 CPPWRF_LM_FUNC1F(cos, glibc::cos, glibcf::cosf)
-CPPWRF_LM_FUNC1(sinh, glibc::sinh)
-CPPWRF_LM_FUNC1(erf, glibc::erf)
-CPPWRF_LM_FUNC1(asin, glibc::asin)
-CPPWRF_LM_FUNC1(acos, glibc::acos)
+CPPWRF_LM_FUNC1F(sinh, glibc::sinh, glibcf::sinhf)
+CPPWRF_LM_FUNC1F(erf, glibc::erf, glibcf::erff)
+CPPWRF_LM_FUNC1F(asin, glibc::asin, glibcf::asinf)
+CPPWRF_LM_FUNC1F(acos, glibc::acos, glibcf::acosf)
 CPPWRF_LM_FUNC1F(tan, glibc::tan, glibcf::tanf)
-CPPWRF_LM_FUNC1(tgamma, glibc::tgamma)
-#undef CPPWRF_LM_FUNC1
+CPPWRF_LM_FUNC1F(tgamma, glibc::tgamma, glibcf::tgammaf)
 #undef CPPWRF_LM_FUNC1F
 #undef CPPWRF_LM_FLOAT
 // atan2: two arguments as std:: (float, float) -> float, otherwise double

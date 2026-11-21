@@ -49,6 +49,19 @@ resumes across versions from WRF's wrfrst files.
   tolerance 0 (`real_p1_fp32_cuda_id`, ..., `real_p6_fp32_cuda_id_1h`). The default fast CUDA FP32 build, FP64 and
   the CPU builds are unchanged.
 
+### Fixed
+- FP32 results no longer depend on the host's libm: they were WRF real*4's only on a host with glibc 2.41 (Debian 13,
+  where the references were made; glibc 2.40 / 2.41 replaced several float functions with CORE-MATH's correctly
+  rounded ones), and an Ubuntu 24.04 build (glibc 2.39) differed from t = 0. The FP32 builds' executables (`cppwrf`,
+  `cppwrf_real`; CPU, and the host code of the CUDA builds) define glibc 2.41's float functions themselves
+  (src/core/glibc_mathf_host.cpp), in place of libm's for every call: expf, logf, powf, sinf, cosf, sincosf, tanf,
+  atanf, atan2f, asinf, acosf, sinhf, tanhf, log10f, erff, tgammaf. New ports of asinf, acosf, erff, tgammaf and
+  sinhf (CORE-MATH, glibc 2.41) in src/core/glibc_mathf.hpp, also on the device of the CUDA identity build (they were
+  CUDA's there); each port equals glibc 2.41's libm on every float input (tools/glibc_mathf_proof.cpp, also built
+  without `-march`) and the device equals the host (tools/glibc_mathf_proof_cuda.cu, RTX 2060). The ctest
+  `fp32_host_libm` checks that `cppwrf` imports none of them. Results on a glibc 2.41 host, FP64 and the fast CUDA
+  FP32 build unchanged.
+
 ## 1.1.1 (2026-11-20)
 
 ### Added

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// src/core/glibc_mathf.hpp (glibc 2.41's scalar expf, logf, powf, sinf, cosf, atanf, tanf, tanhf, log10f, atan2f)
+// src/core/glibc_mathf.hpp (glibc 2.41's scalar expf, logf, powf, sinf, cosf, atanf, tanf, tanhf, log10f, atan2f,
+// asinf, acosf, erff, tgammaf, sinhf)
 // against the system libm, bit for bit (two NaNs count as equal): every 61st float bit pattern of the unary functions
 // and 2^20 pseudo-random powf / atan2f pairs. The ports reproduce Debian's glibc 2.41 (FMA variants): with another
 // glibc version the differences are reported, not failed (tools/glibc_mathf_proof.cpp checks every input).
@@ -17,11 +18,14 @@
 #include "core/glibc_mathf.hpp"
 
 namespace {
-constexpr int kNFn = 15;  // 0-6 unary scalar, 7 powf, 8-12 the 4-lane expf, logf, powf, sinf, cosf, 13 tanf, 14 atan2f
+// 0-6 unary scalar, 7 powf, 8-12 the 4-lane expf, logf, powf, sinf, cosf, 13 tanf, 14 atan2f, 15-19 asinf, acosf,
+// erff, tgammaf, sinhf
+constexpr int kNFn = 20;
 const char* kName[kNFn] = {"expf",    "logf",    "sinf",    "cosf",    "atanf",   "tanhf", "log10f", "powf",
-                           "v4 expf", "v4 logf", "v4 powf", "v4 sinf", "v4 cosf", "tanf",  "atan2f"};
+                           "v4 expf", "v4 logf", "v4 powf", "v4 sinf", "v4 cosf", "tanf",  "atan2f", "asinf",
+                           "acosf",   "erff",    "tgammaf", "sinhf"};
 // the scalar functions (host and device) and, in the identity build, the 4-lane ones (device)
-constexpr int kScalar[] = {0, 1, 2, 3, 4, 5, 6, 7, 13, 14};
+constexpr int kScalar[] = {0, 1, 2, 3, 4, 5, 6, 7, 13, 14, 15, 16, 17, 18, 19};
 CPPWRF_HD inline bool is_pair(int fn) { return fn == 7 || fn == 10 || fn == 14; }
 CPPWRF_HD inline std::uint64_t mix(std::uint64_t z) {
   z += 0x9e3779b97f4a7c15ull;
@@ -57,6 +61,11 @@ CPPWRF_HD inline float port(int fn, float x, float y) {
     case 7: return g::powf(x, y);
     case 13: return g::tanf(x);
     case 14: return g::atan2f(x, y);
+    case 15: return g::asinf(x);
+    case 16: return g::acosf(x);
+    case 17: return g::erff(x);
+    case 18: return g::tgammaf(x);
+    case 19: return g::sinhf(x);
 #if defined(CPPWRF_HAVE_MVEC_F4)
     case 8: return cppwrf::mvec4::expf(x);
     case 9: return cppwrf::mvec4::logf(x);
@@ -68,7 +77,9 @@ CPPWRF_HD inline float port(int fn, float x, float y) {
   }
 }
 // the system libm through volatile pointers (no folding)
-float (*volatile sys1[7])(float) = {::expf, ::logf, ::sinf, ::cosf, ::atanf, ::tanhf, ::log10f};
+float (*volatile sys1[kNFn])(float) = {::expf, ::logf,  ::sinf,  ::cosf,  ::atanf,   ::tanhf,  ::log10f,
+                                        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
+                                        ::asinf, ::acosf, ::erff,  ::tgammaf, ::sinhf};
 float (*volatile sys_powf)(float, float) = ::powf;
 float (*volatile sys_tanf)(float) = ::tanf;
 float (*volatile sys_atan2f)(float, float) = ::atan2f;

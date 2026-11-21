@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Proof of src/core/glibc_mathf.hpp on the CPU: every float input of expf, logf, sinf, cosf, atanf, tanf, tanhf and
-// log10f, and powf and atan2f on 2^32 pseudo-random pairs plus grids of special values, against the system libm
-// (glibc 2.41, FMA variants), bit for bit (two NaNs count as equal).
+// Proof of src/core/glibc_mathf.hpp on the CPU: every float input of expf, logf, sinf, cosf, atanf, tanf, tanhf,
+// log10f, asinf, acosf, erff, tgammaf, sinhf and of sincosf (both results against sinf and cosf), and powf and atan2f
+// on 2^32 pseudo-random pairs plus grids of special values, against the system libm (glibc 2.41, FMA variants), bit
+// for bit (two NaNs count as equal).
 //   g++ -std=c++20 -O2 -ffp-contract=off -fopenmp -Isrc tools/glibc_mathf_proof.cpp -o glibc_mathf_proof
-//   ./glibc_mathf_proof [log2 of the number of powf / atan2f pairs, default 32]
+//   ./glibc_mathf_proof [log2 of the number of powf / atan2f pairs, default 32] [comma-separated function names]
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -35,9 +36,24 @@ float (*volatile sys_atan2f)(float, float) = ::atan2f;
 float (*volatile sys_tanhf)(float) = ::tanhf;
 float (*volatile sys_log10f)(float) = ::log10f;
 float (*volatile sys_powf)(float, float) = ::powf;
+float (*volatile sys_asinf)(float) = ::asinf;
+float (*volatile sys_acosf)(float) = ::acosf;
+float (*volatile sys_erff)(float) = ::erff;
+float (*volatile sys_tgammaf)(float) = ::tgammaf;
+float (*volatile sys_sinhf)(float) = ::sinhf;
+void (*volatile sys_sincosf)(float, float*, float*) = ::sincosf;
+const char* only = nullptr;  // the functions to check (all if null)
+bool want(const char* name) {
+  if (!only) return true;
+  const std::size_t n = std::strlen(name);
+  for (const char* p = only; (p = std::strstr(p, name)); p += n)
+    if ((p == only || p[-1] == ',') && (p[n] == ',' || p[n] == 0)) return true;
+  return false;
+}
 
 template <class P, class S>
 long long unary(const char* name, P port, S sys) {
+  if (!want(name)) return 0;
   long long bad = 0;
   std::uint32_t first = 0;
   bool have = false;
@@ -65,6 +81,8 @@ std::uint64_t mix(std::uint64_t z) {
 
 int main(int argc, char** argv) {
   namespace g = cppwrf::glibcf;
+  const int lg = argc > 1 ? std::atoi(argv[1]) : 32;
+  if (argc > 2) only = argv[2];
   long long bad = 0;
   bad += unary("expf", [](float x) { return g::expf(x); }, [](float x) { return sys_expf(x); });
   bad += unary("logf", [](float x) { return g::logf(x); }, [](float x) { return sys_logf(x); });
@@ -74,10 +92,25 @@ int main(int argc, char** argv) {
   bad += unary("tanf", [](float x) { return g::tanf(x); }, [](float x) { return sys_tanf(x); });
   bad += unary("tanhf", [](float x) { return g::tanhf(x); }, [](float x) { return sys_tanhf(x); });
   bad += unary("log10f", [](float x) { return g::log10f(x); }, [](float x) { return sys_log10f(x); });
-  const int lg = argc > 1 ? std::atoi(argv[1]) : 32;
+  bad += unary("asinf", [](float x) { return g::asinf(x); }, [](float x) { return sys_asinf(x); });
+  bad += unary("acosf", [](float x) { return g::acosf(x); }, [](float x) { return sys_acosf(x); });
+  bad += unary("erff", [](float x) { return g::erff(x); }, [](float x) { return sys_erff(x); });
+  bad += unary("tgammaf", [](float x) { return g::tgammaf(x); }, [](float x) { return sys_tgammaf(x); });
+  bad += unary("sinhf", [](float x) { return g::sinhf(x); }, [](float x) { return sys_sinhf(x); });
+  // sincosf: the sine against sinf's port, the cosine against cosf's
+  bad += unary("sincosf", [](float x) { return g::sinf(x); }, [](float x) {
+    float s, c;
+    sys_sincosf(x, &s, &c);
+    return s;
+  });
+  bad += unary("sincosf", [](float x) { return g::cosf(x); }, [](float x) {
+    float s, c;
+    sys_sincosf(x, &s, &c);
+    return c;
+  });
   long long pbad = 0;
 #pragma omp parallel for schedule(static, 1 << 16) reduction(+ : pbad)
-  for (long long i = 0; i < (1ll << lg); ++i) {
+  for (long long i = 0; i < (want("powf") ? (1ll << lg) : 0); ++i) {
     const std::uint64_t r = mix(std::uint64_t(i));
     float x = f(std::uint32_t(r)), y = f(std::uint32_t(r >> 32));
     // half the pairs with x in (0, 8) and |y| < 64: the arguments of a model
@@ -92,17 +125,17 @@ int main(int argc, char** argv) {
                       -1e30f, INFINITY, -INFINITY, NAN, 1.0000001f, 0.99999994f, 100.0f, 0.1f, -0.1f, 126.0f, -150.0f};
   for (float x : sp)
     for (float y : sp)
-      if (!same(g::powf(x, y), sys_powf(x, y))) {
+      if (want("powf") && !same(g::powf(x, y), sys_powf(x, y))) {
         ++pbad;
         std::printf("powf(%a, %a): %a vs %a\n", double(x), double(y), double(g::powf(x, y)), double(sys_powf(x, y)));
       }
-  std::printf("powf    2^%d pairs + special values: %lld differ\n", lg, pbad);
+  if (want("powf")) std::printf("powf    2^%d pairs + special values: %lld differ\n", lg, pbad);
   bad += pbad;
   // atan2f: 2^lg pseudo-random pairs (half of them with exponents within 2^-30 .. 2^30 of each other) and the special
   // values' pairs
   long long abad = 0;
 #pragma omp parallel for schedule(static, 1 << 16) reduction(+ : abad)
-  for (long long i = 0; i < (1ll << lg); ++i) {
+  for (long long i = 0; i < (want("atan2f") ? (1ll << lg) : 0); ++i) {
     const std::uint64_t r = mix(std::uint64_t(i) ^ 0x9e3779b97f4a7c15ull);
     std::uint32_t a = std::uint32_t(r), b = std::uint32_t(r >> 32);
     if (i & 1) b = (b & 0x807fffffu) | ((((a >> 23) & 0xffu) + ((b >> 23) % 61u) - 30u) & 0xffu) << 23;
@@ -111,11 +144,11 @@ int main(int argc, char** argv) {
   }
   for (float x : sp)
     for (float y : sp)
-      if (!same(g::atan2f(y, x), sys_atan2f(y, x))) {
+      if (want("atan2f") && !same(g::atan2f(y, x), sys_atan2f(y, x))) {
         ++abad;
         std::printf("atan2f(%a, %a): %a vs %a\n", double(y), double(x), double(g::atan2f(y, x)), double(sys_atan2f(y, x)));
       }
-  std::printf("atan2f  2^%d pairs + special values: %lld differ\n", lg, abad);
+  if (want("atan2f")) std::printf("atan2f  2^%d pairs + special values: %lld differ\n", lg, abad);
   bad += abad;
   std::printf(bad ? "glibc_mathf_proof FAILED\n" : "glibc_mathf_proof passed\n");
   return bad ? 1 : 0;

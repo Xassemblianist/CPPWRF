@@ -1,12 +1,13 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Proof of src/core/glibc_mathf.hpp and src/core/libmvec_f4.hpp on the device: every float input of the scalar
-// expf, logf, sinf, cosf, atanf, tanf, tanhf, log10f and of the 4-lane expf, logf, sinf, cosf, atanf, and powf (scalar
-// and 4-lane) and atan2f on 2^N pseudo-random pairs, device against host, bit for bit (two NaNs count as equal). The
+// expf, logf, sinf, cosf, atanf, tanf, tanhf, log10f, asinf, acosf, erff, tgammaf, sinhf and of the 4-lane expf, logf,
+// sinf, cosf, atanf, and powf (scalar and 4-lane) and atan2f on 2^N pseudo-random pairs, device against host, bit for
+// bit (two NaNs count as equal). The
 // host functions are proven against the system libm / libmvec by tools/glibc_mathf_proof.cpp and
 // tests/unit/test_libmvec_f4.cpp.
 //   nvcc -std=c++20 -O3 --fmad=false -arch=native -DCPPWRF_GLIBC_MATH -DCPPWRF_FP32_IDENTITY -Isrc \
 //        -Xcompiler -fopenmp,-ffp-contract=off --expt-relaxed-constexpr tools/glibc_mathf_proof_cuda.cu -o proof_cuda
-//   ./proof_cuda [log2 of the number of pairs, default 32] [names, e.g. "tanf,atan2f": only those]
+//   ./proof_cuda [log2 of the number of pairs, default 32] [comma-separated names, e.g. "tanf,atan2f": only those]
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -20,9 +21,18 @@
 namespace {
 constexpr long long kBatch = 1ll << 26;
 enum Fn { kExp, kLog, kSin, kCos, kAtan, kTan, kTanh, kLog10, kVExp, kVLog, kVSin, kVCos, kVAtan, kPow, kVPow, kAtan2,
-          kNFn };
-const char* kName[kNFn] = {"expf", "logf", "sinf", "cosf", "atanf", "tanf", "tanhf", "log10f", "v4 expf", "v4 logf",
-                           "v4 sinf", "v4 cosf", "v4 atanf", "powf", "v4 powf", "atan2f"};
+          kAsin, kAcos, kErf, kTgamma, kSinh, kNFn };
+const char* kName[kNFn] = {"expf",    "logf",    "sinf",     "cosf",  "atanf", "tanf",   "tanhf",
+                           "log10f",  "v4 expf", "v4 logf",  "v4 sinf", "v4 cosf", "v4 atanf", "powf",
+                           "v4 powf", "atan2f",  "asinf",    "acosf", "erff",  "tgammaf", "sinhf"};
+// a name of the comma-separated list (all if none)
+bool want(const char* list, const char* name) {
+  if (!list) return true;
+  const std::size_t n = std::strlen(name);
+  for (const char* p = list; (p = std::strstr(p, name)); p += n)
+    if ((p == list || p[-1] == ',') && (p[n] == ',' || p[n] == 0)) return true;
+  return false;
+}
 __host__ __device__ inline std::uint64_t mix(std::uint64_t z) {
   z += 0x9e3779b97f4a7c15ull;
   z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
@@ -61,6 +71,11 @@ __host__ __device__ inline float eval(int fn, long long i) {
     case kTan: return g::tanf(x);
     case kTanh: return g::tanhf(x);
     case kLog10: return g::log10f(x);
+    case kAsin: return g::asinf(x);
+    case kAcos: return g::acosf(x);
+    case kErf: return g::erff(x);
+    case kTgamma: return g::tgammaf(x);
+    case kSinh: return g::sinhf(x);
     case kVExp: return v::expf(x);
     case kVLog: return v::logf(x);
     case kVSin: return v::sinf(x);
@@ -86,7 +101,7 @@ int main(int argc, char** argv) {
   std::vector<float> dev(kBatch);
   long long total = 0;
   for (int fn = 0; fn < kNFn; ++fn) {
-    if (argc > 2 && !std::strstr(argv[2], kName[fn])) continue;  // a list of names: only those
+    if (!want(argc > 2 ? argv[2] : nullptr, kName[fn])) continue;
     const bool pairs = fn == kPow || fn == kVPow || fn == kAtan2;
     const long long count = pairs ? (1ll << lg) : (1ll << 32);
     long long bad = 0;
