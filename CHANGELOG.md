@@ -16,6 +16,13 @@ resumes across versions from WRF's wrfrst files.
   tile). New suite case real_a05g_r8_fp64_cpu_1h_t2x2. MPI ranks were not affected.
 - `CPPWRF_KTIME=1` with tiles: the tile threads updated the kernel-time table without a lock (it could crash); the
   debug flag of `CPPWRF_VM_DUMP` was shared by the tile threads.
+- The FP64 builds no longer contain glibc 2.41's float functions (src/core/glibc_mathf_host.cpp came in through the
+  core library); they call the host's libm, as documented. The FP64 results are unchanged.
+- `cppwrf_real --precision float` uses glibc 2.41's float functions in every x86-64 build, not only in the FP32
+  builds (one `cppwrf_real` is installed into a prefix: that of the flavour installed last).
+- test_glibc_mathf compared the ports with themselves (the executable's own expf ... from the core library); it now
+  looks the system libm's functions up in libm.so.6. The ctest `fp32_host_libm` also rejects libmvec vector variants
+  of the ported functions (none are imported).
 
 ## 1.2.0 (2026-11-21)
 

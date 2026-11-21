@@ -6,6 +6,7 @@
 // glibc version the differences are reported, not failed (tools/glibc_mathf_proof.cpp checks every input).
 // CUDA builds: also the device against the host on the same inputs, and in the FP32 identity build
 // (CPPWRF_FP32_IDENTITY) the 4-lane functions of src/core/libmvec_f4.hpp.
+#include <dlfcn.h>
 #include <gnu/libc-version.h>
 
 #include <cmath>
@@ -76,13 +77,31 @@ CPPWRF_HD inline float port(int fn, float x, float y) {
     default: return 0.0f;
   }
 }
-// the system libm through volatile pointers (no folding)
-float (*volatile sys1[kNFn])(float) = {::expf, ::logf,  ::sinf,  ::cosf,  ::atanf,   ::tanhf,  ::log10f,
-                                        nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr,
-                                        ::asinf, ::acosf, ::erff,  ::tgammaf, ::sinhf};
-float (*volatile sys_powf)(float, float) = ::powf;
-float (*volatile sys_tanf)(float) = ::tanf;
-float (*volatile sys_atan2f)(float, float) = ::atan2f;
+// the system libm's own functions, looked up in libm.so.6: the FP32 builds' executables define expf ... themselves
+// (src/core/glibc_mathf_host.cpp, also in cppwrf_core), so ::expf would be the port (volatile pointers: no folding)
+float (*volatile sys1[kNFn])(float) = {};
+float (*volatile sys_powf)(float, float) = nullptr;
+float (*volatile sys_tanf)(float) = nullptr;
+float (*volatile sys_atan2f)(float, float) = nullptr;
+bool load_libm();
+template <class F> bool libm_fn(F volatile& f, const char* name) {
+  static void* h = dlopen("libm.so.6", RTLD_NOW | RTLD_LOCAL);
+  f = h ? reinterpret_cast<F>(dlsym(h, name)) : nullptr;
+  Dl_info in{}, self{};
+  const bool own = f != nullptr && dladdr(reinterpret_cast<void*>(f), &in) &&
+                   dladdr(reinterpret_cast<void*>(&load_libm), &self) && in.dli_fbase == self.dli_fbase;
+  if (f == nullptr || own) {
+    std::printf("%s: %s\n", name, f == nullptr ? "not found in libm.so.6" : "the program's own function, not libm's");
+    return false;
+  }
+  return true;
+}
+bool load_libm() {
+  constexpr int kUnary[] = {0, 1, 2, 3, 4, 5, 6, 15, 16, 17, 18, 19};
+  bool ok = libm_fn(sys_powf, "powf") & libm_fn(sys_tanf, "tanf") & libm_fn(sys_atan2f, "atan2f");
+  for (int fn : kUnary) ok &= libm_fn(sys1[fn], kName[fn]);
+  return ok;
+}
 std::uint32_t bits(float v) {
   std::uint32_t b;
   std::memcpy(&b, &v, 4);
@@ -104,6 +123,10 @@ __global__ void kport(int fn, long long n, float* out) {
 int main() {
   const bool strict = std::strcmp(gnu_get_libc_version(), "2.41") == 0;
   long long fails = 0;
+  if (!load_libm()) {
+    std::printf("test_glibc_mathf FAILED: the system libm's functions are not reachable\n");
+    return 1;
+  }
   for (int fn : kScalar) {  // host ports against the system libm
     long long bad = 0;
     const long long n = count(fn);
