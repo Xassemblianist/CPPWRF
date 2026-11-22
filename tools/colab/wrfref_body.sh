@@ -48,8 +48,8 @@ if [ -n "$STAGE" ]; then  # the suite's tar of these references, to Drive (remot
     grep -qx "$n SUCCESS" $J/refs.out || stage_bad="${stage_bad:+$stage_bad; }run_$n"
     if [ "$steps" = 1 ]; then
       grep -qx "$n/steps SUCCESS" $J/refs.out || stage_bad="${stage_bad:+$stage_bad; }run_$n/steps"
-      grep -qE "^$n: (wrf\.log:)?[1-9][0-9]*( \S+)* [1-9][0-9]* restart files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rst_$n"
-      grep -qE "^$n: (wrf\.log:)?[1-9][0-9]*( \S+)* [1-9][0-9]* history files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rsm_$n"
+      grep -qE "^$n: (wrf\.log:)?[1-9][0-9]*( +\S+)* +[1-9][0-9]* restart files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rst_$n"
+      grep -qE "^$n: (wrf\.log:)?[1-9][0-9]*( +\S+)* +[1-9][0-9]* history files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rsm_$n"
     fi
   done
   [ "$rst_rc" = 0 ] || files_bad="${files_bad:+$files_bad; }make_restart_refs exit $rst_rc"
