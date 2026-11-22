@@ -14,6 +14,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <unordered_map>
 
 #ifdef CPPWRF_HAVE_HDF5
 #include <dlfcn.h>
@@ -102,7 +103,7 @@ Pool& pool() {
 }
 
 std::mutex g_mutex;  // the results
-std::vector<std::unique_ptr<Entry>> g_ready;
+std::unordered_multimap<std::uint64_t, std::unique_ptr<Entry>> g_ready;  // by sample_key
 bool g_installed = false;
 Stats g_stats;
 
@@ -166,7 +167,8 @@ void compress_chunk(const Record& r, std::size_t c) {
   if (compress2(e->out.data(), &n, e->in.data(), uLong(e->in.size()), r.level) != Z_OK) return;  // the filter does it
   e->out.resize(n);
   std::lock_guard<std::mutex> lk(g_mutex);
-  g_ready.push_back(std::move(e));
+  const std::uint64_t key = e->key;
+  g_ready.emplace(key, std::move(e));
   ++g_stats.precomputed;
 }
 
@@ -175,12 +177,13 @@ void compress_chunk(const Record& r, std::size_t c) {
 bool take(int level, const unsigned char* p, std::size_t n, std::vector<unsigned char>& out) {
   const std::uint64_t key = sample_key(p, n);
   std::lock_guard<std::mutex> lk(g_mutex);
-  for (std::size_t i = 0; i < g_ready.size(); ++i) {
-    Entry& e = *g_ready[i];
-    if (e.key == key && e.level == level && e.in.size() == n && std::memcmp(e.in.data(), p, n) == 0) {
+  // the entries of this key only (equal inputs give equal outputs: any entry of the same bytes and level will do)
+  auto [it, end] = g_ready.equal_range(key);
+  for (; it != end; ++it) {
+    Entry& e = *it->second;
+    if (e.level == level && e.in.size() == n && std::memcmp(e.in.data(), p, n) == 0) {
       out = std::move(e.out);
-      g_ready[i] = std::move(g_ready.back());
-      g_ready.pop_back();
+      g_ready.erase(it);
       return true;
     }
   }
