@@ -7,7 +7,22 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+### Added
+- Coverage waves 3 to 5 against WRF 4.8.0 runs (CPU FP64 exact, each with a CUDA FP64 twin): 17 references / 51
+  cases (Noah-MP with fractional sea ice and sst_update, LES-like setups without a PBL scheme, Noah-MP with MYNN,
+  ACM2, BouLac and QNSE, RUC with rdlai2d, grav_settling with other PBLs, the diffusion skip flags and
+  mix_isotropic, Morrison and NSSL with other cumulus schemes, isftcflx 2 and iz0tlnd 2), 16 references / 48 cases
+  with 57 and 89 levels (eight physics sets: the GPU kernels' level tiers above 48 levels on real data), 19
+  references / 57 cases (YSU ysu_topdown_pblmix 0, kfeta_trigger 3, Grell-Freitas and Grell-3 without shallow
+  convection and with clos_choice 1, 4, 7, 10, New Tiedtke on a nest, opt_thcnd 2, the slab scheme with ifsnow 0,
+  kim_tofd, damp_opt 1, top_lid, Dudhia SW with WSM3 and RRTMG LW); data tars port_cov3_data.tar, port_cov4_data.tar, port_cov5_data.tar.
+- CUDA FP64 twins of the 15 CPU-only tiled real cases (run.tiles layouts on the GPU).
+- An opt-in AMD HIP / ROCm build path (CPPWRF_ENABLE_HIP, off by default; docs/HIP.md) through a CUDA / HIP runtime
+  portability header. Not yet built or run on AMD hardware. CUDA and CPU builds unchanged.
+
 ### Fixed
+- tools/bench/bench_stats.py: the speed-up table no longer fails from its second case (a loop variable hid the
+  cases table).
 - wrfrst files of a resumed run whose restart.interval is shorter than the restart file's seconds to the next ring:
   WRF_ALARM_SECS_TIL_NEXT_RING_51 is the interval - (time - PrevRingTime) of output_wrf at every ring, also at the
   rings by the interval before the file's pending RingTime (P1 resumed at 5 min from a 5-min interval with 1 min:
