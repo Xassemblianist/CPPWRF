@@ -63,6 +63,15 @@ _TILED = [
 CASES = [(f"{n}_t{lay}", c[1], c[2], list(c[3]) + [f"run.tiles={lay}"], c[4], c[5], dict(c[6]))
          for n, lay in _TILED for c in [_BASE[n]]]
 
+# CUDA FP64 twins of the CPU-only tiled cases above (the decomposed device paths: patch clipping, whole-field
+# gathers of nests, Tiedtke's row flag, the land-ice Noah carry, FDDA, terrain options, Morrison, Grell-Freitas's
+# averaging): the CPU case's configuration, reference, time and tolerances with the cuda_dp backend
+_TILED_CUDA = [(n, lay) for n, lay in _TILED if n.startswith("real_") and _BASE[n][1] == "cpu_dp"
+               and n not in ("real_p4_r8_fp64_cpu", "real_mynnx1_r8_fp64_cpu")]  # these two have CUDA tiled cases
+_CUDA_NAME = {n: n.replace("_fp64_cpu", "_fp64_cuda") for n, _ in _TILED_CUDA}
+CASES += [(f"{_CUDA_NAME[n]}_t{lay}", "cuda_dp", c[2], list(c[3]) + [f"run.tiles={lay}"], c[4], c[5], dict(c[6]))
+          for n, lay in _TILED_CUDA for c in [_BASE[n]]]
+
 # Cases for the layout comparisons of tools/colab/colab_mpi.sh (every output file of a layout against one rank's):
 # NAME_wrst is NAME with wrfrst files written, which hold fields no wrfout file has (RS at the land-ice points of
 # the D0V domain: Noah's RC carried from the last SFLX point, across the patches in a decomposed run).
@@ -71,4 +80,5 @@ CASES += [(f"{n}_wrst", c[1], c[2], list(c[3]) + sets, c[4], c[5], dict(c[6])) f
 
 # the data tars (tests/verify/vm_data.txt) each case reads: those of the case it tiles
 DATA = {f"{n}_t{lay}": _BASE_DATA[n] for n, lay in _TILED}
+DATA.update({f"{_CUDA_NAME[n]}_t{lay}": _BASE_DATA[n] for n, lay in _TILED_CUDA})
 DATA.update({f"{n}_wrst": _BASE_DATA[n] for n, _ in _WRST})
