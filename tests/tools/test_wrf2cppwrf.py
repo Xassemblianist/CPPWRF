@@ -2158,9 +2158,22 @@ class TestWrfNamelistSemantics(unittest.TestCase):
             t = WrfTranslator(parse_namelist(nl))
             cfg = t.translate()
             self.assertEqual((t.errors, cfg["time"]["dt"]), ([], want), dom)
+        # adapt_timestep rounds the starting time step to 1/100 s before the limits: 1/3 s is 0.33 s; 1/250 s is 0
+        for dom, want in (("starting_time_step = 1, starting_time_step_den = 3, min_time_step = 0", 0.33),
+                          ("starting_time_step = 1, starting_time_step_den = 200, min_time_step = 0", 0.01)):
+            t = WrfTranslator(parse_namelist(real_case(
+                f"&time_control history_interval_s = 600 /\n&domains time_step = 0, {dom}, use_adaptive_time_step = "
+                ".true. /\n&physics /\n")))
+            cfg = t.translate()
+            self.assertEqual((t.errors, cfg["time"]["dt"]), ([], want), dom)
         for nl, err in (("&domains time_step = 60, use_adaptive_time_step = .true. /\n&physics sst_update = 1 /",
-                         "sst_update"),):
-            t = WrfTranslator(parse_namelist(real_case(f"&time_control /\n{nl}\n")))
+                         "sst_update"),
+                        ("&domains time_step = 0, starting_time_step = 1, starting_time_step_den = 250, min_time_step "
+                         "= 0, use_adaptive_time_step = .true. /\n&physics /", "not positive"),
+                        ("&domains time_step = 0, max_time_step = 60, max_time_step_den = -2, min_time_step = 45, "
+                         "use_adaptive_time_step = .true. /\n&physics /", "max_time_step_den = -2"),
+                        ("&domains time_step = 0 /\n&physics /", "time_step = 0 without use_adaptive_time_step")):
+            t = WrfTranslator(parse_namelist(real_case(f"&time_control history_interval_s = 600 /\n{nl}\n")))
             t.translate()
             self.assertIn(err, " ".join(t.errors), nl)
 

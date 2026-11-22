@@ -64,6 +64,10 @@ resumes across versions from WRF's wrfrst files.
   build's 256-lane ordered sums and the refusal of CPPWRF_TILE_CHECK in src/core/tiles.cpp, as in CUDA builds (the
   host path copied the device fields with memcpy); MPI builds take the device UUID from hipDeviceGetUuid, which
   ROCm 5 has as well (hipDeviceProp_t has its uuid member from ROCm 6.0 on). CUDA and CPU builds unchanged.
+- Translator: use_adaptive_time_step rounds the starting time step to 1/100 s before max_time_step and
+  min_time_step, as adapt_timestep (time.dt 0.33 for 1/3 s; a starting time step below 0.005 s with min_time_step =
+  0 is refused); a negative starting / max / min_time_step_den is refused; time_step = 0 without the adaptive time
+  step is an error instead of a crash of the translator.
 
 ## 1.2.2 (2026-11-22)
 

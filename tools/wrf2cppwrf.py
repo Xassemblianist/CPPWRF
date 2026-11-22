@@ -1626,6 +1626,10 @@ class WrfTranslator:
         num = self.get_opt("domains", "time_step_fract_num", 0)
         den = self.get_opt("domains", "time_step_fract_den", 1)
         adaptive = bool(self.get_opt("domains", "use_adaptive_time_step", False))
+        if not adaptive and dt <= 0 and not (num and den and den > 0 and num > 0):
+            # check_a_mundo rejects -1 only; with a time step of 0 (or below) WRF's clock does not advance
+            self.error(f"WRF time_step = {time_step} without use_adaptive_time_step: the time step must be positive.")
+            dt = 60.0
         if den and den > 0 and num and not adaptive:
             self.error("WRF time_step_fract_num/den (fractional time step) is not supported: WRF's boundary "
                        "time dtbc is a running sum of dt, not verified for a non-integer dt.")
@@ -1642,8 +1646,16 @@ class WrfTranslator:
                 if n == -1:
                     n = int(math.floor(factor * dxy / 1000 + 0.5))
                 d = self.get_opt("domains", key + "_den", 0)
+                if d < 0:  # the interval Sn / Sd of a negative denominator is not verified
+                    self.error(f"WRF {key}_den = {d} is not supported (a negative denominator).")
+                    d = 0
                 return float(n) / float(d) if d else float(n)
-            dt = max(min(step("starting_time_step", 4), step("max_time_step", 8)), step("min_time_step", 3))
+            # adapt_timestep rounds the starting time step to 1/100 s (NINT(dt * 100) / 100) before the max_time_step
+            # and min_time_step limits
+            start = step("starting_time_step", 4)
+            y = abs(start) * 100
+            start = math.copysign(math.floor(y) + (1 if y - math.floor(y) >= 0.5 else 0), start) / 100
+            dt = max(min(start, step("max_time_step", 8)), step("min_time_step", 3))
             if dt <= 0:
                 self.error("WRF use_adaptive_time_step: the starting time step is not positive.")
                 dt = 60.0
