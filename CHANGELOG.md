@@ -5,7 +5,7 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
-## 1.3.0 (2026-11-23)
+## 1.3.0 (2026-11-22)
 
 ### Changed
 - The GPU FP32 builds are WRF real*4's arithmetic by default: CPPWRF_CUDA_FP32_IDENTITY (and CPPWRF_HIP_FP32_IDENTITY)

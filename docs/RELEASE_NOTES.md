@@ -1,3 +1,62 @@
+# CPPWRF 1.3.0 release notes
+
+CPPWRF 1.3.0 makes WRF real*4's arithmetic the default of the GPU FP32 builds. `-DCPPWRF_ENABLE_CUDA=ON
+-DCPPWRF_DOUBLE=OFF` now builds the FP32 identity build: bit-identical to the CPU FP32 build and to stock WRF v4.8.0
+real*4 on the configurations of docs/FP32_IDENTITY.md. The fast FP32 build stays available with
+`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`. The results of every verified configuration are unchanged: CPU FP64 and CUDA FP64
+reproduce WRF v4.8.0 real*8 bit for bit, CPU FP32 and the CUDA FP32 identity build reproduce WRF v4.8.0 real*4. It
+covers 12 commits (not counting merges) from `v1.2.3` to the 1.3.0 release commit. The 1.2.3 notes follow below.
+
+## Changed
+
+- **GPU FP32 = WRF real*4 by default:** CPPWRF_CUDA_FP32_IDENTITY and CPPWRF_HIP_FP32_IDENTITY default to ON (no
+  effect on FP64 and CPU builds). Who built `gpu-fp32` without options before gets the identity build now; the fast
+  build (FMA contraction, CUDA's math library; 2 to 17 % faster in the paper benchmark, docs/FP32_ACCURACY.md) is
+  `-DCPPWRF_CUDA_FP32_IDENTITY=OFF`. The release tarballs, containers, Spack package and Python package's `gpu-fp32`
+  follow the default. The suite, benchmark, tiles and MPI tools that test the fast build name it explicitly.
+- **Translator as WRF's check_a_mundo:** WRF v4.8.0's automatic resets and refusals (MSKF's icloud and
+  cu_rad_feedback, the innermost domain's sf_urban_physics, o3input and ghg_input, sst_update 0, MYNN-only options,
+  icloud_bl, scalar_pblmix, grav_settling with mp_physics 28, idcor / hail_opt values, zdamp only with damp_opt 2,
+  nest defaults, vert_refine_fact); options without effect are noted instead of refused; MYNN and ACM2 accept every
+  ported microphysics scheme carrying their species. The translation of the 173 namelists of the repository is
+  unchanged in every value.
+- **Licensing:** SPDX expressions name the third-party terms of every derived file (AER's RRTMG / RRTM, UCAR's
+  Noah-MP, glibc, CORE-MATH, wrf-python); licenses/ holds the texts, docs/LICENSING.md explains the combination.
+
+## Fixed
+
+- **CPPWRF's own restart files** carry the simulation start and, at a last step that does not ring, the seconds to
+  the earlier of the pending ring and the next interval, so that chains of wrfrst and CPPWRF restart files date and
+  ring as WRF; whole seconds of the exact clock with fractional time steps; STEPBL / STEPCU without column physics.
+- **Translator:** the adaptive starting time step rounded to 1/100 s as adapt_timestep; negative time step
+  denominators and time_step = 0 refused with a message.
+- **HIP builds:** the tiled and MPI device paths of src/core/tiles.cpp, hipDeviceGetUuid, NSSL's power table and an
+  assertion in device code. Both HIP FP64 and FP32 (identity and fast) now compile to the end with ROCm 6.4.1 for
+  gfx90a / gfx942; still not run on AMD hardware.
+- **Benchmark tools:** failed steps fail the session; timeouts, OOM kills, power integration and thread counts.
+- **GPU suite data:** the CUDA tiled KESSKF twin reads its data, so all 423 CUDA FP64 checks run.
+
+## Verification
+
+| Where | Result |
+|---|---|
+| CPU CI at 318159a (GitHub-hosted runners, Debian 13 container, run 45017066167) | suite PASS 527 FAIL 0 SKIP 0 at tolerance 0; WRF output files 42 / 42; ideal files 14; differential tests 32 / 32; ctest 39 / 40, the one failure being docs_options_current (generated option tables not regenerated after the translator change), fixed in c0de113 |
+| CPU CI at 5de6edb (the FP32 default and its documentation, affected cases, run 45024599983) | PASS 10 FAIL 0 SKIP 0 |
+| GPU: Colab G4 at 318159a (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 423 / 423 at tolerance 0, FAIL 0, SKIP 0; CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; device glibc math proof identical; ctest 41 / 42 (FP64) and 42 / 43 (FP32), the one failure being docs_options_current, fixed in c0de113 |
+| HIP compile on Colab (ROCm 6.4.1, no AMD GPU) | FP64 (gfx90a), fast FP32 and FP32 identity (gfx942) build to the end |
+
+The G4 run's commit 318159a predates the change of the default. For the binaries it tested the change is none: CMake
+at 318159a and at 5c1a7de gives the same compile flags for CUDA FP64, for the fast FP32 build (old default, new
+`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) and for the identity build (old `=ON`, new default), and the same CPU flags. The
+commits after 5c1a7de change documentation, help strings, comments and version strings only.
+
+The suite defines the same 1153 cases as 1.2.3 (618 CPU FP64, 404 CUDA FP64, 43 CUDA FP32, 44 `cpu_sp`, 44
+`cuda_sp_id`).
+
+## Known limitations
+
+As 1.2.3 (docs/STATUS.md). The HIP build path compiles but is unverified on AMD hardware (docs/HIP.md).
+
 # CPPWRF 1.2.3 release notes
 
 CPPWRF 1.2.3 widens the verified set and fixes restarts and translator details outside it. The results of every

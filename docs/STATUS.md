@@ -1,16 +1,16 @@
 # CPPWRF: status and verification
 
-Version 1.2.3 (docs/RELEASE_NOTES.md: the verified scope of the release).
+Version 1.3.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
-(at c29a32d, version 1.2.3: 1153 cases, 618 CPU FP64, 404 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`, against
+(at 318159a, version 1.3.0: 1153 cases, 618 CPU FP64, 404 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`, against
 WRF real*4) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart configurations. The CPU CI runs 527 checks, i.e.
 the 464 CPU FP64 cases outside `--slow`, 18 restart checks, the Straka check and the 44 `cpu_sp` cases, all passing at
 fbbcf57; the 154 slow CPU cases are the 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases. For 1.1.0 the
 Colab G4 ran all 319 CUDA FP64 cases, the 18 GPU restart checks and the GPU Straka check, 338 checks, all passing
 at tolerance 0, and the 43 CUDA FP32 cases with restart_p1_fp32_cuda, 44 runs within their tolerances; the 1.2.0,
-1.2.1, 1.2.2 and 1.2.3 GPU runs (1.2.3: 423 CUDA FP64 checks, 422 run) are in docs/RELEASE_NOTES.md) and `tests/verify/run_wrf_files_test.sh` (WRF output files).
+1.2.1, 1.2.2, 1.2.3 and 1.3.0 GPU runs (1.3.0: all 423 CUDA FP64 checks run) are in docs/RELEASE_NOTES.md) and `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
 
@@ -280,7 +280,8 @@ at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff`
 files 14, `ctest -L diff` 32/32, ctest 35/35, all exact; for 1.2.1 at 4a57df7: suite PASS 387, WRF output files 42,
 ideal files 14, `ctest -L diff` 32/32, ctest 36/36, all exact; for 1.2.2 at fbbcf57: suite PASS 423, WRF output files
 42, ideal files 14, `ctest -L diff` 32/32, ctest 40/40, all exact; for 1.2.3 at c29a32d / ca4de31: suite PASS 527, WRF
-output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 40/40, all exact), and
+output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 40/40, all exact; for 1.3.0 at 318159a: suite PASS 527,
+WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 39/40 (the generated option tables, fixed in c0de113)), and
 on the AMD CPU of Colab's G4 runtime (`tools/colab/colab_suite.sh --gpu G4 --any-cpu --jobs 12 --threads 4`: the CPU
 suite, the output files, ideal files, differential and ctest tests); the Intel L4 runtime and the GCP VMs stay
 possible.
@@ -324,7 +325,8 @@ Server Edition, sm_120, CUDA 13.0, 2026-11-20) ran all of them at fb158f3, which
 cases, 18 GPU restart checks and the GPU Straka check, 338 PASS, 0 FAIL; the device glibc math proof was identical
 and ctest passed 35/35 in the FP64 and the FP32 CUDA build. For 1.2.2 (fbbcf57, 2026-11-22): 337 cases, 18 GPU
 restart checks and the GPU Straka check, 356 PASS, 0 FAIL. For 1.2.3 (c29a32d, 2026-11-22): 404 cases, 18 GPU
-restart checks and the GPU Straka check, 422 PASS, 0 FAIL, 1 not run (its data tar was missing from the GPU data list). Earlier subsets also ran on Colab's L4 (sm_89) and A100
+restart checks and the GPU Straka check, 422 PASS, 0 FAIL, 1 not run (its data tar was missing from the GPU data list). For 1.3.0 (318159a,
+2026-11-22): 404 cases, 18 GPU restart checks and the GPU Straka check, 423 PASS, 0 FAIL, 0 SKIP. Earlier subsets also ran on Colab's L4 (sm_89) and A100
 (sm_80); H100 was not available. The FP64 device code
 computes as WRF's gfortran real*8 build on x86-64:
 

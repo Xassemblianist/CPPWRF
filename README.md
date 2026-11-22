@@ -1,6 +1,6 @@
 # CPPWRF
 
-Version 1.2.3 ([release notes](docs/RELEASE_NOTES.md)).
+Version 1.3.0 ([release notes](docs/RELEASE_NOTES.md)).
 
 CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static nesting,
 `real.exe` and `ideal.exe`. One source tree builds for the CPU (OpenMP) and for NVIDIA GPUs (CUDA), in FP64
@@ -10,7 +10,7 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** For v1.2.3 all 422 CUDA FP64 checks run matched WRF at tolerance 0 on the Colab G4 (356 for v1.2.2, 338 for v1.2.0 and v1.2.1), and the CUDA FP32 identity build matched WRF real*4 in all 44 cases. For v1.1.0 all 338 CUDA FP64 checks of the
+- **GPU, FP64: bit-identical to WRF too.** For v1.3.0 all 423 CUDA FP64 checks matched WRF at tolerance 0 on the Colab G4 (422 run for v1.2.3, 356 for v1.2.2, 338 for v1.2.0 and v1.2.1), and the CUDA FP32 identity build matched WRF real*4 in all 44 cases. For v1.1.0 all 338 CUDA FP64 checks of the
   suite (319 cases, 18 restart checks and the Straka check) matched WRF at tolerance 0 on the Colab G4 (RTX PRO 6000
   Blackwell, sm_120, CUDA 13.0); earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
 - **CPU and GPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations,
@@ -67,7 +67,7 @@ without a port is reported as an error and never silently ignored. Still missing
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
 - **Model runs against WRF** (`tests/verify/wrf_suite.py`): on every push 483 CPU FP64 checks against WRF real*8
   (464 cases, 18 restart checks and the Straka check; 154 more cases run with `--slow`) and 44 CPU FP32 cases
-  against WRF real*4, all passing at tolerance 0 at c29a32d (version 1.2.3), and the CUDA FP64 checks and the CUDA FP32 identity
+  against WRF real*4, all passing at tolerance 0 at 318159a (version 1.3.0), and the CUDA FP64 checks and the CUDA FP32 identity
   cases once per release on a GPU. They cover
   real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
   at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are
