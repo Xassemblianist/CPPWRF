@@ -7,6 +7,31 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+### Fixed
+- wrfrst files of a resumed run whose restart.interval is shorter than the restart file's seconds to the next ring:
+  WRF_ALARM_SECS_TIL_NEXT_RING_51 is the interval - (time - PrevRingTime) of output_wrf at every ring, also at the
+  rings by the interval before the file's pending RingTime (P1 resumed at 5 min from a 5-min interval with 1 min:
+  60 s at 6, 7, 8, 9 min, was 240, 180, 120, 60 s; a run resumed from such a file rang again at the old RingTime).
+  CPPWRF's own restart file of such a ring carries the same seconds.
+- A run resumed from a wrfrst file dates its files from the file's SIMULATION_START_DATE (input_wrf), not from
+  run.start_date: the translation of a resumed ideal run's namelist (start_* = the restart time) run with
+  run.restart_file wrote SIMULATION_START_DATE = the restart time and every date shifted by the restart time. The
+  adaptive resume's clock from Times counts from that date as well. run.run_time still counts from the simulation
+  start.
+- FP32 builds: STEPRA, STEPBL, STEPCU and STEPFG of the wrfrst file (phy_init without the column physics, STEPRA
+  from phys.radt, STEPFG without grid nudging) and topo_shading's STEPRA without radiation in WRF's REAL as ra_init,
+  bl_init, cu_init and fg_init (radt 2.1 min, dt 12 s: 10, was 11). FP64 builds unchanged.
+- Translator, use_adaptive_time_step: time.dt is adapt_timestep's first time step, starting_time_step /
+  starting_time_step_den between max_time_step and min_time_step (their NINT(4, 8, 3 * MIN(dx, dy) / 1000) defaults
+  with dx, dy of the Registry, 200 m, when the namelist has none), whatever time_step is; time_step = 0 without dx /
+  dy or with a starting time step of 0 s raised to min_time_step was refused. The model computed the time step from
+  [time] already; results unchanged.
+- Nests of an INI: parent_grid_ratio >= 2 and the nest from parent cell 3 to 2 cells inside its parent's edge, as
+  the translator checks (a ratio of 1 at the parent's edge read the parent's fields beyond their halo in the
+  boundary interpolation).
+- Tiedtke: the comment on cududv's level 0 (times pmfu(1) = cmfctop * pmfu(2) with a cloud top at level 2, where
+  WRF's value is undefined; times 0 at level 3). No code change.
+
 ## 1.2.2 (2026-11-22)
 
 ### Documentation

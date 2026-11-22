@@ -83,6 +83,21 @@ std::string wrf_times(const std::string& path) {
   return t;
 }
 
+// a global text attribute of a NetCDF file ("" without one)
+std::string global_text(const std::string& path, const char* name) {
+  int id;
+  std::string t;
+  if (nc_open(path.c_str(), NC_NOWRITE, &id) != NC_NOERR) return t;
+  std::size_t n = 0;
+  nc_type ty;
+  if (nc_inq_att(id, NC_GLOBAL, name, &ty, &n) == NC_NOERR && ty == NC_CHAR) {
+    t.resize(n);
+    if (n > 0 && nc_get_att_text(id, NC_GLOBAL, name, t.data()) != NC_NOERR) t.clear();
+  }
+  nc_close(id);
+  return t;
+}
+
 // The WRF variable of a restart field (names of save_restart_file)
 std::vector<std::string> wrf_names(const std::string& n) {
   auto up = [](std::string x) {
@@ -307,7 +322,7 @@ DomainRunner::DomainRunner(const io::Config& cfg, cases::Model& m, const std::st
 DomainRunner::~DomainRunner() = default;
 
 #ifdef CPPWRF_HAVE_NETCDF
-void DomainRunner::save_restart_file(const std::string& path, long step, double time_sec) {
+void DomainRunner::save_restart_file(const std::string& path, long step, double time_sec, bool ring) {
   // a decomposed run: the writer's code with the whole fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
@@ -324,7 +339,7 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   meta.date_str = wrf_io::add_seconds(start_date_, std::lround(time_sec));
   meta.commit = CPPWRF_COMMIT;
   meta.options = restart_options(cfg_);
-  meta.restart_secs_to_ring = rst_secs_to_ring(step);
+  meta.restart_secs_to_ring = rst_secs_to_ring(step, ring);
   if (m_.suite) {  // Registry r scalars of WRF's restart stream: grid%nsteps; grid%declin, grid%solcon (DECLINX, SOLCONX
     // of the last radiation call: the surface driver's TOPO_RAD_ADJ and urban read them until the next call)
     meta.scalars.emplace_back("NSTEPS", double(m_.suite->nsteps));
@@ -719,9 +734,8 @@ void DomainRunner::load_restart_file(const std::string& path) {
       // rounded (3601 s: 60.016666 min, 3600.99998 s), so the second of XTIME whose date is the file's Times
       long secs = long(std::floor(meta.time_sec + 1e-6));
       const std::string times = wrf_times(path);
-      const std::string sd = cfg_.get_string("run.start_date", !m_.start_date.empty() ? m_.start_date : "2000-01-01_00:00:00");
       for (const long c : {secs, secs + 1, secs - 1})
-        if (times.size() == 19 && wrf_io::add_seconds(sd, c) == times) {
+        if (times.size() == 19 && wrf_io::add_seconds(start_date_, c) == times) {
           secs = c;
           break;
         }
@@ -810,13 +824,27 @@ void DomainRunner::load_restart_file(const std::string& path) {
 }
 #endif
 
+// The simulation start (SIMULATION_START_DATE, the files' dates count from it): run.start_date, else the input's
+// start. A run resumed from a WRF restart file takes the file's (input_wrf: simulation_start_* of the restart file;
+// the namelist's start_* of a resumed run are the restart time)
+std::string DomainRunner::simulation_start() const {
+  std::string sd = cfg_.get_string("run.start_date", !m_.start_date.empty() ? m_.start_date : "2000-01-01_00:00:00");
+#ifdef CPPWRF_HAVE_NETCDF
+  const std::string rf = cfg_.get_string("run.restart_file", "");
+  if (!rf.empty() && is_wrfrst(rf)) {
+    const std::string f = global_text(rf, "SIMULATION_START_DATE");
+    if (f.size() >= 19) sd = f.substr(0, 19);
+  }
+#endif
+  return sd;
+}
+
 // Output field lists and the wrfout writer (also called by the nest driver before start(), so that
 // the nest initialisation feedback reaches the parent's first history frame)
 void DomainRunner::prepare_output() {
   if (output_prepared_) return;
   output_prepared_ = true;
-  if (start_date_.empty())
-    start_date_ = cfg_.get_string("run.start_date", !m_.start_date.empty() ? m_.start_date : "2000-01-01_00:00:00");
+  if (start_date_.empty()) start_date_ = simulation_start();
   if (m_.rk && m_.rk->physics()) {
     extra_2d_ = {&m_.rk->physics()->rainnc, &m_.rk->physics()->rainncv};
     if (m_.rk->physics()->ice_precip()) {
@@ -972,7 +1000,7 @@ bool DomainRunner::start() {
   wrf_timing_ = cfg_.get_bool("output.wrf_timing", false);
   // the non-finite check of every step (else on the diagnostic steps only, output.diag_interval)
   nonfinite_every_step_ = cfg_.get_bool("run.check_nonfinite_every_step", false);
-  start_date_ = cfg_.get_string("run.start_date", !m_.start_date.empty() ? m_.start_date : "2000-01-01_00:00:00");
+  start_date_ = simulation_start();
 
 #ifndef CPPWRF_HAVE_NETCDF
   if (write_wrfout_) {
@@ -1412,11 +1440,13 @@ bool DomainRunner::rst_due(long n) const {
 }
 
 // the restart alarm's seconds to its next ring after step n: output_wrf's interval - (time - PrevRingTime) in whole
-// seconds (share/output_wrf.F:413-435); a native restart file at the last step before a resumed run's first ring (no
-// wrfrst file there) takes the seconds to that RingTime, so a run resumed from it rings there too
-long DomainRunner::rst_secs_to_ring(long n) const {
+// seconds (share/output_wrf.F:413-435), also at a ring by the interval before a resumed run's pending RingTime (a
+// restart.interval shorter than the file's seconds to the next ring: output_wrf does not read RingTime); a native
+// restart file at a last step that does not ring before that RingTime (no wrfrst file there) takes the seconds to
+// it, so a run resumed from it rings there too
+long DomainRunner::rst_secs_to_ring(long n, bool ring) const {
   const double t = double(n) * m_.g.dt;
-  if (rst_ring_time_ >= 0.0 && t < rst_ring_time_) return long(std::trunc(rst_ring_time_ - t));
+  if (!ring && rst_ring_time_ >= 0.0 && t < rst_ring_time_) return long(std::trunc(rst_ring_time_ - t));
   if (rst_iv_s_ <= 0) return 1700000000L;  // the forever interval (set_timekeeping), written unchanged
   return long(std::trunc(rst_iv_s_) - std::trunc(t - rst_prev_));
 }
@@ -1433,7 +1463,7 @@ void DomainRunner::do_restart(long n, bool ring) {
   std::snprintf(rst_name, sizeof(rst_name), "restart_%06ld.nc", n);
   std::string rst_path = out_dir_ + "/" + rst_name;
   const auto t_rst = std::chrono::steady_clock::now();
-  if (write_native_restart_) save_restart_file(rst_path, n, time_s(n));
+  if (write_native_restart_) save_restart_file(rst_path, n, time_s(n), ring);
   // wrfrst only when WRF's restart alarm rings, not at an off-interval last step; output_wrf writes the seconds
   // to the next ring as interval - (time - PrevRingTime) in whole seconds (share/output_wrf.F:413-435). Only with
   // WRF output: a nest's feedback also builds the history writer with output.format = native, but then its
@@ -1453,7 +1483,7 @@ void DomainRunner::do_restart(long n, bool ring) {
     wrfout_->set_exact_time(elapsed(n), false);
     wrfout_->set_auxhist3_alarm(double(aux3_iv_) * m_.g.dt, double(aux3_ref_) * m_.g.dt);
     wrfout_->write_restart(n, n * m_.g.dt, double(hist_iv_) * m_.g.dt, double(hist_ref_) * m_.g.dt,
-                           double(rst_secs_to_ring(n)), aux4_first_s_);
+                           double(rst_secs_to_ring(n, true)), aux4_first_s_);
   }
   if (wrf_timing_ && wrfout_ && ring) wrf_timing_line(writing("restart", domain_tag_), t_rst);
 }

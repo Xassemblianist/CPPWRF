@@ -415,8 +415,9 @@ struct KTiedtke {
       in.sig1[zz] = znu(k);
     }
     for (int k = 0; k <= nz; ++k) in.paph[nz + 1 - k] = p8w(i, j, k);
-    // level 0 (above the top): cududv reads puen(ik = ktopm2 - 1 = 0) times a zero mass flux, outside WRF's
-    // arrays; a defined value instead of the buffer's
+    // level 0 (above the top): cududv reads puen(ik = ktopm2 - 1 = 0), outside WRF's arrays: times a zero mass flux
+    // with a cloud top at level 3 (cuflx zeroes pmfu(1)), times pmfu(1) = cmfctop * pmfu(2) with one at level 2
+    // (WRF's result there is undefined); a defined value instead of the buffer's
     in.pu[0] = real(0.);
     in.pv[0] = real(0.);
     const real evap = qfx(i, j);

@@ -321,15 +321,14 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
   start_em_slopes();
   // integer state of the restart file: physics call intervals (radt = bldt = cudt = 0 -> every step),
   // adaptive time step (off), the serial patch size
-  auto stepn = [&](const char* opt) {
-    const double m = wc_->num(opt);
-    return double(std::max(1L, std::lround(m * 60. / g.dt)));
-  };
+  // max(nint(X*60./DT), 1) in WRF's REAL (ra_init, bl_init, cu_init, fg_init; float in a real*4 build)
+  auto step_of = [&](double m) { return double(std::max(1L, std::lround(real(m) * real(60.) / real(g.dt)))); };
+  auto stepn = [&](const char* opt) { return step_of(wc_->num(opt)); };
   // the configuration's radt / fgdt where it has them (a resumed run with another radt: ra_init's STEPRA of that one),
   // else the namelist's
   auto stepc = [&](const char* key, const char* opt) {
     if (!cfg.has(key)) return stepn(opt);
-    return double(std::max(1L, std::lround(cfg.get_double(key, 0.0) * 60. / g.dt)));
+    return step_of(cfg.get_double(key, 0.0));
   };
   phy_init_["STEPRA"] = {stepc("phys.radt", "radt")};
   phy_init_["STEPBL"] = {m_.suite ? double(m_.suite->stepbl) : stepn("bldt")};

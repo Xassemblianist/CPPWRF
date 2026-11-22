@@ -840,8 +840,9 @@ void PhysicsSuite::init_topo(const std::vector<double>& ht, const std::vector<do
 
 void PhysicsSuite::topo_shading_step() {
   // pre_radiation_driver: the first step and the steps of the radiation calls by the step count (STEPRA)
-  const int stepra = rad_ ? rad_->stepra()
-                          : (o_.rad.radt == 0 ? 1 : std::max(1, int(std::lround(o_.rad.radt * 60. / g_.dt))));
+  const int stepra =
+      rad_ ? rad_->stepra()
+           : (o_.rad.radt == 0 ? 1 : std::max(1, int(std::lround(real(o_.rad.radt) * real(60.) / real(g_.dt)))));
   if (!(itimestep == 1 || itimestep % stepra == 1 + o_.rad.ra_call_offset)) return;
   TopoFields& t = *topo_;
   const rb julian = wrf_julian(o_.rad.julyr, o_.rad.julday, o_.rad.gmt, clock_since_start());

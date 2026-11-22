@@ -602,7 +602,7 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[run]` | `case` | string | *required* | Simulation case (`real`, `em_hill2d_x`, `em_quarter_ss`, `em_squall2d_x`, `em_squall2d_y`, `em_grav2d_x`, `straka`, `squall2d`, `warm_bubble`, `rest_state`, `igw`) | `ideal_case` |
 | `[run]` | `run_time` | double | `0.0` | Total simulation duration in seconds | `run_days/hours/minutes/seconds` |
 | `[run]` | `restart_file` | string | `""` | Path to NetCDF restart file (`restart_*.nc`) to resume execution | `restart` / restart filename |
-| `[run]` | `start_date` | string | `"2000-01-01_00:00:00"` | UTC start timestamp string | `start_year/month/day/hour/etc` |
+| `[run]` | `start_date` | string | `"2000-01-01_00:00:00"` | UTC start timestamp string: the simulation start (a run resumed from a wrfrst file takes the file's `SIMULATION_START_DATE`) | `start_year/month/day/hour/etc` |
 | `[run]` | `stop_on_nonfinite` | bool | `true` | Stop when a diagnostic step finds a NaN / Inf (false: go on, as WRF does) | none |
 | `[run]` | `check_nonfinite_every_step` | bool | `false` | Look for NaN / Inf after every step (default: on the `output.diag_interval` steps); the message names the first non-finite field and point | none |
 | `[run]` | `tiles` | string | `"1"` | `PxQ` (or `P`): the domain as P x Q tiles, host threads of one process (section 7, "Tiles and MPI ranks") | none |
@@ -774,7 +774,9 @@ from WRF or from CPPWRF. CPPWRF reads the restart stream (prognostic state, base
 state); fields that WRF does not restart start from WRF's initial value. A nested run reads
 `wrfrst_d0N_<date>` from the same directory for each nest. Resumed from WRF's restart files, the CPU
 FP64 results are identical to WRF's resumed run (`tests/verify/run_wrf_files_test.sh`, references
-from `tests/verify/make_resumed_refs.sh`).
+from `tests/verify/make_resumed_refs.sh`). `run.run_time` counts from the simulation start, not from the
+restart time; the files' dates count from the wrfrst file's `SIMULATION_START_DATE` (as wrf.exe, whose
+namelist `start_*` of a resumed run is the restart time), whatever `run.start_date` says.
 
 ```ini
 [restart]

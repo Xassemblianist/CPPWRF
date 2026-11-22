@@ -2144,6 +2144,20 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         # interval_seconds: the Registry default 10800 (real_case checks it against the wrfbdy interval)
         self.assertEqual((tm["history_interval_s"], tm["interval_seconds"]), (600, 10800))
         self.assertNotIn("target_hcfl", tm)
+        # time.dt: adapt_timestep's first time step, starting_time_step (/ its _den) between max_time_step and
+        # min_time_step (-1: NINT(4, 8, 3 * MIN(dx, dy) / 1000), dx, dy Registry 200 m), whatever time_step is
+        for dom, want in (("time_step = 0", 1),  # without dx, dy: NINT(0.8) = 1 s
+                          ("time_step = 0, dx = 100, dy = 100, min_time_step = 1", 1),  # NINT(0.4) = 0 -> 1 s
+                          ("time_step = 0, starting_time_step = 1, starting_time_step_den = 2, min_time_step = 0", 0.5),
+                          ("time_step = 60, starting_time_step = 50", 50),
+                          ("time_step = 60", 60)):
+            nl = real_case(f"&time_control history_interval_s = 600 /\n&domains {dom}, use_adaptive_time_step = .true."
+                           " /\n&physics /\n")
+            if dom == "time_step = 0":
+                nl = re.sub(r"\bd[xy] = 15000,", "", nl)
+            t = WrfTranslator(parse_namelist(nl))
+            cfg = t.translate()
+            self.assertEqual((t.errors, cfg["time"]["dt"]), ([], want), dom)
         for nl, err in (("&domains time_step = 60, use_adaptive_time_step = .true. /\n&physics sst_update = 1 /",
                          "sst_update"),):
             t = WrfTranslator(parse_namelist(real_case(f"&time_control /\n{nl}\n")))

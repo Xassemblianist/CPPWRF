@@ -16,6 +16,9 @@ The test runs em_quarter_ss (11 x 11 cells, dt 12 s, restart interval 20 s, 144 
 of 24 s and compares the times of the wrfrst files, and the seconds to the next ring they carry, with that rule. The
 run resumed from CPPWRF's own restart_000002.nc continues the uninterrupted run: the same rings and wrfrst files
 (variables and global attributes); with another restart interval it rings as a run resumed from the wrfrst file.
+A resumed interval shorter than the file's seconds to the next ring (12 s) rings first and writes interval - (time -
+PrevRingTime). A resumed run dates its files from the wrfrst file's SIMULATION_START_DATE (run.start_date = the
+restart time, the namelist start of WRF's resumed run, changes nothing), and STEPRA is ra_init's in the build's REAL.
 
   restart_alarm_test.py CPPWRF_BINARY WORK_DIR     (from the repository root; exit 77 without
                                                     ${CPPWRF_WRF_REF}/run_qss/input_sounding or without NetCDF)
@@ -100,6 +103,26 @@ def main():
         return 1
     _, got = run("resumed", ["--set", f"run.restart_file={first[0]}"])
     check(f"run resumed from {t0} s, (time, seconds to the next ring)", got, wrf_rings(dt, iv, t_end, t0, secs))
+    # a restart interval shorter than the file's seconds to the next ring (12 s < 16 s): the interval rings before the
+    # pending RingTime (ESMF_ClockAdvance's PRED3: PrevRingTime += interval) and output_wrf writes interval - (time -
+    # PrevRingTime), it does not read RingTime
+    _, got = run("resumed_iv12", ["--set", f"run.restart_file={first[0]}", "--set", "restart.interval=12"])
+    check(f"run resumed from {t0} s with restart.interval = 12", got, wrf_rings(dt, 12, t_end, t0, secs))
+    # the namelist's start of a resumed run is the restart time: the files' dates count from the simulation start of
+    # the wrfrst file (input_wrf), whatever run.start_date says
+    d2, got = run("resumed_start", ["--set", f"run.restart_file={first[0]}",
+                                    "--set", f"run.start_date=0001-01-01_00:00:{t0:02d}"])
+    check(f"run resumed from {t0} s with run.start_date = the restart time", got, wrf_rings(dt, iv, t_end, t0, secs))
+    import netCDF4
+    starts = sorted({netCDF4.Dataset(f).getncattr("SIMULATION_START_DATE")
+                     for f in glob.glob(os.path.join(d2, "wrf*_d01_*"))})
+    check("its SIMULATION_START_DATE", starts, ["0001-01-01_00:00:00"])
+    # ra_init's STEPRA = max(nint(radt*60./dt), 1) in WRF's REAL: radt = 2.1 min, dt = 12 s is 10.499999 in real*4
+    # (10), 10.500000000000002 in real*8 (11)
+    prec = subprocess.run([binary, "--version"], capture_output=True, text=True).stdout
+    d3, _ = run("stepra", ["--set", "phys.radt=2.1", "--set", f"run.run_time={4 * dt}"])
+    with netCDF4.Dataset(sorted(glob.glob(os.path.join(d3, "wrfrst_d01_*")))[0]) as nc:
+        check("STEPRA of radt = 2.1 min, dt = 12 s", int(nc["STEPRA"][0]), 10 if "float32" in prec else 11)
     # restart_interval = 0 in the resumed run: the alarm keeps the file's RingTime and rings once (WRF 4.8.0: the run
     # resumed from 150 s with restart_interval = 0 writes one wrfrst file, of 250 s, with 1700000000 seconds to go)
     _, got = run("resumed_iv0", ["--set", f"run.restart_file={first[0]}", "--set", "restart.interval=0"])
@@ -111,13 +134,12 @@ def main():
     dn, got = run("resumed_native", ["--set", f"run.restart_file={native}"])
     check(f"run resumed from {t0} s (CPPWRF's restart file), (time, seconds to the next ring)", got,
           [x for x in want if x[0] > t0])
-    # with another restart.interval (30 s, 0) the file's PrevRingTime is of no use: the alarm of a run resumed from
-    # WRF's file, from the restart time and the file's seconds to the next ring
-    for iv2 in (30, 0):
+    # with another restart.interval (30 s, 12 s, 0) the file's PrevRingTime is of no use: the alarm of a run resumed
+    # from WRF's file, from the restart time and the file's seconds to the next ring
+    for iv2 in (30, 12, 0):
         _, got = run(f"resumed_native_iv{iv2}", ["--set", f"run.restart_file={native}", "--set", f"restart.interval={iv2}"])
         check(f"run resumed from {t0} s (CPPWRF's restart file) with restart.interval = {iv2}", got,
               wrf_rings(dt, iv2, t_end, t0, secs))
-    import netCDF4
     for f in sorted(glob.glob(os.path.join(dn, "wrfrst_d01_*"))):
         with netCDF4.Dataset(f) as b, netCDF4.Dataset(os.path.join(d, os.path.basename(f))) as a:
             a.set_auto_maskandscale(False)
