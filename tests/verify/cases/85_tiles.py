@@ -82,3 +82,5 @@ CASES += [(f"{n}_wrst", c[1], c[2], list(c[3]) + sets, c[4], c[5], dict(c[6])) f
 DATA = {f"{n}_t{lay}": _BASE_DATA[n] for n, lay in _TILED}
 DATA.update({f"{_CUDA_NAME[n]}_t{lay}": _BASE_DATA[n] for n, lay in _TILED_CUDA})
 DATA.update({f"{n}_wrst": _BASE_DATA[n] for n, _ in _WRST})
+# the GPU runs take run_KESSKF_r8 from kesskf_data.tar (v05_files_data.tar's absolute links are for the CPU suite)
+DATA["real_kesskf_r8_fp64_cuda_t3x1"] = "kesskf_data.tar,v05_iofields.tar"

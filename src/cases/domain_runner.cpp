@@ -337,9 +337,10 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   meta.dx = g.dx; meta.dy = g.dy; meta.dt = g.dt;
   meta.case_name = cname_;
   meta.date_str = wrf_io::add_seconds(start_date_, std::lround(time_sec));
+  meta.sim_start_date = start_date_.substr(0, 19);  // a run resumed from the file dates its files from it
   meta.commit = CPPWRF_COMMIT;
   meta.options = restart_options(cfg_);
-  meta.restart_secs_to_ring = rst_secs_to_ring(step, ring);
+  meta.restart_secs_to_ring = m_.adapt ? rst_secs_to_ring_adapt(step, ring) : rst_secs_to_ring(step, ring);
   if (m_.suite) {  // Registry r scalars of WRF's restart stream: grid%nsteps; grid%declin, grid%solcon (DECLINX, SOLCONX
     // of the last radiation call: the surface driver's TOPO_RAD_ADJ and urban read them until the next call)
     meta.scalars.emplace_back("NSTEPS", double(m_.suite->nsteps));
@@ -826,12 +827,13 @@ void DomainRunner::load_restart_file(const std::string& path) {
 
 // The simulation start (SIMULATION_START_DATE, the files' dates count from it): run.start_date, else the input's
 // start. A run resumed from a WRF restart file takes the file's (input_wrf: simulation_start_* of the restart file;
-// the namelist's start_* of a resumed run are the restart time)
+// the namelist's start_* of a resumed run are the restart time); so does a run resumed from CPPWRF's own file, which
+// carries the simulation start of the run that wrote it (that run resumed from a wrfrst file: its file's)
 std::string DomainRunner::simulation_start() const {
   std::string sd = cfg_.get_string("run.start_date", !m_.start_date.empty() ? m_.start_date : "2000-01-01_00:00:00");
 #ifdef CPPWRF_HAVE_NETCDF
   const std::string rf = cfg_.get_string("run.restart_file", "");
-  if (!rf.empty() && is_wrfrst(rf)) {
+  if (!rf.empty()) {
     const std::string f = global_text(rf, "SIMULATION_START_DATE");
     if (f.size() >= 19) sd = f.substr(0, 19);
   }
@@ -1439,16 +1441,41 @@ bool DomainRunner::rst_due(long n) const {
   return rst_one_shot(n) || (rst_iv_s_ > 0 && rst_prev_ + rst_iv_s_ <= double(n) * m_.g.dt + 1e-6 * m_.g.dt);
 }
 
+// the whole seconds of a non-negative time difference x of the fixed time step clock (WRFU_TimeIntervalGet's S of
+// the exact interval): n * dt in floating point can lie just below a whole second (a time step of 60 / 11 s:
+// 11 * dt = 59.99999999999999), where the exact clock is on it
+static long whole_seconds(double x) {
+  const double r = std::round(x);
+  return long(std::abs(x - r) <= 1e-6 ? r : std::trunc(x));
+}
+
 // the restart alarm's seconds to its next ring after step n: output_wrf's interval - (time - PrevRingTime) in whole
 // seconds (share/output_wrf.F:413-435), also at a ring by the interval before a resumed run's pending RingTime (a
 // restart.interval shorter than the file's seconds to the next ring: output_wrf does not read RingTime); a native
-// restart file at a last step that does not ring before that RingTime (no wrfrst file there) takes the seconds to
-// it, so a run resumed from it rings there too
+// restart file at a last step that does not ring (no wrfrst file there) takes the seconds to the alarm's next ring,
+// the earlier of the pending RingTime and PrevRingTime + interval (ESMF_ClockAdvance rings at either), so a run
+// resumed from it rings there too
 long DomainRunner::rst_secs_to_ring(long n, bool ring) const {
   const double t = double(n) * m_.g.dt;
-  if (!ring && rst_ring_time_ >= 0.0 && t < rst_ring_time_) return long(std::trunc(rst_ring_time_ - t));
+  const long by_iv = long(std::trunc(rst_iv_s_)) - whole_seconds(t - rst_prev_);
+  if (!ring && rst_ring_time_ >= 0.0 && t < rst_ring_time_) {
+    const long to_rt = whole_seconds(rst_ring_time_ - t);
+    return rst_iv_s_ > 0 ? std::min(to_rt, by_iv) : to_rt;
+  }
   if (rst_iv_s_ <= 0) return 1700000000L;  // the forever interval (set_timekeeping), written unchanged
-  return long(std::trunc(rst_iv_s_) - std::trunc(t - rst_prev_));
+  return by_iv;
+}
+
+// the same with the adaptive time step (the alarm by the clock, adapt_before_step): CPPWRF's own restart file of
+// step n (do_restart writes the wrfrst files' from the same state)
+long DomainRunner::rst_secs_to_ring_adapt(long n, bool ring) const {
+  const wrf_time::Interval t = t_end_[std::size_t(n - start_step)];
+  const long by_iv = rst_iv_s_ > 0 ? long(rst_iv_t_.S - (t - rst_prev_t_).S) : 1700000000L;
+  if (!ring && rst_ring_set_ && t < rst_ring_t_) {
+    const long to_rt = long((rst_ring_t_ - t).S);
+    return rst_iv_s_ > 0 ? std::min(to_rt, by_iv) : to_rt;
+  }
+  return by_iv;
 }
 
 // a resumed run's first ring: RingTime <= time < RingTime + dt (ESMF_ClockAdvance's PRED2, Is_alarm_tstep's)

@@ -28,6 +28,9 @@ struct RestartMeta {
   double dx = 0.0, dy = 0.0, dt = 0.0;
   std::string case_name;
   std::string date_str = "0001-01-01_00:00:00";
+  // the simulation start the run's dates count from (SIMULATION_START_DATE, as in WRF's wrfrst files: a run resumed
+  // from the file dates its files from it); "": not written
+  std::string sim_start_date;
   // the restart alarm's seconds to its next ring, as WRF's wrfrst attribute WRF_ALARM_SECS_TIL_NEXT_RING_51 (a run
   // resumed from the file rings first at its time + these seconds); < 0: not written (no restart alarm)
   long restart_secs_to_ring = -1;

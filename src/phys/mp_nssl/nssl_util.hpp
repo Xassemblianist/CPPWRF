@@ -72,10 +72,11 @@ struct Work {
 };
 
 // gfortran's x**n for an integer constant n (powi_as_mults: GCC's power tree, tree-ssa-math-opts.cc powi_table)
-template <int N>
-struct PowiTab {
-  static constexpr int t[] = {0, 1, 1, 2, 2, 3, 3, 4, 4, 6, 5, 6, 6, 10, 7, 9, 8};
-};
+// (a function, not a static data member: HIP device code cannot read a host static constexpr array)
+CPPWRF_HD constexpr int powi_tab(int n) {
+  constexpr int t[] = {0, 1, 1, 2, 2, 3, 3, 4, 4, 6, 5, 6, 6, 10, 7, 9, 8};
+  return t[n];
+}
 template <int N, class T>
 CPPWRF_HD inline T ipow_pos(T x) {
   if constexpr (N == 0) {
@@ -84,7 +85,7 @@ CPPWRF_HD inline T ipow_pos(T x) {
     return x;
   } else {
     static_assert(N <= 16, "ipow: extend the power table");
-    constexpr int tn = PowiTab<0>::t[N];
+    constexpr int tn = powi_tab(N);
     return ipow_pos<N - tn>(x) * ipow_pos<tn>(x);
   }
 }

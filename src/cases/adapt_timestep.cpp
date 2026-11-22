@@ -20,7 +20,9 @@ long fint(double x) { return long(x); }
 // NINT(dt * precision) of adapt_timestep's DOUBLE PRECISION dt
 long nint_dt(double dt) {
   if constexpr (sizeof(real) == 8) {
+#if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)  // host code (a GPU device pass has no 80-bit long double)
     static_assert(std::numeric_limits<long double>::digits >= 60, "dt * 100 must be exact in long double");
+#endif
     return std::lround(static_cast<long double>(dt) * 100.0L);
   } else {
     return std::lround(dt * precision);

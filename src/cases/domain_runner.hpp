@@ -115,6 +115,7 @@ class DomainRunner {
   bool rst_one_shot(long n) const;  // the alarm rings at the end of step n by its RingTime (ESMF_ClockAdvance's PRED2)
   // WRF_ALARM_SECS_TIL_NEXT_RING_51 of a restart file at the end of step n (ring: the alarm rang there)
   long rst_secs_to_ring(long n, bool ring) const;
+  long rst_secs_to_ring_adapt(long n, bool ring) const;
   // adaptive time step: the exact time (since this run's start) at the end of step start_step + i, and the history and
   // restart alarms of ESMF_ClockAdvance by time (PrevRingTime + interval <= current time; PrevRingTime += interval)
   std::vector<wrf_time::Interval> t_end_{wrf_time::Interval{}};

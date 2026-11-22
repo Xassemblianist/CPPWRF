@@ -19,20 +19,28 @@ run resumed from CPPWRF's own restart_000002.nc continues the uninterrupted run:
 A resumed interval shorter than the file's seconds to the next ring (12 s) rings first and writes interval - (time -
 PrevRingTime). A resumed run dates its files from the wrfrst file's SIMULATION_START_DATE (run.start_date = the
 restart time, the namelist start of WRF's resumed run, changes nothing), and STEPRA is ra_init's in the build's REAL.
+CPPWRF's own file at a last step that does not ring carries the seconds to the alarm's next ring (the earlier of the
+pending RingTime and PrevRingTime + interval) and the simulation start, so that a chain wrfrst -> restart_NNNNNN.nc ->
+resumed run rings and dates its files as WRF's alarm and input_wrf do. A time step of 60 / 11 s takes the whole seconds
+of the exact clock.
 
   restart_alarm_test.py CPPWRF_BINARY WORK_DIR     (from the repository root; exit 77 without
                                                     ${CPPWRF_WRF_REF}/run_qss/input_sounding or without NetCDF)
 """
 import glob
+import math
 import os
 import shutil
 import subprocess
 import sys
+from fractions import Fraction
 
 
 def wrf_rings(dt, iv, t_end, t0=0, secs_to_ring=None):
     """(time, seconds to the next ring written at that time) of WRF's restart alarm from t0 to t_end; secs_to_ring:
-    the WRF_ALARM_SECS_TIL_NEXT_RING_51 of the restart file a resumed run starts from."""
+    the WRF_ALARM_SECS_TIL_NEXT_RING_51 of the restart file a resumed run starts from. dt may be a Fraction (a time
+    step of time_step_fract): the times are then the whole seconds of the file names, and the seconds to the next ring
+    the interval minus the whole seconds of time - PrevRingTime (WRFU_TimeIntervalGet's S)."""
     prev, cur, out = t0, t0, []
     ring_time = None if secs_to_ring is None else t0 + secs_to_ring
     while cur + dt <= t_end:
@@ -44,7 +52,7 @@ def wrf_rings(dt, iv, t_end, t0=0, secs_to_ring=None):
         else:
             continue
         # restart_interval = 0: the forever interval (1700000000 s, written unchanged)
-        out.append((cur, iv - (cur - prev) if iv > 0 else 1700000000))
+        out.append((math.floor(cur), iv - math.floor(cur - prev) if iv > 0 else 1700000000))
     return out
 
 
@@ -149,6 +157,42 @@ def main():
             vs = sorted(n for n in a.variables if n not in b.variables or
                         a.variables[n][:].tobytes() != b.variables[n][:].tobytes())
             check(f"{os.path.basename(f)} of the native resume: differing attributes, variables", (atts, vs), ([], []))
+
+    # a chain wrfrst -> CPPWRF's own file -> resumed run. The run resumed from the wrfrst file of 60 s (restart interval
+    # 60 s: 60 s to the next ring, RingTime 120 s) with restart.interval = 24 rings by the interval at 84 s and ends at
+    # 96 s, where its own restart file has the seconds to the alarm's next ring, 108 s (PrevRingTime 84 + 24, before
+    # the pending RingTime 120 s: ESMF_ClockAdvance rings at either), and the simulation start of the wrfrst file
+    # (run.start_date = the restart time, as the namelist start of WRF's resumed run). The run resumed from that file
+    # with restart.interval = 36 rings first at 108 s and dates its files from the simulation start.
+    d60, got = run("iv60", ["--set", "restart.interval=60"])
+    check("restart.interval = 60, (time, seconds to the next ring)", got, wrf_rings(dt, 60, t_end))
+    f60 = glob.glob(os.path.join(d60, "wrfrst_d01_*_00:01:00"))
+    if not f60:
+        print("FAIL no restart file of 60 s to resume from")
+        return 1
+    late = ["--set", "run.start_date=0001-01-01_00:01:00"]
+    db, got = run("chain_b", ["--set", f"run.restart_file={f60[0]}", "--set", "restart.interval=24",
+                              "--set", "run.run_time=96"] + late)
+    check("run resumed from 60 s with restart.interval = 24 to 96 s", got, wrf_rings(dt, 24, 96, 60, 60))
+    nb = os.path.join(db, f"restart_{96 // dt:06d}.nc")
+    with netCDF4.Dataset(nb) as nc:
+        check(f"{os.path.basename(nb)}: seconds to the next ring, simulation start",
+              (int(nc.getncattr("WRF_ALARM_SECS_TIL_NEXT_RING_51")),
+               nc.getncattr("SIMULATION_START_DATE") if "SIMULATION_START_DATE" in nc.ncattrs() else None),
+              (12, "0001-01-01_00:00:00"))
+    dc, got = run("chain_c", ["--set", f"run.restart_file={nb}", "--set", "restart.interval=36"] + late)
+    check("run resumed from that file (96 s) with restart.interval = 36", got, wrf_rings(dt, 36, t_end, 96, 12))
+    starts = sorted({netCDF4.Dataset(f).getncattr("SIMULATION_START_DATE")
+                     for f in glob.glob(os.path.join(dc, "wrf*_d01_*"))})
+    check("its SIMULATION_START_DATE", starts, ["0001-01-01_00:00:00"])
+
+    # a time step of 60 / 11 s (time.dt_den = 11, as a nest's parent_dt / parent_time_step_ratio) and a restart
+    # interval of 55 s: the alarm rings at 60 s (11 steps; 59.99999999999999 s in floating point) with PrevRingTime
+    # 55 s, 55 - 5 = 50 s to the next ring, and at 114 6/11 s with 55 - 4 = 51 s
+    fdt = Fraction(60, 11)
+    _, got = run("dt60_11", ["--set", f"time.dt={float(fdt)!r}", "--set", "time.dt_den=11",
+                             "--set", "restart.interval=55", "--set", "run.run_time=120"])
+    check("time step 60 / 11 s, restart.interval = 55", got, wrf_rings(fdt, 55, 120))
     return 1 if fails else 0
 
 

@@ -103,7 +103,7 @@ struct Worker {
   std::uint32_t seq = 0;  // collectives so far (checked in every message)
   bool service = false;   // the writer inside a tile::Service scope
   int dev = 0;
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   char* dbuf = nullptr;  // device staging buffer of the messages
   std::size_t dbuf_bytes = 0;
 #endif
@@ -208,7 +208,7 @@ std::size_t layout_pieces(std::vector<Piece>& ps) {
   return o;
 }
 
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
 template <class U>
 struct KBox {
   static constexpr bool kNoMulAdd = true;
@@ -250,7 +250,7 @@ void launch_box(const Entry& e, const Piece& p, char* dbuf, bool put) {
 // the pieces ps of this worker's fields into msg (get) or from msg (put); msg has layout_pieces(ps) bytes
 void move_pieces(const std::vector<Piece>& ps, char* msg, std::size_t bytes, bool put) {
   if (ps.empty()) return;
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   char* d = staging(bytes);
   if (put) copy_to_dev(d, msg, bytes);
   for (const Piece& p : ps) launch_box(W->reg.e[std::size_t(p.entry)], p, d, put);
@@ -538,7 +538,7 @@ double ordered_sum(const Range3D& r, const std::vector<double>& v) {
   double acc = 0.0;
   for (int k = r.k0; k < r.k1; ++k) {
     const double* p = v.data() + std::size_t(k - r.k0) * n;
-#if defined(CPPWRF_USE_CUDA) && !defined(CPPWRF_FP32_IDENTITY) && !defined(CPPWRF_DOUBLE)
+#if defined(CPPWRF_USE_GPU) && !defined(CPPWRF_FP32_IDENTITY) && !defined(CPPWRF_DOUBLE)
     double sh[256];
     for (std::size_t t = 0; t < 256; ++t) {
       double a = 0.0;
@@ -865,7 +865,7 @@ int run_worker(Comm& c, int id, const Options& o, const std::function<int(int)>&
   track = &kTrack;
   struct Reset {
     ~Reset() {
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
       if (W && W->dbuf) dev_free(W->dbuf);
 #endif
       track = nullptr;
@@ -891,7 +891,7 @@ Options options(const std::string& run_tiles) {
   o.py = py;
   if (const char* e = std::getenv("CPPWRF_TILE_DEVICES"); e && *e) o.devices = parse_ints(e);
   if (const char* e = std::getenv("CPPWRF_TILE_CHECK"); e && *e && *e != '0') o.check = true;
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   if (o.check) throw std::runtime_error("CPPWRF_TILE_CHECK: the CPU build only");
 #endif
   return o;
