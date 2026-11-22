@@ -91,7 +91,7 @@ static int run(int argc, char** argv, bool mpi) {
   if (!r.start()) return 3;
 
   // CUDA graphs: the host prepares step n + 1 while the device runs step n (every read of device data waits for
-  // it; the step's fatal checks are read before the next step is launched); the last step is waited for
+  // it; the step's fatal checks are read once the next step is launched); the last step is waited for
   const bool overlap = step_graphs_on();
   for (long n = r.start_step + 1; n <= m.nsteps; ++n) {
     r.before_step(n);

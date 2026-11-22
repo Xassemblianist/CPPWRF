@@ -506,9 +506,9 @@ int device_work_share();
 // device runs the same kernels in the same order with the same arguments as without graphs. An operation that
 // waits for the device (copy_to_host, copy_to_dev, dev_alloc, dev_free, dev_sync, Reducer) ends the current graph
 // segment, launches it, and the capture resumes after it. Inside the step fatal_check() only copies the device
-// flag asynchronously; the flags are read once, when the host next waits for the step (end() waits for the
-// previous step before it launches this one). CPPWRF_GRAPHS=0 (or CPPWRF_KTIME) launches without graphs;
-// CPPWRF_GRAPHS=stats prints the graph counts at exit. CPU build: no-op.
+// flag asynchronously; the flags are read once, when the host next waits for the step (end() launches this step,
+// then waits for the previous one: the device runs the steps back to back). CPPWRF_GRAPHS=0 (or CPPWRF_KTIME)
+// launches without graphs; CPPWRF_GRAPHS=stats prints the graph counts at exit. CPU build: no-op.
 class StepScope {
  public:
   explicit StepScope(const void* key);

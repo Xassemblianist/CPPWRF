@@ -162,20 +162,22 @@ struct Graphs {
     return e;
   }
 #endif
-  // ends the open segment: launches its graph (after the previous segment's flags were read) and records the
-  // event that its fatal checks wait for
+  // ends the open segment: launches its graph, then reads the previous segment's flags (waiting for it: the device
+  // has this one queued behind it and runs on without a pause), and records the event that this segment's fatal
+  // checks wait for. The launches run in the same order on the one stream as before. A raised flag stops the run
+  // with this segment queued: its own flags are never read (as when it was not launched), nothing waits for it.
   void segment_point() {
-    bool launched = false;
+    bool launched = false, ended = false;
 #if defined(CPPWRF_USE_CUDA)
     if (capturing) {
       cudaGraph_t g = nullptr;
       capturing = false;
+      ended = true;
       ck(cudaStreamEndCapture(stream(), &g), "cudaStreamEndCapture");
       std::size_t nn = 0;
       ck(cudaGraphGetNodes(g, nullptr, &nn), "cudaGraphGetNodes");
       cudaGraphExec_t e = nn ? exec_for(g) : nullptr;
       cudaGraphDestroy(g);
-      flush();  // the previous step or segment is done and its flags are clean before this one runs
       if (e) {
         ck(cudaGraphLaunch(e, stream()), "cudaGraphLaunch");
         launched = true;
@@ -183,17 +185,19 @@ struct Graphs {
         n_seg_nodes += long(nn);
       }
       ++seg;
-    } else
-#endif
-    if (!cur.empty()) {
-      flush();
     }
+#endif
     if (launched || !cur.empty()) {  // at most one step or segment in flight unchecked
-      pend.swap(cur);
-      cur.clear();
+      std::vector<Poll> next;  // this segment's checks (slots of this bank)
+      next.swap(cur);
       bank ^= 1;
+      flush();  // the previous step or segment: done, its flags read (the other bank)
+      pend.swap(next);
+      cur.swap(next);  // the read checks' vector (empty) keeps its storage
       ck(gpuEventRecord(ev, stream()), "gpuEventRecord");
       ev_pending = true;
+    } else if (ended) {
+      flush();
     }
   }
   // reads the flags of the launched checks in the order of the calls; the first raised code stops the run
