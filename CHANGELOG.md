@@ -5,6 +5,64 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
+## 1.2.4 (2026-11-23)
+
+### Changed
+- Translator: aligned WRF namelist validation and automatic resets with WRF v4.8.0 (`share/module_check_a_mundo.F`,
+  `share/input_wrf.F` and the physics/dynamics drivers). Automatic resets and inactive options now match WRF with a
+  note instead of failing: ideal `hypsometric_opt = 2` resets to 1; `sf_urban_physics` copies the innermost domain's
+  value on nested runs; MSKF (`cu_physics = 11`) resets any `icloud` to 1 and sets `cu_rad_feedback = .true.` before
+  checking `cu_diag`; `o3input` resets to 0 for non-RRTMG radiation; `sst_update = 0` zeroes `io_form_auxinput4` and
+  `auxinput4_interval*`; non-MYNN PBL resets `bl_mynn_edmf`, `bl_mynn_edmf_dd`, `bl_mynn_output` and `icloud_bl = 1`
+  to 0; `bl_pbl_physics = 5, bl_mynn_edmf = 0, ishallow = 1` is accepted; `mp_physics = 28` resets any non-zero
+  `grav_settling` to 0 before range checks; `ghg_input`, `idcor` and `hail_opt` values other than 1 follow WRF's 0
+  branch; `nssl_*` flags accept any `< 0` as the default; `tice2tsk_if2cold` with `fractional_seaice = 0`, `lagday`
+  with `tmn_update = 0`, `opt_thcnd` outside Noah, `cugd_avedx` / ensemble sizes outside Grell-3D, `shadlen` with
+  `topo_shading = 0`, `scalar_pblmix = 1` with WSM3 / WSM5 / no PBL, `gwd_dx_factor` / `gwd_if_nonhyd` on domains
+  with `gwd_opt = 0`, `chem_adv_opt` and moving-nest options at their Registry defaults are accepted. MYNN
+  (`bl_pbl_physics = 5`) now accepts all ported microphysics with `qc, qi, qs` (4, 6, 8, 10, 14, 16, 17, 18) and
+  ACM2 (`bl_pbl_physics = 7`) all ported microphysics with `qc, qi` (4, 6, 8, 10, 14, 16, 17, 18, 28, 50, 51).
+  Stricter checks matching WRF: `zdamp >= ztop` is enforced only for `damp_opt = 2` (with ideal default `ztop = 15000`);
+  omitted nest `parent_id` defaults to Registry 0 (rejected) instead of `dom_id - 1`; `vert_refine_fact = 0` is
+  rejected; non-`max_domains` array options (`press_levels`, `z_levels`, `ocean_z`, ...) are checked across all
+  supplied elements; child `s_we`/`s_sn` no longer inherit domain 1's value; fixed `DEFAULT_ONLY_OPTIONS` key
+  `"grid_allowed"`.
+- Licensing: SPDX expressions name the third-party terms of the files derived from other code (AER's RRTMG / RRTM:
+  LicenseRef-AER-RRTMG, verbatim from the WRF source; UCAR's Noah-MP: LicenseRef-UCAR-NoahMP; glibc: LGPL-2.1-or-later;
+  CORE-MATH: MIT; wrf-python: Apache-2.0); licenses/ holds each text, NOTICE.md lists every derived file,
+  docs/LICENSING.md explains the combination. No code change.
+
+### Fixed
+- CPPWRF's own restart file records the simulation start (SIMULATION_START_DATE), and a run resumed from it dates
+  its files from it, as from a wrfrst file: in a chain wrfrst -> restart_NNNNNN.nc -> resumed run with run.start_date
+  = the restart time (the translation of a resumed run's namelist), every date of the last run shifted by the first
+  restart time.
+- CPPWRF's own restart file at a last step that does not ring, with a resumed run's RingTime still pending: the
+  seconds to the alarm's next ring are those to the earlier of RingTime and PrevRingTime + interval (ESMF_ClockAdvance
+  rings at either; was the seconds to RingTime), so that a run resumed from it with another restart.interval rings
+  there. With the adaptive time step the file's seconds come from the clock (were from step * the current time
+  step; such files are not read back, results unchanged).
+- WRF_ALARM_SECS_TIL_NEXT_RING_51 with a time step that is not a whole number of seconds (time.dt_den, a nest's
+  parent_dt / parent_time_step_ratio): the whole seconds of the exact clock (60 / 11 s and a 55 s interval: 50 s at
+  60 s, was 51 s; n * dt lay just below the whole second).
+- A run without column physics writes STEPBL and STEPCU of the configuration's phys.bldt / phys.cudt into its wrfrst
+  files (bl_init, cu_init), as STEPRA and STEPFG; was the namelist's when the two differ.
+- HIP builds: the tiled and MPI runs' halo exchange and gathers through the device staging buffer, the fast FP32
+  build's 256-lane ordered sums and the refusal of CPPWRF_TILE_CHECK in src/core/tiles.cpp, as in CUDA builds (the
+  host path copied the device fields with memcpy); MPI builds take the device UUID from hipDeviceGetUuid, which
+  ROCm 5 has as well (hipDeviceProp_t has its uuid member from ROCm 6.0 on). CUDA and CPU builds unchanged.
+- Translator: use_adaptive_time_step rounds the starting time step to 1/100 s before max_time_step and
+  min_time_step, as adapt_timestep (time.dt 0.33 for 1/3 s; a starting time step below 0.005 s with min_time_step =
+  0 is refused); a negative starting / max / min_time_step_den is refused; time_step = 0 without the adaptive time
+  step is an error instead of a crash of the translator.
+- Benchmark tools (tools/bench): failed builds, apt, report and Drive steps and failed runs fail the session (were
+  reported with a time); release assets whole or in parts; WPS only for C2 without --data-lday; a timeout kills the
+  run's process group and an OOM kill is not reported as a timeout; 1-based blocks of the history-on regime;
+  linear-time power integration; the post-step write charged at idle power; at least one thread; relative SVG links.
+- Suite: the CUDA tiled twin of the KESSKF case reads kesskf_data.tar (was skipped for its missing data).
+- HIP builds: NSSL's power table as a constexpr function and adapt_timestep's static_assert outside device code
+  (hipcc 6.4 refused both). CUDA and CPU builds unchanged.
+
 ## 1.2.3 (2026-11-22)
 
 ### Added
@@ -48,47 +106,6 @@ resumes across versions from WRF's wrfrst files.
   boundary interpolation).
 - Tiedtke: the comment on cududv's level 0 (times pmfu(1) = cmfctop * pmfu(2) with a cloud top at level 2, where
   WRF's value is undefined; times 0 at level 3). No code change.
-- CPPWRF's own restart file records the simulation start (SIMULATION_START_DATE), and a run resumed from it dates
-  its files from it, as from a wrfrst file: in a chain wrfrst -> restart_NNNNNN.nc -> resumed run with run.start_date
-  = the restart time (the translation of a resumed run's namelist), every date of the last run shifted by the first
-  restart time.
-- CPPWRF's own restart file at a last step that does not ring, with a resumed run's RingTime still pending: the
-  seconds to the alarm's next ring are those to the earlier of RingTime and PrevRingTime + interval (ESMF_ClockAdvance
-  rings at either; was the seconds to RingTime), so that a run resumed from it with another restart.interval rings
-  there. With the adaptive time step the file's seconds come from the clock (were from step * the current time
-  step; such files are not read back, results unchanged).
-- WRF_ALARM_SECS_TIL_NEXT_RING_51 with a time step that is not a whole number of seconds (time.dt_den, a nest's
-  parent_dt / parent_time_step_ratio): the whole seconds of the exact clock (60 / 11 s and a 55 s interval: 50 s at
-  60 s, was 51 s; n * dt lay just below the whole second).
-- A run without column physics writes STEPBL and STEPCU of the configuration's phys.bldt / phys.cudt into its wrfrst
-  files (bl_init, cu_init), as STEPRA and STEPFG; was the namelist's when the two differ.
-- HIP builds: the tiled and MPI runs' halo exchange and gathers through the device staging buffer, the fast FP32
-  build's 256-lane ordered sums and the refusal of CPPWRF_TILE_CHECK in src/core/tiles.cpp, as in CUDA builds (the
-  host path copied the device fields with memcpy); MPI builds take the device UUID from hipDeviceGetUuid, which
-  ROCm 5 has as well (hipDeviceProp_t has its uuid member from ROCm 6.0 on). CUDA and CPU builds unchanged.
-- Translator: use_adaptive_time_step rounds the starting time step to 1/100 s before max_time_step and
-  min_time_step, as adapt_timestep (time.dt 0.33 for 1/3 s; a starting time step below 0.005 s with min_time_step =
-  0 is refused); a negative starting / max / min_time_step_den is refused; time_step = 0 without the adaptive time
-  step is an error instead of a crash of the translator.
-- Translator: aligned WRF namelist validation and automatic resets with WRF v4.8.0 (`share/module_check_a_mundo.F`,
-  `share/input_wrf.F` and the physics/dynamics drivers). Automatic resets and inactive options now match WRF with a
-  note instead of failing: ideal `hypsometric_opt = 2` resets to 1; `sf_urban_physics` copies the innermost domain's
-  value on nested runs; MSKF (`cu_physics = 11`) resets any `icloud` to 1 and sets `cu_rad_feedback = .true.` before
-  checking `cu_diag`; `o3input` resets to 0 for non-RRTMG radiation; `sst_update = 0` zeroes `io_form_auxinput4` and
-  `auxinput4_interval*`; non-MYNN PBL resets `bl_mynn_edmf`, `bl_mynn_edmf_dd`, `bl_mynn_output` and `icloud_bl = 1`
-  to 0; `bl_pbl_physics = 5, bl_mynn_edmf = 0, ishallow = 1` is accepted; `mp_physics = 28` resets any non-zero
-  `grav_settling` to 0 before range checks; `ghg_input`, `idcor` and `hail_opt` values other than 1 follow WRF's 0
-  branch; `nssl_*` flags accept any `< 0` as the default; `tice2tsk_if2cold` with `fractional_seaice = 0`, `lagday`
-  with `tmn_update = 0`, `opt_thcnd` outside Noah, `cugd_avedx` / ensemble sizes outside Grell-3D, `shadlen` with
-  `topo_shading = 0`, `scalar_pblmix = 1` with WSM3 / WSM5 / no PBL, `gwd_dx_factor` / `gwd_if_nonhyd` on domains
-  with `gwd_opt = 0`, `chem_adv_opt` and moving-nest options at their Registry defaults are accepted. MYNN
-  (`bl_pbl_physics = 5`) now accepts all ported microphysics with `qc, qi, qs` (4, 6, 8, 10, 14, 16, 17, 18) and
-  ACM2 (`bl_pbl_physics = 7`) all ported microphysics with `qc, qi` (4, 6, 8, 10, 14, 16, 17, 18, 28, 50, 51).
-  Stricter checks matching WRF: `zdamp >= ztop` is enforced only for `damp_opt = 2` (with ideal default `ztop = 15000`);
-  omitted nest `parent_id` defaults to Registry 0 (rejected) instead of `dom_id - 1`; `vert_refine_fact = 0` is
-  rejected; non-`max_domains` array options (`press_levels`, `z_levels`, `ocean_z`, ...) are checked across all
-  supplied elements; child `s_we`/`s_sn` no longer inherit domain 1's value; fixed `DEFAULT_ONLY_OPTIONS` key
-  `"grid_allowed"`.
 
 ## 1.2.2 (2026-11-22)
 
