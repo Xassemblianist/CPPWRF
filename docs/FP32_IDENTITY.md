@@ -2,10 +2,11 @@
 
 CPPWRF's FP64 builds are bit-identical to WRF v4.8.0 real*8 (docs/STATUS.md). This page covers the CPU FP32 build
 (`-DCPPWRF_DOUBLE=OFF`, no CUDA): on the configurations below it is bit-identical to stock WRF v4.8.0 real*4, every
-history variable and every bit, so a CPU FP32 run can stand in for a WRF real*4 run; and the CUDA FP32 identity build
-(`-DCPPWRF_CUDA_FP32_IDENTITY=ON`, section [GPU: the identity build](#gpu-the-identity-build)), which gives the same
-bits on the GPU. docs/FP32_ACCURACY.md covers the fast CUDA FP32 build (the default), which is not identical to
-anything and is measured against WRF real*8 instead.
+history variable and every bit, so a CPU FP32 run can stand in for a WRF real*4 run; and the default CUDA FP32 build
+(`-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF`, `CPPWRF_CUDA_FP32_IDENTITY=ON` by default, section
+[GPU: the identity build](#gpu-the-identity-build)), which gives the same bits on the GPU. docs/FP32_ACCURACY.md
+covers the opt-in fast CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`), which is not identical to anything and is
+measured against WRF real*8 instead.
 
 ## What is identical
 
@@ -72,7 +73,7 @@ physics); N1 uses run_N1's real*4 inputs. Each case checks its configuration aga
 CPU FP32 build of the branch base (ce0718d) differs from WRF real*4 on D6 / D5 (QCLOUD at 63 points after the first
 step), MORR / MORG (QICE at 52), N1 (the d01 base state PHB / MUB at t = 0) and N3; KESSKF, ACM7, Q4, T6, P7, G2,
 SLAB1 and DUD4 needed no change.
-The older WRF real*4 run_P4 of port_fp32r4_data.tar, the reference of the CUDA FP32 case `real_p4_fp32_1h`,
+The older WRF real*4 run_P4 of port_fp32r4_data.tar, the reference of the fast CUDA FP32 case `real_p4_fp32_1h`,
 differs from a rerun of the same `wrf.exe` with the same inputs and namelist here from the first 10 minutes on
 (U at 176903 of 469920 points), with or without glibc's FMA variants; it was made by another run of WRF real*4 and
 is not used for the CPU FP32 cases.
@@ -111,9 +112,9 @@ pow), which the FP64 builds call as well. The FP64 builds are unchanged.
 
 ## GPU: the identity build
 
-`cmake -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON` builds a CUDA FP32 binary whose
-results are the CPU FP32 build's, bit for bit (and so WRF real*4's on the cases above). It differs from the fast CUDA
-FP32 build (the default) in:
+`cmake -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF` (`CPPWRF_CUDA_FP32_IDENTITY=ON` by default; passing it explicitly
+is also accepted) builds a CUDA FP32 binary whose results are the CPU FP32 build's, bit for bit (and so WRF real*4's
+on the cases above). It differs from the opt-in fast CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) in:
 
 - arithmetic: `--fmad=false` in every kernel (no fused multiply-add contraction), `--ftz=false --prec-div=true
   --prec-sqrt=true` stated explicitly;
@@ -157,7 +158,9 @@ fast, 1.00 s identity (+3 %); the stepping time without KTIME 0.98-1.06 s agains
 spread. By kernel group (fast -> identity, ms over the 10 steps): RRTMG LW 626 -> 634 (its batch kernels have
 `--fmad=false` in the fast build already), dynamics 178 -> 185, WSM6 45 -> 50, Kain-Fritsch 23 -> 27, YSU 26.6 ->
 27.1, Noah and the surface layer 2.8 -> 4.5. GPUs with a larger share of time in FMA-heavy kernels, or with slow
-FP64 (the glibc ports compute in double), will pay more; the fast build stays the default.
+FP64 (the glibc ports compute in double), pay more: in the paper benchmark (steady stepping, history off) the fast
+build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) was 2 to 17 % faster than the identity build (C1 0.46 vs 0.54 s per
+simulated hour, C2 2.79 vs 2.84, C3 1.62 vs 1.72, C4 3.32 vs 3.81). The identity build is the default from 1.3.0.
 
 ## How it is proven
 
@@ -203,9 +206,10 @@ FP64 (the glibc ports compute in double), will pay more; the fast build stays th
 
 ## What is not identical yet
 
-- The fast CUDA FP32 build (the default): FMA contraction and CUDA's math library; it stays measured in
-  docs/FP32_ACCURACY.md. The identity build covers the cases above only; hypotf (no FP32 code calls it) is CUDA's on
-  its device (the optional radar reflectivity's complex logarithm is glibc's port there, as in the FP64 build).
+- The opt-in fast CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`): FMA contraction and CUDA's math library; it
+  stays measured in docs/FP32_ACCURACY.md. The default identity build covers the cases above only; hypotf (no FP32
+  code calls it) is CUDA's on its device (the optional radar reflectivity's complex logarithm is glibc's port there, as
+  in the FP64 build).
 - Schemes and options other than those of the cases above are not checked against WRF real*4: aerosol-aware Thompson
   (mp_physics 28) with aerosol input fields or wif_input_opt 2, the MYNN options other than the defaults
   (MYNNX1 / MYNNX2, SPP), WDM6 with hail_opt 1, the other microphysics, cumulus, PBL, surface and radiation schemes,

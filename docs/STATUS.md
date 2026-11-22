@@ -81,9 +81,10 @@ table has no row. A whole-model proof removes the option's row.
    compare CPPWRF's wrfout files with WRF's at tolerance 0 (tests/verify/exact.py: NaN equals only NaN, -0
    differs from +0) in every variable the reference holds, every reference frame up to the case's time, types and
    attributes, and check that the configuration sets the options of the reference run's namelist.input; so do the
-   CUDA FP64 cases. The CPU FP32 cases (`cpu_sp`) and their GPU twins (`cuda_sp_id`, the CUDA FP32 identity build)
-   compare with WRF real*4's history files in the same way, at tolerance 0 (section "FP32 against WRF real*4"
-   below). The fast CUDA FP32 cases compare fields by relative L2 over the domain. The comparators' own test
+   CUDA FP64 cases. The CPU FP32 cases (`cpu_sp`) and their GPU twins (`cuda_sp_id`, the default CUDA FP32 identity
+   build) compare with WRF real*4's history files in the same way, at tolerance 0 (section "FP32 against WRF real*4"
+   below). The fast CUDA FP32 cases (`cuda`, `-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) compare fields by relative L2 over the
+   domain. The comparators' own test
    (tests/verify/selftest.py: one ulp, NaN, -0, a missing variable or frame must fail) runs before the VM suite.
 3. **WRF output files** (`tests/verify/run_wrf_files_test.sh`, ctest `wrf_files_vs_wrf`): the
    wrfout and wrfrst files of the CPU FP64 runs, and the runs resumed from WRF's restart files,
@@ -344,7 +345,8 @@ The device code makes these adds with two 32-bit adds with carry (`glibc::detail
 main before the FP64 bit-identity work (a862af3, CUDA's math library and FMA contraction; the work, e09fe5e to
 86d8aa7: glibc's math on the device, `--fmad=false`, this work-around and the folds, measured together; 1 h, no
 history; P1 / P4 / D0): L4 +7 % / +2 % / +3 %, G4 +6 % / -4 % / 0 %, A100 +5 % / +2 % / +6 %. No other measurement
-of the device math's cost exists (in particular none of `CPPWRF_CUDA_GLIBC_MATH=OFF` against `ON` alone). The CUDA FP32 build is not affected by this (CUDA's math library, FMA contraction). Its
+of the device math's cost exists (in particular none of `CPPWRF_CUDA_GLIBC_MATH=OFF` against `ON` alone). The fast
+CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`: CUDA's math library, FMA contraction) is not affected by this. Its
 relative L2 at 1 h in the 1.1.0 G4 run (fb158f3; docs/FP32_ACCURACY.md, section 1.1.0, has the values that moved
 with this release's FP32 fixes):
 
@@ -372,8 +374,8 @@ Straka density current and em_squall2d_x (TKE) in x (40 min); in the variant mat
 km_opt 2, km_opt 3 / 4, 6th-order diffusion, h_adv_order 6, moist_adv_opt 0, em_hill2d_x and winds along the walls. A
 wind across a symmetric wall is rejected: WRF keeps the wall value of the normal velocity while the sign of muu flips
 there, and its solution breaks down within a minute.
-On the GPU the ideal cases (also symmetric, open and diff_opt 2) are bit-identical in FP64, and em_squall2d_x in FP32
-is within WRF's own single/double difference (U 6.8e-5; WRF real*8 vs. WRF FP32: 8.2e-5).
+On the GPU the ideal cases (also symmetric, open and diff_opt 2) are bit-identical in FP64, and em_squall2d_x in fast
+FP32 is within WRF's own single/double difference (U 6.8e-5; WRF real*8 vs. WRF FP32: 8.2e-5).
 
 Namelist variants (tools/gcp/gcp_matrix.sh, 3-minute runs from the P1, P4, P6, P8 and P9 inputs, every wrfout
 variable at tolerance 0): kfeta_trigger 3, ysu_topdown_pblmix 0, icloud 0, cldovrlp 0-5 (1-5 with idcor 0 and 1; 0 also with restart files, MYNN and the N3s nest), cu_rad_feedback (Kain-Fritsch: also cudt 5, Kessler, icloud 0, cldovrlp 0, wrfrst at 30 min; Grell-Freitas with WSM6 or Kessler and RRTMG, ishallow 0 and 1, wrfrst at 30 min; Tiedtke and New Tiedtke 1 h; the N3s nest on both or one domain; 3 min and 1 h), shallowcu_forced_ra,
@@ -398,11 +400,12 @@ the default real*4 build) on 24 configurations: P1, P2, P3, P4, P9, NMP1 (Noah-M
 (one-way) and N3 (two-way, P4 physics), MON3 (monotonic advection on N3), KESSKF (Kessler), ACM7 (ACM2 + Pleim-Xiu),
 Q4 (QNSE), T6 (Tiedtke), P7 (New Tiedtke), DUD4 (Dudhia shortwave) and SLAB1 (5-layer slab LSM). The 44 `cpu_sp`
 cases run each of them for 1 h and 20 of them also for 3 minutes with history every step (every minute on the nests of N3 and MON3), every variable of the WRF
-real*4 history at tolerance 0. The CUDA FP32 identity build (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`: no FMA contraction,
-glibc 2.41's float functions on the device) gives the same bits on the GPU: the 44 `cuda_sp_id` cases pass on an RTX
-2060 (sm_75) and on a Colab G4 (sm_120). The FP32 executables define glibc 2.41's float functions themselves
-(src/core/glibc_mathf_host.cpp), so binaries built on Ubuntu 24.04 (glibc 2.39) pass these cases too. The default
-CUDA FP32 build stays the fast one, compared by relative L2 (below and docs/FP32_ACCURACY.md). docs/FP32_IDENTITY.md
+real*4 history at tolerance 0. The default CUDA FP32 build (`-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF`,
+`CPPWRF_CUDA_FP32_IDENTITY=ON` by default: no FMA contraction, glibc 2.41's float functions on the device) gives the
+same bits on the GPU: the 44 `cuda_sp_id` cases pass on an RTX 2060 (sm_75) and on a Colab G4 (sm_120). The FP32
+executables define glibc 2.41's float functions themselves (src/core/glibc_mathf_host.cpp), so binaries built on Ubuntu
+24.04 (glibc 2.39) pass these cases too. The opt-in fast CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, 2 to 17 %
+faster in the paper benchmark) is compared by relative L2 (above and docs/FP32_ACCURACY.md). docs/FP32_IDENTITY.md
 has the method, the case table, the proofs of the ported functions, the cost and what is not identical yet (moving
 nests, more than two domains, restarts, configurations without a WRF real*4 reference, other compilers for WRF).
 
@@ -441,7 +444,8 @@ MPI + OpenMP, real*4 and real*8; its fastest of five process layouts counts. Eac
 and on: R1, P4 (radt 1 and 15 min), the nest N3 and a 9.1 times larger domain made on the runtime with WPS and
 real.exe. `tools/bench/colab_bench.sh` reproduces it in one session.
 
-Stepping time in seconds per simulated hour, history off (rerun at main c9c95c5, 2026-11-16; WRF's best layout):
+Stepping time in seconds per simulated hour, history off (rerun at main c9c95c5, 2026-11-16, fast GPU FP32 build
+`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`; WRF's best layout):
 
 | Case | WRF real*4 | WRF real*8 | CPPWRF GPU FP32 | CPPWRF GPU FP64 | CPPWRF CPU FP64 (48 threads) |
 |---|---|---|---|---|---|
@@ -451,10 +455,10 @@ Stepping time in seconds per simulated hour, history off (rerun at main c9c95c5,
 | N3 | 24.14 | 34.09 | 4.46 | 8.26 | 38.56 |
 | L (359 x 269 x 44) | 25.72 | 45.18 | 2.50 | 7.52 | 52.43 |
 
-GPU FP32 is 5.1 to 10.3 times faster than WRF real*4, GPU FP64 3.1 to 6.0 times faster than WRF real*8 (docs/PERF.md
-has the first run and the layouts). This run predates RRTMG in single precision in CUDA FP32 builds; no new benchmark
-was run for 1.1.0 or 1.2.0 (docs/PERF.md says what was and was not measured again; 1.2.0's GPU changes left the G4's
-1 h stepping times within a second, docs/RELEASE_NOTES.md).
+Fast GPU FP32 is 5.1 to 10.3 times faster than WRF real*4, GPU FP64 3.1 to 6.0 times faster than WRF real*8
+(docs/PERF.md has the first run and the layouts). This run predates RRTMG in single precision in CUDA FP32 builds; no
+new benchmark was run for 1.1.0 or 1.2.0 (docs/PERF.md says what was and was not measured again; 1.2.0's GPU changes
+left the G4's 1 h stepping times within a second, docs/RELEASE_NOTES.md).
 
 Agreement in these runs:
 - The CPU FP64 output is bit-identical to the suite's WRF real*8 references for P4 and N3 (both domains).

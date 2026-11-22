@@ -5,9 +5,9 @@
 #
 #   paper_gpu.sh STAMP
 #
-# Builds CPPWRF's three CUDA binaries from /content/in/src.tar.gz, each the release build of README.md for this
-# GPU: cuda (FP32, the fast default), cuda_sp_id (FP32 with -DCPPWRF_CUDA_FP32_IDENTITY=ON: the CPU FP32 build's
-# bits) and cuda_dp (FP64); waits until the chroot job has written STAMP into /opt/paper/body_started; links
+# Builds CPPWRF's three CUDA binaries from /content/in/src.tar.gz, each a release build for this GPU: cuda (fast FP32,
+# -DCPPWRF_CUDA_FP32_IDENTITY=OFF), cuda_sp_id (FP32 identity, -DCPPWRF_CUDA_FP32_IDENTITY=ON, default: the CPU FP32
+# build's bits) and cuda_dp (FP64); waits until the chroot job has written STAMP into /opt/paper/body_started; links
 # /opt/paper, /opt/job and /opt/wrfbench to the chroot's (the jobs name chroot paths); writes the GPU side's manifest
 # (tools/bench/manifest.py collect --side gpu) and /opt/paper/gpu_ready ("apt=EXIT cuda=EXIT cuda_sp_id=EXIT cuda_dp=EXIT");
 # then runs tools/bench/bench_exec.py agent on /opt/paper/q (each job: one CPPWRF run with nvidia-smi sampling,

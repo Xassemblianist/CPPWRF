@@ -38,9 +38,10 @@
 // results of WRF's real*8 build and of the CPU build; CMake option CPPWRF_CUDA_GLIBC_MATH / CPPWRF_HIP_GLIBC_MATH
 // (default ON; OFF: CPPWRF_CUDA_LIBM / CPPWRF_HIP_LIBM, device math library). The kernels call the math library as
 // cppwrf::libm (core/libm.hpp).
-// GPU FP32 identity build (CPPWRF_FP32_IDENTITY): the CPU FP32 build's arithmetic and math on the device, bit for
-// bit: glibc's double functions as in the FP64 build, glibc's float functions (core/glibc_mathf.hpp) and libmvec's
-// 4-lane float functions (core/libmvec_f4.hpp) on the device.
+// GPU FP32 identity build (CPPWRF_FP32_IDENTITY; default for GPU FP32 builds: CPPWRF_CUDA_FP32_IDENTITY /
+// CPPWRF_HIP_FP32_IDENTITY default ON): the CPU FP32 build's arithmetic and math on the device, bit for bit: glibc's
+// double functions as in the FP64 build, glibc's float functions (core/glibc_mathf.hpp) and libmvec's 4-lane float
+// functions (core/libmvec_f4.hpp) on the device.
 #if defined(CPPWRF_FP32_IDENTITY) && \
     (!defined(CPPWRF_USE_GPU) || defined(CPPWRF_DOUBLE) || defined(CPPWRF_CUDA_LIBM) || defined(CPPWRF_HIP_LIBM))
 #error "CPPWRF_FP32_IDENTITY: GPU FP32 builds with glibc's math only"
@@ -50,7 +51,7 @@
 #define CPPWRF_GLIBC_MATH 1
 #endif
 #include "core/libm.hpp"
-// the device's float functions: device libm, or glibc's in the identity build (CPPWRF_GF(expf) ...)
+// the device's float functions: glibc's in the default identity build, or device libm in the fast build (CPPWRF_GF)
 #if defined(CPPWRF_FP32_IDENTITY)
 #include "core/glibc_mathf.hpp"
 #define CPPWRF_GF(f) ::cppwrf::glibcf::f
@@ -291,8 +292,8 @@ CPPWRF_HD inline double log10(double a, int i, int n) {
 // float (FP32 builds): WRF's real*4 build vectorises the same loops with 4 floats per call (_ZGVbN4v_expf,
 // _ZGVbN4v_logf, _ZGVbN4vv_powf; sin / cos below: _ZGVbN4v_sinf, _ZGVbN4v_cosf): iterations 0 ... 4*(n/4)-1 of an n-trip loop through the vector function, the
 // remaining n mod 4 (and a loop of fewer than 4 trips) through the scalar libm. The CPU build computes those lanes
-// as libmvec does (core/libmvec_f4.hpp), and so does the CUDA FP32 identity build; the fast CUDA FP32 build keeps
-// the scalar functions (CUDA's on the device).
+// as libmvec does (core/libmvec_f4.hpp), and so does the default GPU FP32 identity build; the opt-in fast build keeps
+// the scalar functions (device libm).
 CPPWRF_HD inline bool lane4(int i, int n) { return i < (n & ~3); }
 CPPWRF_HD inline float pow(float a, float b, int i, int n) {
 #if defined(CPPWRF_MVEC_F4_PASS)
@@ -666,11 +667,11 @@ template <class K> void column_for_whole(const Range2D& r, const K& k) {
 // takes the blocks z0[m] <= blockIdx.z < z0[m + 1] (its k range) with parallel_for's thread mapping in x and y.
 // The parts must be independent (no part reads or writes what another part writes): on the GPU their cells run
 // in any order. The CPU build runs each part at once as its own parallel_for, in the order given.
-// CUDA FP32 (nvcc's default --fmad=true): ptxas contracts a*b + c into an fma depending on the code around it, so
-// a kernel with such arithmetic can round differently inside a batched kernel (the FP64 build compiles with
-// --fmad=false: every operation is rounded on its own). There only kernels that declare
-// `static constexpr bool kNoMulAdd = true` (copies, zeros, comparisons) are batched; the others are launched one by
-// one with parallel_for, the kernel they had before.
+// Fast CUDA FP32 (-DCPPWRF_CUDA_FP32_IDENTITY=OFF, nvcc's default --fmad=true): ptxas contracts a*b + c into an fma
+// depending on the code around it, so a kernel with such arithmetic can round differently inside a batched kernel
+// (FP64 and the default FP32 identity build compile with --fmad=false: every operation is rounded on its own). In
+// GPU FP32 builds only kernels that declare `static constexpr bool kNoMulAdd = true` (copies, zeros, comparisons)
+// are batched; the others are launched one by one with parallel_for, the kernel they had before.
 #if !defined(CPPWRF_USE_GPU) || defined(CPPWRF_GPUCC)
 #if defined(CPPWRF_USE_GPU) && !defined(CPPWRF_DOUBLE)
 inline constexpr bool kFuseMulAdd = false;

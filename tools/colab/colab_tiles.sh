@@ -12,9 +12,9 @@
 #
 # --gpu-dp / --gpu-dp-tiles / --gpu-fp32 / --bench: tools/colab/tiles_gpu.sh on the runtime's GPU at the same time:
 # cuda_dp cases without tiles (--gpu-dp) and with every other --gpu-layouts layout (--gpu-dp-tiles) against the WRF
-# references, cuda (FP32) cases whose snapshots must be identical to those of the --base revision's build (default
-# origin/main) without tiles in every layout, and the stepping times of the --bench cases (no history output) with
-# every --bench-layouts layout (gpu_dp_*.log, fp32_same.log, bench.log).
+# references, cuda (fast FP32, -DCPPWRF_CUDA_FP32_IDENTITY=OFF) cases whose snapshots must be identical to the --base revision's
+# build (default origin/main) without tiles in every layout, and the stepping times of the --bench cases (no history
+# output) with every --bench-layouts layout (gpu_dp_*.log, fp32_same.log, bench.log).
 #
 # Data: the tars of the cases (wrf_suite.py --data-for) unless --data. --session / --keep as colab_suite.sh (a kept
 # session keeps the build in /opt/tiles of its chroot: the next run's build is incremental). Results in OUT:

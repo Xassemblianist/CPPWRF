@@ -86,9 +86,9 @@ grep -q "SUCCESS COMPLETE WRF" rsl.out.0000 && echo bitti
 CPPWRF'in desteklemediği bir seçenek, koşuyu en başta durdurur. İleti seçeneğin adını, değerini ve desteklenen
 değerleri söyler; çıkış durumu sıfırdan farklıdır. Böyle bir seçenek hiçbir zaman sessizce yok sayılmaz.
 
-Bu 3 saatlik koşu, RTX PRO 6000 Blackwell üzerinde `gpu-fp32` ile 15 s, `gpu-fp64` ile 42 s sürdü. `cpu-fp64` 48 iş
-parçacığıyla 222-273 s sürdü. Kendi makinenizin hızını `cppwrf-bench` ölçer. `cppwrf-fit namelist.input` ise bir
-koşunun bellek ve süre ihtiyacını koşmadan önce tahmin eder.
+Bu 3 saatlik koşu, RTX PRO 6000 Blackwell üzerinde hızlı `gpu-fp32` (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) ile 15 s,
+`gpu-fp64` ile 42 s sürdü. `cpu-fp64` 48 iş parçacığıyla 222-273 s sürdü. Kendi makinenizin hızını `cppwrf-bench`
+ölçer. `cppwrf-fit namelist.input` ise bir koşunun bellek ve süre ihtiyacını koşmadan önce tahmin eder.
 
 ## 4. Harita
 

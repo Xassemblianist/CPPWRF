@@ -75,9 +75,9 @@ All builds are made on the runtime from the commit under test (`git archive`) an
   Also WRF real*4 tuned for the CPU (model `wrf_r4t`, in session 1 by default): `FCOPTIM = -O3 -march=native
   -funroll-loops` (FMA contraction allowed, gfortran's default), dmpar and dm+sm, screened like the others; it
   answers "how much of the speed-up is compiler flags". `--models` without wrf_r4t leaves it out.
-- CPPWRF CUDA on the runtime's Ubuntu (CUDA 13): `cuda` (FP32, the fast default: FMA, CUDA's math), `cuda_sp_id`
-  (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`: the CPU FP32 build's bits), `cuda_dp` (FP64, `--fmad=false`, glibc's math on
-  the device).
+- CPPWRF CUDA on the runtime's Ubuntu (CUDA 13): `cuda` (fast FP32, `-DCPPWRF_CUDA_FP32_IDENTITY=OFF`: FMA, CUDA's
+  math), `cuda_sp_id` (FP32 identity, `-DCPPWRF_CUDA_FP32_IDENTITY=ON`, default from 1.3.0: the CPU FP32 build's
+  bits), `cuda_dp` (FP64, `--fmad=false`, glibc's math on the device).
 - CPPWRF CPU in the chroot: `cpu-dp` (FP64, the release build: `-O3 -march=native`, `CPPWRF_PORTABLE_LIBMVEC` on:
   Intel's libmvec log on any CPU), `cpu-dp-hwlog` (`CPPWRF_PORTABLE_LIBMVEC` off: this CPU's libmvec, as the WRF
   executables built here call it) and `cpu-sp` (FP32).
@@ -153,8 +153,8 @@ Two history settings ("regimes"), the same namelist for both models apart from t
 - on: a frame every hour (`--hist-min 60`), NetCDF-4 with WRF's default chunking, shuffle and deflate level 2 in
   both models (the same format and settings). CPPWRF compresses the chunks on host threads (the same bytes,
   docs/PERF.md "NetCDF output"); WRF compresses serially on rank 0 (no quilting). `--nc0` (in the recommended
-  command) also times CPPWRF GPU FP32 with `CPPWRF_NC_THREADS=0`, HDF5's own serial filter as WRF uses it: that row
-  is the like-for-like history-on comparison, and its difference to the default row is the threaded compression.
+  command) also times CPPWRF fast GPU FP32 with `CPPWRF_NC_THREADS=0`, HDF5's own serial filter as WRF uses it: that
+  row is the like-for-like history-on comparison, and its difference to the default row is the threaded compression.
   WRF's I/O quilting, PnetCDF and classic NetCDF are not measured; history-on numbers are secondary.
 
 ## Process layouts
@@ -283,8 +283,8 @@ Intel link is the suite's (the same configurations at 1 h, C1's physics at 24 h 
 session. An Intel WRF real*8 run of C1-C4 (one process, from the published inputs) closes it and is planned before
 the paper.
 
-Accuracy of the fast FP32 build: `tools/verify/fp32_accuracy.py compare` for the pairs fp32-r8 (GPU FP32 against GPU
-FP64, the bit-identical real*8 result), r4-r8 (WRF real*4 in one process against it), fp32id-r8, r4best-r8 (WRF
+Accuracy of the fast FP32 build: `tools/verify/fp32_accuracy.py compare` for the pairs fp32-r8 (fast GPU FP32 against
+GPU FP64, the bit-identical real*8 result), r4-r8 (WRF real*4 in one process against it), fp32id-r8, r4best-r8 (WRF
 real*4 at its fastest layout), r4tuned-r8 (the tuned WRF real*4) and r8best-r8dm1 (WRF real*8 at its fastest layout
 against one process: WRF's own layout effect), and `report` with the ratio R = metric(fp32-r8) / metric(r4-r8) per
 variable and hour (`paper/accuracy.md`, `paper/svg_accuracy/`, every pair drawn). The relative L2 at the last frame

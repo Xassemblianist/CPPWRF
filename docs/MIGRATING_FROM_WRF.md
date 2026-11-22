@@ -23,7 +23,10 @@ ported, what differs, and how to check CPPWRF against your own WRF runs.
   - The comparison is with WRF built with gfortran 14.2 on Debian 13 and run in one process. WRF's own result
     changes with its MPI layout, its compiler and its flags. So WRF on your cluster, with 64 MPI ranks, does not
     match itself on one rank bit for bit either.
-  - `gpu-fp32` is the fast mode. It differs from WRF real*8 by about as much as WRF's own real*4 build does.
+  - `cpu-fp32` and the default `gpu-fp32` build (`CPPWRF_CUDA_FP32_IDENTITY=ON`, default) are bit-identical to each
+    other and to stock WRF v4.8.0 real*4 on the 24 configurations of docs/FP32_IDENTITY.md. The opt-in fast build
+    (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, 2 to 17 % faster in the paper benchmark) differs from WRF real*8 by about as
+    much as WRF's own real*4 build does (docs/FP32_ACCURACY.md).
 - **The run directory:** `cppwrf-wrf` and `cppwrf-realexe` are drop-in replacements for `wrf.exe` and `real.exe`
   (below). They keep WRF's file names and places, the `rsl.out.0000` / `rsl.error.0000` logs with `Timing for main`
   lines, `SUCCESS COMPLETE WRF`, and a nonzero exit status on failure.
@@ -78,10 +81,11 @@ running.
 
 | You want | Mode |
 |---|---|
-| The fastest run, for forecasts and ensembles | `gpu-fp32`. Its difference from WRF real*8 is the size of WRF real*4's. |
+| Forecasts and ensembles on a GPU, with WRF real*4's arithmetic | `gpu-fp32` (default: bit-identical to `cpu-fp32`, and to stock WRF real*4 on docs/FP32_IDENTITY.md's configurations). |
+| The fastest GPU run (2 to 17 % faster than default `gpu-fp32`) | `gpu-fp32` built with `-DCPPWRF_CUDA_FP32_IDENTITY=OFF`. Its difference from WRF real*8 is the size of WRF real*4's (docs/FP32_ACCURACY.md). |
 | WRF real*8's numbers, fast | `gpu-fp64`. It is bit-identical to WRF real*8 and about 2 to 3 times slower than FP32. |
 | WRF real*8's numbers without a GPU | `cpu-fp64`. On one node it runs at about 0.6 to 0.9 times the speed of WRF real*8 on all its cores. |
-| To check a GPU result | `cpu-fp64` on the same case, then `cppwrf-compare`. FP64 must be identical. |
+| To check a GPU result | `cpu-fp64` on the same case, then `cppwrf-compare`. FP64 must be identical (and default `gpu-fp32` matches `cpu-fp32` on docs/FP32_IDENTITY.md's configurations). |
 
 docs/PERF.md has the measured speeds, and `cppwrf-bench` measures your machine.
 
@@ -111,9 +115,11 @@ What to expect when you compare with your own WRF:
 - **Your WRF is a real*8 build, run in one process** (`-np 1`, no OpenMP), built with gfortran on x86-64 without
   `-march`. Then `cpu-fp64` and `gpu-fp64` should be identical to it. If WRF was built with another gfortran than
   14.2, some vectorised loops may differ in the last bit, and those differences grow over a forecast.
-- **Your WRF is the usual real*4 build, or runs with MPI.** Then expect differences of the size of WRF real*4
-  against real*8: a relative L2 error of about 1e-4 to 1e-3 for U after an hour, more for W. Compare `gpu-fp32` with
-  WRF real*4 by these norms, not by bits.
+- **Your WRF is the usual real*4 build, run in one process** (gfortran 14.2, glibc 2.41, no `-march`). On the
+  configurations of docs/FP32_IDENTITY.md, `cpu-fp32` and the default `gpu-fp32` build should be identical to it.
+- **Your WRF runs with MPI, or you use the fast `gpu-fp32` build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`).** Then expect
+  differences of the size of WRF real*4 against real*8: a relative L2 error of about 1e-4 to 1e-3 for U after an hour,
+  more for W. Compare by these norms, not by bits.
 - **Some variables are left out of exact comparisons.** RQCBLTEN and RQIBLTEN in runs without cloud water or ice are
   uninitialised memory in WRF.
 

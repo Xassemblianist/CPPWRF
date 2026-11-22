@@ -26,15 +26,18 @@ at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must
 
 ### Why FP32?
 
-Speed. On the GPU, FP32 is 1.6 to 4 times faster than FP64 in the benchmark of docs/STATUS.md (rerun at main
-c9c95c5, before RRTMG ran in single precision in CUDA FP32), and it needs about 60 % of the memory. On a
-359 x 269 x 44 domain, an hour of forecast steps in 2.50 s in FP32 against 7.52 s in FP64. WRF real*4 at its best
-layout on the same machine (48 hardware threads) takes 25.72 s (docs/STATUS.md, "Performance").
+Speed. On the GPU, the fast FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) is 1.6 to 4 times faster than FP64 in the
+benchmark of docs/STATUS.md (rerun at main c9c95c5, before RRTMG ran in single precision in CUDA FP32), and FP32
+needs about 60 % of the memory. On a 359 x 269 x 44 domain, an hour of forecast steps in 2.50 s in fast FP32 against
+7.52 s in FP64. WRF real*4 at its best layout on the same machine (48 hardware threads) takes 25.72 s (docs/STATUS.md,
+"Performance").
 
-FP32 is not bit-identical to anything. Its difference from WRF real*8 is about the size of the difference between
-WRF's own real*4 and real*8 builds. For U after an hour, that is a relative L2 error of 2e-4 to 8e-4. Most
-operational WRF runs use the real*4 build, so FP32 is the natural choice for forecasts and ensembles. Use FP64 when
-you need WRF real*8's exact numbers.
+The default `gpu-fp32` build (`CPPWRF_CUDA_FP32_IDENTITY=ON`) is bit-identical to `cpu-fp32` and to stock WRF v4.8.0
+real*4 on the 24 configurations of docs/FP32_IDENTITY.md. The opt-in fast build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`,
+2 to 17 % faster than the identity build in the paper benchmark) is not bit-identical to WRF real*4; its difference
+from WRF real*8 is about the size of the difference between WRF's own real*4 and real*8 builds (for U after an hour,
+a relative L2 error of 2e-4 to 8e-4; docs/FP32_ACCURACY.md). Most operational WRF runs use the real*4 build, so FP32
+is the natural choice for forecasts and ensembles. Use FP64 when you need WRF real*8's exact numbers.
 
 ### What GPU do I need?
 

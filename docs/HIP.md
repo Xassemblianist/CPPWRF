@@ -25,7 +25,7 @@ follow-up on an AMD machine are guarded where their HIP semantics differ from CU
   - Strict IEEE flags for HIP sources: `-ffp-contract=off` and `-fno-gpu-flush-denormals-to-zero`, plus a
     `CMAKE_HIP_FLAGS` guard rejecting fast-math, FMA contraction, flush-to-zero and approximate-transcendental
     flags.
-  - Matching HIP math options `CPPWRF_HIP_GLIBC_MATH` (`ON` by default) and `CPPWRF_HIP_FP32_IDENTITY` (`OFF` by
+  - Matching HIP math options `CPPWRF_HIP_GLIBC_MATH` (`ON` by default) and `CPPWRF_HIP_FP32_IDENTITY` (`ON` by
     default).
   - Install and CPack flavour naming (`hip-fp64`, `hip-fp32`).
 - **Portability header (`src/core/gpu_runtime.hpp`)**:
@@ -91,7 +91,7 @@ cmake --build build-hip-dp -j "$(nproc)"
 FP32 builds:
 
 ```bash
-# HIP FP32 (default device libm)
+# HIP FP32 (default: identity mode, glibc float/double + 4-lane libmvec ports on device)
 cmake -S . -B build-hip-sp \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
@@ -99,14 +99,14 @@ cmake -S . -B build-hip-sp \
   -DCPPWRF_ENABLE_HIP=ON \
   -DCPPWRF_DOUBLE=OFF
 
-# HIP FP32 identity (glibc float/double + 4-lane libmvec ports on device)
-cmake -S . -B build-hip-sp-id \
+# HIP FP32 fast mode (opt-in: device libm instead of the glibc ports)
+cmake -S . -B build-hip-sp-fast \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCPPWRF_ENABLE_CUDA=OFF \
   -DCPPWRF_ENABLE_HIP=ON \
   -DCPPWRF_DOUBLE=OFF \
-  -DCPPWRF_HIP_FP32_IDENTITY=ON
+  -DCPPWRF_HIP_FP32_IDENTITY=OFF
 ```
 
 ### HIP CMake options
@@ -116,15 +116,15 @@ cmake -S . -B build-hip-sp-id \
 | `CPPWRF_ENABLE_HIP` | `OFF` | Build the AMD HIP backend (mutually exclusive with `CPPWRF_ENABLE_CUDA`). |
 | `CMAKE_HIP_ARCHITECTURES` | `gfx90a;gfx942;gfx1100` | Semicolon-separated AMDGPU target ISA list passed to `amdclang++`. |
 | `CPPWRF_HIP_GLIBC_MATH` | `ON` | Use `src/core/glibc_math.hpp` on device and host in HIP FP64 builds (`OFF` defines `CPPWRF_HIP_LIBM`). |
-| `CPPWRF_HIP_FP32_IDENTITY` | `OFF` | HIP FP32 identity mode (`CPPWRF_FP32_IDENTITY`): glibc float/double and 4-lane libmvec ports on device. |
+| `CPPWRF_HIP_FP32_IDENTITY` | `ON` | HIP FP32 identity mode (`CPPWRF_FP32_IDENTITY`, default): glibc float/double and 4-lane libmvec ports on device; `OFF` is the fast build (device libm). |
 
 ## Floating-point behaviour and bit-identity notes
 
 - **Device math ports**: In HIP FP64 (`CPPWRF_HIP_GLIBC_MATH=ON`, default), `CPPWRF_GLIBC_MATH` is enabled just
   as in CUDA FP64, routing all transcendental `cppwrf::libm` and `cppwrf::vm` calls through the in-tree Debian 13
   glibc 2.41 ports (`src/core/glibc_math.hpp`, `src/core/libmvec_x86.hpp`). In HIP FP32 identity mode
-  (`CPPWRF_HIP_FP32_IDENTITY=ON`), `src/core/glibc_mathf.hpp` and `src/core/libmvec_f4.hpp` are likewise enabled
-  on the device. These ports avoid ROCm OCML transcendental ULP differences against glibc/CUDA on every ported
+  (`CPPWRF_HIP_FP32_IDENTITY=ON`, default), `src/core/glibc_mathf.hpp` and `src/core/libmvec_f4.hpp` are likewise
+  enabled on the device. These ports avoid ROCm OCML transcendental ULP differences against glibc/CUDA on every ported
   function.
 - **Compiler flags**: `CMakeLists.txt` passes `-ffp-contract=off` (no implicit FMA contraction on host or device
   passes, equivalent to GCC `-ffp-contract=off` and nvcc `--fmad=false`) and `-fno-gpu-flush-denormals-to-zero`
@@ -174,7 +174,7 @@ Run these stages in order on an AMD ROCm machine:
      (where available) configure, build and pass `ctest -L unit` with unchanged behaviour.
 2. **HIP configure, build and unit tests**:
    - Configure and build `build-hip-dp` (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_ENABLE_HIP=ON -DCPPWRF_DOUBLE=ON`)
-     and `build-hip-sp-id` (`-DCPPWRF_DOUBLE=OFF -DCPPWRF_HIP_FP32_IDENTITY=ON`).
+     and `build-hip-sp-id` (`-DCPPWRF_DOUBLE=OFF`; `CPPWRF_HIP_FP32_IDENTITY=ON` is the default).
    - Run `ctest --test-dir build-hip-dp -L unit --output-on-failure` and
      `ctest --test-dir build-hip-sp-id -L unit --output-on-failure` (exercises `test_glibc_mathf` device vs host,
      `lint_fatal_check`, `fp32_double_rounding`, `fp32_host_libm`, and `robustness`).

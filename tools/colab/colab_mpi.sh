@@ -10,8 +10,8 @@
 #       [--gpu-cases NAME,...] [--gpu-layouts 1,2x1,1x2,2x2] [--gpu-fp32 NAME,...] [--base REV]
 #
 # --gpu-cases: cuda_dp cases under mpirun with every --gpu-layouts layout on the runtime's GPU (tools/colab/mpi_gpu.sh).
-# --gpu-fp32: cuda_dp cases run in FP32 by the --base revision's build (default origin/main) and by this revision's,
-# as one process and as two ranks: every output file must be the base build's.
+# --gpu-fp32: cuda_dp cases run in fast FP32 (-DCPPWRF_CUDA_FP32_IDENTITY=OFF) by the --base revision's build (default
+# origin/main) and by this revision's, as one process and as two ranks: every output file must be the base build's.
 #       [--session NAME] [--keep]
 #
 # Data: the tars of the cases (wrf_suite.py --data-for) unless --data. --session / --keep as colab_suite.sh (a kept

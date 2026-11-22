@@ -49,15 +49,16 @@ updates, branches, constants and defaults. Every result is checked against WRF i
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
 - **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all CUDA FP64 checks of the suite, 422 run for v1.2.3, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1, on the RTX PRO 6000 Blackwell of a Colab G4, earlier
   subsets on NVIDIA L4 and A100).
-- **CPU, FP32** (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default real*4
-  build) on 24 configurations, the 44 `cpu_sp` cases of the suite (P1-P4, P9, Noah-MP, Thompson, MYNN, WDM6,
-  Morrison, the nests N1 / N3 and more); the CUDA FP32 identity build (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) gives the same
-  bits on the GPU. The FP32 executables carry glibc 2.41's float functions, so the result does not depend on the
-  host's libm (docs/FP32_IDENTITY.md).
-- **GPU, FP32**: the fast mode (the default CUDA FP32 build); its distance from WRF real*8 is that of stock WRF real*4 for most physics suites,
-  and in the first hour of single runs with ACM2 / Pleim-Xiu, Morrison or the skin SST up to about twice it, as a
-  rounding draw rather than a defect (docs/FP32_ACCURACY.md). Use it for forecasts and
-  ensembles on GPUs with slow FP64; use FP64 when the answer must be WRF real*8's (verification, comparisons with
+- **CPU and GPU, FP32** (`-DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default
+  real*4 build) on 24 configurations, the 44 `cpu_sp` and 44 `cuda_sp_id` cases of the suite (P1-P4, P9, Noah-MP,
+  Thompson, MYNN, WDM6, Morrison, the nests N1 / N3 and more). The CUDA FP32 build defaults to this identity mode
+  (`CPPWRF_CUDA_FP32_IDENTITY=ON`). The FP32 executables carry glibc 2.41's float functions, so the result does not
+  depend on the host's libm (docs/FP32_IDENTITY.md).
+- **GPU, FP32 (fast mode)**: opt-in (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, FMA contraction and CUDA's math library; 2 to
+  17 % faster than the identity build in the paper benchmark). Its distance from WRF real*8 is that of stock WRF
+  real*4 for most physics suites, and in the first hour of single runs with ACM2 / Pleim-Xiu, Morrison or the skin
+  SST up to about twice it, as a rounding draw rather than a defect (docs/FP32_ACCURACY.md). Use FP32 for forecasts
+  and ensembles on GPUs with slow FP64; use FP64 when the answer must be WRF real*8's (verification, comparisons with
   WRF runs, continuing a WRF run).
 
 Every WRF option is either ported identically or rejected with an error; nothing is silently ignored. Not proved:
@@ -114,7 +115,7 @@ One source tree gives five builds; build directories are independent.
 cmake -S . -B build-cpu -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON
 cmake --build build-cpu -j "$(nproc)"
 
-# GPU, FP32: the fast mode
+# GPU, FP32 (default: identity mode, bit-identical to CPU FP32 and to WRF real*4 on docs/FP32_IDENTITY.md)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF
 cmake --build build -j "$(nproc)"
 
@@ -126,9 +127,10 @@ cmake --build build-gpu-dp -j "$(nproc)"
 cmake -S . -B build-cpu-sp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF
 cmake --build build-cpu-sp -j "$(nproc)"
 
-# GPU, FP32 identity mode: the CPU FP32 build's results on the GPU, bit for bit (slower than the fast mode)
-cmake -S . -B build-gpu-sp-id -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON
-cmake --build build-gpu-sp-id -j "$(nproc)"
+# GPU, FP32 fast mode (opt-in: FMA contraction, CUDA's math; 2 to 17 % faster, docs/FP32_ACCURACY.md)
+cmake -S . -B build-gpu-sp-fast -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF \
+  -DCPPWRF_CUDA_FP32_IDENTITY=OFF
+cmake --build build-gpu-sp-fast -j "$(nproc)"
 ```
 
 Each build makes `cppwrf` (the model), `src/init_real/cppwrf_real` (real.exe) and the unit tests. A build tree
@@ -146,7 +148,7 @@ environment variable `CPPWRF_DATA_DIR` overrides both.
 | `CPPWRF_NATIVE` | `ON` | Release builds: `-march=native`; `OFF` for portable binaries (same values either way) |
 | `CPPWRF_PORTABLE_LIBMVEC` | `ON` | glibc's vector `log` / `log10` as on Intel CPUs, on every x86-64 CPU (the WRF references are Intel-made) |
 | `CPPWRF_CUDA_GLIBC_MATH` | `ON` | CUDA FP64: glibc's math functions on the device (bit-identical to WRF); `OFF`: CUDA's math library |
-| `CPPWRF_CUDA_FP32_IDENTITY` | `OFF` | CUDA FP32 only: `ON` gives the CPU FP32 build's results bit for bit (WRF real*4's on docs/FP32_IDENTITY.md's cases): no FMA contraction, glibc's float and double math on the device; slower than the default fast FP32 build |
+| `CPPWRF_CUDA_FP32_IDENTITY` | `ON` | CUDA FP32 only: `ON` (default) gives the CPU FP32 build's results bit for bit (WRF real*4's on docs/FP32_IDENTITY.md's cases): no FMA contraction, glibc's float and double math on the device. `OFF`: the opt-in fast FP32 build (FMA contraction, CUDA's math; 2 to 17 % faster in the paper benchmark; docs/FP32_ACCURACY.md) |
 | `CPPWRF_MPI` | `OFF` | `ON`: the program runs as MPI ranks under `mpirun` (needs an MPI library with its C API, e.g. MPICH or Open MPI; section 7, "Tiles and MPI ranks"); `OFF`: no MPI header or library is used |
 | `CPPWRF_DIFF_TESTS` | `OFF` | Register the differential tests against WRF's compiled Fortran (need a WRF build, `WRF_DIR`) |
 
@@ -186,15 +188,15 @@ enforce them:
   kernel and glibc's libm / libmvec algorithms on the device (`CPPWRF_CUDA_GLIBC_MATH`, default ON; OFF uses
   CUDA's math library, which agrees with WRF to roundoff). Together with the other changes that made the FP64 build
   bit-identical, it changed the FP64 stepping time by -4 to +7 % (docs/STATUS.md); `OFF` alone was not timed. The
-  FP32 build uses CUDA's math library and contracts FMAs (`--fmad=true`) in the dynamics, in Kessler, WSM3 / 5 / 6
-  and WDM6 (physics_coupling.cpp), in the schemes with their own source files (KF, multi-scale KF, YSU, MYJ, QNSE,
-  the revised MM5 / Eta / QNSE surface layers, Noah, Noah-MP) and in radiation.cpp (Dudhia shortwave). CMakeLists.txt
-  builds with `--fmad=false` in both precisions RRTMG's LW / SW batch kernels, Thompson, Morrison, P3, NSSL and the
-  suite, surface, PBL, cumulus and FDDA drivers, and so the header-only schemes compiled in those drivers (e.g. MYNN,
-  ACM2, BouLac, Grell-Freitas, Grell-3D, Tiedtke, New Tiedtke, BMJ, RUC, the slab, the MYNN and Pleim-Xiu surface
-  layers). It agrees with WRF's single-precision run to roundoff. The FP32 identity build
-  (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) has `--fmad=false` everywhere and glibc's float and double functions on the
-  device: the CPU FP32 build's results, bit for bit (docs/FP32_IDENTITY.md).
+  default FP32 build (`CPPWRF_CUDA_FP32_IDENTITY=ON`, default) has `--fmad=false` everywhere and glibc's float and
+  double functions on the device: the CPU FP32 build's results, bit for bit (docs/FP32_IDENTITY.md). The opt-in fast
+  FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) uses CUDA's math library and contracts FMAs (`--fmad=true`) in the
+  dynamics, in Kessler, WSM3 / 5 / 6 and WDM6 (physics_coupling.cpp), in the schemes with their own source files
+  (KF, multi-scale KF, YSU, MYJ, QNSE, the revised MM5 / Eta / QNSE surface layers, Noah, Noah-MP) and in
+  radiation.cpp (Dudhia shortwave); CMakeLists.txt still builds with `--fmad=false` RRTMG's LW / SW batch kernels,
+  Thompson, Morrison, P3, NSSL and the suite, surface, PBL, cumulus and FDDA drivers, and so the header-only schemes
+  compiled in those drivers (e.g. MYNN, ACM2, BouLac, Grell-Freitas, Grell-3D, Tiedtke, New Tiedtke, BMJ, RUC, the
+  slab, the MYNN and Pleim-Xiu surface layers). It agrees with WRF's single-precision run to roundoff.
 
 ---
 
@@ -245,9 +247,9 @@ The script runs, in `~/qs`:
 
 The same `run.ini` runs in every build: `CPPWRF_BUILD=build-gpu-dp` (or `build`) runs the model on the GPU. On the
 Colab G4 runtime (AMD EPYC 9B45, RTX PRO 6000 Blackwell) the 3-hour run of both domains took 222 to 273 s of stepping
-on 48 CPU threads in FP64, 42 s on the GPU in FP64 and 15 s in FP32 (the whole script 5 to 7 minutes, most of it the
-CPU run and the GFS download), and the GPU FP64 output was bit-identical to the CPU FP64 output in every variable of
-every wrfout file. WRF's default namelist sets `restart_interval = 7200` (minutes): no wrfrst file is due within the
+on 48 CPU threads in FP64, 42 s on the GPU in FP64 and 15 s in fast FP32 (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`; the
+whole script 5 to 7 minutes, most of it the CPU run and the GFS download), and the GPU FP64 output was bit-identical
+to the CPU FP64 output in every variable of every wrfout file. WRF's default namelist sets `restart_interval = 7200` (minutes): no wrfrst file is due within the
 run, but CPPWRF writes its own `restart_<step>.nc` at the last step of every domain (0.5 and 1.3 GB here;
 `--set restart.interval=0` turns restart files off).
 
@@ -516,14 +518,15 @@ CPU build.
   every FP64 kernel with `--fmad=false` (no fused multiply-add, as gfortran on x86-64 without `-march`) and run
   glibc's libm / libmvec algorithms on the device (`CPPWRF_CUDA_GLIBC_MATH`); these changes together moved the FP64
   stepping time by -4 to +7 % (docs/STATUS.md). Verified on L4 (sm_89), RTX PRO 6000 Blackwell (sm_120) and A100 (sm_80).
-- **FP32** (`-DCPPWRF_DOUBLE=OFF`): the fast mode, with CUDA's math library and FMA contraction (except in RRTMG's
-  batch kernels, Thompson, Morrison, P3, NSSL and the physics drivers with the schemes compiled in them; list in
-  [Required Flags and Determinism](#required-flags-and-determinism)). Its difference from WRF real*8 is of the size of stock WRF
-  real*4's (docs/FP32_ACCURACY.md: the measurement, its method and tools/verify/fp32_accuracy.py, which compares any
-  two sets of wrfout files).
-- **FP32 identity** (`-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON`): the CPU FP32 build's results bit for bit,
-  and so WRF real*4's on the cases of docs/FP32_IDENTITY.md. No FMA contraction and glibc 2.41's float functions on
-  the device; on an RTX 2060 it costs 3 % of kernel time on P4. It installs as the `gpu-fp32` flavour.
+- **FP32** (`-DCPPWRF_DOUBLE=OFF`, default `CPPWRF_CUDA_FP32_IDENTITY=ON`): the identity build, giving the CPU FP32
+  build's results bit for bit, and so WRF real*4's on the cases of docs/FP32_IDENTITY.md. No FMA contraction and
+  glibc 2.41's float functions on the device. It installs as the `gpu-fp32` flavour.
+- **FP32 fast mode** (`-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF`): opt-in, with CUDA's math library and
+  FMA contraction (except in RRTMG's batch kernels, Thompson, Morrison, P3, NSSL and the physics drivers with the
+  schemes compiled in them; list in [Required Flags and Determinism](#required-flags-and-determinism)). In the paper
+  benchmark it was 2 to 17 % faster than the identity build. Its difference from WRF real*8 is of the size of stock
+  WRF real*4's (docs/FP32_ACCURACY.md: the measurement, its method and tools/verify/fp32_accuracy.py, which compares
+  any two sets of wrfout files). It also installs as the `gpu-fp32` flavour.
 - **Memory:** a kernel's local arrays are reserved by CUDA for every thread the GPU can hold at once, so that part
   of the footprint grows with the GPU (the largest frame is 10.8-12.4 KB per thread in FP64 and 4.2-11 KB in FP32:
   0.4 GB on an RTX 2060, 3 GB on an RTX PRO 6000). The large per-column arrays of the column physics live in a
@@ -941,9 +944,10 @@ from the tars' file lists (`tools/colab/colab_tarlist.sh` reads them on a Colab 
 
 docs/PERF.md compares CPPWRF with WRF v4.8.0 on one Colab G4 runtime (AMD EPYC 9B45 with 48 hardware threads and an
 RTX PRO 6000 Blackwell). For the real-data domain 119 x 89 x 44 with full physics (P4, 1 h), WRF real*4 at its
-fastest MPI layout steps in 7.8 s. CPPWRF steps in 1.7 s on the GPU in FP32 and 2.8 s in FP64 (WRF real*8: 9.7 s).
-On a 359 x 269 x 44 domain the GPU's lead grows to 8.2x in FP32 and 4.7x in FP64. `tools/bench/colab_bench.sh`
-repeats the measurement. The memory-traffic budget of the large step is also in docs/PERF.md.
+fastest MPI layout steps in 7.8 s. CPPWRF steps in 1.7 s on the GPU in fast FP32 (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`)
+and 2.8 s in FP64 (WRF real*8: 9.7 s). On a 359 x 269 x 44 domain the GPU's lead grows to 8.2x in fast FP32 and 4.7x
+in FP64. `tools/bench/colab_bench.sh` repeats the measurement. The memory-traffic budget of the large step is also in
+docs/PERF.md.
 
 NetCDF-4 output (wrfout, wrfrst, auxhist3) is compressed as WRF compresses it (chunks of half the horizontal
 dimensions, shuffle + deflate level 2), but the chunks of each record are compressed on a pool of host threads

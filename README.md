@@ -13,12 +13,13 @@ The port follows WRF statement by statement, and every result is checked against
 - **GPU, FP64: bit-identical to WRF too.** For v1.2.3 all 422 CUDA FP64 checks run matched WRF at tolerance 0 on the Colab G4 (356 for v1.2.2, 338 for v1.2.0 and v1.2.1), and the CUDA FP32 identity build matched WRF real*4 in all 44 cases. For v1.1.0 all 338 CUDA FP64 checks of the
   suite (319 cases, 18 restart checks and the Straka check) matched WRF at tolerance 0 on the Colab G4 (RTX PRO 6000
   Blackwell, sm_120, CUDA 13.0); earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
-- **CPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations, among
-  them P1-P4, Thompson, MYNN, WDM6, Morrison, Noah-MP and the nests N1 / N3; on the GPU too with the opt-in build
-  `-DCPPWRF_CUDA_FP32_IDENTITY=ON`. The result does not depend on the host's libm. See
+- **CPU and GPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations,
+  among them P1-P4, Thompson, MYNN, WDM6, Morrison, Noah-MP and the nests N1 / N3. The CUDA FP32 build defaults to
+  this identity mode (`CPPWRF_CUDA_FP32_IDENTITY=ON`), and the result does not depend on the host's libm. See
   [docs/FP32_IDENTITY.md](docs/FP32_IDENTITY.md).
-- **GPU, FP32:** the default CUDA FP32 build is the fast mode, compared with WRF by relative L2 error; its 44 suite
-  runs are within their measured tolerances.
+- **GPU, FP32 (fast mode):** opt-in (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, FMA contraction and CUDA's math library; 2 to
+  17 % faster than the identity build in the paper benchmark), compared with WRF by relative L2 error; its 44 suite
+  runs are within their measured tolerances ([docs/FP32_ACCURACY.md](docs/FP32_ACCURACY.md)).
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
 
@@ -85,9 +86,10 @@ float functions in the executable, so their result does not depend on the host's
 WRF v4.8.0 and CPPWRF ran on one Google Colab G4 runtime: an AMD EPYC 9B45 (24 cores, 48 hardware threads) and an
 NVIDIA RTX PRO 6000 Blackwell (96 GB). WRF was built there from the release source with its own GNU `configure`
 (MPI, and MPI + OpenMP), in real*4 and real*8; its fastest of five process layouts counts. Each run is 1 simulated
-hour with the same namelist and inputs (CPPWRF main c9c95c5, 2026-11-16, before RRTMG computed in single precision
-in CUDA FP32 builds; no new benchmark was run for 1.1 or 1.2). The table gives the stepping time in seconds per simulated hour, without
-start-up and history output ([docs/PERF.md](docs/PERF.md) has the wall times, other layouts and memory):
+hour with the same namelist and inputs (CPPWRF main c9c95c5, 2026-11-16, fast GPU FP32 build
+`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, before RRTMG computed in single precision in CUDA FP32 builds; no new benchmark was
+run for 1.1 or 1.2). The table gives the stepping time in seconds per simulated hour, without start-up and history
+output ([docs/PERF.md](docs/PERF.md) has the wall times, other layouts and memory):
 
 | Case | WRF real*4, best layout | WRF real*8, best layout | CPPWRF GPU FP32 | CPPWRF GPU FP64 |
 |---|---|---|---|---|
@@ -105,7 +107,9 @@ its history and restart files on host threads, and the files keep every byte: wi
 
 In these runs, the GPU FP64 results are bit-identical to the CPU FP64 results. The CPU FP64 results are
 bit-identical to WRF real*8 run in one process, which is how the references are made: WRF's own result changes
-with its MPI layout. GPU FP32 differs from WRF real*4 by about as much as WRF real*4 differs from WRF real*8.
+with its MPI layout. In these runs, the fast GPU FP32 build differed from WRF real*4 by about as much as WRF real*4
+differs from WRF real*8 (the default GPU FP32 identity build matches WRF real*4 on the configurations of
+docs/FP32_IDENTITY.md and was 2 to 17 % slower than the fast build in the paper benchmark).
 
 ## Build
 
@@ -114,7 +118,7 @@ with its MPI layout. GPU FP32 differs from WRF real*4 by about as much as WRF re
 cmake -S . -B build-cpu -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON
 cmake --build build-cpu -j "$(nproc)"
 
-# GPU build, FP32 (the fast mode)
+# GPU build, FP32 (default: identity mode, bit-identical to CPU FP32 and to WRF real*4 on docs/FP32_IDENTITY.md)
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF
 cmake --build build -j "$(nproc)"
 
@@ -126,9 +130,10 @@ cmake --build build-gpu-dp -j "$(nproc)"
 cmake -S . -B build-cpu-sp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF
 cmake --build build-cpu-sp -j "$(nproc)"
 
-# GPU build, FP32 identity (the CPU FP32 build's results on the GPU; slower than the fast mode)
-cmake -S . -B build-gpu-sp-id -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=ON
-cmake --build build-gpu-sp-id -j "$(nproc)"
+# GPU build, FP32 fast mode (opt-in: FMA contraction, CUDA's math; 2 to 17 % faster, docs/FP32_ACCURACY.md)
+cmake -S . -B build-gpu-sp-fast -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF \
+  -DCPPWRF_CUDA_FP32_IDENTITY=OFF
+cmake --build build-gpu-sp-fast -j "$(nproc)"
 ```
 
 You need a C++20 compiler, CMake >= 3.24, OpenMP and NetCDF-C; the CUDA toolkit >= 12.1 and a GPU of compute

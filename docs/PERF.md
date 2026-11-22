@@ -13,8 +13,8 @@ below are from that run, with CPPWRF at main b30ec5b.
   (gfortran 14.2, MPICH 4.2.1, `FCOPTIM = -O2 -ftree-vectorize -funroll-loops`, no `-march`).
 - WRF has four builds: dmpar (option 34) and dm+sm (option 35), each in real*4 (the usual production build) and
   real*8 (`configure -r8`, the suite's reference build).
-- CPPWRF has three builds: CUDA FP32 and CUDA FP64 (the release builds of README.md), and the CPU FP64 build with
-  OpenMP (gcc 14.2, `-O3 -march=native`). The CPU build runs with 48 threads.
+- CPPWRF has three builds: fast CUDA FP32 (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, the default before 1.3.0) and CUDA FP64,
+  and the CPU FP64 build with OpenMP (gcc 14.2, `-O3 -march=native`). The CPU build runs with 48 threads.
 
 **Cases.** Every run is 1 simulated hour. The same namelist goes to `wrf.exe` and to `tools/wrf2cppwrf.py`.
 - R1: dynamics only.
@@ -91,7 +91,8 @@ keep the results (CUDA FP64 at tolerance 0 on the G4, 338 / 338 at b2d320c). On 
 within a second (P4 FP64 9 s, N3 FP64 16 -> 15 s, P4 FP32 3 s, N2 FP32 3 -> 2 s); the gains showed on the smaller
 RTX 2060. A change of NSSL's launch in the same work made NSSL 3 to 8 times slower on the G4 (P4N18 1 h: 47 -> 135 s
 FP64, 19 -> 165 s FP32) and was reverted; NSSL keeps 1.1's launch. The CUDA FP32 identity build
-(`-DCPPWRF_CUDA_FP32_IDENTITY=ON`) costs 3 % of kernel time on P4 on an RTX 2060 (docs/FP32_IDENTITY.md).
+(`CPPWRF_CUDA_FP32_IDENTITY=ON`, the default from 1.3.0; `OFF` selects the fast build timed above) costs 3 % of kernel
+time on P4 on an RTX 2060 (docs/FP32_IDENTITY.md).
 
 **The paper benchmark** (tools/bench/PROTOCOL.md, `tools/bench/colab_paper.sh`) replaces these 1-hour runs for the
 paper: 6 h to 24 h cases, WRF's layouts screened, a warm-up and 5 interleaved timed repetitions with medians and
@@ -628,11 +629,11 @@ phy_prep_part2's decouple, update_phy_ten (one launch per term of a tendency: ea
 phy_ra_ten / phy_bl_ten / phy_cu_ten order), the 16 radiation accumulations, the small step's ru_m / rv_m edge sums,
 and adjacent halo fills of single fields (`fill_halos` of `HaloField`: both ranks, explicit parities).
 
-CUDA FP32 builds keep nvcc's default `--fmad=true`, and ptxas contracts `a*b + c` into an fma depending on the code
-around it: `test_launch_batch` with a multiply-add kernel gave different FP32 values batched than alone. FP32 builds
-therefore batch only kernels without multiply-add (`kNoMulAdd`: zeroing, spec_bdytend, flow_dep_bdy, zero_grad_bdy,
-halo copies); the others launch as before. FP64 builds (`--fmad=false`) and the CPU (each part its own parallel_for)
-batch everything.
+The fast CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) keeps nvcc's default `--fmad=true`, and ptxas contracts
+`a*b + c` into an fma depending on the code around it: `test_launch_batch` with a multiply-add kernel gave different
+FP32 values batched than alone. FP32 builds therefore batch only kernels without multiply-add (`kNoMulAdd`: zeroing,
+spec_bdytend, flow_dep_bdy, zero_grad_bdy, halo copies); the others launch as before. FP64 builds (`--fmad=false`) and
+the CPU (each part its own parallel_for) batch everything.
 
 Stepping s/h, 1 h, no history output, base origin/main 2d49050 / port/F04 564a5d7, each twice, interleaved in one
 session; graph nodes per step = kernels + device copies (`CPPWRF_GRAPHS=stats`; N3: per parent step, 4 graph
@@ -721,8 +722,8 @@ radt 15), FP64 and FP32. The top kernels and what changed:
 - **KUpdate / KTendU, V, W, T** (FP64 compute-bound at 81-87 % of the SM: every face flux of the scalar transport
   and of the rk_tendency advection was computed twice, once by each cell of the face): in FP64 builds the face
   fluxes are computed once per face into a scratch array (`KFaceX/Y/Z`, `KFace<KTend*, d>`; the same expressions)
-  and both cells read them. FP32 builds keep the inline fluxes (those files build with `--fmad=true`, so the code
-  stays textually unchanged there).
+  and both cells read them. FP32 builds keep the inline fluxes (those files build with `--fmad=true` in the fast build,
+  so the code stays textually unchanged there).
 - **KLwBand** (one thread per (column, band), read-modify-write of the band sums; memory-bound: 35 % occupancy,
   ~2.9 GB of local-memory traffic per launch): now `KLwGpoint` (one thread per (column, g-point): the rtrnmc sweeps
   of one g-point as `rrtmg_lw_gpoint`, results in place in the work arrays) and `KLwLevel` (per (column, level): the
@@ -786,7 +787,8 @@ microphysics) stay one thread per column, in WRF's order. Every value is the sam
   (rain and snow + graupel sedimentation per column), B (melting, ice fall speed), Ice (ice sedimentation and the
   surface precipitation per column), C (freezing, warm and cold rain processes, saturation adjustment), per
   microphysics loop; the values carried between stages in a work array of 12 levels-sized fields (`Wsm6Work`, +390
-  MiB on L, +40 MiB on P4). FP32 builds keep `Wsm6Kernel`: physics_coupling.cpp builds with `--fmad=true` there.
+  MiB on L, +40 MiB on P4). FP32 builds keep `Wsm6Kernel`: physics_coupling.cpp builds with `--fmad=true` in the fast
+  build.
 - **Thompson, FP32 and FP64** (thompson.cpp builds with `--fmad=false` in both): `ThompsonLevel0` (the first two
   level loops; no_micro and k_melting as level flags), `ThompsonStage1` (column: their reduction, twet, the early
   return), `ThompsonLevel` (the snow moments to the rain evaporation), `ThompsonStage3` (column: sedimentation,
@@ -823,7 +825,7 @@ MYNN, Grell-Freitas (column_for_work) and nests against WRF and the WSM6, radar,
 differential tests.
 
 Open: MYNN PBL (472 ms per hour FP64, 124 FP32 on the MYNN case) is now the largest column kernel there; YSU and
-KF (L FP64 ~320 ms each) build with `--fmad=true` in FP32, so a split there is FP64-only like WSM6's.
+KF (L FP64 ~320 ms each) build with `--fmad=true` in fast FP32, so a split there is FP64-only like WSM6's.
 
 ## Column physics in stages II: MYNN PBL (P01c; measured, Colab G4)
 
@@ -876,7 +878,7 @@ FP64 and FP32, base against new, byte-identical (snapshots and restart variables
 (79); the FP32 suite cases with base and new builds byte-identical; the CPU suite cases of MYNN and the smoke set
 against WRF and the MYNN and suite differential tests.
 
-Not done: YSU and KF. Both build with `--fmad=true` in FP32, so a split is FP64-only with a second copy of the
+Not done: YSU and KF. Both build with `--fmad=true` in fast FP32, so a split is FP64-only with a second copy of the
 scheme; YSU's level-parallel loops are about 40 % of its time (ncu on P4: initialisation 11 %, the free-atmosphere
 diffusivity 12 %, tke 11 %, the tridiagonal coefficients of heat, moisture and momentum about 28 % with the
 solves 17 % sequential), a gain of about 1 % of L FP64. KF's updraft, downdraft and closure are sequential per
@@ -991,7 +993,7 @@ footprint of a run.
   in FP64, live in the column work buffer (`core/column_work`, the warp layout of F06). Their frames are now 0-368 B.
   The CPU and the host pass keep the local arrays; the arithmetic is the same text.
 - Kain-Fritsch and MYJ keep their local arrays in FP32 (10960 B and 9816 B): kf.cpp and myjpbl.cpp contract
-  multiply-adds in FP32 (`--fmad=true`), and the contraction follows the storage (F06 measured different P2 / P4
+  multiply-adds in fast FP32 (`--fmad=true`), and the contraction follows the storage (F06 measured different P2 / P4
   values for KF). The FP32 text of both is unchanged, so the FP32 bytes are.
 - `core/column_work`: `ColPtr<T>` / `ColCPtr<T>` (a buffer view on the device, a pointer on the host) for the
   helpers' parameters, `CPPWRF_COLUMN_MEMBER` / `CPPWRF_COLUMN_STRUCT` for structs of column arrays,

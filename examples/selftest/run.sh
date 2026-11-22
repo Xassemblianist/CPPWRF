@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # The check of a CPPWRF installation: a tiny em_quarter_ss run (10 x 10 x 10 points, 5 steps, 1 s of CPU) through the
 # drop-in wrf.exe, and the SHA-256 of its last frame's values (cppwrf.wrfout.values_hash). CPU FP64 and GPU FP64 builds
-# must give expected_fp64.txt exactly (they are bit-identical); GPU FP32 gives its own hash and is checked for a
-# successful, finite run.
+# must give expected_fp64.txt exactly (they are bit-identical); FP32 builds have no reference hash and are checked for
+# a successful, finite run.
 #   examples/selftest/run.sh [cpu-fp64|gpu-fp64|gpu-fp32] [WORK]   (WORK: default a new temporary directory)
 # cppwrf-wrf from PATH, else the source tree's tools/ or the installation's bin/; the binary as cppwrf-wrf finds it
 # (CPPWRF_EXE, bin/, build*/).

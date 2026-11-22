@@ -13,7 +13,8 @@ Aynı kaynak ağacından dört ayrı derleme ("flavour") çıkar. İstediğiniz 
 |---|---|---|
 | `cpu-fp64` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON` | WRF v4.8.0 real*8 ile bit bit aynı sonuç. GPU gerekmez. |
 | `gpu-fp64` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON` | Yine WRF real*8 ile bit bit aynı, ama tek bir NVIDIA GPU'da ve çok daha hızlı. |
-| `gpu-fp32` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF` | En hızlısı. WRF real*8'den, WRF'nin kendi real*4 derlemesi kadar ayrılır. |
+| `gpu-fp32` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF` | `cpu-fp32` ile, docs/FP32_IDENTITY.md'deki vakalarda da WRF v4.8.0 real*4 ile bit bit aynı sonuç. Tek bir NVIDIA GPU'da çalışır. |
+| `gpu-fp32` (hızlı, isteğe bağlı) | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF` | Hızlı FP32 kipi (FMA, CUDA matematik kitaplığı; makale kıyaslamasında %2-17 daha hızlı). WRF real*8'den WRF real*4 kadar ayrılır (docs/FP32_ACCURACY.md). `gpu-fp32` adıyla kurulur. |
 | `cpu-fp32` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF` | docs/FP32_IDENTITY.md'deki vakalarda WRF v4.8.0 real*4 ile bit bit aynı sonuç. GPU gerekmez. |
 
 ## Gerekli paketler
@@ -46,7 +47,8 @@ git clone https://github.com/Xassemblianist/CPPWRF.git && cd CPPWRF
 cmake -S . -B build-cpu -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON
 cmake --build build-cpu -j "$(nproc)"
 
-# GPU derlemeleri (bu makinedeki GPU için; başka GPU'lar için CMAKE_CUDA_ARCHITECTURES verin)
+# GPU derlemeleri (bu makinedeki GPU için; başka GPU'lar için CMAKE_CUDA_ARCHITECTURES verin;
+# varsayılan FP32 özdeşlik derlemesidir, hızlı kip için -DCPPWRF_CUDA_FP32_IDENTITY=OFF ekleyin)
 cmake -S . -B build-gpu-dp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON
 cmake --build build-gpu-dp -j "$(nproc)"
 cmake -S . -B build-gpu -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF
@@ -65,7 +67,7 @@ CUDA derlemesi uzun sürer ve iş başına birkaç GB bellek ister. Bellek azsa 
 | `CPPWRF_NATIVE` | `ON` | `-march=native`. Başka işlemcilerde çalışacak ikili dosyalar için `OFF` verin; sonuçlar değişmez. |
 | `CPPWRF_PORTABLE_LIBMVEC` | `ON` | glibc'nin vektör `log` / `log10` işlevlerini her işlemcide Intel'deki gibi hesaplar. |
 | `CPPWRF_CUDA_GLIBC_MATH` | `ON` | FP64 GPU derlemesinde glibc'nin matematik işlevlerini GPU'da çalıştırır. |
-| `CPPWRF_CUDA_FP32_IDENTITY` | `OFF` | Yalnız CUDA FP32 (`CPPWRF_CUDA_GLIBC_MATH=ON` gerekir): `ON`, CPU FP32 derlemesinin sonucunu GPU'da bit bit aynen verir (docs/FP32_IDENTITY.md'deki vakalarda WRF real*4'ünkü); hızlı kipten biraz yavaştır. `gpu-fp32` adıyla kurulur. |
+| `CPPWRF_CUDA_FP32_IDENTITY` | `ON` | Yalnız CUDA FP32 (`CPPWRF_CUDA_GLIBC_MATH=ON` gerekir): `ON` (varsayılan), CPU FP32 derlemesinin sonucunu GPU'da bit bit aynen verir (docs/FP32_IDENTITY.md'deki vakalarda WRF real*4'ünkü). `OFF`: isteğe bağlı hızlı kip (FMA birleştirmesi, CUDA matematik kitaplığı; makale kıyaslamasında %2-17 daha hızlı; docs/FP32_ACCURACY.md). İkisi de `gpu-fp32` adıyla kurulur. |
 
 Son üç seçenek neden var? WRF'nin sonucu, matematik işlevlerinin son bitine kadar nasıl yuvarlandığına bağlıdır:
 
@@ -76,9 +78,10 @@ Son üç seçenek neden var? WRF'nin sonucu, matematik işlevlerinin son bitine 
   algoritmalarını GPU'ya taşır; `gpu-fp64`'ü WRF ile bit bit aynı yapan budur. FP64'ü bit bit aynı yapan öteki
   değişikliklerle birlikte FP64 adım süresini %-4 ile %+7 arasında değiştirdi (docs/STATUS.md); tek başına `OFF`
   ölçülmedi.
-- **`CPPWRF_CUDA_FP32_IDENTITY`:** FP32 GPU derlemesinde her çekirdekte FMA birleştirmesini kapatır ve glibc 2.41'in
-  float işlevlerini GPU'da çalıştırır; böylece `gpu-fp32`, `cpu-fp32` ile bit bit aynı sonucu verir. RTX 2060'ta P4'te
-  çekirdek süresine %3 ekler. Varsayılan `OFF` hızlı kiptir.
+- **`CPPWRF_CUDA_FP32_IDENTITY`:** `ON` (varsayılan) FP32 GPU derlemesinde her çekirdekte FMA birleştirmesini kapatır
+  ve glibc 2.41'in float işlevlerini GPU'da çalıştırır; böylece `gpu-fp32`, `cpu-fp32` ile bit bit aynı sonucu verir.
+  `OFF` isteğe bağlı hızlı kiptir (FMA birleştirmesi ve CUDA'nın matematik kitaplığı; makale kıyaslamasında %2-17 daha
+  hızlı; docs/FP32_ACCURACY.md).
 
 FP32 derlemeleri float işlevleri için sistemin libm'ini çağırmaz: glibc 2.41'inkiler (her girdide aynı olduğu
 kanıtlanmış hâlleriyle) programın içindedir. Bu yüzden `cpu-fp32` başka glibc sürümlerinde de WRF real*4'ün bitlerini

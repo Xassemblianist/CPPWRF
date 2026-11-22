@@ -13,7 +13,8 @@ One source tree gives up to four builds, called *flavours*. They can be installe
 |---|---|---|
 | `cpu-fp64` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON` | Bit-identical to WRF v4.8.0 real*8. Runs on any x86-64 machine with OpenMP. |
 | `gpu-fp64` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON` | Bit-identical to WRF real*8 and to `cpu-fp64`. Runs on one NVIDIA GPU, about 3 to 5 times faster than WRF real*8. |
-| `gpu-fp32` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF` | The fast mode. It is as close to WRF real*8 as WRF's own real*4 build is. |
+| `gpu-fp32` | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF` | Bit-identical to `cpu-fp32` and to WRF v4.8.0 real*4 on the cases of docs/FP32_IDENTITY.md. Runs on one NVIDIA GPU. |
+| `gpu-fp32` (fast, opt-in) | `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF` | Fast FP32 mode (FMA, CUDA's math; 2 to 17 % faster in the paper benchmark). Accuracy like WRF real*4 against real*8 (docs/FP32_ACCURACY.md). Installs as `gpu-fp32`. |
 | `cpu-fp32` | `-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF` | Bit-identical to WRF v4.8.0 real*4 on the cases of docs/FP32_IDENTITY.md. Runs on any x86-64 machine with OpenMP. |
 
 ## 2. Packages
@@ -53,7 +54,8 @@ From the source tree (`git clone https://github.com/Xassemblianist/CPPWRF.git`):
 cmake -S . -B build-cpu -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON
 cmake --build build-cpu -j "$(nproc)"
 
-# GPU, FP64 and FP32 (the GPU of this machine; see CMAKE_CUDA_ARCHITECTURES below)
+# GPU, FP64 and FP32 (the GPU of this machine, see CMAKE_CUDA_ARCHITECTURES below; default FP32 is the identity build,
+# -DCPPWRF_CUDA_FP32_IDENTITY=OFF the fast build)
 cmake -S . -B build-gpu-dp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON
 cmake --build build-gpu-dp -j "$(nproc)"
 cmake -S . -B build-gpu -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF
@@ -75,7 +77,7 @@ GB per job on the large physics sources.
 | `CPPWRF_NATIVE` | `ON` | `-march=native`. Use `OFF` for binaries that must run on other CPUs. The values are the same either way. |
 | `CPPWRF_PORTABLE_LIBMVEC` | `ON` | See "The glibc-math options" below. |
 | `CPPWRF_CUDA_GLIBC_MATH` | `ON` | See "The glibc-math options" below. |
-| `CPPWRF_CUDA_FP32_IDENTITY` | `OFF` | CUDA FP32 only. `ON`: the CPU FP32 build's results on the GPU, bit for bit (WRF real*4's on the cases of docs/FP32_IDENTITY.md), a little slower than the fast mode. It installs as `gpu-fp32`. |
+| `CPPWRF_CUDA_FP32_IDENTITY` | `ON` | CUDA FP32 only. `ON` (default): the CPU FP32 build's results on the GPU, bit for bit (WRF real*4's on the cases of docs/FP32_IDENTITY.md). `OFF`: the opt-in fast FP32 build (FMA contraction, CUDA's math; 2 to 17 % faster in the paper benchmark; docs/FP32_ACCURACY.md). Both install as `gpu-fp32`. |
 | `CMAKE_INSTALL_PREFIX` | `/usr/local` | Where `cmake --install` puts the files. |
 
 ### The glibc-math options and why they exist
@@ -91,9 +93,10 @@ WRF's results depend on the exact rounding of its math functions. Three options 
   math functions on the GPU instead of CUDA's math library. That is what makes `gpu-fp64` bit-identical to WRF.
   With the rest of the FP64 bit-identity changes it moved the FP64 stepping time by -4 to +7 % (docs/STATUS.md);
   `OFF` alone was not timed. `OFF` uses CUDA's math library, which agrees with WRF to roundoff only.
-- **`CPPWRF_CUDA_FP32_IDENTITY`** (CUDA FP32 builds only; needs `CPPWRF_CUDA_GLIBC_MATH=ON`). `ON` turns FMA
-  contraction off in every kernel and runs glibc 2.41's float functions on the GPU, so `gpu-fp32` gives the same bits
-  as `cpu-fp32`. On an RTX 2060 it costs 3 % of kernel time on P4. The default `OFF` is the fast mode.
+- **`CPPWRF_CUDA_FP32_IDENTITY`** (CUDA FP32 builds only; needs `CPPWRF_CUDA_GLIBC_MATH=ON`). `ON` (default) turns
+  FMA contraction off in every kernel and runs glibc 2.41's float functions on the GPU, so `gpu-fp32` gives the same
+  bits as `cpu-fp32`. `OFF` is the opt-in fast mode (FMA contraction, CUDA's math library; 2 to 17 % faster in the
+  paper benchmark; docs/FP32_ACCURACY.md).
 
 The FP32 builds do not call the host's libm for float functions: the executables carry glibc 2.41's (each proven
 equal on every input), so `cpu-fp32` gives WRF real*4's bits with other glibc versions too (proven with binaries built on Ubuntu 24.04,
@@ -101,7 +104,8 @@ glibc 2.39).
 
 The CMake files also refuse flags that change results: `-ffast-math`, `-Ofast`, `-ffp-contract=fast`, and on the GPU
 `--use_fast_math`, `-ftz=true`, `-prec-div=false` and `-prec-sqrt=false`. They set `-ffp-contract=off` and nvcc's
-`--fmad=false` (FP64) themselves. docs/USER_GUIDE.md ("Required Flags and Determinism") explains each one.
+`--fmad=false` (FP64 and default FP32) themselves. docs/USER_GUIDE.md ("Required Flags and Determinism") explains each
+one.
 
 ## 4. Install
 

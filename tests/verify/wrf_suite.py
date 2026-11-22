@@ -15,9 +15,10 @@ dycore, boundaries, diffusion or physics coupling.
 The cases are defined in tests/verify/cases/ (one file per group, see its __init__.py).
 
 Binaries: --cpu-dp the CPU FP64 build (cases cpu_dp, against WRF's real*8 build), --cpu-sp the CPU FP32 build
-(-DCPPWRF_DOUBLE=OFF; cases cpu_sp, against WRF's real*4 build, also at tolerance 0), --cuda / --cuda-dp the CUDA
-FP32 / FP64 builds, --cuda-sp-id the CUDA FP32 identity build (-DCPPWRF_CUDA_FP32_IDENTITY=ON; cases cuda_sp_id: the
-cpu_sp cases on the GPU, against the same WRF real*4 references at tolerance 0).
+(-DCPPWRF_DOUBLE=OFF; cases cpu_sp, against WRF's real*4 build, also at tolerance 0), --cuda the fast CUDA FP32
+build (-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF; cases cuda, compared by relative L2), --cuda-dp the CUDA
+FP64 build, --cuda-sp-id the default CUDA FP32 identity build (-DCPPWRF_DOUBLE=OFF, CPPWRF_CUDA_FP32_IDENTITY=ON by
+default; cases cuda_sp_id: the cpu_sp cases on the GPU, against the same WRF real*4 references at tolerance 0).
 Cases with tolerance 0 (CPU FP64, CPU FP32) run with WRF history output and their wrfout files are compared with WRF's at
 tolerance 0 (exact.py: NaN equals only NaN, -0 differs from +0): every variable of the reference file, every
 reference frame up to the case's time (the final one must be there), types and variable attributes, and the
@@ -579,9 +580,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cpu-dp")
     ap.add_argument("--cpu-sp", help="the CPU FP32 build (-DCPPWRF_DOUBLE=OFF): the cpu_sp cases")
-    ap.add_argument("--cuda-sp-id", help="the CUDA FP32 identity build (-DCPPWRF_CUDA_FP32_IDENTITY=ON): the cuda_sp_id "
-                    "cases (the cpu_sp cases on the GPU)")
-    ap.add_argument("--cuda")
+    ap.add_argument("--cuda-sp-id", help="the default CUDA FP32 identity build (CPPWRF_CUDA_FP32_IDENTITY=ON, "
+                    "default): the cuda_sp_id cases (the cpu_sp cases on the GPU)")
+    ap.add_argument("--cuda", help="the fast CUDA FP32 build (-DCPPWRF_CUDA_FP32_IDENTITY=OFF): the cuda cases")
     ap.add_argument("--cuda-dp")
     ap.add_argument("--out", default=os.path.expanduser("~/cppwrf_scratch/wrf_suite"))
     ap.add_argument("--only", help="comma-separated substrings of case names")

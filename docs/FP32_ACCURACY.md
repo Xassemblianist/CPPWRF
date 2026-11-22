@@ -1,8 +1,9 @@
 # CPPWRF GPU FP32 accuracy
 
-CPPWRF's CPU FP64 and GPU FP64 builds are bit-identical to WRF v4.8.0 real*8. The GPU FP32 build, the fast mode on
-GPUs with slow FP64 (RTX, L4, the RTX PRO 6000 Blackwell of a Colab G4), cannot be bit-identical to anything. The fair
-question is whether it is as trustworthy as the WRF most people run, stock WRF real*4:
+CPPWRF's CPU FP64 and GPU FP64 builds are bit-identical to WRF v4.8.0 real*8. The fast GPU FP32 build
+(`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`), an opt-in mode on GPUs with slow FP64 (RTX, L4, the RTX PRO 6000 Blackwell of a
+Colab G4), cannot be bit-identical to anything. The fair question is whether it is as trustworthy as the WRF most
+people run, stock WRF real*4:
 
 > Is the difference between CPPWRF GPU FP32 and WRF real*8 not larger than the difference between WRF real*4 and
 > WRF real*8?
@@ -13,9 +14,10 @@ The measure is the ratio, per case, variable and output time,
 
 R <= 1: CPPWRF FP32 is at least as close to the double-precision answer as WRF's own single-precision build.
 
-The CPU FP32 build is a different matter: since 1.2.0, on the cases of docs/FP32_IDENTITY.md it is bit-identical to WRF real*4,
-and so is the CUDA FP32 identity build (`-DCPPWRF_CUDA_FP32_IDENTITY=ON`), at a cost in speed; this page is about the
-fast CUDA FP32 build, the default.
+The CPU FP32 build and the default CUDA FP32 build (`CPPWRF_CUDA_FP32_IDENTITY=ON`, default since 1.3.0) are a
+different matter: on the cases of docs/FP32_IDENTITY.md they are bit-identical to WRF real*4, at a cost in speed (2
+to 17 % slower than the fast build in the paper benchmark). This page is about the opt-in fast CUDA FP32 build
+(`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`).
 
 ## Status
 
@@ -73,9 +75,9 @@ The ratio R of the study (FP32's difference over WRF real*4's) was not measured 
 
 One Colab G4 runtime (AMD EPYC 9B45, RTX PRO 6000 Blackwell). WRF v4.8.0 real*4 and real*8 built from the release
 source with WRF's configure for GNU (gfortran 14.2, MPICH), each run at its fastest MPI layout (24 ranks, or 24 x 2 /
-12 x 4 ranks x threads); CPPWRF's CUDA FP32 release build; all from the same real*8 `wrfinput` / `wrfbdy`; the real*4
-runs with WRF's single-precision RRTMG tables. Relative L2 difference ||a - b|| / ||b|| over the whole domain at 1 h.
-Each cell: WRF real*4 vs WRF real*8 / CPPWRF FP32 vs WRF real*8 (R).
+12 x 4 ranks x threads); CPPWRF's fast CUDA FP32 release build; all from the same real*8 `wrfinput` / `wrfbdy`; the
+real*4 runs with WRF's single-precision RRTMG tables. Relative L2 difference ||a - b|| / ||b|| over the whole domain
+at 1 h. Each cell: WRF real*4 vs WRF real*8 / CPPWRF FP32 vs WRF real*8 (R).
 
 | Case | U | V | W | T | QVAPOR | PH | MU | PSFC |
 |---|---|---|---|---|---|---|---|---|
@@ -106,8 +108,8 @@ What the numbers say, and what they do not:
 - WRF v4.8.0 from the official release source, WRF's own `configure` for GNU (dmpar, option 34) in the Debian 13
   chroot of the suite (gfortran 14.2, MPICH): real*4 (no `-r8`: the usual production build) and real*8
   (`configure -r8`). The real*4 runs read WRF's single-precision RRTMG tables and compute their own Thompson tables.
-- CPPWRF's release builds of README.md: CUDA FP32 (`-DCPPWRF_DOUBLE=OFF`: CUDA's math library, FMA contraction) and
-  CUDA FP64.
+- CPPWRF's release builds: fast CUDA FP32 (`-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF`: CUDA's math
+  library, FMA contraction; the default at the time of the study) and CUDA FP64.
 - The real*8 reference of every comparison is the CPPWRF GPU FP64 run. It is bit-identical to WRF real*8 run in one
   process on Intel (the suite's references); the same session re-runs the suite's tolerance-0 GPU FP64 cases of the
   studied configurations to show it. Using it rather than a new WRF real*8 run removes two effects that have nothing
@@ -472,22 +474,24 @@ configuration; no FP32 port defect was found, so no FP32 byte changes:
 
 - **FP64 is WRF real*8** at tolerance 0 in all studied configurations (suite cuda_dp cases and 1221 compared
   variable-frames).
-- **GPU FP32 is as trustworthy as stock WRF real*4** for forecasts: after a few hours its difference from real*8 is
-  the chaotic spread that any last-bit perturbation reaches, even one in double precision (24 h / 72 h R 0.8 to
+- **Fast GPU FP32 is as trustworthy as stock WRF real*4** for forecasts: after a few hours its difference from real*8
+  is the chaotic spread that any last-bit perturbation reaches, even one in double precision (24 h / 72 h R 0.8 to
   1.1; WRF real*4's own process layout moves the same numbers by up to 10 %).
-- **In the first hours** FP32 is as close to real*8 as WRF real*4 or closer for KF / WSM6 / YSU / Noah / RRTMG, Thompson,
-  MYJ, the nest, the dry TKE case, the tropics and the large domain. With ACM2 + Pleim-Xiu (ACM7), Morrison's hydrometeors
-  and the skin SST single runs reach R 1.2 to 2.3 at 1 h; "Root causes of the first-hour outliers" traces each to
-  single Kain-Fritsch decisions that are ties at the last bit (and grow through ACM2's mixing), finds no FP32 port
-  defect, and shows R ranging 1.1 to 2.0 (ACM7 T) over five builds of the same code. By 6 h these configurations are
-  at R 0.8 to 1.1 like the others (24 h median 0.81 to 1.15).
+- **In the first hours** fast FP32 is as close to real*8 as WRF real*4 or closer for KF / WSM6 / YSU / Noah / RRTMG,
+  Thompson, MYJ, the nest, the dry TKE case, the tropics and the large domain. With ACM2 + Pleim-Xiu (ACM7),
+  Morrison's hydrometeors and the skin SST single runs reach R 1.2 to 2.3 at 1 h; "Root causes of the first-hour
+  outliers" traces each to single Kain-Fritsch decisions that are ties at the last bit (and grow through ACM2's
+  mixing), finds no FP32 port defect, and shows R ranging 1.1 to 2.0 (ACM7 T) over five builds of the same code. By
+  6 h these configurations are at R 0.8 to 1.1 like the others (24 h median 0.81 to 1.15).
 
 ## When to use FP32 and when FP64
 
-- FP64 (CPU or GPU) when the answer must be WRF's: verification against WRF real*8, studies that compare against
-  WRF runs, restarts that must continue a WRF run exactly.
-- GPU FP32 for production forecasts and ensembles on GPUs with slow FP64: on a G4 it steps 1.7 to 4.3 times faster
-  than GPU FP64 (docs/PERF.md). Beyond the first hours its distance from WRF real*8 is that of WRF real*4, the build
-  most WRF users run. In the first hour single FP32 runs with ACM2 / Pleim-Xiu, Morrison or the skin SST can be up to
-  twice as far from real*8 as one WRF real*4 run, as a draw of the rounding, not a defect; use FP64 (or an ensemble)
-  where that first hour matters.
+- FP64 (CPU or GPU) when the answer must be WRF real*8's: verification against WRF real*8, studies that compare
+  against WRF runs, restarts that must continue a WRF run exactly.
+- Default GPU FP32 (`CPPWRF_CUDA_FP32_IDENTITY=ON`, default) for production forecasts and ensembles on GPUs with slow
+  FP64: bit-identical to CPU FP32 and to stock WRF real*4 on the configurations of docs/FP32_IDENTITY.md.
+- Fast GPU FP32 (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) when you want the extra 2 to 17 % speed over the identity build
+  (in the paper benchmark): on a G4 it steps 1.7 to 4.3 times faster than GPU FP64 (docs/PERF.md). Beyond the first
+  hours its distance from WRF real*8 is that of WRF real*4, the build most WRF users run. In the first hour single
+  fast FP32 runs with ACM2 / Pleim-Xiu, Morrison or the skin SST can be up to twice as far from real*8 as one WRF
+  real*4 run, as a draw of the rounding, not a defect; use FP64 (or an ensemble) where that first hour matters.
