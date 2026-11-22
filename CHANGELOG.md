@@ -70,6 +70,25 @@ resumes across versions from WRF's wrfrst files.
   min_time_step, as adapt_timestep (time.dt 0.33 for 1/3 s; a starting time step below 0.005 s with min_time_step =
   0 is refused); a negative starting / max / min_time_step_den is refused; time_step = 0 without the adaptive time
   step is an error instead of a crash of the translator.
+- Translator: aligned WRF namelist validation and automatic resets with WRF v4.8.0 (`share/module_check_a_mundo.F`,
+  `share/input_wrf.F` and the physics/dynamics drivers). Automatic resets and inactive options now match WRF with a
+  note instead of failing: ideal `hypsometric_opt = 2` resets to 1; `sf_urban_physics` copies the innermost domain's
+  value on nested runs; MSKF (`cu_physics = 11`) resets any `icloud` to 1 and sets `cu_rad_feedback = .true.` before
+  checking `cu_diag`; `o3input` resets to 0 for non-RRTMG radiation; `sst_update = 0` zeroes `io_form_auxinput4` and
+  `auxinput4_interval*`; non-MYNN PBL resets `bl_mynn_edmf`, `bl_mynn_edmf_dd`, `bl_mynn_output` and `icloud_bl = 1`
+  to 0; `bl_pbl_physics = 5, bl_mynn_edmf = 0, ishallow = 1` is accepted; `mp_physics = 28` resets any non-zero
+  `grav_settling` to 0 before range checks; `ghg_input`, `idcor` and `hail_opt` values other than 1 follow WRF's 0
+  branch; `nssl_*` flags accept any `< 0` as the default; `tice2tsk_if2cold` with `fractional_seaice = 0`, `lagday`
+  with `tmn_update = 0`, `opt_thcnd` outside Noah, `cugd_avedx` / ensemble sizes outside Grell-3D, `shadlen` with
+  `topo_shading = 0`, `scalar_pblmix = 1` with WSM3 / WSM5 / no PBL, `gwd_dx_factor` / `gwd_if_nonhyd` on domains
+  with `gwd_opt = 0`, `chem_adv_opt` and moving-nest options at their Registry defaults are accepted. MYNN
+  (`bl_pbl_physics = 5`) now accepts all ported microphysics with `qc, qi, qs` (4, 6, 8, 10, 14, 16, 17, 18) and
+  ACM2 (`bl_pbl_physics = 7`) all ported microphysics with `qc, qi` (4, 6, 8, 10, 14, 16, 17, 18, 28, 50, 51).
+  Stricter checks matching WRF: `zdamp >= ztop` is enforced only for `damp_opt = 2` (with ideal default `ztop = 15000`);
+  omitted nest `parent_id` defaults to Registry 0 (rejected) instead of `dom_id - 1`; `vert_refine_fact = 0` is
+  rejected; non-`max_domains` array options (`press_levels`, `z_levels`, `ocean_z`, ...) are checked across all
+  supplied elements; child `s_we`/`s_sn` no longer inherit domain 1's value; fixed `DEFAULT_ONLY_OPTIONS` key
+  `"grid_allowed"`.
 
 ## 1.2.2 (2026-11-22)
 
