@@ -83,7 +83,7 @@ if [ $DRY = 1 ]; then
   for t in ${DATA//,/ }; do
     w=
     timeout 120 rclone lsf "cppwrf-drive:cppwrf-data/$t" 2> /dev/null | grep -qx "$t" && w="Drive"
-    grep -qF "  $t.part" <<< "$SUMS" && w="${w:+$w and }the GitHub release"
+    awk -v t="$t" '$2 == t || index($2, t ".part") == 1 { f = 1; exit } END { exit !f }' <<< "$SUMS" && w="${w:+$w and }the GitHub release"
     [ -n "$BK" ] && timeout 120 gcloud storage ls "gs://$BK/$t" > /dev/null 2>&1 && w="${w:+$w and }the bucket"
     echo "[colab_wrfref] $t: ${w:-NOT FOUND (Drive, GitHub${BK:+, bucket})}"
     [ -n "$w" ] || bad=1

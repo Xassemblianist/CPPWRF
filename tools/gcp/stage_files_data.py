@@ -65,12 +65,16 @@ def main():
             continue
         m = re.search(r"real\.dir=(\S+)", extra)
         rd = m.group(1) if m else stage_data.config_value(cfg, "real", "dir").replace("${CPPWRF_WRF_RUNS}", WR)
-        thompson = (stage_data.config_value(cfg, "phys", "mp_physics") or "0").strip() == "8"
+        mm = re.search(r"phys\.mp_physics=(\S+)", extra)
+        mp = (mm.group(1) if mm else stage_data.config_value(cfg, "phys", "mp_physics") or "0").strip()
+        thompson = mp in ("8", "28")
+        p3 = mp in ("50", "51")
         for f in sorted(os.listdir(rd)):
             p = os.path.join(rd, f)
             if os.path.isdir(p) or (f in stage_data.THOMPSON and not thompson):
                 continue
-            if f in stage_data.THOMPSON or not any(stage_data.fnmatch.fnmatch(f, s) for s in stage_data.SKIP):
+            if f in stage_data.THOMPSON or (f == stage_data.P3 and p3) or \
+                    not any(stage_data.fnmatch.fnmatch(f, s) for s in stage_data.SKIP):
                 add(p, WR, "wrf_runs")
         add_outputs(ref)
         if rst:

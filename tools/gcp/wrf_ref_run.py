@@ -92,7 +92,7 @@ def segmented(R, nl, seg, parts_prefix):
             n = setkey(n, "time_control", key, ", ".join([str(v)] * (1 if key in ("run_seconds", "restart",
                                                                                   "restart_interval") else ndom)))
         open(os.path.join(R, "namelist.input"), "w").write(n)
-        subprocess.run(f"./wrf.exe > wrf_part{k}.log 2>&1", shell=True, cwd=R, env=env)
+        subprocess.run(f"./wrf.exe > wrf_part{k}.log 2>&1", shell=True, cwd=R, env=wrf_env)
         bad = wrf_failed(R, f"wrf_part{k}.log")
         if bad:
             return [f"part {k}"] + bad
@@ -164,6 +164,10 @@ for k, v in [("run_seconds", str(3 * dt)), ("history_interval_s", f"{dt}, {dt}, 
     steps = setkey(steps, "time_control", k, v)
 R = os.path.join(dest, f"run_{name}")
 env = dict(os.environ, OMP_NUM_THREADS="1")
+# MALLOC_PERTURB_=128 (as tests/verify/make_restart_refs.sh and make_resumed_refs.sh): fills malloc'd buffers with
+# 0x7f (finite float/double) so 0.0*cupclwm in GFL's module_cu_gfl_wrf.F90 (cupclwm uninitialised when imid=0) does
+# not hit 0.0*NaN from 0xffffffffffffff.. bytes freed by HDF5 during mid-run wrfout / wrfrst writes.
+wrf_env = dict(env, MALLOC_PERTURB_="128")
 real = special.get("run.real")
 prepare(R, nl, None if real else src)
 if real:  # real.exe on the met_em files of the listed directories, in R with the reference's namelist
@@ -181,7 +185,7 @@ if real:  # real.exe on the met_em files of the listed directories, in R with th
             lines = log.strip().splitlines()
             print(f"{name} REAL-FAILED {[l.strip() for l in lines if 'ERROR' in l or 'FATAL' in l][:4] or lines[-1:]}",
                   flush=True)
-            sys.exit(0)
+            sys.exit(1)
 runs_now = [R]
 if special.get("run.steps", "1") != "0":
     prepare(os.path.join(R, "steps"), steps, R if real else src)
@@ -189,13 +193,19 @@ if special.get("run.steps", "1") != "0":
 if prepare_only:
     sys.exit(0)
 seg = int(special.get("run.segment", "0"))
-jobs = {d: subprocess.Popen("./wrf.exe > wrf.log 2>&1", shell=True, cwd=d, env=env) for d in runs_now
+jobs = {d: subprocess.Popen("./wrf.exe > wrf.log 2>&1", shell=True, cwd=d, env=wrf_env) for d in runs_now
         if not (seg and d == R)}
+failed = False
 if seg:
     bad = segmented(R, nl, seg, os.environ.get("WRFREF_PARTS"))
+    if bad:
+        failed = True
     print(f"{name} SUCCESS" if not bad else f"{name} WRF-FAILED {bad}", flush=True)
 for d, p in jobs.items():
     p.wait()
     bad = wrf_failed(d)
+    if bad:
+        failed = True
     tag = name if d == R else f"{name}/steps"
     print(f"{tag} SUCCESS" if not bad else f"{tag} WRF-FAILED {bad}", flush=True)
+sys.exit(1 if failed else 0)

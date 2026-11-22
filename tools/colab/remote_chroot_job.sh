@@ -100,15 +100,18 @@ gcs() {  # an expired token (it lives as long as the workstation's gcloud token,
   done
   return 1
 }
-gh_has() {  # TAR is in the GitHub release (its SHA256SUMS lists TAR's parts)
+gh_parts() {  # SHA256SUMS lines for TAR: the whole file if listed, else its .part* pieces
+  awk -v t="$1" '$2 == t { w = $0 } index($2, t ".part") == 1 { p = p $0 "\n" } END { if (w) print w; else printf "%s", p }' $C/SHA256SUMS 2> /dev/null
+}
+gh_has() {  # TAR is in the GitHub release (its SHA256SUMS lists TAR whole or its .part* pieces)
   [ -s $C/SHA256SUMS ] ||
     { curl -sSfL --retry 5 -o $C/SHA256SUMS.$BASHPID "$GH/SHA256SUMS" 2>> $C/gh.log && mv -f $C/SHA256SUMS.$BASHPID $C/SHA256SUMS; }
-  grep -qF "  $1.part" $C/SHA256SUMS 2> /dev/null
+  [ -n "$(gh_parts "$1")" ]
 }
-gh_cat() {  # TAR from the GitHub release to stdout: its parts downloaded one by one into $T/parts, checked, concatenated
+gh_cat() {  # TAR from the GitHub release to stdout: whole or .part* pieces downloaded one by one into $T/parts, checked, concatenated
   local t=$1 sum p i ok
   mkdir -p $T/parts
-  grep -F "  $t.part" $C/SHA256SUMS | while read -r sum p; do
+  gh_parts "$t" | while read -r sum p; do
     ok=0
     for i in 1 2 3 4 5; do
       curl -sSfL --retry 5 -o "$T/parts/$p" "$GH/$p" 2>> "$C/fetch_$t.log" &&

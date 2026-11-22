@@ -5,7 +5,8 @@
   stage_data.py --only NAME[,NAME] [--files NAME[,NAME]] [--no-thompson-tables] [--whole] [--refs-only] [--no-refs]
                 [--no-steps] OUT.tar|-
 
-Each case's run directory (real.dir of its configuration or of its --set overrides) is written under its own
+--only takes exact wrf_suite.py case (or special check) names. Each case's run directory (real.dir of its
+configuration or of its --set overrides) is written under its own
 name, so the remote side sets CPPWRF_WRF_RUNS to the unpacked directory and runs the same suite. Links are
 followed. Left out: other history and restart files, rsl/log files, met_em input, executables and the
 large tables no ported scheme reads; the Thompson .dat tables only for mp_physics = 8 and 28 (and not with
@@ -22,10 +23,11 @@ restarted in the middle (suite.restart_at) also takes WRF's wrfrst files at the 
 auxhist3 files (output_diagnostics) next to its reference wrfout, whole.
 --files: the cases of tests/verify/run_wrf_files_test.sh run with CPPWRF_FILES_NO_VALUES=1 (a GPU build): their input
 directories, and their wrfout / wrfrst references (run, restart and resumed directories) as skeletons, with every
-variable, dimension, attribute and time but zero numbers; whole only the wrfrst files of minute 1, which the resumed
-runs start from.
+variable, dimension, attribute and time but zero numbers; whole only the wrfrst files one minute after each case's
+start (derived from namelist.input), which the resumed runs start from.
 """
 import argparse
+import datetime
 import fnmatch
 import glob
 import os
@@ -106,6 +108,24 @@ def config_value(cfg, section, key):
     return None
 
 
+def first_restart_stamp(d):
+    """The YYYY-MM-DD_HH:MM:SS timestamp one minute after the start in d/namelist.input (None without one)."""
+    nml = os.path.join(d, "namelist.input")
+    if not os.path.isfile(nml):
+        return None
+    nl = open(nml).read()
+    vals = []
+    for k in ("year", "month", "day", "hour", "minute", "second"):
+        m = re.search(rf"^\s*start_{k}\s*=\s*(\d+)", nl, re.M | re.I)
+        if m:
+            vals.append(int(m.group(1)))
+        elif k in ("minute", "second"):
+            vals.append(0)
+        else:
+            return None
+    return (datetime.datetime(*vals) + datetime.timedelta(minutes=1)).strftime("%Y-%m-%d_%H:%M:%S")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", required=True)
@@ -118,17 +138,21 @@ def main():
     ap.add_argument("out")
     a = ap.parse_args()
     log = (lambda *x: print(*x, file=sys.stderr)) if a.out == "-" else print  # stdout may be the tar
-    want = [o for o in a.only.split(",") if o]
+    want = {o for o in a.only.split(",") if o}
+    known = {c[0] for c in wrf_suite.CASES} | set(wrf_suite.SPECIAL)
+    unknown = sorted(want - known)
+    if unknown:
+        sys.exit(f"no case named {', '.join(unknown)}")
     dirs = {}  # run directory -> history files to keep, Thompson tables needed
     p3dirs = set()  # run directories of P3 cases (its lookup table)
     ref_times = {}  # reference wrfout -> compared times
     exact = set()  # reference wrfout files of tolerance-0 cases
     restarts = set()  # WRF's wrfrst files at the restart of restarted cases
     ideal = set()  # files under CPPWRF_WRF_REF: ideal-case soundings and reference wrfout files
-    if any("straka" in o for o in want):
+    if want & {"straka_wrf", "straka_wrf_cuda"}:
         ideal.add(os.path.join(WREF, "run_straka_d1", "wrfout_d01_0001-01-01_00:00:00"))
     for name, key, cfg, sets, wo, t, tol in wrf_suite.CASES:
-        if not any(o in name for o in want):
+        if name not in want:
             continue
         snd = config_value(cfg, "case", "sounding_file")
         refs = list(wo.values()) if isinstance(wo, dict) else [wo]
@@ -171,7 +195,7 @@ def main():
             p3dirs.add(rd)
         log(f"{name}: {os.path.relpath(rd, WR)}")
     for tag, cfg, _ in wrf_suite.RESTARTS:  # restart_<tag>_*: the input directory of the configuration
-        if not a.refs_only and any(o in n for n in wrf_suite.SPECIAL if n.startswith(f"restart_{tag}_") for o in want):
+        if not a.refs_only and any(n in want for n in wrf_suite.SPECIAL if n.startswith(f"restart_{tag}_")):
             rd = config_value(cfg, "real", "dir").replace("${CPPWRF_WRF_RUNS}", WR)
             d = dirs.setdefault(rd, [set(), False])
             d[1] = d[1] or ((config_value(cfg, "phys", "mp_physics") or "0").strip() in ("8", "28") and not a.no_thompson_tables)
@@ -189,12 +213,17 @@ def main():
         if (config_value(cfg, "phys", "mp_physics") or "0").strip() in ("50", "51"):
             p3dirs.add(rd)
         rsm = rst.replace("/rst_", "/rsm_") if rst else None
+        rst_at = None
+        if rst and os.path.isdir(rst):
+            rst_at = first_restart_stamp(rst) or (first_restart_stamp(ref) if os.path.isdir(ref) else None)
+            if not rst_at:
+                sys.exit(f"{rst}: cannot derive minute-1 restart time (no namelist.input)")
         for x in (ref, rst, rsm):
             if not x or not os.path.isdir(x):
                 continue
             for f in sorted(os.listdir(x)):
                 p, arc = os.path.join(x, f), os.path.join("wrf_runs", os.path.relpath(os.path.join(x, f), WR))
-                if re.fullmatch(r"wrfrst_d\d\d_.*_00:01:00", f) and x == rst:
+                if x == rst and rst_at and re.fullmatch(rf"wrfrst_d\d\d_{re.escape(rst_at)}", f):
                     whole[arc] = p
                 elif re.fullmatch(r"(wrfout|wrfrst)_d\d\d_.*", f):
                     if p in ref_times:
@@ -204,6 +233,12 @@ def main():
                     whole[arc] = p
         log(f"files {name}: {os.path.relpath(rd, WR)}, {os.path.relpath(ref, WR)}"
             + (f", {os.path.relpath(rst, WR)}, {os.path.relpath(rsm, WR)}" if rst else ""))
+    missing_dirs = [d for d in sorted(dirs) if not os.path.isdir(d)]
+    if missing_dirs:
+        sys.exit("missing run directory: " + ", ".join(missing_dirs))
+    missing_refs = [p for p in sorted(set(ref_times) | restarts) if not os.path.isfile(p)]
+    if missing_refs:
+        sys.exit("missing reference file: " + ", ".join(missing_refs))
     tf = tarfile.open(fileobj=sys.stdout.buffer, mode="w|", dereference=True) if a.out == "-" else \
         tarfile.open(a.out, "w", dereference=True)
     added = set()

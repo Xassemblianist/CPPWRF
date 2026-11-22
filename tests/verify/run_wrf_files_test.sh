@@ -36,6 +36,44 @@ print(",".join([x for x, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")) if 
                + (["LH"] if "ISFFLX" in d.ncattrs() and int(d.getncattr("ISFFLX")) == 0 else [])
                + (["QZ0", "USTM"] if sys.argv[2] == "f1" else []) or ["-"]))' "$1" "$2"
 }
+# start time from the first namelist.input in the given directories: minute-1 restart stamp or last wrfrst offset [s]
+rst_info() {
+  python3 -c 'import datetime, glob, os, re, sys
+mode, dirs = sys.argv[1], [d for d in sys.argv[2:] if d and d != "-" and os.path.isdir(d)]
+t0 = None
+for d in dirs:
+    p = os.path.join(d, "namelist.input")
+    if not os.path.isfile(p):
+        continue
+    nl = open(p).read()
+    vals = []
+    for k in ("year", "month", "day", "hour", "minute", "second"):
+        m = re.search(rf"^\s*start_{k}\s*=\s*(\d+)", nl, re.M | re.I)
+        if m:
+            vals.append(int(m.group(1)))
+        elif k in ("minute", "second"):
+            vals.append(0)
+        else:
+            vals = None
+            break
+    if vals:
+        t0 = datetime.datetime(*vals)
+        break
+if mode == "at":
+    print((t0 + datetime.timedelta(minutes=1)).strftime("%Y-%m-%d_%H:%M:%S") if t0 else "")
+else:
+    best = 0
+    for d in dirs:
+        for f in glob.glob(os.path.join(d, "wrfrst_d01_*")):
+            m = re.search(r"(\d{4}-\d{2}-\d{2}_\d{2}:\d{2}:\d{2})$", os.path.basename(f))
+            if not m:
+                continue
+            tf = datetime.datetime.strptime(m.group(1), "%Y-%m-%d_%H:%M:%S")
+            secs = int((tf - t0).total_seconds()) if t0 else tf.hour * 3600 + tf.minute * 60 + tf.second
+            if secs > best:
+                best = secs
+    print(best)' "$@"
+}
 WORK=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}/wrf_files_test
 R=${CPPWRF_WRF_RUNS}
 cd "$REPO_ROOT"
@@ -95,9 +133,8 @@ while IFS='|' read -r name cfg ref rst extra; do
   sets=(--set output.format=wrfout --set output.out_interval=1 --set output.dir="$WORK/$name")
   if { [ "$rst" != "-" ] && [ -d "$rst" ]; } || compgen -G "$ref/wrfrst_d0*" > /dev/null; then
     sets+=(--set restart.interval=60)
-    # restart files only up to WRF's last one (they take ~0.5 GB each for the larger domains)
-    last=$( (ls "$rst"/wrfrst_d01_* "$ref"/wrfrst_d01_* 2>/dev/null || true) | sed -E 's/.*_([0-9]{2}):([0-9]{2}):([0-9]{2})$/\1 \2 \3/' |
-            awk '{t = $1 * 3600 + $2 * 60 + $3; if (t > m) m = t} END {print m + 0}')
+    # restart files only up to WRF's last one (elapsed seconds from the namelist start; ~0.5 GB each for large domains)
+    last=$(rst_info last "$rst" "$ref")
     [ "$last" -gt 0 ] && sets+=(--set restart.end="$last")
   fi
   # shellcheck disable=SC2206
@@ -130,15 +167,20 @@ while IFS='|' read -r name cfg ref rst extra; do
   if [ "$rst" != "-" ] && [ -d "$rsm" ]; then
     rdir=$WORK/$name/resumed; mkdir -p "$rdir"
     rsets=("${sets[@]}" --set output.dir="$rdir")
-    for r in "$rst"/wrfrst_d01_*_00:01:00; do rsets+=(--set run.restart_file="$r"); done
-    if ! "$EXE" "$cfg" "${rsets[@]}" > "$rdir/run.log" 2>&1; then
-      echo "FAIL $name: resumed run failed"; tail -3 "$rdir/run.log"; ok=0
+    at=$(rst_info at "$rst" "$ref")
+    if [ -z "$at" ] || [ ! -f "$rst/wrfrst_d01_$at" ]; then
+      echo "FAIL $name: restart file wrfrst_d01_${at:-?} not found in $rst"; ok=0
     else
-      for f in "$rsm"/wrfout_d0*; do
-        b=$(basename "$f"); ours=$rdir/$b; [ -f "$ours" ] || ours=$rdir/${b:7:3}/$b
-        $CMP "$(ignored "$f" "$name")" "$ours" "$f" > "$rdir/cmp.log" 2>&1 || { ok=0; echo "FAIL $name resumed $b"; head -20 "$rdir/cmp.log"; }
-        n=$((n + 1))
-      done
+      rsets+=(--set run.restart_file="$rst/wrfrst_d01_$at")
+      if ! "$EXE" "$cfg" "${rsets[@]}" > "$rdir/run.log" 2>&1; then
+        echo "FAIL $name: resumed run failed"; tail -3 "$rdir/run.log"; ok=0
+      else
+        for f in "$rsm"/wrfout_d0*; do
+          b=$(basename "$f"); ours=$rdir/$b; [ -f "$ours" ] || ours=$rdir/${b:7:3}/$b
+          $CMP "$(ignored "$f" "$name")" "$ours" "$f" > "$rdir/cmp.log" 2>&1 || { ok=0; echo "FAIL $name resumed $b"; head -20 "$rdir/cmp.log"; }
+          n=$((n + 1))
+        done
+      fi
     fi
   fi
   if [ $ok = 1 ]; then echo "PASS $name"; rm -rf "${WORK:?}/$name"; else fail=1; fi
