@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later AND Apache-2.0
 """One time of a wrfout file and wrf-python's diagnostics of it.
 
 The methods follow wrf-python 1.3.4.1's getters (src/wrf/g_*.py) line by line: the same variables, the same

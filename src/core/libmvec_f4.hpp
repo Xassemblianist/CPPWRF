@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later AND LGPL-2.1-or-later
 #pragma once
 // glibc 2.41 libmvec's 4-lane float expf, logf, powf, sinf, cosf and atanf (_ZGVbN4v_expf, _ZGVbN4v_logf,
 // _ZGVbN4vv_powf, _ZGVbN4v_sinf, _ZGVbN4v_cosf, _ZGVbN4v_atanf; the SSE4

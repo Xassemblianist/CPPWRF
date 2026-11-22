@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later AND LicenseRef-AER-RRTMG
 #pragma once
 // RRTMG's real kind (module parkind of WRF's module_ra_rrtmg_lw.F, which the LW and SW modules use as
 // "use parkind, only : im => kind_im, rb => kind_rb"). WRF builds it with kind_rb = kind(1.0), the default REAL:
