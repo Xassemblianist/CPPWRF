@@ -185,6 +185,7 @@ problems, and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-GPL-3.0-or-later; see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md), which includes the WRF notice. WRF is
+Copyright (C) 2026 Ömer Kaan Yılmaz. GPL-3.0-or-later; see [LICENSE](LICENSE) and [NOTICE.md](NOTICE.md), which
+includes the WRF notice. WRF is
 developed by NCAR/MMM and its partners. CPPWRF is an independent port and is not affiliated with or endorsed
 by NCAR or UCAR.
