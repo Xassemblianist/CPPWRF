@@ -146,17 +146,25 @@ int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body) {
           err = std::string("MPI: gpuSetDevice(") + std::to_string(dev) + "): " + gpuGetErrorString(ce);
       }
       // the node's ranks on this rank's device (by its UUID: the ranks may see the devices under other numbers)
-      gpuDeviceProp prop{};
       int cur = 0;
+#if defined(CPPWRF_USE_HIP)
+      // hipDeviceGetUuid (ROCm 5 too: hipDeviceProp_t has its uuid member from ROCm 6.0 on)
+      hipUUID uuid{};
+      if (err.empty() && (gpuGetDevice(&cur) != gpuSuccess || hipDeviceGetUuid(&uuid, cur) != hipSuccess))
+        err = "MPI: cannot query the rank's " CPPWRF_GPU_API_NAME " device";
+#else
+      gpuDeviceProp prop{};
       if (err.empty() && (gpuGetDevice(&cur) != gpuSuccess || gpuGetDeviceProperties(&prop, cur) != gpuSuccess))
         err = "MPI: cannot query the rank's " CPPWRF_GPU_API_NAME " device";
-      std::vector<char> ids(std::size_t(nlocal) * sizeof(prop.uuid));
-      MPI_Allgather(&prop.uuid, int(sizeof(prop.uuid)), MPI_BYTE, ids.data(), int(sizeof(prop.uuid)), MPI_BYTE, node);
+      const auto& uuid = prop.uuid;
+#endif
+      std::vector<char> ids(std::size_t(nlocal) * sizeof(uuid));
+      MPI_Allgather(&uuid, int(sizeof(uuid)), MPI_BYTE, ids.data(), int(sizeof(uuid)), MPI_BYTE, node);
       MPI_Comm_free(&node);
       if (!err.empty()) throw std::runtime_error(err);
       int share = 0;
       for (int r = 0; r < nlocal; ++r)
-        share += std::memcmp(&ids[std::size_t(r) * sizeof(prop.uuid)], &prop.uuid, sizeof(prop.uuid)) == 0;
+        share += std::memcmp(&ids[std::size_t(r) * sizeof(uuid)], &uuid, sizeof(uuid)) == 0;
       set_device_work_share(share);
       // rank 0 names the mapping unless every rank is on device 0
       std::vector<int> devs(std::size_t(n), 0);

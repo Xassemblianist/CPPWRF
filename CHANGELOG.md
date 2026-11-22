@@ -60,6 +60,10 @@ resumes across versions from WRF's wrfrst files.
   60 s, was 51 s; n * dt lay just below the whole second).
 - A run without column physics writes STEPBL and STEPCU of the configuration's phys.bldt / phys.cudt into its wrfrst
   files (bl_init, cu_init), as STEPRA and STEPFG; was the namelist's when the two differ.
+- HIP builds: the tiled and MPI runs' halo exchange and gathers through the device staging buffer, the fast FP32
+  build's 256-lane ordered sums and the refusal of CPPWRF_TILE_CHECK in src/core/tiles.cpp, as in CUDA builds (the
+  host path copied the device fields with memcpy); MPI builds take the device UUID from hipDeviceGetUuid, which
+  ROCm 5 has as well (hipDeviceProp_t has its uuid member from ROCm 6.0 on). CUDA and CPU builds unchanged.
 
 ## 1.2.2 (2026-11-22)
 
