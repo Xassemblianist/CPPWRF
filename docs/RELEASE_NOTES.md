@@ -1,3 +1,56 @@
+# CPPWRF 1.2.3 release notes
+
+CPPWRF 1.2.3 widens the verified set and fixes restarts and translator details outside it. The results of every
+verified configuration are unchanged: CPU FP64 and CUDA FP64 reproduce WRF v4.8.0 real*8 bit for bit, CPU FP32 and
+the CUDA FP32 identity build reproduce WRF v4.8.0 real*4 on the configurations of docs/FP32_IDENTITY.md. It covers
+19 commits (not counting merges) from `v1.2.2` to the 1.2.3 release commit. The 1.2.2 notes follow below.
+
+## Added
+
+- **Coverage waves 3 to 5:** 52 WRF v4.8.0 r8 references and 156 cases (104 CPU FP64, 52 CUDA FP64): Noah-MP with
+  fractional sea ice and sst_update, LES-like setups without a PBL scheme, Noah-MP with MYNN / ACM2 / BouLac / QNSE,
+  RUC with rdlai2d, grav_settling with other PBL schemes, the diffusion skip flags and mix_isotropic, Morrison and
+  NSSL with other cumulus schemes, isftcflx 2 / iz0tlnd 2; eight physics sets with 57 and 89 levels (the GPU
+  kernels' level tiers above 48 levels on real data); YSU ysu_topdown_pblmix 0, kfeta_trigger 3, Grell-Freitas and
+  Grell-3 without shallow convection and with clos_choice 1 / 4 / 7 / 10, New Tiedtke on a nest, opt_thcnd 2, the
+  slab scheme with ifsnow 0, kim_tofd, damp_opt 1, top_lid, Dudhia SW with WSM3 and RRTMG LW.
+- **CUDA FP64 twins of the 15 CPU-only tiled real cases** (run.tiles layouts on the GPU).
+- **An opt-in AMD HIP / ROCm build path** (CPPWRF_ENABLE_HIP, off by default; docs/HIP.md) through a CUDA / HIP
+  runtime portability header. CUDA and CPU builds are unchanged (CUDA FP64 P1, P4, P4 tiled and N2 byte-identical
+  before and after). Not yet compiled to the end or run on AMD hardware.
+
+## Fixed
+
+- **Restarts as WRF:** a run resumed with a restart interval shorter than the file's seconds to the next ring
+  writes WRF_ALARM_SECS_TIL_NEXT_RING_51 as output_wrf; a run resumed from a wrfrst file dates its files from the
+  file's SIMULATION_START_DATE (also when run.start_date is the restart time); FP32 builds compute STEPRA / STEPBL /
+  STEPCU / STEPFG in WRF's REAL.
+- **Translator:** the first adaptive time step as adapt_timestep (starting_time_step / _den between the max and min
+  steps, with WRF's dx-based defaults); namelists it refused before are accepted.
+- **Nests of an INI** must have parent_grid_ratio >= 2 and lie 2 parent cells inside their parent, as the
+  translator checks.
+- **Tools:** the benchmark report no longer fails from its second case; the WRF output files test passes
+  restart.end only to fixed time step runs; the CI planner keeps each job's data below a runner's disk.
+
+## Verification
+
+| Where | Result |
+|---|---|
+| CPU CI at c29a32d (GitHub-hosted runners, Debian 13 container, run 44999293731) | suite PASS 527 FAIL 0 SKIP 0 at tolerance 0 (with the 104 new CPU FP64 cases and the 44 `cpu_sp` cases); ideal files 14; differential tests 32 / 32 |
+| CPU CI at ca4de31 (the test fixes on top of c29a32d, run 45004618168) | WRF output files 42 / 42; ideal files 14; differential tests 32 / 32; ctest 40 / 40 |
+| GPU: Colab G4 at c29a32d (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 422 / 422 run at tolerance 0, FAIL 0 (one more check, `real_kesskf_r8_fp64_cuda_t3x1`, was not run: its data tar was missing from the GPU data list); CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; device glibc math proof identical; ctest 41 / 42 (FP64) and 42 / 43 (FP32), the one failure being the Python test affected_cases, fixed in ca4de31 |
+
+How the counts relate (`tests/verify/wrf_suite.py --list`): the suite defines 1153 cases, 618 CPU FP64, 404 CUDA
+FP64, 43 CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`, 171 more than 1.2.2. The CI's 527 checks are the 464 CPU FP64
+cases that are not `--slow`, 18 restart checks, the Straka check and the 44 `cpu_sp` cases; the G4's 423 CUDA FP64
+checks are the 404 cases, 18 restart checks and the Straka check.
+
+The commits after c29a32d change tests, documentation and version strings only.
+
+## Known limitations
+
+As 1.2.2 (docs/STATUS.md). The HIP build path is unverified (see docs/HIP.md).
+
 # CPPWRF 1.2.2 release notes
 
 CPPWRF 1.2.2 is a fix release of 1.2.1. The results of every verified configuration are unchanged: CPU FP64 and CUDA

@@ -5,7 +5,7 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
-## Unreleased
+## 1.2.3 (2026-11-22)
 
 ### Added
 - Coverage waves 3 to 5 against WRF 4.8.0 runs (CPU FP64 exact, each with a CUDA FP64 twin): 17 references / 51
@@ -21,6 +21,8 @@ resumes across versions from WRF's wrfrst files.
   portability header. Not yet built or run on AMD hardware. CUDA and CPU builds unchanged.
 
 ### Fixed
+- Files test: restart.end only for fixed time step runs (an adaptive run refuses it); CI planner (cppwrf-data
+  ci/plan.py): at most 90 GiB of data per suite job.
 - tools/bench/bench_stats.py: the speed-up table no longer fails from its second case (a loop variable hid the
   cases table).
 - wrfrst files of a resumed run whose restart.interval is shorter than the restart file's seconds to the next ring:

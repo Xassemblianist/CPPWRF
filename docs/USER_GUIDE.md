@@ -44,10 +44,10 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files, for the 379 CPU FP64 checks of the suite at fbbcf57, version 1.2.2 (real-data
+  process, in every variable and output time of the wrfout and wrfrst files, for the 483 CPU FP64 checks of the suite at c29a32d, version 1.2.3 (real-data
   domains in the mid-latitudes, the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and
   72 h forecasts, WRF's default namelist, WRF's idealized cases).
-- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all CUDA FP64 checks of the suite, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1, on the RTX PRO 6000 Blackwell of a Colab G4, earlier
+- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all CUDA FP64 checks of the suite, 422 run for v1.2.3, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1, on the RTX PRO 6000 Blackwell of a Colab G4, earlier
   subsets on NVIDIA L4 and A100).
 - **CPU, FP32** (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default real*4
   build) on 24 configurations, the 44 `cpu_sp` cases of the suite (P1-P4, P9, Noah-MP, Thompson, MYNN, WDM6,
