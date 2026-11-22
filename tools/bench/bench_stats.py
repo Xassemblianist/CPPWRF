@@ -27,7 +27,8 @@ is not published (a write waits for the queued steps): wall, other, marginal and
 From the medians: SYPD from the wall time and from the steady rate, ns per cell and step (step_s over the cell
 updates of all domains per domain-1 step), and one simulated day as fixed + marginal x 86400 / simulated seconds
 (the fixed start-up counted once, not scaled with the length); the GPU energy of a day likewise (the fixed energy
-once + the steady power x a day's marginal time). Speed-ups against WRF real*4, tuned real*4 and real*8 at their
+once + the marginal energy of a day, charging the steady-window part marginal - io_post at power_steady_w and the
+post-step CPU write io_post at power_idle_w). Speed-ups against WRF real*4, tuned real*4 and real*8 at their
 fastest screened layouts: per block, WRF's run over CPPWRF's run of that block (the blocks interleave the models),
 over the blocks both ran in: the median block ratio with its bootstrap interval and range, and the ratio of the
 two medians over those same blocks; history off for step_s and wall, history on for wall.
@@ -120,6 +121,19 @@ def summarize(runs, verify, cases_info=None, best=None, manifest=None, rate=None
     for c in cases:
         for reg in ("off", "on"):
             rs = [r for r in ok if r["case"] == c and r["regime"] == reg]
+            dedup, seen_dup, last_idx = [], 0, {}
+            for r in rs:
+                bk = r.get("block")
+                if bk is not None:
+                    key = (r["model"], bk)
+                    if key in last_idx:
+                        dedup[last_idx[key]] = None
+                        seen_dup += 1
+                    last_idx[key] = len(dedup)
+                dedup.append(r)
+            if seen_dup:
+                print(f"warning: {c} {reg}: {seen_dup} duplicate (model, block) record(s); kept latest", file=sys.stderr)
+            rs = [r for r in dedup if r is not None]
             models = sorted({r["model"] for r in rs}, key=lambda m: ORDER.index(m) if m in ORDER else 99)
             for m in models:
                 g = [r for r in rs if r["model"] == m]
@@ -139,14 +153,23 @@ def summarize(runs, verify, cases_info=None, best=None, manifest=None, rate=None
                              ns_cell_step=ss * 1e9 / cells_per_step if cells_per_step else None)
                 if mg is not None and fx is not None:  # a one-day forecast: the fixed part once + a day's marginal part
                     d.update(s_marginal_per_sim_day=mg * day, s_fixed=fx, s_per_forecast_day=fx + mg * day)
-                ps, et = med("power_steady_w"), med("energy_j")
-                if ps is not None and mg is not None:
-                    d["gpu_wh_marginal_per_sim_day"] = ps * mg * day / 3600
-                    fixed_e = [((r.get("gpu") or {}).get("energy_j") - (r.get("gpu") or {}).get("power_steady_w") *
-                                (r.get("timing") or {}).get("marginal")) for r in g
-                               if (r.get("gpu") or {}).get("energy_j") is not None and
-                               (r.get("gpu") or {}).get("power_steady_w") is not None and
-                               (r.get("timing") or {}).get("marginal") is not None]
+                et = med("energy_j")
+                mg_e, fixed_e = [], []
+                for r in g:
+                    gp, tm = r.get("gpu") or {}, r.get("timing") or {}
+                    r_ps, r_mg = gp.get("power_steady_w"), tm.get("marginal")
+                    if r_ps is None or r_mg is None:
+                        continue
+                    r_post = max(0.0, tm.get("io_post") or 0.0)
+                    r_pi = gp.get("power_idle_w") or 0.0
+                    # marginal = compute + io_steady + io_post + input_steady; power_steady_w spans steps 2..N
+                    # (including io_steady), while io_post is a CPU-only write after GPU work finishes
+                    e_m = r_ps * max(0.0, r_mg - r_post) + r_pi * r_post
+                    mg_e.append(e_m)
+                    if gp.get("energy_j") is not None:
+                        fixed_e.append(gp["energy_j"] - e_m)
+                if mg_e:
+                    d["gpu_wh_marginal_per_sim_day"] = float(np.median(mg_e)) * day / 3600
                     if fixed_e:
                         d["gpu_wh_fixed"] = float(np.median(fixed_e)) / 3600
                         d["gpu_wh_per_forecast_day"] = d["gpu_wh_fixed"] + d["gpu_wh_marginal_per_sim_day"]
@@ -186,25 +209,25 @@ def summarize(runs, verify, cases_info=None, best=None, manifest=None, rate=None
                                    steal_pct_median=(stats([(r.get("cpu_share") or {}).get("steal_pct") for r in g])
                                                      or {}).get("median")))
             for base in ("wrf_r4", "wrf_r4t", "wrf_r8"):
-                b = {r["block"]: r for r in rs if r["model"] == base}
+                b = {r["block"]: r for r in rs if r["model"] == base and r.get("block") is not None}
                 if not b:
                     continue
                 for m in models:
                     if m.startswith("wrf"):
                         continue
+                    bm = {r["block"]: r for r in rs if r["model"] == m and r.get("block") is not None}
                     for k in ("step_s", "wall"):
-                        pr = [(value(b[r["block"]], k), value(r, k)) for r in rs if r["model"] == m and
-                              r["block"] in b]
-                        pr = [(x, y) for x, y in pr if pos(x) and pos(y)]  # the blocks both models ran in
+                        pr = [(bk, value(b[bk], k), value(bm[bk], k)) for bk in sorted(b) if bk in bm]
+                        pr = [(bk, x, y) for bk, x, y in pr if pos(x) and pos(y)]  # the blocks both models ran in
                         if not pr:
                             continue
-                        ratios = [x / y for x, y in pr]
+                        ratios = [x / y for _, x, y in pr]
                         # the ratio of the two medians over the same (matched) blocks
-                        mr = float(np.median([x for x, _ in pr]) / np.median([y for _, y in pr]))
+                        mr = float(np.median([x for _, x, _ in pr]) / np.median([y for _, _, y in pr]))
                         speed.append(dict(case=c, regime=reg, model=m, vs=base, metric=k, n=len(ratios),
                                           median=float(np.median(ratios)), min=min(ratios), max=max(ratios),
                                           ci95=boot_ci(ratios), ratio_of_medians=mr,
-                                          blocks=sorted(r["block"] for r in rs if r["model"] == m and r["block"] in b)))
+                                          blocks=[bk for bk, _, _ in pr]))
     lay = {}
     for r in runs:
         if r.get("phase") == "screen" and r.get("ok") and not r.get("warmup"):
@@ -267,7 +290,7 @@ def cell(s, n=2):
     return f"{f(s['median'], n)} [{f(s['q25'], n)}-{f(s['q75'], n)}] ({f(s['min'], n)}-{f(s['max'], n)})"
 
 
-def markdown(S, accuracy_md=None):
+def markdown(S, accuracy_md=None, md_path=None):
     o = []
     w = o.append
     w("# CPPWRF and WRF v4.8.0: paper benchmark\n")
@@ -380,8 +403,9 @@ def markdown(S, accuracy_md=None):
             eg = [g for g in gs if g["stats"]["energy_j"]]
             if eg:
                 w("GPU board energy (nvidia-smi power.draw integrated; the board only, not the host). Steady power: over "
-                  "the steady steps (domain 1's first to last timing line); per simulated day = steady power x the "
-                  "marginal time of a day, plus the fixed part once:\n")
+                  "the steady steps (domain 1's first to last timing line); per simulated day = the fixed energy once + "
+                  "the marginal energy of a day (steady power over marginal - io_post, plus idle power over the "
+                  "post-step CPU write io_post):\n")
                 w("| model | run energy J | steady power W | SM clock MHz | Wh fixed | Wh marginal / sim. day | "
                   "Wh / forecast day | throttled runs | power-capped runs |")
                 w("|---|---|---|---|---|---|---|---|---|")
@@ -436,7 +460,9 @@ def markdown(S, accuracy_md=None):
                     w(f"- {v['case']} {d} {NAMES.get(v['a'], v['a'])}: " + ", ".join(
                         f"{k} {y:.1e}" for k, y in x["l2"].items() if y is not None))
     if accuracy_md and os.path.exists(accuracy_md):
-        w(f"\nThe FP32 accuracy ratio R per variable and hour: {os.path.basename(accuracy_md)} "
+        acc_ref = (os.path.relpath(os.path.abspath(accuracy_md), os.path.dirname(os.path.abspath(md_path))).replace(os.sep, "/")
+                   if md_path else os.path.basename(accuracy_md))
+        w(f"\nThe FP32 accuracy ratio R per variable and hour: [{acc_ref}]({acc_ref}) "
           "(tools/verify/fp32_accuracy.py report).")
     if S["failed"]:
         w("\n## Failed runs\n")
@@ -482,7 +508,7 @@ def main():
                   json.load(open(opt("--best"))) if opt("--best") else None,
                   json.load(open(opt("--manifest"))) if opt("--manifest") else None,
                   float(opt("--rate")) if opt("--rate") else None, float(opt("--cpu-rate")) if opt("--cpu-rate") else None)
-    md = markdown(S, opt("--accuracy-md"))
+    md = markdown(S, opt("--accuracy-md"), opt("--md"))
     if opt("--md"):
         open(opt("--md"), "w").write(md)
     else:

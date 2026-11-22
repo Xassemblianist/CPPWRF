@@ -151,7 +151,8 @@ cd $J/src || exit 1
 if [ $NEED_L = 1 ]; then
   if [ -f $W/wps_day/met_ok ] && [ -x $W/WRF-r8/main/real.exe ]; then
     python3 tools/bench/paper_run.py make-large --base $J/data/wrf_runs/run_FP2_P4_24h_r8 --met $W/wps_day --out $W/run_Lday \
-      --start 2026-10-12_06 --end 2026-10-12_12 --wrf $W >> $P/out/make_large.log 2>&1
+      --start 2026-10-12_06 --end 2026-10-12_12 --wrf $W >> $P/out/make_large.log 2>&1 ||
+      echo "PAPER_L_FAILED make-large (make_large.log)" >> $J/setup.out
     B "C2: run_Lday $(tail -1 $P/out/make_large.log)"
   else B "C2: no WPS or real.exe: no large domain"; echo "PAPER_L_FAILED" >> $J/setup.out; fi
 else
@@ -160,21 +161,40 @@ fi
 if [ "${PAPER_SAVE_LDAY:-0}" = 1 ] && [ -s $W/run_Lday/wrfbdy_d01 ]; then
   mkdir -p $J/drive $J/stage/wrf_runs/run_Lday
   for f in $W/run_Lday/*; do ln -sfn "$(readlink -f "$f")" $J/stage/wrf_runs/run_Lday/; done
-  tar chf $J/drive/paper_lday_data.tar -C $J/stage wrf_runs && B "paper_lday_data.tar: $(du -h $J/drive/paper_lday_data.tar | cut -f1)" &&
+  if tar chf $J/drive/paper_lday_data.tar -C $J/stage wrf_runs; then
+    B "paper_lday_data.tar: $(du -h $J/drive/paper_lday_data.tar | cut -f1)"
     SHA $J/drive/paper_lday_data.tar "paper_lday_data.tar (written to Drive cppwrf-data)"
+  else
+    echo "PAPER_L_FAILED tar paper_lday_data.tar" >> $J/setup.out
+  fi
 fi
 M=(--cmake cpu-dp=$W/cpu-dp --cmake cpu-sp=$W/cpu-sp)
 [ "$SET" = full ] && M+=(--cmake cpu-dp-hwlog=$W/cpu-dp-hwlog)
 for n in $WRFS; do M+=(--wrf WRF-$n=$W/WRF-$n); done
 python3 tools/bench/manifest.py collect --side cpu --commit $J/commit.txt "${M[@]}" --out $P/manifest_cpu.json >> $P/out/manifest.log 2>&1
 OPTS=(--root $P --data $J/data/wrf_runs --wrf $W --src $J/src --cases "$CASES")
-[ "$SET" = full ] || OPTS+=(--models gpu_fp32,gpu_fp32id,gpu_fp64 --proof cpu_fp64,cpu_fp32 --proof-threads $((NP / 2)))
+[ "$SET" = full ] || OPTS+=(--models gpu_fp32,gpu_fp32id,gpu_fp64 --proof cpu_fp64,cpu_fp32 --proof-threads $(( NP > 1 ? NP / 2 : 1 )))
 OPTS+=("$@")
 python3 tools/bench/paper_run.py prepare "${OPTS[@]}" >> $P/out/run.log 2>&1 ||
   echo "PAPER_PHASE_FAILED prepare exit $? (run.log)" >> $J/setup.out
 grep -q 'FAILED' $P/out/paper.log && grep 'wrf2cppwrf.py FAILED' $P/out/paper.log | sed 's/^/PAPER_TRANSLATE_FAILED /' >> $J/setup.out
 for i in $(seq 720); do [ -e $P/gpu_ready ] && break; sleep 10; done  # the GPU side's builds end before the timings
 B "GPU side: $(cat $P/gpu_ready 2> /dev/null || echo 'not ready after 2 h')"
+if [ ! -e $P/gpu_ready ]; then
+  echo "PAPER_GPU_TIMEOUT not ready after 2 h" >> $J/setup.out
+else
+  gpu_seen=0
+  for tok in $(cat $P/gpu_ready); do
+    case "$tok" in
+      \(*) ;;
+      apt=0) ;;
+      apt=*) echo "PAPER_SETUP_FAILED gpu-apt ($tok, gpu_apt.log)" >> $J/setup.out ;;
+      *=0) gpu_seen=$((gpu_seen + 1)) ;;
+      *=*) echo "PAPER_BUILD_FAILED gpu-${tok%%=*} ($tok, gpu_build-${tok%%=*}.log)" >> $J/setup.out; gpu_seen=$((gpu_seen + 1)) ;;
+    esac
+  done
+  [ $gpu_seen -gt 0 ] || echo "PAPER_BUILD_FAILED gpu-ready empty" >> $J/setup.out
+fi
 python3 tools/bench/manifest.py merge $P/manifest_cpu.json $P/manifest_gpu.json --out $P/out/manifest.json >> $P/out/manifest.log 2>&1
 STEPS="timed proof verify report"; [ "$SET" = full ] && STEPS="screen $STEPS"
 for step in $STEPS; do  # a phase that fails is logged and reported (setup.out: the launcher exits non-zero)
@@ -185,7 +205,7 @@ dpkg-query -W -f='${Package} ${Version}\n' > $P/out/packages_chroot.txt 2>&1  # 
 touch $P/q/stop
 for i in $(seq 24); do [ -e $P/gpu_exit ] && break; sleep 5; done
 cp $J/build-*.log $J/wrf_build.log $J/wps.log $J/mpi.log $P/out/logs/ 2> /dev/null
-cp $P/gpu_host.log $P/gpu_build-*.log $P/out/logs/ 2> /dev/null
+cp $P/gpu_host.log $P/gpu_apt.log $P/gpu_build-*.log $P/out/logs/ 2> /dev/null
 for n in $WRFS; do { echo "== WRF-$n"; grep -E '^(DMPARALLEL|OMPCPP|SFC|SCC|DM_FC|DM_CC|FCOPTIM|FCBASEOPTS_NO_G|PROMOTION|CFLAGS_LOCAL|ARCH_LOCAL)\s' $W/WRF-$n/configure.wrf 2> /dev/null; } >> $P/out/wrf_config.txt; done
 tar czf $J/fetch/paper.tar.gz -C $P out --transform 's,^out,paper,' --exclude='wrfout_*'
 B "end"

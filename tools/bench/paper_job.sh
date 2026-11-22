@@ -3,11 +3,11 @@
 # The Colab side of tools/bench/colab_paper.sh (root, under nohup): the Debian 13 chroot, the data, the GPU side and
 # the chroot job of the paper benchmark (tools/bench/PROTOCOL.md). No cloud bucket: the data tars stream from the
 # Drive remote cppwrf-drive (folder cppwrf-data) into tar x, a tar not on Drive comes from the public GitHub release
-# Xassemblianist/cppwrf-data data-v1 (512 MiB parts, each checked against the release's SHA256SUMS).
+# Xassemblianist/cppwrf-data data-v1 (whole file or 512 MiB parts, each checked against the release's SHA256SUMS).
 #
 #   paper_job.sh SET CASES STAMP DATA [PAPER_RUN_OPTION ...]
 #
-# /content/in: src.tar.gz (git archive), commit.txt, wps.tar.gz, rclone.conf (only the cppwrf-drive section),
+# /content/in: src.tar.gz (git archive), commit.txt, wps.tar.gz (when needed), rclone.conf (only the cppwrf-drive section),
 # save_lday (present: PAPER_SAVE_LDAY=1). DATA: the tars, comma-separated, unpacked into /opt/job/data in order.
 # Steps: debootstrap trixie into /content/deb13 with build-essential, cmake, gfortran, NetCDF, python3-netcdf4 and
 # numpy (once per session, as tools/colab/remote_chroot_job.sh); /opt/job = src/, data/, commit.txt, wps.tar.gz;
@@ -23,19 +23,27 @@ J=$R/opt/job GH=https://github.com/Xassemblianist/cppwrf-data/releases/download/
 rm -rf $C; mkdir -p $C/parts
 exec > $C/job.log 2>&1
 RC="--config $I/rclone.conf"
+pack_res() {
+  rm -rf $C/res && mkdir -p $C/res
+  cp -f $C/*.log $C/*.txt $C/res/ 2> /dev/null
+  tar czf $C/results.tar.gz -C $C/res .
+}
 finish() {
   [ -f $J/fetch/paper.tar.gz ] && cp $J/fetch/paper.tar.gz $C/
-  mkdir -p $C/res; cp -f $C/*.log $C/*.txt $C/res/ 2> /dev/null
-  tar czf $C/results.tar.gz -C $C/res .
-  for f in $C/paper.tar.gz $C/results.tar.gz; do
-    [ -f $f ] && { rclone $RC copyto $f "cppwrf-drive:cppwrf-g4results/paper_$STAMP/$(basename $f)" >> $C/drive.log 2>&1 ||
-      echo "DRIVE_FAILED $(basename $f)" >> $C/setup.txt; }
-  done
   for f in $J/drive/*; do
     [ -f "$f" ] || continue
     rclone $RC copyto "$f" "cppwrf-drive:cppwrf-data/$(basename "$f")" --drive-chunk-size 256M >> $C/drive.log 2>&1 &&
       echo "DRIVE $(basename "$f") $(stat -c %s "$f")" >> $C/data.txt || echo "DRIVE_FAILED $(basename "$f")" >> $C/setup.txt
   done
+  [ -f $C/paper.tar.gz ] && { rclone $RC copyto $C/paper.tar.gz "cppwrf-drive:cppwrf-g4results/paper_$STAMP/paper.tar.gz" >> $C/drive.log 2>&1 ||
+    echo "DRIVE_FAILED paper.tar.gz" >> $C/setup.txt; }
+  pack_res
+  if [ -f $C/results.tar.gz ]; then
+    rclone $RC copyto $C/results.tar.gz "cppwrf-drive:cppwrf-g4results/paper_$STAMP/results.tar.gz" >> $C/drive.log 2>&1 || {
+      echo "DRIVE_FAILED results.tar.gz" >> $C/setup.txt
+      pack_res
+    }
+  fi
   rm -f $I/rclone.conf
   date > $C/done
 }
@@ -64,7 +72,8 @@ dpkg-query -W -f='${Package} ${Version}\n' > $C/host_packages.txt 2>&1  # the ru
 { cat /etc/os-release; uname -a; nvidia-smi 2>&1 | head -12; nvcc --version 2>&1 | tail -2; } > $C/host.txt 2>&1
 rm -rf $J; mkdir -p $J/src $J/data
 tar xzf $I/src.tar.gz -C $J/src || { echo "SRC_FAILED" >> $C/setup.txt; exit 1; }
-cp $I/commit.txt $I/wps.tar.gz $J/
+cp $I/commit.txt $J/
+if [ -f $I/wps.tar.gz ]; then cp $I/wps.tar.gz $J/; fi
 # the GPU side builds while the data come and the chroot job builds (it waits for /opt/paper/body_started = STAMP)
 nohup bash $J/src/tools/bench/paper_gpu.sh $STAMP > /dev/null 2>&1 &
 drive_tar() {  # TAR: rclone cat | tar x, three tries
@@ -76,21 +85,28 @@ drive_tar() {  # TAR: rclone cat | tar x, three tries
   done
   return 1
 }
-gh_tar() {  # TAR: its release parts (SHA256SUMS) downloaded one by one, checked, streamed into tar x
-  local t=$1
+gh_tar() {  # TAR: whole file or its release parts (SHA256SUMS) downloaded one by one, checked, streamed into tar x
+  local t=$1 te pat
+  te=$(printf '%s\n' "$t" | sed 's/\./\\./g')
   [ -s $C/SHA256SUMS ] || curl -sSfL --retry 5 -o $C/SHA256SUMS "$GH/SHA256SUMS" || return 1
-  grep -q "  $t\.part" $C/SHA256SUMS || return 1
+  if grep -qE "  ${te}$" $C/SHA256SUMS; then
+    pat="  ${te}$"
+  elif grep -qE "  ${te}\.part[0-9a-zA-Z]+$" $C/SHA256SUMS; then
+    pat="  ${te}\.part[0-9a-zA-Z]+$"
+  else
+    return 1
+  fi
   ( set -o pipefail
-    grep "  $t\.part" $C/SHA256SUMS | while read -r sum p; do
+    grep -E "$pat" $C/SHA256SUMS | while read -r sum p; do
       ok=0
       for i in 1 2 3 4 5; do
-        curl -sSfL --retry 5 -o $C/parts/$p "$GH/$p" 2>> $C/fetch_$t.log &&
-          [ "$(sha256sum $C/parts/$p | cut -c1-64)" = "$sum" ] && { ok=1; break; }
-        echo "retry $p $i" >> $C/fetch_$t.log; sleep 20
+        curl -sSfL --retry 5 -o "$C/parts/$p" "$GH/$p" 2>> "$C/fetch_$t.log" &&
+          [ "$(sha256sum "$C/parts/$p" | cut -c1-64)" = "$sum" ] && { ok=1; break; }
+        echo "retry $p $i" >> "$C/fetch_$t.log"; sleep 20
       done
-      [ $ok = 1 ] || { echo "PART_FAILED $p" >> $C/fetch_$t.log; exit 1; }
-      cat $C/parts/$p; rm -f $C/parts/$p
-    done | tee >(sha256sum | cut -c1-64 > $C/sha_$t) | tar xf - -C $J/data ) 2>> $C/fetch_$t.log
+      [ $ok = 1 ] || { echo "PART_FAILED $p" >> "$C/fetch_$t.log"; rm -f "$C/parts/$p"; exit 1; }
+      cat "$C/parts/$p"; rm -f "$C/parts/$p"
+    done | tee >(sha256sum | cut -c1-64 > "$C/sha_$t") | tar xf - -C $J/data ) 2>> "$C/fetch_$t.log"
 }
 for t in ${DATA//,/ }; do
   t0=$SECONDS

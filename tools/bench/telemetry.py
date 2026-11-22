@@ -29,6 +29,7 @@ window [ta, tb] (the run's steady steps), energy_steady_j and power_steady_w ove
 power: not the host CPU, memory, disks or the data centre's overhead. A field the GPU does not report ([N/A]) gives
 null.
 """
+import bisect
 import datetime
 import glob
 import json
@@ -193,21 +194,27 @@ def _integrate(pts, t0, t1):
     """Integral of the piecewise linear function through pts [(t, p)] over [t0, t1] (constant beyond its ends)."""
     if not pts:
         return None
+    if t1 <= t0:
+        return 0.0
+    pts = sorted(pts, key=lambda x: x[0])
     if len(pts) == 1:
         return pts[0][1] * (t1 - t0)
+    ts = [t for t, _ in pts]
 
     def at(t):
-        if t <= pts[0][0]:
+        if t <= ts[0]:
             return pts[0][1]
-        if t >= pts[-1][0]:
+        if t >= ts[-1]:
             return pts[-1][1]
-        for (ta, pa), (tb, pb) in zip(pts, pts[1:]):
-            if ta <= t <= tb:
-                return pa + (pb - pa) * (t - ta) / (tb - ta) if tb > ta else pa
-        return pts[-1][1]
+        i = bisect.bisect_right(ts, t)
+        ta, pa = pts[i - 1]
+        tb, pb = pts[i]
+        return pa + (pb - pa) * (t - ta) / (tb - ta) if tb > ta else pa
 
-    knots = [t0] + [t for t, _ in pts if t0 < t < t1] + [t1]
-    return sum((at(a) + at(b)) / 2 * (b - a) for a, b in zip(knots, knots[1:]))
+    i0 = bisect.bisect_right(ts, t0)
+    i1 = bisect.bisect_left(ts, t1)
+    seg = [(t0, at(t0))] + pts[i0:i1] + [(t1, at(t1))]
+    return sum((pa + pb) * 0.5 * (tb - ta) for (ta, pa), (tb, pb) in zip(seg, seg[1:]))
 
 
 def summarize(csv, t0, t1, idle_before=1.5, steady=None):

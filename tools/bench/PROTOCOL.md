@@ -245,8 +245,12 @@ HwThermalSlowdown, 0x80 HwPowerBrakeSlowdown: "throttled") and, counted on their
 power cap (0x4 SwPowerCap: normal at full load). 0x1 GpuIdle, 0x2 ApplicationsClocksSetting, 0x10 SyncBoost and
 0x100 DisplayClockSetting are not throttling.
 
-The energy of one simulated day = the fixed energy (the run's energy minus steady power x the marginal time) once +
-steady power x the marginal time of a day. This is the GPU board's energy only: not the host CPU, memory, disks or
+The energy of one simulated day = the fixed energy once + the marginal energy of a day. For each run, the marginal
+energy is `power_steady_w` over the steady-window part of `marginal` (`marginal - io_post`: `compute` with history
+off, `compute + io_steady` with history on, matching the `[ta, tb]` window over which `power_steady_w` is measured)
+plus `power_idle_w` over `io_post` (the post-step CPU write after the last GPU step finishes, when the GPU is idle;
+0 when `power_idle_w` is absent), and the fixed energy is `energy_j` minus that marginal energy; both are aggregated
+by their median across the repetitions. This is the GPU board's energy only: not the host CPU, memory, disks or
 the data centre. CPU energy counters (RAPL / powercap, perf) are probed on both sides and recorded in the manifest;
 they are expected to be hidden in the Colab VM. When none is readable no CPU energy and no GPU-versus-CPU energy
 ratio is reported.
@@ -313,7 +317,7 @@ release are working copies, not the archive.
 
 No cloud bucket and no gcloud. The workstation needs the Colab CLI and the rclone remote cppwrf-drive; the runtime
 gets only that remote's section (deleted at the end). `tools/bench/paper_job.sh` on the runtime streams each data
-tar from Drive (`rclone cat | tar x`), else from the GitHub release data-v1 (512 MiB parts checked against its
+tar from Drive (`rclone cat | tar x`), else from the GitHub release data-v1 (whole file or 512 MiB parts checked against its
 SHA256SUMS), recording each tar's SHA-256. The results come back with `colab download` and are also copied to
 `cppwrf-drive:cppwrf-g4results/paper_<date>/` (paper.tar.gz, results.tar.gz), from where the launcher takes them if
 the download fails. A failed phase (prepare, screen, timed, proof, verify, report), translation, build or download,
