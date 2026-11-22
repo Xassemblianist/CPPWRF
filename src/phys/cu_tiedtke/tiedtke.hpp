@@ -672,7 +672,9 @@ CPPWRF_HD inline void cuflx(const TdConst<T>& c, int klev, ColCPtr<T> pqen, ColC
   itop = c_min(itop, kctop);
   if (!ldcum || kdtop < kctop) lddraf = false;
   if (!ldcum) ktype = 0;
-  ktopm2 = itop - 2;
+  // a cloud top at level 2 (ktopm2 = 0): WRF's level 0 and the [jk-1] = -1 writes are outside its 1:klev arrays;
+  // the levels from 1 (above the model top nothing is transported)
+  ktopm2 = c_max(itop - 2, 1);
   for (int jk = ktopm2; jk <= klev; ++jk) {
     if (ldcum && jk >= kctop - 1) {
       pmfus[jk] = pmfus[jk] - pmfu[jk] * (c.cpd * ptenh[jk] + pgeoh[jk]);

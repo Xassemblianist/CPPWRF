@@ -1377,6 +1377,14 @@ class WrfTranslator:
             self.error("WRF specified = .false. in a real case is not supported: WRF stops without a lateral "
                        "boundary condition on domain 1.")
         sections["run"]["case"] = case_name
+        if case_name.startswith("em_"):
+            # ideal.exe and wrf.exe date the files with the namelist's start_* (Registry defaults
+            # 1993-03-13_12:00:00; WRF's test/em_* namelists have 0001-01-01_00:00:00)
+            try:
+                t0 = self.domain_date("start", 0)
+                sections["run"]["start_date"] = f"{t0.year:04d}-{t0:%m-%d_%H:%M:%S}"
+            except ValueError as e:
+                self.error(f"WRF start date of domain 1 is invalid: {e}")
 
         # 3. Determine run_time
         run_days = self.get_opt("time_control", "run_days", 0)
@@ -1622,6 +1630,17 @@ class WrfTranslator:
             self.error("WRF time_step_fract_num/den (fractional time step) is not supported: WRF's boundary "
                        "time dtbc is a running sum of dt, not verified for a non-integer dt.")
             dt += float(num) / float(den)
+        if adaptive and dt <= 0:
+            # start_em replaces time_step by starting_time_step (NINT(4 * MIN(dx, dy) / 1000) when -1): the
+            # namelist's time_step = 0 of adaptive runs
+            sts = self.get_opt("domains", "starting_time_step", -1)
+            if sts == -1:
+                dxy = min(float(self.get_opt("domains", "dx", 0) or 0), float(self.get_opt("domains", "dy", 0) or 0))
+                sts = int(math.floor(4 * dxy / 1000 + 0.5))
+            dt = float(sts)
+            if dt <= 0:
+                self.error("WRF use_adaptive_time_step: the starting time step is not positive.")
+                dt = 60.0
         sections["time"]["dt"] = int(dt) if dt.is_integer() else dt
         if adaptive:
             self.translate_adaptive(sections, case_name, total_s)

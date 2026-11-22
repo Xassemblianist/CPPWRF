@@ -196,7 +196,9 @@ CPPWRF_HD inline void get_pblh(int kte, real& pblh, A_thv1 thv1, A_zw1 zw1, A_dz
   int k = kts + 1;
   int kthv = 1;
   real minthv = real(9.E9);
-  while (zw1[k] <= real(200.)) {
+  // k <= kte: WRF's DO WHILE has no bound (thv1, dz, qkw are kts:kte, zw kts:kte+1); a column whose top is
+  // below the threshold would read past them in WRF too
+  while (k <= kte && zw1[k] <= real(200.)) {
     if (minthv > thv1[k]) {
       minthv = thv1[k];
       kthv = k;

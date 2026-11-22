@@ -109,5 +109,10 @@ LanduseInit landuse_init(const std::string& table_dir, const std::string& mminlu
 std::vector<std::string> split_list(const std::string& s);
 // domain.bc_x / bc_y: periodic | symmetric | specified | open
 BC parse_bc(const std::string& s);
+// The smallest grids the kernels index within their halos (throws): nz >= 3 (e_vert >= 4: the 3-level stencils of
+// the surface w, phy_prep, the microphysics fall speeds); a symmetric axis of at least Grid::halo points (the mirror
+// of a narrower axis reads the other side's halo); specified boundaries: at least 9 x 9 points (e_we, e_sn >= 10,
+// WRF's smallest decomposed patch; the relaxation rows reach i +- 1 from row 4)
+void check_grid_size(const Grid& g);
 
 }  // namespace cppwrf::cases

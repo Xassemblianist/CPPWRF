@@ -904,6 +904,26 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
                                doms[i].model.start_date + ", its parent at " + p.model.start_date +
                                ": a nest's delayed start (start_* per domain) is not ported");
     nest_scalar_pairs(*p.model.st, *doms[i].model.st);  // the same moist species and scalars (throws)
+    // the nest's geometry (the translator checks it too; an INI may not): check_a_mundo's equal e_vert, start_em's
+    // e_we - s_we and e_sn - s_sn divisible by parent_grid_ratio, and the nest inside its parent (the interpolation,
+    // forcing and feedback index the parent's fields there)
+    const Grid &pg = p.model.g, &cg = doms[i].model.g;
+    const NestDomainSpec& cs = doms[i].spec;
+    const int r = cs.parent_grid_ratio;
+    if (cg.nz != pg.nz)
+      throw std::runtime_error(cs.tag + ": e_vert must be the same for all domains (" + std::to_string(cg.nz + 1) +
+                               ", parent " + std::to_string(pg.nz + 1) + ")");
+    if (r < 1 || cg.nx % r != 0 || cg.ny % r != 0)
+      throw std::runtime_error(cs.tag + ": e_we - s_we (" + std::to_string(cg.nx) + ") and e_sn - s_sn (" +
+                               std::to_string(cg.ny) + ") must be divisible by parent_grid_ratio (" + std::to_string(r) +
+                               ")");
+    if (cs.i_parent_start < 1 || cs.j_parent_start < 1 || cs.i_parent_start - 1 + cg.nx / r > pg.nx ||
+        cs.j_parent_start - 1 + cg.ny / r > pg.ny)
+      throw std::runtime_error(cs.tag + ": the nest (i_parent_start " + std::to_string(cs.i_parent_start) +
+                               ", j_parent_start " + std::to_string(cs.j_parent_start) + ", " + std::to_string(cg.nx) +
+                               " x " + std::to_string(cg.ny) + " points, ratio " + std::to_string(r) +
+                               ") does not lie inside its parent (" + std::to_string(pg.nx) + " x " +
+                               std::to_string(pg.ny) + ")");
   }
   // A resumed run opens every nest before the restart files are read (they overwrite the initial state).
   const bool resumed = !root_cfg.get_string("run.restart_file", "").empty();

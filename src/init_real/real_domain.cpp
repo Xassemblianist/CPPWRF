@@ -138,6 +138,10 @@ RealOptions RealOptions::from_namelist(const Namelist& nl, const WrfSchema& sc, 
   o.parent_grid_ratio = c.integer("parent_grid_ratio");
   if (o.e_we <= 0 || o.e_sn <= 0 || o.e_vert <= 0 || o.num_metgrid_levels <= 0)
     throw std::runtime_error("real: e_we, e_sn, e_vert and num_metgrid_levels are required in &domains");
+  // the smallest grid the port indexes inside its arrays (real.exe reads outside them below: ide - 1 = 0, dn(3) of
+  // e_vert = 2, the metgrid levels 2 and nlev / 2 = 0 of one level)
+  if (o.e_we < 3 || o.e_sn < 3 || o.e_vert < 4 || o.num_metgrid_levels < 2)
+    throw std::runtime_error("real: e_we, e_sn >= 3, e_vert >= 4 and num_metgrid_levels >= 2 are needed");
   // options of real.exe that are not ported
   // nest_interp_coord = 1: MAX_P, T_MAX_P, GHT_MAX_P, MIN_P, ... (module_initialize_real.F:642-673)
   for (const char* k : {"use_maxw_level", "use_trop_level", "madwrf_opt", "madwrf_cldinit", "nest_interp_coord"})

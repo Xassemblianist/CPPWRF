@@ -415,6 +415,10 @@ struct KTiedtke {
       in.sig1[zz] = znu(k);
     }
     for (int k = 0; k <= nz; ++k) in.paph[nz + 1 - k] = p8w(i, j, k);
+    // level 0 (above the top): cududv reads puen(ik = ktopm2 - 1 = 0) times a zero mass flux, outside WRF's
+    // arrays; a defined value instead of the buffer's
+    in.pu[0] = real(0.);
+    in.pv[0] = real(0.);
     const real evap = qfx(i, j);
     if (first) {
       icum1(i, j) = cu_tiedtke::tiedtke_first_ascent<real>(c, nz, in, evap, slimsk, delt, i, nx, cppwrf_cw_);

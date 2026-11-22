@@ -54,8 +54,8 @@ class LateralBC {
   bool has_scalar(int n) const { return n >= 0 && n < int(sdata_.size()) && !sdata_[n].off.empty(); }
   int width() const { return width_; }
 
-  double dtbc = 0;  // seconds since the start of the current boundary interval
-  void advance_time(double dt) { dtbc += dt; }
+  real dtbc = 0;  // seconds since the start of the current boundary interval (grid%dtbc: WRF's REAL)
+  void advance_time(double dt) { dtbc += real(dt); }
 
   void relax_dry(const State& s, Tendencies& t, const BaseState& b) const;
   void spec_dry(Tendencies& t) const;

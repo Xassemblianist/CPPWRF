@@ -381,6 +381,7 @@ struct Taugb {
       const double FP = w.fac11[LAY] + w.fac01[LAY];
       int IFP = int(2.E2 * FP + 0.5);
       if (IFP <= 0) IFP = 0;
+      if (IFP > 200) IFP = 200;  // CORR1 / CORR2 (0:200): WRF reads past them below ~1 Pa
       FC00 = w.fac00[LAY] * t.corr2[IFP];
       FC10 = w.fac10[LAY] * t.corr2[IFP];
       FC01 = w.fac01[LAY] * t.corr1[IFP];
@@ -400,6 +401,7 @@ struct Taugb {
       const double FP = w.fac11[LAY] + w.fac01[LAY];
       int IFP = int(2.E2 * FP + 0.5);
       if (IFP <= 0) IFP = 0;
+      if (IFP > 200) IFP = 200;  // CORR1 / CORR2 (0:200): WRF reads past them below ~1 Pa
       FC00 = w.fac00[LAY] * t.corr2[IFP];
       FC10 = w.fac10[LAY] * t.corr2[IFP];
       FC01 = w.fac01[LAY] * t.corr1[IFP];
@@ -844,7 +846,9 @@ void rtrn(const RrtmLwTables& t, Col& C, double TBOUND, const double* SEMISS) {
   auto ODCLR = [&](int ipr, int lev) -> double& { return w.odclr[std::size_t((lev - 1) * NGPT + ipr - 1)]; };
   auto PLVL = [&](int ib, int lev) -> double& { return w.plvl[std::size_t(lev * NBANDS + ib - 1)]; };
   auto PLAY = [&](int ib, int lev) -> double& { return w.play[std::size_t((lev - 1) * NBANDS + ib - 1)]; };
-  auto TOTPLNK = [&](int i, int ib) { return F2(t.totplnk, 181, i, ib); };
+  // rows 1 .. 181 (160 .. 340 K): WRF reads outside them for temperatures below 160 K or from 340 K on (row 182
+  // at TBOUND = 340 K, times a zero fraction); the edge row instead
+  auto TOTPLNK = [&](int i, int ib) { return F2(t.totplnk, 181, i < 1 ? 1 : (i > 181 ? 181 : i), ib); };
   const double* DELWAVE = t.delwave - 1;
   const int* NGB = t.ngb - 1;
   double PLANKBND[NBANDS + 1], PLNKEMIT[NBANDS + 1];

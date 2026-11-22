@@ -577,7 +577,7 @@ template <class F, bool MAX> __global__ void kred(F f, Range3D r, double* part) 
   }
   if (threadIdx.x == 0) part[blockIdx.x] = sh[0];
 }
-// The CUDA FP32 identity build's sums: one thread per k plane adds its values in the CPU build's (j, i) order
+// The CUDA FP64 and FP32 identity builds' sums: one thread per k plane adds its values in the CPU build's (j, i) order
 template <class F> __global__ void kred_seq(F f, Range3D r, double* part) {
   const int kk = r.k0 + blockIdx.x;
   double acc = 0.0;
@@ -994,7 +994,8 @@ class Reducer {
     if (nk > max_k_) throw std::runtime_error("Reducer: k range exceeds max_k");
 #if defined(CPPWRF_USE_CUDA)
 #if defined(__CUDACC__)
-#if defined(CPPWRF_FP32_IDENTITY)
+#if defined(CPPWRF_FP32_IDENTITY) || defined(CPPWRF_DOUBLE)
+    // the FP64 and FP32 identity builds: the CPU build's order (diag.csv as the CPU build's)
     if constexpr (!MAX) detail::kred_seq<F><<<nk, 1, 0, cuda_launch_stream()>>>(f, r, dpart_);
     else detail::kred<F, MAX><<<nk, 256, 0, cuda_launch_stream()>>>(f, r, dpart_);
 #else

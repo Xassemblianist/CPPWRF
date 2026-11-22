@@ -71,6 +71,18 @@ std::pair<int, long> wrf_alarm(const std::string& path, int a) {
   return r;
 }
 
+// Times(0) of a WRF file ("" without one)
+std::string wrf_times(const std::string& path) {
+  int id, vid;
+  std::string t;
+  if (nc_open(path.c_str(), NC_NOWRITE, &id) != NC_NOERR) return t;
+  char b[20] = {};
+  const std::size_t st[2] = {0, 0}, ct[2] = {1, 19};
+  if (nc_inq_varid(id, "Times", &vid) == NC_NOERR && nc_get_vara_text(id, vid, st, ct, b) == NC_NOERR) t.assign(b, 19);
+  nc_close(id);
+  return t;
+}
+
 // The WRF variable of a restart field (names of save_restart_file)
 std::vector<std::string> wrf_names(const std::string& n) {
   auto up = [](std::string x) {
@@ -669,14 +681,17 @@ void DomainRunner::load_restart_file(const std::string& path) {
     // takes those seconds as its interval as well (RingInterval=interval, share/input_wrf.F:301-325); negative
     // values are skipped
     const long hsecs = wrf_alarm(path, 1).second;
-    if (m_.adapt) {  // the alarms by time from the restart time (adapt_before_step)
-      hist_alarm_t_ = hsecs >= 0 && hsecs < 1700000000;
+    if (m_.adapt && hsecs >= 0) {  // the alarms by time from the restart time (adapt_before_step)
+      hist_alarm_t_ = hsecs < 1700000000;
       if (hist_alarm_t_) hist_iv_t_ = wrf_time::make(hsecs);
       if (hsecs == 0) throw std::runtime_error(path + ": WRF_ALARM_SECS_TIL_NEXT_RING_01 = 0");
       // and RingTime = the restart time + those seconds: the first ring is at the first step at or past it, the later
       // ones count from that step (ESMF_ClockAdvance)
       hist_ring_set_ = hist_alarm_t_;
       hist_ring_t_ = hist_iv_t_;
+    } else if (m_.adapt) {
+      // a negative value: input_wrf keeps set_timekeeping's history alarm (the namelist interval from the resumed
+      // start), as start() set it
     } else if (hsecs >= 1700000000) {
       hist_iv_ = 0;  // a forever interval: no history
     } else if (hsecs >= 0) {
@@ -700,9 +715,20 @@ void DomainRunner::load_restart_file(const std::string& path) {
         m_.suite->cudtacttime = real(wrf_scalar(path, "CUDTACTTIME"));
       }
       if (m_.bc) m_.bc->dtbc = wrf_scalar(path, "DTBC");
-      // the resumed clock starts at the restart time of the file's Times (whole seconds)
-      m_.sim_offset = wrf_time::make(std::int64_t(std::floor(meta.time_sec + 1e-6)));
+      // the resumed clock starts at the restart time of the file's Times (whole seconds): XTIME of a real*4 file is
+      // rounded (3601 s: 60.016666 min, 3600.99998 s), so the second of XTIME whose date is the file's Times
+      long secs = long(std::floor(meta.time_sec + 1e-6));
+      const std::string times = wrf_times(path);
+      const std::string sd = cfg_.get_string("run.start_date", !m_.start_date.empty() ? m_.start_date : "2000-01-01_00:00:00");
+      for (const long c : {secs, secs + 1, secs - 1})
+        if (times.size() == 19 && wrf_io::add_seconds(sd, c) == times) {
+          secs = c;
+          break;
+        }
+      m_.sim_offset = wrf_time::make(std::int64_t(secs));
       m_.now = wrf_time::Interval{};
+      // a run that ends at or before the restart time takes no step (domain_clockisstoptime)
+      if (m_.run_time > 0 && m_.sim_offset >= wrf_time::make(std::llround(m_.run_time))) m_.nsteps = start_step;
     }
     const auto [aring, asecs] = wrf_alarm(path, 30);
     if (asecs >= 0 && asecs < 1700000000) aux4_first_s_ = double(start_step) * g.dt + double(asecs);

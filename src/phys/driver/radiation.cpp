@@ -325,7 +325,7 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
       throw std::runtime_error("radiation: RRTMG LW layers (nz + nint(p_top/400 Pa)) exceed " +
                                std::to_string(RRTMG_LW_SWEEP_MAX));
   }
-  stepra_ = o.radt == 0 ? 1 : std::max(1, int(std::lround(o.radt * rb(60.) / g.dt)));
+  stepra_ = o.radt == 0 ? 1 : std::max(1, int(std::lround(rb(o.radt) * rb(60.) / rb(g.dt))));
   if (rrtmg_lw) p_->lw = std::make_unique<RrtmgLwTables>();
   const bool rrtmg_sw = o.ra_sw_physics == 4;
   if (rrtmg_sw) p_->sw = std::make_unique<RrtmgSwTables>();
@@ -348,6 +348,9 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
     std::string err;
     if (!load_rrtm_lw_tables(o.table_dir + "/RRTM_DATA", *p_->rrtm, err)) throw std::runtime_error("radiation: " + err);
     p_->rrtm_nlayers = rrtm_lw_nlayers(g.nz, o.p_top);
+    if (p_->rrtm_nlayers > 1022)  // o3data's level array (WRF: automatic arrays)
+      throw std::runtime_error("radiation: ra_lw_physics = 1 (RRTM) holds at most 1022 layers (model and buffer "
+                               "layers); this domain has " + std::to_string(p_->rrtm_nlayers));
   }
   if (rrtmg_sw && !load_rrtmg_sw_tables(table_file(rrtmg_table_name("sw")), *p_->sw))
     throw std::runtime_error("radiation: cannot read rrtmg_sw_tables.bin");
