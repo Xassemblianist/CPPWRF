@@ -360,8 +360,8 @@ def markdown(S, accuracy_md=None):
                         row = []
                         for k in ("step_s", "wall"):
                             x = xs[k]
-                            ci = f" [{x['ci95'][0]:.2f}-{x['ci95'][1]:.2f}]" if x and x.get("ci95") else ""
-                            row.append(f"{x['median']:.2f}x{ci} ({x['min']:.2f}-{x['max']:.2f})" if x else "-")
+                            cis = f" [{x['ci95'][0]:.2f}-{x['ci95'][1]:.2f}]" if x and x.get("ci95") else ""
+                            row.append(f"{x['median']:.2f}x{cis} ({x['min']:.2f}-{x['max']:.2f})" if x else "-")
                         n = max(x["n"] for x in xs.values() if x)
                         rm = " / ".join(f"{xs[k]['ratio_of_medians']:.2f}x" if xs[k] else "-" for k in ("step_s", "wall"))
                         w(f"| {NAMES.get(m, m)} | {NAMES[vs]} | {n} | " + " | ".join(row) + f" | {rm} |")
