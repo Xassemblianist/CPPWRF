@@ -877,6 +877,8 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     std::unique_ptr<DomainRunner> runner;
     std::vector<int> children;  // 0-based indices into doms
     nest::FeedbackScratch fb_scratch;  // the feedback smoothers' temporaries on this domain (a parent) grid
+    // CUDA graphs (StepScope keys) of med_nest_force into this nest and of this nest's feedback to its parent
+    char force_graph = 0, feedback_graph = 0, feedback_physics_graph = 0;
     long step = 0;
     bool started = false;
   };
@@ -1035,16 +1037,25 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
 
   auto feedback = [&](DomInstance& d, DomInstance& c) {
     if (c.spec.feedback == 0) return;
-    med_nest_feedback(d.model, c.model, c.spec, &d.fb_scratch);
+    {
+      StepScope graph(&c.feedback_graph);  // CUDA: as graphs, like a time step's launches
+      med_nest_feedback(d.model, c.model, c.spec, &d.fb_scratch);
+      graph.end();
+    }
     // as after the solve and med_nest_force (advance_domain): with CUDA graphs one stream orders the work and every
     // read of device data waits for it; the run's last root step ends with the device's work
     if (!step_graphs_on() || doms[0].step == doms[0].model.nsteps) dev_sync();
 #ifdef CPPWRF_HAVE_NETCDF
     if (d.runner->history() && c.runner->history()) {  // the physics state, then history-only fields (Registry u=)
-      d.runner->history()->feedback_physics(*c.runner->history(), c.spec.i_parent_start, c.spec.j_parent_start,
-                                            c.spec.parent_grid_ratio);
-      d.runner->history()->feedback_from(*c.runner->history(), c.spec.i_parent_start, c.spec.j_parent_start,
-                                         c.spec.parent_grid_ratio);
+      {
+        StepScope graph(&c.feedback_physics_graph);
+        d.runner->history()->feedback_physics(*c.runner->history(), c.spec.i_parent_start, c.spec.j_parent_start,
+                                              c.spec.parent_grid_ratio);
+        graph.end();
+      }
+      // run when the parent next reads them (an output)
+      d.runner->history()->queue_feedback_from(*c.runner->history(), c.spec.i_parent_start, c.spec.j_parent_start,
+                                               c.spec.parent_grid_ratio);
     }
 #endif
   };
@@ -1075,7 +1086,11 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     if (wait) dev_sync();
 
     for (int c_idx : d.children) {
-      med_nest_force(d.model, doms[c_idx].model, doms[c_idx].spec);
+      {
+        StepScope graph(&doms[c_idx].force_graph);  // CUDA: as graphs, like a time step's launches
+        med_nest_force(d.model, doms[c_idx].model, doms[c_idx].spec);
+        graph.end();
+      }
       if (wait) dev_sync();
     }
     const bool stop_time = doms[0].step == doms[0].model.nsteps;
