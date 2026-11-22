@@ -2,6 +2,7 @@
 #pragma once
 // Fields: SoA, one allocation per field, i fastest, k slowest, halo 3 in x (and y if ny>1),
 // row pitch padded to a multiple of 32 elements, i=0 aligned to 8 elements.
+#include <algorithm>
 #include <cstddef>
 #include <string>
 #include <utility>
@@ -117,11 +118,13 @@ template <int R> class FieldT {
   }
   // Host-side initialisation (setup only): f(i,j,k) for logical points; halos zero.
   template <class F> void fill_host(F f) {
-    std::vector<real> h(L_.total, real(0));
+    const HostStaging st(bytes());
+    real* h = static_cast<real*>(st.data());
+    std::fill_n(h, L_.total, real(0));
     for (int k = 0; k < L_.nz; ++k)
       for (int j = L_.j0(); j < L_.j1(); ++j)
         for (int i = L_.i0(); i < L_.i1(); ++i) h[L_.index(i, j, k)] = real(f(i, j, k));
-    copy_to_dev(buf_.get(), h.data(), bytes());
+    copy_to_dev(buf_.get(), h, bytes());
   }
   void download(std::vector<real>& h) const {  // whole buffer incl. halos
     h.resize(L_.total);
@@ -161,22 +164,26 @@ template <int R> class BaseFieldT {
   }
   // f(i,j,k); for uniform fields only i=j=0 is evaluated.
   template <class F> void fill_host(F f) {
-    std::vector<real> h(L_.total, real(0));
+    const HostStaging st(L_.total * sizeof(real));
+    real* h = static_cast<real*>(st.data());
+    std::fill_n(h, L_.total, real(0));
     const int ia = uniform_ ? 0 : L_.i0(), ib = uniform_ ? 1 : L_.i1(), ja = uniform_ ? 0 : L_.j0(), jb = uniform_ ? 1 : L_.j1();
     for (int k = 0; k < L_.nz; ++k)
       for (int j = ja; j < jb; ++j)
         for (int i = ia; i < ib; ++i) h[L_.index(i, j, k)] = real(f(i, j, k));
-    copy_to_dev(buf_.get(), h.data(), L_.total * sizeof(real));
+    copy_to_dev(buf_.get(), h, L_.total * sizeof(real));
   }
   // As fill_host, but a non-uniform field is also filled in its lateral halo:
   // i = -halo..nx+halo-1 (and j likewise when ny > 1); f must accept those indices.
   template <class F> void fill_host_halo(F f) {
     if (uniform_) { fill_host(f); return; }
-    std::vector<real> h(L_.total, real(0));
+    const HostStaging st(L_.total * sizeof(real));
+    real* h = static_cast<real*>(st.data());
+    std::fill_n(h, L_.total, real(0));
     for (int k = 0; k < L_.nz; ++k)
       for (int j = L_.wj0; j < L_.wj1; ++j)
         for (int i = L_.wi0; i < L_.wi1; ++i) h[L_.index(i, j, k)] = real(f(i, j, k));
-    copy_to_dev(buf_.get(), h.data(), L_.total * sizeof(real));
+    copy_to_dev(buf_.get(), h, L_.total * sizeof(real));
   }
   void download(std::vector<real>& h) const {
     h.resize(L_.total);

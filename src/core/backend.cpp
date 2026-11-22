@@ -500,6 +500,49 @@ ColumnBlock column_block() {
   return b;
 }
 
+namespace {
+struct ThreadStaging {
+  void* p = nullptr;
+  std::size_t bytes = 0;
+  bool held = false;
+};
+ThreadStaging& thread_staging() {  // never freed: kept for the run (the device may be gone at exit)
+  thread_local ThreadStaging* t = new ThreadStaging;
+  return *t;
+}
+}  // namespace
+HostStaging::HostStaging(std::size_t bytes) {
+  ThreadStaging& t = thread_staging();
+  if (!t.held && t.bytes < bytes) {
+    void* p = nullptr;
+#if defined(CPPWRF_USE_GPU)
+    if (gpuHostAlloc(&p, bytes, gpuHostAllocDefault) != gpuSuccess) {
+      (void)gpuGetLastError();
+      p = nullptr;
+    } else if (t.p) {
+      gpuFreeHost(t.p);
+    }
+#else
+    p = std::malloc(bytes);
+    if (p && t.p) std::free(t.p);
+#endif
+    if (p) {
+      t.p = p;
+      t.bytes = bytes;
+    }
+  }
+  if (!t.held && t.bytes >= bytes) {
+    t.held = held_ = true;
+    p_ = t.p;
+    return;
+  }
+  own_.resize(bytes);  // nested, or the allocation failed
+  p_ = own_.data();
+}
+HostStaging::~HostStaging() {
+  if (held_) thread_staging().held = false;
+}
+
 int fatal_code_host = 0;
 
 const char* fatal_message(int code) {

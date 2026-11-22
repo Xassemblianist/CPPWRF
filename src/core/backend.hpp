@@ -485,6 +485,22 @@ void copy_to_host(void* dst, const void* src, std::size_t bytes);
 void copy_to_dev(void* dst, const void* src, std::size_t bytes);
 void copy_dev(void* dst, const void* src, std::size_t bytes);
 void dev_sync();
+// A host buffer of at least `bytes` to build an upload in (Field::fill_host): one per host thread, reused (grown as
+// needed, kept for the run) instead of a new allocation per field, pinned on the GPU (a faster copy). A nested use
+// while the thread's buffer is held gets a buffer of its own.
+class HostStaging {
+ public:
+  explicit HostStaging(std::size_t bytes);
+  ~HostStaging();
+  HostStaging(const HostStaging&) = delete;
+  HostStaging& operator=(const HostStaging&) = delete;
+  void* data() const { return p_; }
+
+ private:
+  void* p_ = nullptr;
+  bool held_ = false;  // the thread's buffer
+  std::vector<unsigned char> own_;
+};
 int current_device();  // the calling thread's CUDA device (0 on the CPU)
 const char* backend_name();
 // CPPWRF_MEMINFO=1: prints the device memory in use and the stack (local memory) reserved per GPU thread
