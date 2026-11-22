@@ -4,7 +4,18 @@ INTERVAL s and the runs resumed at MID s from its wrfrst files (and, for one dom
 write the same wrfout frames and wrfrst files after MID at tolerance 0. The physics calls run less often than every
 step (radt, bldt, cudt > dt) and MID and the wrfrst files after it fall between their calls, so the resumed runs
 must carry what WRF's restart stream (Registry r) carries between the calls. The WRF runs named give the inputs and
-namelist.input; they are not compared (the options differ from theirs).
+namelist.input. Where WRF has a run of the chain's very configuration (suite.chain_wrf: D0, SR1) the straight and
+the resumed runs are compared with it at tolerance 0 too; the others change the physics intervals (radt, bldt,
+cudt) from their WRF runs' and are CPPWRF against CPPWRF only until WRF runs of their configurations exist (their
+PASS line says so; the REFS lines for tools/colab/colab_wrfref.sh are in the comment below).
+
+WRF runs still needed (tools/colab/colab_wrfref.sh REFS.txt; then suite.chain_wrf=<run>/wrfout_d01_... here):
+  CHP4_r8 run_P4_r8 wrf_r8.exe physics.radt=10 physics.bldt=5 physics.cudt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+  CHG2_r8 run_G2_r8 wrf_r8.exe physics.bldt=5 physics.cudt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+  CHP8_r8 run_P8_r8 wrf_r8.exe physics.bldt=5 physics.cudt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+  CHNMP1_r8 run_NMP1_r8 wrf_r8.exe physics.bldt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+  CHSLAB1_r8 run_SLAB1_r8 wrf_r8.exe physics.bldt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+  CHN3_r8 run_N3h_r8 wrf_r8.exe physics.radt=4,2 time_control.run_seconds=1200 time_control.history_interval_s=300,900 run.steps=0
 
 CASES: see tests/verify/cases/__init__.py."""
 from cases.common import WR  # noqa: F401
@@ -22,9 +33,11 @@ _N3 = ["real.dir=" + f"{WR}/run_N3h_r8", "phys.table_dir=" + f"{WR}/run_N3h_r8",
 CASES = [
     # WRF's default namelist (CONUS: Thompson, Tiedtke, RRTMG radt 15, MYJ, Noah, GWDO, fractional sea ice) resumed
     # at 6 min, wrfrst every 3 min before the next radiation call at 15 min
+    # (its run_D0_r8/steps inputs; against WRF's run of that directory, history every step, too)
     ("real_d0_r8_fp64_cpu_chain", "cpu_dp", "configs/real_d0_r8.ini",
-     ["real.dir=" + f"{WR}/run_D0_r8", "output.out_interval=3", "output.diag_interval=3", "suite.chain=360,180"],
-     f"{WR}/run_D0_r8/wrfout_d01_{_D}", 1200, {}),
+     ["output.out_interval=3", "output.diag_interval=3", "suite.chain=360,180",
+      f"suite.chain_wrf={WR}/run_D0_r8/steps/wrfout_d01_{_D}"],
+     f"{WR}/run_D0_r8/steps/wrfout_d01_{_D}", 1200, {}),
     ("real_p4_r8_fp64_cpu_chain", "cpu_dp", "configs/real_p4_r8.ini", _P4 + ["suite.chain=360,180"],
      f"{WR}/run_P4_r8/wrfout_d01_{_D}", 900, {}),
     # G2 (P2 with GWDO, gwd_opt 1) with PBL and cumulus every 5 min
@@ -44,7 +57,7 @@ CASES = [
     # (and CPPWRF's from the wrfrst file) shades nothing until the next radiation call; CPPWRF's file keeps it
     ("real_sr1_r8_fp64_cpu_chain", "cpu_dp", "configs/real_sr1_r8.ini",
      ["real.dir=" + f"{WR}/run_SR1_r8", "output.out_interval=30", "output.diag_interval=30",
-      "suite.chain=14700,2100,native"],
+      "suite.chain=14700,2100,native", f"suite.chain_wrf={WR}/run_SR1_r8/wrfout_d01_{_D}"],
      f"{WR}/run_SR1_r8/wrfout_d01_{_D}", 16800, {}),
     # SLAB1 (the slab LSM: THC, CAPG) with PBL every 5 min
     ("real_slab1_r8_fp64_cpu_chain", "cpu_dp", "configs/real_slab1_r8.ini",

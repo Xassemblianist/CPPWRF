@@ -29,7 +29,7 @@
 # (several @core lines add up)
 @core real_r1_fp64_cpu,real_t1_fp64_cpu,real_r1d6_fp64_cpu
 @core real_p4_r8_fp64_cpu,real_p4_r8_fp64_cpu_1h,real_p4_r8_fp64_cpu_t2x2
-@core real_n3_r8_fp64_cpu,restart_p1_fp64,ideal_quarter_ss_k2_fp64_cpu,straka_wrf
+@core real_n3_r8_fp64_cpu,restart_p1_fp64,ideal_quarter_ss_k2_fp64_cpu,ideal_grav2d_x_fp64_cpu
 
 # --- documentation and project files: nothing
 docs/**                              docs

@@ -149,8 +149,6 @@ def main():
     exact = set()  # reference wrfout files of tolerance-0 cases
     restarts = set()  # WRF's wrfrst files at the restart of restarted cases
     ideal = set()  # files under CPPWRF_WRF_REF: ideal-case soundings and reference wrfout files
-    if want & {"straka_wrf", "straka_wrf_cuda"}:
-        ideal.add(os.path.join(WREF, "run_straka_d1", "wrfout_d01_0001-01-01_00:00:00"))
     for name, key, cfg, sets, wo, t, tol in wrf_suite.CASES:
         if name not in want:
             continue
@@ -202,7 +200,26 @@ def main():
             if (config_value(cfg, "phys", "mp_physics") or "0").strip() in ("50", "51"):
                 p3dirs.add(rd)
             log(f"restart_{tag}: {os.path.relpath(rd, WR)}")
-    skel, whole = {}, {}  # files test references: skeletons, whole files (path in the tar -> file)
+    rwhole = {}  # the restart checks' WRF references (wrf_suite.restart_check): whole files
+    for tag, cfg, _ in wrf_suite.RESTARTS:
+        if a.no_refs or not any(n in want for n in wrf_suite.SPECIAL if n.startswith(f"restart_{tag}_fp64")):
+            continue
+        case_name, rst_ref, rsm_ref, _ = wrf_suite.RESTART_WRF[tag]
+        case = next(c for c in wrf_suite.CASES if c[0] == case_name)
+        rd = next((s.split("=", 1)[1] for s in case[3] if s.startswith("real.dir=")), None)
+        if rd:  # the case's own input directory (restart_t1: run_T1_r8)
+            dirs.setdefault(rd.replace("${CPPWRF_WRF_RUNS}", WR), [set(), False])
+        ref = os.path.join(WR, rst_ref, os.path.basename(case[4])) if rst_ref else case[4]
+        for x in [ref, os.path.join(os.path.dirname(ref), "namelist.input"),
+                  os.path.join(os.path.dirname(ref), "myoutfields.txt")]:
+            if os.path.isfile(x):
+                rwhole[os.path.join("wrf_runs", os.path.relpath(x, WR))] = x
+        for x in ([os.path.join(WR, rst_ref)] if rsm_ref else []) + ([os.path.join(WR, rsm_ref)] if rsm_ref else []):
+            for f in sorted(os.listdir(x)) if os.path.isdir(x) else []:
+                if re.fullmatch(r"(wrfout|wrfrst)_d\d\d_.*|namelist\.input|myoutfields\.txt", f):
+                    rwhole[os.path.join("wrf_runs", os.path.relpath(os.path.join(x, f), WR))] = os.path.join(x, f)
+        log(f"restart_{tag}: WRF {os.path.relpath(ref, WR)}" + (f", {rst_ref}, {rsm_ref}" if rsm_ref else ""))
+    skel, whole = {}, dict(rwhole)  # files test references: skeletons, whole files (path in the tar -> file)
     fcases = files_cases()
     for name in [f for f in a.files.split(",") if f]:
         cfg, ref, rst, extra = fcases[name]

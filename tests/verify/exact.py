@@ -14,20 +14,44 @@ def raw(ds):
     return ds
 
 
+def _ints(x, y):
+    """Both arrays integer (or boolean): compared in their own types, not via float64 (exact beyond 2**53)."""
+    return x.dtype.kind in "iub" and y.dtype.kind in "iub"
+
+
 def differ(x, y):
     """Mask of the points where x and y (same shape) are not the same value."""
-    x, y = np.asarray(x, dtype=np.float64), np.asarray(y, dtype=np.float64)
+    x, y = np.asarray(x), np.asarray(y)
+    if _ints(x, y):
+        return x != y
+    x, y = x.astype(np.float64, copy=False), y.astype(np.float64, copy=False)
     nx, ny = np.isnan(x), np.isnan(y)
     d = (x != y) & ~(nx & ny)
     return d | ((x == 0) & (y == 0) & (np.signbit(x) != np.signbit(y)))
 
 
+def nan_matched(x, y):
+    """Points where x and y are both NaN (identical by the rule above, counted in the comparisons' summaries)."""
+    x, y = np.asarray(x), np.asarray(y)
+    if x.dtype.kind != "f" or y.dtype.kind != "f" or x.shape != y.shape:
+        return 0
+    return int((np.isnan(x) & np.isnan(y)).sum())
+
+
 def describe(x, y):
     """None when x and y are identical, else 'n/size max|d| (first: a vs b at index)' with the NaN-vs-number and
-    signed-zero point counts."""
-    x, y = np.atleast_1d(np.asarray(x, dtype=np.float64)), np.atleast_1d(np.asarray(y, dtype=np.float64))
+    signed-zero point counts. Integer arrays are compared in their own types."""
+    x, y = np.atleast_1d(np.asarray(x)), np.atleast_1d(np.asarray(y))
     if x.shape != y.shape:
         return f"shape {x.shape} vs {y.shape}"
+    if _ints(x, y):
+        d = x != y
+        n = int(d.sum())
+        if not n:
+            return None
+        i = int(np.flatnonzero(d)[0])
+        return f"{n}/{x.size} integers differ (first {int(x.flat[i])} vs {int(y.flat[i])} at {i})"
+    x, y = x.astype(np.float64, copy=False), y.astype(np.float64, copy=False)
     d = differ(x, y)
     n = int(d.sum())
     if not n:
@@ -108,41 +132,59 @@ def frames(files, opened=None):
     return m
 
 
-def compare_stream(cfiles, wfiles, subset=False, until=None, global_atts=True):
+def compare_stream(cfiles, wfiles, subset=False, until=None, global_atts=True, after=None, ignore_atts=(),
+                   stats=None, common_only=False):
     """Differences of CPPWRF's files of one stream and domain (wrfout_d0N or wrfrst_d0N, any frames per file) from
     WRF's: ({label: difference}, number of common frames). Every variable of every common frame (by Times) at
-    tolerance 0, types, and the metadata of the files holding the first common frame; times or variables only one
-    model wrote are differences ('(times)', '(wrf-only-vars)', '(cppwrf-only-vars)', '(metadata)').
+    tolerance 0 (integers in their own types), the variables without a Time dimension of every pair of files that
+    hold a common frame, types, and the metadata of every such pair of files; times or variables only one model
+    wrote are differences ('(times)', '(wrf-only-vars)', '(cppwrf-only-vars)', '(metadata)').
     subset=True: WRF's files hold a part of the output (tools/colab/stage_data.py keeps some frames and variables):
     CPPWRF's other variables and frames are no difference, WRF's frames up to `until` (Times string) must all be
-    there and the metadata covers WRF's variables. global_atts=False: the global attributes are not compared.
+    there and the metadata covers WRF's variables. after (Times string): only WRF's frames later than it count (a
+    resumed run's files against an uninterrupted run's). global_atts=False: the global attributes are not compared;
+    ignore_atts: global attributes not compared besides TITLE (START_DATE of a resumed run against an uninterrupted
+    run). stats: a dict that gets the counts of what was compared (summary() prints them). common_only: WRF's
+    frames that CPPWRF did not write are no difference either (CPPWRF's history less frequent than the
+    reference's; the counts say how many of WRF's frames were compared).
     One frame of one variable of each model is in memory at a time; the files are closed at the end."""
     opened = []
     try:
-        return _compare_stream(frames(cfiles, opened), frames(wfiles, opened), subset, until, global_atts)
+        B = frames(wfiles, opened)
+        if after is not None:
+            B = {k: v for k, v in B.items() if k > after}
+        return _compare_stream(frames(cfiles, opened), B, subset, until, global_atts, ignore_atts, stats, common_only)
     finally:
         for ds in opened:
             ds.close()
 
 
-def _compare_stream(A, B, subset, until, global_atts):
+def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None, common_only=False):
     bad, nframes = {}, {}
     common = sorted(set(A) & set(B))
-    only_c = [] if subset else sorted(set(A) - set(B))
-    only_w = sorted(t for t in set(B) - set(A) if until is None or t <= until)
-    if only_c or only_w:  # times written by one model only
-        bad["(times)"] = f"only-cppwrf {only_c} only-wrf {only_w}"
-    wrf_only, cppwrf_only = set(), set()
+    only_c = sorted(set(A) - set(B))
+    want_w = sorted(t for t in B if until is None or t <= until)
+    only_w = [] if common_only else sorted(t for t in set(B) - set(A) if until is None or t <= until)
+    if (only_c and not subset) or only_w:  # times written by one model only
+        bad["(times)"] = f"only-cppwrf {[] if subset else only_c} only-wrf {only_w}"
+    wrf_only, cppwrf_only, compared, static, nan = set(), set(), set(), set(), {}
+    pairs = []  # the pairs of files (CPPWRF's, WRF's) holding a common frame, in the order of the frames
     for k in common:
         (a, ta), (b, tb) = A[k], B[k]
+        if not any(a is p and b is q for p, q in pairs):
+            pairs.append((a, b))
         cppwrf_only |= {v for v in a.variables if v not in b.variables}
         wrf_only |= {v for v in b.variables if v not in a.variables}
         for v in b.variables:
             if v not in a.variables or "Time" not in b[v].dimensions:
                 continue
+            compared.add(v)
             if b[v].dtype.kind == "S":
                 if v != "Times" and text(a[v], ta) != text(b[v], tb):
                     bad.setdefault(v, f"{k} text differs")
+                continue
+            if a[v].dimensions[:1] != ("Time",):  # a variable with a Time dimension in WRF's file only
+                bad.setdefault(v, f"dimensions cppwrf {a[v].dimensions} wrf {b[v].dimensions}")
                 continue
             x, y = np.asarray(a[v][ta]), np.asarray(b[v][tb])  # one frame of one variable
             if x.shape != y.shape:
@@ -157,6 +199,28 @@ def _compare_stream(A, B, subset, until, global_atts):
             if dif:
                 nframes[v] = nframes.get(v, 0) + 1
                 bad.setdefault(v, f"{k} {dif}")
+            m = nan_matched(x, y)
+            if m:
+                nan[v] = nan.get(v, 0) + m
+    for a, b in pairs:  # the variables without a Time dimension, of every pair of files
+        for v in b.variables:
+            if v not in a.variables or "Time" in b[v].dimensions:
+                continue
+            static.add(v)
+            x, y = np.asarray(a[v][:]), np.asarray(b[v][:])
+            if b[v].dtype.kind == "S" or a[v].dtype.kind == "S":
+                if text(a[v]) != text(b[v]):
+                    bad.setdefault(v, "text differs")
+                continue
+            if x.shape != y.shape or a[v].dtype != b[v].dtype:
+                bad.setdefault(v, f"shape/type cppwrf {x.shape} {a[v].dtype} wrf {y.shape} {b[v].dtype}")
+                continue
+            dif = describe(x, y)
+            if dif:
+                bad.setdefault(v, f"(no Time dimension) {dif}")
+            m = nan_matched(x, y)
+            if m:
+                nan[v] = nan.get(v, 0) + m
     if wrf_only:  # variables WRF writes and CPPWRF does not
         bad["(wrf-only-vars)"] = sorted(wrf_only)
     if cppwrf_only and not subset:  # variables CPPWRF writes and WRF does not
@@ -164,12 +228,54 @@ def _compare_stream(A, B, subset, until, global_atts):
     for v in nframes:
         if nframes[v] > 1:
             bad[v] += f" [{nframes[v]} frames]"
-    if common:  # dimensions, types, variable and global attributes of the files holding the first common frame
-        a, b = A[common[0]][0], B[common[0]][0]
-        ignore = ("TITLE",) if global_atts else set(a.ncattrs()) | set(b.ncattrs())
-        meta = metadata(a, b, ignore, only=list(b.variables) if subset else None)
-        if meta:
-            bad["(metadata)"] = meta
+    meta = []  # dimensions, types, variable and global attributes of every pair of files holding a common frame
+    for a, b in pairs:
+        ignore = ("TITLE",) + tuple(ignore_atts) if global_atts else set(a.ncattrs()) | set(b.ncattrs())
+        m = metadata(a, b, ignore, only=list(b.variables) if subset else None)
+        meta += [x for x in m if x not in meta]
+    if meta:
+        bad["(metadata)"] = meta
     if not common:
         bad["(frames)"] = "no common frame"
+    if stats is not None:
+        ref_vars = set().union(*(set(B[k][0].variables) for k in want_w)) if want_w else set()
+        add(stats, frames=len(common), ref_frames=len(want_w), ref_vars=len(ref_vars - {"Times"}),
+            vars=len((compared | static) - {"Times"}), static=len(static), cppwrf_only_vars=len(cppwrf_only),
+            cppwrf_only_frames=len(only_c), files=len(pairs), nan=sum(nan.values()), nan_vars=len(nan),
+            global_atts=int(bool(global_atts)), streams=1)
+        stats.setdefault("nan_by_var", {})
+        for v, m in nan.items():
+            stats["nan_by_var"][v] = stats["nan_by_var"].get(v, 0) + m
+        stats.setdefault("ignored_atts", set()).update(ignore_atts if global_atts else ())
     return bad, len(common)
+
+
+def add(stats, **counts):
+    """Adds the counts to the dict `stats` (several streams' comparisons summed)."""
+    for k, n in counts.items():
+        stats[k] = stats.get(k, 0) + n
+
+
+def summary(stats, removed=()):
+    """One line of what compare_stream compared (the counts in `stats`, summed over streams): WRF's frames and
+    variables compared of those WRF wrote, the variables without a Time dimension, CPPWRF-only variables and
+    frames, the NaN points identical in both, the global attributes (or that they were not compared) and the
+    variables whose differences the caller does not count (`removed`: [(variables, reason)])."""
+    s = stats
+    if not s.get("streams"):
+        return "nothing compared"
+    out = (f"{s['frames']}/{s['ref_frames']} WRF frames, {s['vars']}/{s['ref_vars']} WRF variables"
+           f" ({s['static']} without Time) in {s['files']} file pairs")
+    if s["cppwrf_only_vars"] or s["cppwrf_only_frames"]:
+        out += f"; CPPWRF-only {s['cppwrf_only_vars']} variables, {s['cppwrf_only_frames']} frames"
+    if s["nan"]:
+        out += (f"; NaN at the same {s['nan']} points in both ("
+                + ", ".join(f"{v} {n}" for v, n in sorted(s["nan_by_var"].items())) + ")")
+    if s["global_atts"] < s["streams"]:
+        out += f"; global attributes not compared in {s['streams'] - s['global_atts']} of {s['streams']} streams"
+    elif s.get("ignored_atts"):
+        out += f"; global attributes but {', '.join(sorted(s['ignored_atts']))}"
+    for vs, why in removed:
+        if vs:
+            out += f"; differences not counted: {', '.join(sorted(vs))} ({why})"
+    return out

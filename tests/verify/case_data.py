@@ -99,12 +99,29 @@ def needs(name):
                     at = (t0 + datetime.timedelta(seconds=mid)).strftime("%Y-%m-%d_%H:%M:%S")
                     files[os.path.join(d, f"wrfrst_{dom}_{at}")] = True
         return files, dirs
-    if name.startswith("straka_wrf"):
-        files[rel(f"{wrf_suite.WREF}/run_straka_d1/wrfout_d01_0001-01-01_00:00:00")] = True
-        return files, config_paths("configs/straka_wrf.ini", [])
     m = re.fullmatch(r"restart_(.+?)_(fp64|fp64_cuda|fp32_cuda)", name)
     tag, cfg, rd = next(r for r in wrf_suite.RESTARTS if r[0] == m.group(1))
-    return files, config_paths(cfg, [])
+    if m.group(2) == "fp32_cuda":  # restart_p1 (self-consistency of the fast FP32 build)
+        return files, config_paths(cfg, [])
+    # restart_check: the suite case's configuration and reference, or WRF's rst_ / rsm_ runs (cases/restarts.py)
+    case_name, rst_ref, rsm_ref, _ = wrf_suite.RESTART_WRF[tag]
+    case = next(c for c in wrf_suite.CASES if c[0] == case_name)
+    sets = [s for s in case[3] if not s.startswith("suite.")]
+    ref = rel(case[4])
+    if rst_ref:
+        ref = os.path.join("wrf_runs", rst_ref, os.path.basename(ref))
+    files[ref] = True
+    files.setdefault(os.path.join(os.path.dirname(ref), "namelist.input"), True)
+    files.setdefault(os.path.join(os.path.dirname(ref), "myoutfields.txt"), False)
+    if rsm_ref:
+        t0 = datetime.datetime.strptime(ref[-19:], "%Y-%m-%d_%H:%M:%S")
+        at = (t0 + datetime.timedelta(seconds=60)).strftime("%Y-%m-%d_%H:%M:%S")
+        files[os.path.join("wrf_runs", rst_ref, f"wrfrst_d01_{at}")] = True
+        files[os.path.join("wrf_runs", rsm_ref, "namelist.input")] = True
+        files.setdefault(os.path.join("wrf_runs", rsm_ref, "myoutfields.txt"), False)
+        files[os.path.join("wrf_runs", rsm_ref, "wrfout_d01_*")] = False
+        files[os.path.join("wrf_runs", rsm_ref, "wrfrst_d01_*")] = False
+    return files, config_paths(cfg, sets)
 
 
 def derive(name, lists, tars):

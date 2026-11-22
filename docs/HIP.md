@@ -196,8 +196,7 @@ Run these stages in order on an AMD ROCm machine:
    - Add a `hip_dp` (and optionally `hip_sp_id`) backend selector to `tests/verify/wrf_suite.py` (mirroring
      `cuda_dp` and `cuda_sp_id`, keeping all reference data and tolerances unchanged).
    - Run every case in the `cuda_dp` set against `build-hip-dp/cppwrf` at **tolerance 0** (exact bit-for-bit
-     match of every `wrfout` variable, frame, and attribute, plus restart checks `restart_*_fp64` and
-     `straka_wrf`).
+     match of every `wrfout` variable, frame, and attribute, plus the restart checks `restart_*_fp64`).
    - For HIP FP32 identity (`build-hip-sp-id/cppwrf`), run the `cuda_sp_id` case set at **tolerance 0**.
    - Exercise MPI multi-GPU decomposition (`-DCPPWRF_MPI=ON`, `mpirun -n 2` / `4` with `CPPWRF_RANK_DEVICES`
      and shared-GPU ranks) and verify bit-identity against single-rank HIP FP64.

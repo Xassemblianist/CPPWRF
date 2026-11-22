@@ -12,7 +12,7 @@ files select the cases whose configuration selects that scheme (1 h versions inc
 driver and build files the core sample, documentation nothing, tools and tests outside the suite no case (the run's
 translator tests and the comparators' self-test). A file that no line matches selects the core sample, with a warning.
 The cases and configurations are read from HEAD's tree (git archive), the CPU FP64 cases of tests/verify/wrf_suite.py
-and its special checks (straka_wrf, restart_*_fp64); the slow cases (suite.slow) only with --slow. --short keeps only
+and its special checks (restart_*_fp64); the slow cases (suite.slow) only with --slow. --short keeps only
 the short versions (simulated time <= 1200 s). A scheme that more than 40 cases use (WSM6, YSU, Noah, RRTMG, ...)
 selects all its short cases but only 6 of its long ones, each with another configuration (--all-long: all of them).
 
@@ -146,7 +146,6 @@ def load_cases(tree):
         for name, key, cfg, sets, _wo, t, _tol in g.CASES:
             if key in ("cpu_dp", "cpu_sp"):  # the CPU cases (FP64, FP32 against WRF real*4)
                 out.append(Case(name, cfg, list(sets), t, gfile, "suite.slow" in sets))
-    out.append(Case("straka_wrf", "configs/straka_wrf.ini", [], 0, "tests/verify/wrf_suite.py", False))
     for tag, cfg, _rd in mod.RESTARTS:
         out.append(Case(f"restart_{tag}_fp64", cfg, [], 0, "tests/verify/cases/restarts.py", False))
     cfgs = sorted(os.path.relpath(p, tree) for p in glob.glob(os.path.join(tree, "configs", "*.ini")))

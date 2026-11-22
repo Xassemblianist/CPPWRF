@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# The result of a CPU suite run (tools/gcp/gcp_run.sh, tools/colab/colab_suite.sh): prints the PASS / FAIL / SKIP counts
+# The result of a CPU suite run (tools/gcp/gcp_run.sh, tools/colab/colab_suite.sh): prints the PASS / FAIL / SKIP counts,
+# the SPLIT line (the PASSes by what they compared with: WRF at tolerance 0, WRF by relative L2, CPPWRF itself only)
 # and lines of OUT's logs and exits with 0 only for a complete suite without FAIL or SKIP (wrf_suite.py's SUITE line and
 # exit 0), passing translator tests and comparator self-test, an empty setup.out and, for the full suite (CASES empty),
 # files, ideal files, differential and ctest tests without FAIL or SKIP.
@@ -9,6 +10,12 @@
 set -euo pipefail
 OUT=$1 CASES=$2 FILES=${3:-0}
 for k in PASS FAIL SKIP; do echo "$k $(grep -c "^$k " "$OUT/suite.log" 2>/dev/null || true)"; done
+# the PASSes by what they compared with (the tag before the wall time, wrf_suite.py KINDS); a line without a tag (an
+# older suite) counts as untagged
+n_tag() { grep -E "^PASS .*$1  \([0-9]+ s\)$" "$OUT/suite.log" 2>/dev/null | wc -l; }
+w0=$(n_tag '\[vs WRF tol 0\]') wl2=$(n_tag '\[vs WRF rel L2\]') so=$(n_tag '\[self only\]')
+np=$(grep -c "^PASS " "$OUT/suite.log" 2>/dev/null || true)
+echo "SPLIT PASS vs WRF at tolerance 0: $w0; vs WRF by relative L2: $wl2; CPPWRF self-consistency only: $so$( [ "$((w0 + wl2 + so))" = "${np:-0}" ] || echo "; untagged: $((${np:-0} - w0 - wl2 - so))")"
 grep -E "^(FAIL|SKIP|ERROR) " "$OUT/suite.log" 2>/dev/null || true
 bad=0
 cat "$OUT/setup.out" 2>/dev/null | grep . && bad=1
