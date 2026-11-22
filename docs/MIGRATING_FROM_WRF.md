@@ -206,7 +206,7 @@ CPPWRF runs these features only at WRF's default value (another value is an erro
 | `&domains.rebalance` | `0` | rebalancing of the input state |
 | `&time_control.cycling` | `.false.` | cycling of the input state |
 | `&dfi_control.dfi_opt` | `0` | digital filter initialisation |
-| `&domains.allowed` | `.true.` | domains that are not integrated (grid_allowed) |
+| `&domains.grid_allowed` | `.true.` | domains that are not integrated (grid_allowed) |
 | `&dynamics.use_q_diabatic` | `0` | qv / qc diabatic terms in the scalar tendencies (q_diabatic_add) |
 | `&dynamics.rad_nudge` | `0` | theta relaxation to the initial profile (theta_relaxation) |
 | `&dynamics.do_avgflx_em` | `0` | time-averaged mass fluxes in the history output (AVGFLX_*) |
@@ -278,6 +278,7 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `auxinput4_inname` | wrflowinp file name; used with sst_update = 1 |
 | `auxinput4_interval` | wrflowinp interval; used with sst_update = 1 |
 | `base_temp` | Base potential temperature (read from sounding or wrfinput) |
+| `chem_adv_opt` | WRF-Chem only (not used by wrf.exe without WRF_CHEM) |
 | `coriolis2d` | not used by wrf.exe |
 | `dampcoef` | damp_opt = 0 |
 | `debug_level` | WRF internal logging verbosity |
