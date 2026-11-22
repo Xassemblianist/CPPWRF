@@ -135,7 +135,10 @@ while IFS='|' read -r name cfg ref rst extra; do
     sets+=(--set restart.interval=60)
     # restart files only up to WRF's last one (elapsed seconds from the namelist start; ~0.5 GB each for large domains)
     last=$(rst_info last "$rst" "$ref")
-    [ "$last" -gt 0 ] && sets+=(--set restart.end="$last")
+    # (not with the adaptive time step: the model refuses restart.end there)
+    if [ "$last" -gt 0 ] && ! grep -qE '^[[:space:]]*adaptive[[:space:]]*=[[:space:]]*(true|1)' "$REPO_ROOT/$cfg"; then
+      sets+=(--set restart.end="$last")
+    fi
   fi
   # shellcheck disable=SC2206
   [ -n "$extra" ] && sets+=($extra)

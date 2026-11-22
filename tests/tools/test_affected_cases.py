@@ -111,8 +111,10 @@ class Selections(unittest.TestCase):
         self.assertEqual(len({BY[n].cfgfile for n in longs}), ac.LONG_MAX)
         self.assertTrue(any("broad scheme mp_physics=6" in x for x in log))
         # a scheme of few cases keeps all its long versions
-        names, _ = run(["src/phys/bl_mynn/x.cpp"])
-        self.assertEqual(set(names), with_opt("bl_pbl_physics", 5))
+        boulac = with_opt("bl_pbl_physics", 8)
+        self.assertLessEqual(len(boulac), ac.BROAD)
+        names, _ = run(["src/phys/bl_boulac/x.cpp"])
+        self.assertEqual(set(names), boulac)
 
     def test_unmapped_is_core_with_warning(self):
         names, warn = run(["some/new/place.cpp"])
