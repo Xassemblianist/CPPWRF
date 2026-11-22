@@ -1231,6 +1231,9 @@ void WrfHistory::feedback_from(WrfHistory& child, int ipos, int jpos, int ratio)
   const tile::Service svc;
   if (svc.served()) return;
   run_queued_feedback();
+  // the child's own queued feedback first (a nest of the child): its fields are read below, as when every
+  // feedback ran at once
+  child.run_queued_feedback();
   const Grid& cg = child.m_.g;
   // history and restart fields (the restart stream carries more of them)
   FeedbackCache& fc = feedback_cache();
