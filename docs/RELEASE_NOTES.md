@@ -4,7 +4,7 @@ CPPWRF 1.2.2 is a fix release of 1.2.1. The results of every verified configurat
 FP64 reproduce WRF v4.8.0 real*8 bit for bit, CPU FP32 and the CUDA FP32 identity build reproduce WRF v4.8.0 real*4
 on the configurations of docs/FP32_IDENTITY.md. What changes are columns, grids, restarts and options outside the
 verified set where CPPWRF read outside its arrays, accepted what WRF refuses or continued a run differently from
-WRF, and the verified set itself: 18 more WRF references with 54 cases. It covers [COMMITS PENDING] commits (not
+WRF, and the verified set itself: 18 more WRF references with 54 cases. It covers 18 commits (not
 counting merges) from `v1.2.1` (bd0f7d5) to the 1.2.2 release commit. The 1.2.1 notes follow below.
 
 ## Fixed
@@ -56,11 +56,15 @@ counting merges) from `v1.2.1` (bd0f7d5) to the 1.2.2 release commit. The 1.2.1 
 
 | Where | Result |
 |---|---|
-| CPU CI at [CI COMMIT PENDING] (GitHub-hosted runners, Debian 13 container, run [CI RUN PENDING]) | [CI PENDING] |
-| GPU: Colab G4 at [G4 COMMIT PENDING] (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | [G4 PENDING] |
+| CPU CI at fbbcf57 (GitHub-hosted runners, Debian 13 container, run 44978966008) | suite PASS 423 FAIL 0 SKIP 0 at tolerance 0 (with the 36 new CPU FP64 cases and the 44 `cpu_sp` cases); WRF output files 42; ideal files 14; differential tests 32 / 32; ctest 40 / 40 |
+| GPU: Colab G4 at fbbcf57 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 356 / 356 at tolerance 0 (with the 18 new CUDA FP64 cases); CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 42 / 42 (FP64) and 43 / 43 (FP32); device glibc math proof identical |
 
 How the counts relate (`tests/verify/wrf_suite.py --list`): the suite defines 982 cases, 514 CPU FP64, 337 CUDA
-FP64, 43 CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`, 54 more than 1.2.1 (the coverage wave). [COUNTS PENDING]
+FP64, 43 CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`, 54 more than 1.2.1 (the coverage wave). The CI's 423 checks are the 360 CPU FP64 cases that are not `--slow`, 18
+restart checks, the Straka check and the 44 `cpu_sp` cases; the G4's 356 CUDA FP64 checks are the 337 cases, 18
+restart checks and the Straka check.
+
+The commits after fbbcf57 change documentation and version strings only.
 
 ## Known limitations
 

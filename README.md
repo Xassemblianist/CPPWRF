@@ -10,7 +10,7 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** For v1.2.1 (as for v1.2.0) all 338 CUDA FP64 checks matched WRF at tolerance 0 on the Colab G4, and the CUDA FP32 identity build matched WRF real*4 in all 44 cases. For v1.1.0 all 338 CUDA FP64 checks of the
+- **GPU, FP64: bit-identical to WRF too.** For v1.2.2 all 356 CUDA FP64 checks matched WRF at tolerance 0 on the Colab G4 (338 for v1.2.0 and v1.2.1), and the CUDA FP32 identity build matched WRF real*4 in all 44 cases. For v1.1.0 all 338 CUDA FP64 checks of the
   suite (319 cases, 18 restart checks and the Straka check) matched WRF at tolerance 0 on the Colab G4 (RTX PRO 6000
   Blackwell, sm_120, CUDA 13.0); earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
 - **CPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations, among
@@ -64,9 +64,9 @@ without a port is reported as an error and never silently ignored. Still missing
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
-- **Model runs against WRF** (`tests/verify/wrf_suite.py`): on every push 343 CPU FP64 checks against WRF real*8
-  (324 cases, 18 restart checks and the Straka check; 154 more cases run with `--slow`) and 44 CPU FP32 cases
-  against WRF real*4, all passing at tolerance 0 at 4a57df7 (version 1.2.1), and the CUDA FP64 checks and the CUDA FP32 identity
+- **Model runs against WRF** (`tests/verify/wrf_suite.py`): on every push 379 CPU FP64 checks against WRF real*8
+  (360 cases, 18 restart checks and the Straka check; 154 more cases run with `--slow`) and 44 CPU FP32 cases
+  against WRF real*4, all passing at tolerance 0 at fbbcf57 (version 1.2.2), and the CUDA FP64 checks and the CUDA FP32 identity
   cases once per release on a GPU. They cover
   real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
   at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are
