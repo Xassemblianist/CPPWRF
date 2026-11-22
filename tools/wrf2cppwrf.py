@@ -578,7 +578,7 @@ DEFAULT_ONLY_OPTIONS = {
     ("domains", "rebalance"): (0, "rebalancing of the input state"),
     ("time_control", "cycling"): (False, "cycling of the input state"),
     ("dfi_control", "dfi_opt"): (0, "digital filter initialisation"),
-    ("domains", "allowed"): (True, "domains that are not integrated (grid_allowed)"),
+    ("domains", "grid_allowed"): (True, "domains that are not integrated (grid_allowed)"),
     ("dynamics", "use_q_diabatic"): (0, "qv / qc diabatic terms in the scalar tendencies (q_diabatic_add)"),
     ("dynamics", "rad_nudge"): (0, "theta relaxation to the initial profile (theta_relaxation)"),
     # history output options (fields or streams CPPWRF does not write)
@@ -617,8 +617,7 @@ DEFAULT_ONLY_OPTIONS = {
 }
 
 # max_domains options that are single values in CPPWRF: every domain must have domain 1's value
-SAME_ON_ALL_DOMAINS = (("physics", "kim_tofd"), ("physics", "tofd_factor"), ("dynamics", "gwd_dx_factor"),
-                       ("dynamics", "gwd_if_nonhyd"))
+SAME_ON_ALL_DOMAINS = (("physics", "kim_tofd"), ("physics", "tofd_factor"))
 
 UNSUPPORTED_PHYSICS_SWITCHES = {
     "shcu_physics": "Separate shallow cumulus scheme",
@@ -709,6 +708,7 @@ NO_EFFECT_OPTIONS = {
     # not used by wrf.exe 4.8.0 (Registry entries only; variants r32cor / r32curv identical to WRF)
     "do_coriolis": "not used by wrf.exe", "do_curvature": "not used by wrf.exe", "do_gradp": "not used by wrf.exe",
     "coriolis2d": "not used by wrf.exe", "top_radiation": "not used by wrf.exe",
+    "chem_adv_opt": "WRF-Chem only (not used by wrf.exe without WRF_CHEM)",
     # swinit only (Dudhia shortwave, translated with ra_sw_physics = 1)
     "swrad_scat": "read by the Dudhia shortwave scheme only",
     # adaptive time step only (translated with use_adaptive_time_step = .true.); max_time_step also by
@@ -840,16 +840,20 @@ class WrfTranslator:
         if "nssl_mp_params" in self.nml:
             self.error("WRF namelist group &nssl_mp_params (nssl_2mom_init's module settings) is not supported by "
                        "CPPWRF.")
-        # check_a_mundo: mp_physics 17 sets 2-moment, hail, CCN and density 2 whatever the namelist says
+        # check_a_mundo: mp_physics 17 sets 2-moment, hail, CCN and density 2 whatever the namelist says; for
+        # mp_physics 18 any negative value (< 0) of those four flags selects its default (1, 1, 1, 2)
         flags = {"nssl_2moment_on": (-1, 1), "nssl_hail_on": (-1, 1), "nssl_ccn_on": (-1, 1),
                  "nssl_density_on": (-1, 2), "nssl_3moment": (0,)}
         for k, ok in flags.items():
             v = self.get_opt("physics", k, ok[0])
             if mp_physics == 17 and k != "nssl_3moment":
                 continue
-            if v not in ok:
+            neg_default = k != "nssl_3moment" and isinstance(v, int) and not isinstance(v, bool) and v < 0
+            if not neg_default and v not in ok:
                 self.error(f"WRF {k} = {v} with mp_physics = {mp_physics} is not supported by CPPWRF (supported: "
                            f"{' or '.join(str(x) for x in ok)}, mp_physics 18's default).")
+            elif neg_default and v != -1:
+                self.notice(f"Option &physics.{k} = {v}: set to default {ok[1]} (< 0 in check_a_mundo).")
         params = {"nssl_cccn": 0.5e9, "nssl_alphah": 0.0, "nssl_alphahl": 1.0, "nssl_cnoh": 4.e5, "nssl_cnohl": 4.e4,
                   "nssl_cnor": 8.e5, "nssl_cnos": 3.e6, "nssl_rho_qh": 500.0, "nssl_rho_qhl": 900.0,
                   "nssl_rho_qs": 100.0, "nssl_icdx": 6, "nssl_icdxhl": 6, "nssl_ssat_output": 0}
@@ -963,7 +967,7 @@ class WrfTranslator:
                 den = self.get_opt("domains", "time_step_fract_den", 1) or 1
                 dt = Fraction(int(self.get_opt("domains", "time_step", 60))) + (Fraction(int(num), int(den)) if num else 0)
             else:
-                p = self.get_dom_opt("domains", "parent_id", d, d, fallback_d0=False)
+                p = self.get_dom_opt("domains", "parent_id", d, 0, fallback_d0=False)
                 r = self.get_dom_opt("domains", "parent_time_step_ratio", d, 1, fallback_d0=False)
                 p = p - 1 if isinstance(p, int) and 1 <= p <= d else 0
                 dt = dts[p] / (r if isinstance(r, int) and r >= 1 else 1)
@@ -1274,7 +1278,8 @@ class WrfTranslator:
                 continue
             vals = self.nml.get(row["wrf_group"], {}).get(row["wrf_key"], [])
             reg = REGISTRY_DEFAULTS.get(row["wrf_key"])
-            n = max(1, self._max_dom) if reg and reg[2] == "max_domains" else 1
+            n = max(1, self._max_dom) if reg and reg[2] == "max_domains" else (
+                1 if reg and reg[2] == "1" else len(vals))
             for v in dict.fromkeys(str(x) if not isinstance(x, bool) else x for x in vals[:n] if x is not None):
                 if not tier_value_matches(row["values"], v):
                     continue
@@ -1293,6 +1298,17 @@ class WrfTranslator:
         # frame/module_configure.F: every domain runs the microphysics of the highest domain, mp_physics(max_dom)
         if self._max_dom > 1 and len(phys.get("mp_physics", [])) >= self._max_dom:
             phys["mp_physics"] = [phys["mp_physics"][self._max_dom - 1]] * self._max_dom
+        # share/module_check_a_mundo.F:1063-1077: every domain runs sf_urban_physics(max_dom)
+        if self._max_dom > 1 and phys.get("sf_urban_physics"):
+            su_vals = list(phys["sf_urban_physics"][:self._max_dom])
+            if len(su_vals) < self._max_dom:
+                su_vals.extend([0] * (self._max_dom - len(su_vals)))
+            inner = su_vals[self._max_dom - 1]
+            if any(v != inner for v in su_vals):
+                self.notice("--- NOTE:   sf_urban_physics option must be identical in each domain; "
+                            "----> Resetting namelist values to that defined on the inner most domain "
+                            f"({su_vals} -> {inner}).")
+            phys["sf_urban_physics"] = [inner] * self._max_dom
         if suite == "none":
             for key in PHYSICS_SUITES["conus"]:
                 vals = phys.get(key, [])[:self._max_dom]
@@ -1681,13 +1697,28 @@ class WrfTranslator:
         kvdif = self.get_opt("dynamics", "kvdif", 0.0)
         sections["dyn"]["khdif"] = int(khdif) if isinstance(khdif, (int, float)) and float(khdif).is_integer() else khdif
         sections["dyn"]["kvdif"] = int(kvdif) if isinstance(kvdif, (int, float)) and float(kvdif).is_integer() else kvdif
-        if self.get_opt("dynamics", "gwd_opt", 0) == 1:  # GWDO in the PBL driver (needs CON, OA1-4, OL1-4, ELVMAX in wrfinput)
+        gwd_vals = [self.get_dom_opt("dynamics", "gwd_opt", d, 0) for d in range(max(1, self._max_dom))]
+        gwd_active = [d for d, v in enumerate(gwd_vals) if v != 0]
+        gdx_vals = self.get_opt_list("dynamics", "gwd_dx_factor")[:max(1, self._max_dom)]
+        gnh_vals = self.get_opt_list("dynamics", "gwd_if_nonhyd")[:max(1, self._max_dom)]
+        if gwd_vals[0] == 1:  # GWDO in the PBL driver (needs CON, OA1-4, OL1-4, ELVMAX in wrfinput)
             sections["dyn"]["gwd_opt"] = 1
-            gdx = self.get_opt("dynamics", "gwd_dx_factor", 2.0)
+            gdx = gdx_vals[0] if gdx_vals else 2.0
             if gdx != 2.0:
                 sections["dyn"]["gwd_dx_factor"] = gdx
-            if not self.get_opt("dynamics", "gwd_if_nonhyd", True):
+            gnh = gnh_vals[0] if gnh_vals else True
+            if not gnh:
                 sections["dyn"]["gwd_if_nonhyd"] = False
+        for key, vals, dflt in (("gwd_dx_factor", gdx_vals, 2.0), ("gwd_if_nonhyd", gnh_vals, True)):
+            if not vals:
+                continue
+            if not gwd_active:
+                if any(not _same_value(v, dflt) for v in vals):
+                    self.notice(f"Option &dynamics.{key} = {vals}: no effect with gwd_opt = 0.")
+            else:
+                active_vals = [vals[d] if d < len(vals) else dflt for d in gwd_active]
+                if len(set(active_vals)) > 1:
+                    self.error(f"WRF {key} = {vals}: CPPWRF uses one value for all domains with gwd_opt /= 0.")
 
         w_damping = self.get_opt("dynamics", "w_damping", 0)
         if w_damping not in (0, 1):
@@ -1712,11 +1743,12 @@ class WrfTranslator:
             zdamp = self.get_opt("dynamics", "zdamp", 5000.0)
             dampcoef = self.get_opt("dynamics", "dampcoef", 0.2)
             sections["dyn"]["zdamp"] = int(zdamp) if float(zdamp).is_integer() else zdamp
-            ztop_nl = self.get_opt("domains", "ztop", None)
-            if ztop_nl is not None and float(zdamp) >= float(ztop_nl):
-                # WRF's damping layer then reaches below the model bottom (rk_rayleigh_damp reads out of
-                # bounds; wrf.exe crashes)
-                self.error(f"WRF zdamp = {zdamp} >= ztop = {ztop_nl} is not supported (WRF fails).")
+            ztop_nl = self.get_opt("domains", "ztop", 15000.0 if case_name != "real" else None)
+            if damp_opt == 2 and ztop_nl is not None and float(zdamp) >= float(ztop_nl):
+                # Only damp_opt = 2 (rk_rayleigh_damp, dyn_em/module_big_step_utilities_em.F:5940-6075) has
+                # unguarded DO WHILE( z >= (ztop-zdamp) ) loops that read out of bounds; damp_opt = 1 and 3 are bounded
+                self.error(f"WRF damp_opt = 2 with zdamp = {zdamp} >= ztop = {ztop_nl} is not supported "
+                           "(WRF rk_rayleigh_damp reads out of bounds and crashes).")
             sections["dyn"]["dampcoef"] = dampcoef
         elif case_name in ("hill2d",):
             sections["dyn"]["damp_opt"] = 0
@@ -1882,13 +1914,16 @@ class WrfTranslator:
                 # namelist hybrid_opt = 0 must reach the model
                 sections["dyn"]["hybrid_opt"] = hybrid_opt
 
-        # hypsometric_opt is a &domains option (Registry.EM_COMMON, default 2). wrf.exe uses the namelist value
-        # (the input's HYPSOMETRIC_OPT attribute only resets it to 1 when missing); the real case's default is 2
+        # hypsometric_opt is a &domains option (Registry.EM_COMMON, default 2). Real cases use the namelist value
+        # (default 2); share/input_wrf.F:1032-1040 forces ideal cases to 1 regardless of the namelist setting
         if self.has_opt("domains", "hypsometric_opt"):
             hypso = self.get_opt("domains", "hypsometric_opt", 2)
-            if hypso not in (1, 2):
+            if case_name != "real":
+                if hypso != 1:
+                    self.notice("NOTE:  Ideal cases always use hypsometric_opt=1, regardless of namelist setting")
+            elif hypso not in (1, 2):
                 self.error(f"WRF hypsometric_opt = {hypso} is not supported; CPPWRF supports 1 and 2.")
-            elif (case_name != "real" and hypso != 1) or (case_name == "real" and hypso != 2):
+            elif hypso != 2:
                 sections["dyn"]["hypsometric_opt"] = hypso
 
         # WRF 4.8 options without a CPPWRF implementation
@@ -1919,10 +1954,6 @@ class WrfTranslator:
             if gwd_d != gwd_opt and gwd_d != 0:
                 self.error(f"WRF gwd_opt must be equal for all domains (or = zero): domain {d + 1} has gwd_opt = "
                            f"{gwd_d}, domain 1 {gwd_opt}.")
-
-        chem_adv = self.get_opt("dynamics", "chem_adv_opt", 0)
-        if chem_adv != 0:
-            self.warn("WRF chemistry advection (chem_adv_opt) is not supported.")
 
         tke_adv = self.get_opt("dynamics", "tke_adv_opt", None)
         if tke_adv is not None:
@@ -2191,12 +2222,6 @@ class WrfTranslator:
                                    "(the MYNN surface layer's RUC branches are not ported).")
                     if mp_physics == 0:
                         self.error("WRF sf_surface_physics = 3 (RUC) needs a microphysics with cloud water (qc_curr).")
-                elif sf_surface != 0:
-                    opt_thcnd = self.get_opt("physics", "opt_thcnd", 1)
-                    if opt_thcnd not in (1, 2):
-                        self.error(f"WRF opt_thcnd = {opt_thcnd} is not supported; CPPWRF supports 1 and 2.")
-                    elif opt_thcnd == 2 and sf_surface == 2:  # Noah only
-                        sections["phys"]["opt_thcnd"] = 2
 
                 tbl_dir = self.table_dir
                 if not tbl_dir:
@@ -2286,6 +2311,10 @@ class WrfTranslator:
                         self.error(f"WRF lagday = {lagday} is not a number of days.")
                     elif lagday != 150:
                         sections["phys"]["lagday"] = lagday
+                elif self.has_opt("physics", "lagday"):
+                    lagday = self.get_opt("physics", "lagday", 150)
+                    if lagday != 150:
+                        self.notice(f"Option &physics.lagday = {lagday}: no effect with tmn_update = 0.")
                 # sea-ice parameters: CPPWRF runs with WRF's defaults only (no reference run with others)
                 for si_key, si_def in (("seaice_albedo_default", 0.65), ("seaice_thickness_default", 3.0),
                                        ("seaice_snowdepth_max", 1.e10), ("seaice_snowdepth_min", 0.001)):
@@ -2301,6 +2330,9 @@ class WrfTranslator:
                     sections["phys"]["fractional_seaice"] = 1
                     if self.get_opt("physics", "tice2tsk_if2cold", False):
                         sections["phys"]["tice2tsk_if2cold"] = True
+                elif self.get_opt("physics", "tice2tsk_if2cold", False):
+                    self.notice("--- WARNING: You set tice2tsk_if2cold = .true.,  but fractional_seaice = 0; "
+                                "tice2tsk_if2cold will have no effect on results.")
                 if self.get_opt("physics", "kim_tofd", False):
                     sections["phys"]["kim_tofd"] = True
                     tofd_factor = self.get_opt("physics", "tofd_factor", 0.003)
@@ -2350,8 +2382,10 @@ class WrfTranslator:
                         "tke_budget": (0, (0, 1))}
                     mynn_defaults = (("bl_mynn_edmf_dd", 0), ("bl_mynn_mixaerosols", 1), ("bl_mynn_mixnumcon", 0),
                                      ("pert_mynn", False), ("spp_pbl", 0), ("mynn_chem_vertmx", False))
-                    if bl_pbl != 5:  # the PBL options matter only with the MYNN PBL
-                        mynn_defaults = tuple((k, d) for k, (d, _) in mynn_ported.items()) + mynn_defaults
+                    if bl_pbl != 5:  # the PBL options matter only with the MYNN PBL; check_a_mundo resets edmf/edmf_dd/output
+                        mynn_reset = {"bl_mynn_edmf", "bl_mynn_edmf_dd", "bl_mynn_output"}
+                        mynn_defaults = (tuple((k, d) for k, (d, _) in mynn_ported.items() if k not in mynn_reset)
+                                         + tuple((k, d) for k, d in mynn_defaults if k not in mynn_reset))
                         mynn_ported = {}
                     for mk, (mdef, mok) in mynn_ported.items():
                         vals = self.get_opt_list("physics", mk)[:max(1, self._max_dom)] or [mdef]
@@ -2387,14 +2421,16 @@ class WrfTranslator:
                     if bl_pbl == 5 and mp_physics == 28:
                         self.error("WRF bl_pbl_physics = 5 with mp_physics = 28 (MYNN mixing of the aerosols, "
                                    "bl_mynn_mixaerosols) is not supported by CPPWRF.")
-                    elif bl_pbl == 5 and mp_physics not in (6, 8):
-                        self.error("WRF bl_pbl_physics = 5 needs a microphysics with qc, qi and qs (mp_physics 6 or 8): "
-                                   "WRF passes the MYNN-EDMF an uninitialised snow content otherwise.")
-                    if bl_pbl == 5 and (self.get_opt("physics", "ishallow", 0) > 0 or self.get_opt("physics", "shcu_physics", 0) > 0):
+                    elif bl_pbl == 5 and mp_physics not in (4, 6, 8, 10, 14, 16, 17, 18):
+                        self.error("WRF bl_pbl_physics = 5 needs a microphysics with qc, qi and qs (mp_physics 4, 6, "
+                                   "8, 10, 14, 16, 17 or 18): WRF passes the MYNN-EDMF an uninitialised snow content "
+                                   "otherwise.")
+                    if bl_pbl == 5 and (self.get_opt("physics", "ishallow", 0) > 0
+                                        or any(v > 0 for v in self.get_opt_list("physics", "shcu_physics")[:max(1, self._max_dom)])):
                         if sections["phys"].get("bl_mynn_edmf", 1) > 0:
-                            self.error("WRF bl_mynn_edmf > 0 requires shcu_physics = 0 and ishallow = 0.")
-                        else:
-                            self.error("WRF bl_mynn_edmf = 0 with shcu_physics or ishallow is not supported by CPPWRF.")
+                            self.error("WRF bl_mynn_edmf > 0 requires shcu_physics = 0 and ishallow = 0 "
+                                       "(\"--- ERROR: bl_mynn_edmf > 0 requires both shcu_physics=0 & ishallow=0\", "
+                                       "check_a_mundo).")
                 # module_physics_init.F pbl_select: YSU needs isfc = 1 (sfclay), MYJ isfc = 2 (myjsfc)
                 if bl_pbl == 1 and sf_sfclay != 1:
                     self.error("WRF bl_pbl_physics = 1 (YSU) needs sf_sfclay_physics = 1 "
@@ -2407,9 +2443,10 @@ class WrfTranslator:
                 if bl_pbl == 7 and sf_sfclay not in (1, 7):
                     self.error("WRF bl_pbl_physics = 7 (ACM2) needs sf_sfclay_physics = 1 or 7 "
                                "(module_physics_init: use sfclay or pxsfc scheme for this pbl option).")
-                if bl_pbl == 7 and mp_physics not in (6, 8, 28):
-                    self.error("WRF bl_pbl_physics = 7 (ACM2) needs a microphysics with qc and qi (mp_physics 6, 8 or "
-                               "28): WRF stops without qc and reads an absent qi otherwise.")
+                if bl_pbl == 7 and mp_physics not in (4, 6, 8, 10, 14, 16, 17, 18, 28, 50, 51):
+                    self.error("WRF bl_pbl_physics = 7 (ACM2) needs a microphysics with qc and qi (mp_physics 4, 6, 8, "
+                               "10, 14, 16, 17, 18, 28, 50 or 51): WRF stops without qc and reads an absent qi "
+                               "otherwise.")
                 # module_physics_init.F pbl_select: BouLac needs isfc = 1 (sfclay) or 2 (myjsfc)
                 if bl_pbl == 8 and sf_sfclay not in (1, 2):
                     self.error("WRF bl_pbl_physics = 8 (BouLac) needs sf_sfclay_physics = 1 or 2 "
@@ -2452,21 +2489,9 @@ class WrfTranslator:
                 if sf_surface == 7:
                     self.error("WRF sf_surface_physics = 7 (Pleim-Xiu land surface, 2 soil layers, pxlsm_* options and "
                                "soil nudging) is not supported by CPPWRF.")
-                if bl_pbl == 5:
-                    icb = self.get_opt("physics", "icloud_bl", 1)
-                    if icb not in (0, 1):
-                        self.error(f"WRF icloud_bl = {icb} is not supported (0 or 1).")
-                    elif icb != 1:
-                        sections["phys"]["icloud_bl"] = icb
                 if bl_pbl == 1 and sf_sfclay != 1:
                     self.error("WRF bl_pbl_physics = 1 (YSU) needs sf_sfclay_physics = 1 (module_physics_init: "
                                "'Use sf_sfclay_physics= 1 or 91 for this pbl option').")
-                # module_pbl_driver: scalar_pblmix > 0 mixes the 4-D scalars (Thompson's QNI, QNR) with exch_h in
-                # diff4d after the PBL scheme (not ported; Kessler and WSM6 have no scalars); MYNN turns it off (check_a_mundo)
-                scalar_pblmix = self.get_opt_list("physics", "scalar_pblmix")
-                if bl_pbl not in (0, 5) and mp_physics not in (0, 1, 6) and any(v not in (0, None) for v in scalar_pblmix):
-                    self.error("WRF scalar_pblmix = 1 (PBL mixing of the number concentrations with diff4d) is not "
-                               "supported by CPPWRF.")
                 self.check_supported("sf_sfclay_physics", sf_sfclay)
                 self.check_supported("sf_surface_physics", sf_surface)
                 self.check_supported("bl_pbl_physics", bl_pbl)
@@ -2501,6 +2526,80 @@ class WrfTranslator:
                         self.error(f"WRF Noah-MP soiltstep = {sections['phys']['soiltstep']} must be >= 0.")
 
         # Additional microphysics / cumulus / PBL / surface / radiation options in [phys]
+        # module_surface_driver.F: opt_thcnd is passed to the Noah LSM (sf_surface_physics = 2) only
+        if self.has_opt("physics", "opt_thcnd"):
+            opt_thcnd = self.get_opt("physics", "opt_thcnd", 1)
+            if sf_surface == 2:
+                if opt_thcnd not in (1, 2):
+                    self.error(f"WRF opt_thcnd = {opt_thcnd} is not supported; CPPWRF supports 1 and 2.")
+                elif opt_thcnd == 2:
+                    sections.setdefault("phys", {})["opt_thcnd"] = 2
+            elif opt_thcnd != 1:
+                self.notice(f"Option &physics.opt_thcnd = {opt_thcnd}: no effect without Noah LSM (sf_surface_physics = 2).")
+
+        # share/module_check_a_mundo.F:1446-1459: sst_update = 0 zeroes io_form_auxinput4 and auxinput4_interval*
+        if self.get_opt("physics", "sst_update", 0) == 0:
+            aux4_keys = ("io_form_auxinput4", "auxinput4_interval", "auxinput4_interval_y",
+                         "auxinput4_interval_d", "auxinput4_interval_h", "auxinput4_interval_m",
+                         "auxinput4_interval_s")
+            aux4_nonzero = False
+            for k in aux4_keys:
+                n_k = 1 if k == "io_form_auxinput4" else max(1, max_dom)
+                if any(v not in (0, None) for v in self.get_opt_list("time_control", k)[:n_k]):
+                    aux4_nonzero = True
+            if aux4_nonzero:
+                self.notice("--- NOTE: sst_update is 0, setting io_form_auxinput4 = 0 and "
+                            "auxinput4_interval = 0 for all domains")
+
+        if not has_physics_suite:
+            if self.has_opt("physics", "lagday") and (self.nml.get("physics", {}).get("tmn_update") or [0])[0] == 0:
+                lagday = self.get_opt("physics", "lagday", 150)
+                if lagday != 150:
+                    self.notice(f"Option &physics.lagday = {lagday}: no effect with tmn_update = 0.")
+            if (self.has_opt("physics", "tice2tsk_if2cold")
+                    and (self.nml.get("physics", {}).get("fractional_seaice") or [0])[0] == 0):
+                if self.get_opt("physics", "tice2tsk_if2cold", False):
+                    self.notice("--- WARNING: You set tice2tsk_if2cold = .true.,  but fractional_seaice = 0; "
+                                "tice2tsk_if2cold will have no effect on results.")
+
+        # share/module_check_a_mundo.F:1775-1782: reset bl_mynn_edmf, bl_mynn_edmf_dd and bl_mynn_output when bl_pbl /= 5
+        if bl_pbl != 5:
+            for mk in ("bl_mynn_edmf", "bl_mynn_edmf_dd", "bl_mynn_output"):
+                if self.has_opt("physics", mk):
+                    vals = self.get_opt_list("physics", mk)[:max(1, self._max_dom)]
+                    if any(v not in (0, None) for v in vals):
+                        self.notice(f"Option &physics.{mk} = {vals}: reset to 0 when bl_pbl_physics /= 5 (check_a_mundo).")
+
+        # share/module_check_a_mundo.F:1806-1821: icloud_bl = 1 requires MYNN PBL, else reset to 0;
+        # phys/module_radiation_driver.F:1404 tests icloud_bl > 0
+        if self.has_opt("physics", "icloud_bl"):
+            icb = self.get_opt("physics", "icloud_bl", 1)
+            if bl_pbl == 5:
+                if icb == 0:
+                    sections["phys"]["icloud_bl"] = 0
+                elif isinstance(icb, int) and not isinstance(icb, bool) and icb < 0:
+                    sections["phys"]["icloud_bl"] = 0
+                    self.notice(f"Option &physics.icloud_bl = {icb}: set to 0 (radiation_driver tests icloud_bl > 0).")
+                elif icb != 1:
+                    self.notice(f"Option &physics.icloud_bl = {icb}: treated as 1 (radiation_driver tests icloud_bl > 0).")
+            elif icb == 1:
+                self.notice("Need MYNN PBL for icloud_bl = 1, resetting to 0")
+            elif icb != 0:
+                self.notice(f"Option &physics.icloud_bl = {icb}: no effect without MYNN PBL (bl_pbl_physics = 5).")
+
+        # module_pbl_driver: scalar_pblmix > 0 mixes the 4-D scalars (Thompson's QNI, QNR, ...) with exch_h in
+        # diff4d after the PBL scheme (not ported; mp_physics 0, 1, 3, 4 and 6 have no 4-D scalars); MYNN turns it
+        # off (check_a_mundo:2515-2530)
+        scalar_pblmix = self.get_opt_list("physics", "scalar_pblmix")[:max(1, self._max_dom)]
+        if any(isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0 for v in scalar_pblmix):
+            if bl_pbl == 5:
+                self.notice("--- WARNING: MYNN is set to mix scalars, turning off scalar_pblmix")
+            elif bl_pbl != 0 and mp_physics not in (0, 1, 3, 4, 6):
+                self.error("WRF scalar_pblmix = 1 (PBL mixing of the number concentrations with diff4d) is not "
+                           "supported by CPPWRF.")
+            else:
+                self.notice(f"Option &physics.scalar_pblmix = {scalar_pblmix}: no effect (no PBL 4-D scalar mixing).")
+
         if self.has_opt("physics", "mp_tend_lim"):
             mp_tend_lim = self.get_opt("physics", "mp_tend_lim", 10.0)
             if float(mp_tend_lim) <= 0.0:
@@ -2508,12 +2607,14 @@ class WrfTranslator:
             elif float(mp_tend_lim) != 10.0:
                 sections.setdefault("phys", {})["mp_tend_lim"] = mp_tend_lim
 
+        # mp_wsm6.F90:88-100 / module_mp_wdm6.F:2096-2108: hail for hail_opt == 1, graupel (0) for any other value
         if self.has_opt("physics", "hail_opt"):
             hail_opt = self.get_opt("physics", "hail_opt", 0)
-            if hail_opt not in (0, 1):
-                self.error(f"WRF hail_opt = {hail_opt} is not supported; CPPWRF supports 0 and 1.")
+            if hail_opt == 1:
+                sections.setdefault("phys", {})["hail_opt"] = 1
             elif hail_opt != 0:
-                sections.setdefault("phys", {})["hail_opt"] = hail_opt
+                self.notice(f"Option &physics.hail_opt = {hail_opt}: treated as 0 (graupel; WRF enables hail only "
+                            "for hail_opt = 1).")
 
         if self.has_opt("physics", "use_mp_re"):
             use_mp_re = self.get_opt("physics", "use_mp_re", 1)
@@ -2579,6 +2680,13 @@ class WrfTranslator:
                 if self.get_opt("physics", key, dflt) != dflt:
                     self.error(f"WRF {key} = {self.get_opt('physics', key, dflt)} is not supported with Grell-3D "
                                f"(cu_physics = 5); CPPWRF supports the default {dflt}.")
+        else:
+            for key, dflt in (("cugd_avedx", 1), ("maxiens", 1), ("maxens", 3), ("maxens2", 3),
+                              ("maxens3", 16), ("ensdim", 144)):
+                if self.has_opt("physics", key):
+                    v = self.get_opt("physics", key, dflt)
+                    if v != dflt:
+                        self.notice(f"Option &physics.{key} = {v}: no effect without Grell-3D (cu_physics = 5).")
         for d in range(max(1, self._max_dom)):
             if self.get_dom_opt("physics", "cu_physics", d, 0) == 10:
                 self.error(f"WRF cu_physics = 10 (KF-CuP, module_cu_kfcup.F) on domain {d + 1} is not ported; "
@@ -2597,20 +2705,23 @@ class WrfTranslator:
             if self.get_opt("physics", "ishallow", 0) == 1:
                 sections.setdefault("phys", {})["ishallow"] = 1
 
-        # check_a_mundo: cu_diag = 1 needs a Grell scheme (GF, G3, GD) or KF-CuP on that domain (fatal otherwise);
-        # with those schemes it is set to 1 whatever the namelist says. Before that check
-        # (module_check_a_mundo.F:2198-2211) a domain with cu_rad_feedback gets cu_diag = 1 if domain 1's cu_physics
-        # is GF, G3 or GD, else 0
+        # check_a_mundo (L1390-1398, L2198-2239): MSKF (cu_physics = 11) first sets cu_rad_feedback(d) = .true. and
+        # icloud = 1; next, any domain with cu_rad_feedback = .true. gets cu_diag = 1 if domain 1's cu_physics is
+        # GF (3), G3 (5) or GD (93), else 0; finally cu_diag = 1 requires GF, G3, GD or KF-CuP on that domain
         cu_diags = list(self.get_opt_list("physics", "cu_diag")[:max(1, self._max_dom)])
         cu_diags += [0] * (max(1, self._max_dom) - len(cu_diags))
         cu1 = self.get_dom_opt("physics", "cu_physics", 0, 0)
         for d in range(len(cu_diags)):
-            if self.get_dom_opt("physics", "cu_rad_feedback", d, False, fallback_d0=False) is True:
+            cu_d = self.get_dom_opt("physics", "cu_physics", d, 0)
+            rad_fb = (self.get_dom_opt("physics", "cu_rad_feedback", d, False, fallback_d0=False) is True
+                      or cu_d == 11)
+            if rad_fb:
                 cu_diags[d] = 1 if cu1 in (3, 5, 93) else 0
         for d, cu_diag in enumerate(cu_diags):
             if cu_diag == 1 and self.get_dom_opt("physics", "cu_physics", d, 0) not in (3, 5):
                 self.error(f"WRF cu_diag = 1 on domain {d + 1} requires Grell-Freitas or Grell-3D cumulus "
-                           "(cu_physics = 3 or 5); wrf.exe stops.")
+                           "(cu_physics = 3 or 5); wrf.exe stops ('--- ERROR: Using cu_diag=1 requires use of one "
+                           "of the following CU schemes:').")
 
         if self.has_opt("physics", "clos_choice"):
             clos_choice = self.get_opt("physics", "clos_choice", 0)
@@ -2636,7 +2747,7 @@ class WrfTranslator:
             # divides by zero when stepave is 0 (WRF stops with a floating-point exception)
             dts = [dt]
             for d in range(1, max(1, self._max_dom)):
-                pid = self.get_dom_opt("domains", "parent_id", d, d, fallback_d0=False)
+                pid = self.get_dom_opt("domains", "parent_id", d, 0, fallback_d0=False)
                 ratio = self.get_dom_opt("domains", "parent_time_step_ratio", d, 1, fallback_d0=False)
                 dts.append(dts[pid - 1] / float(ratio) if isinstance(pid, int) and 1 <= pid <= d else dt)
             for d, dt_d in enumerate(dts):
@@ -2682,13 +2793,17 @@ class WrfTranslator:
                        "memory).")
 
         icloud = self.get_opt("physics", "icloud", 1)
-        # check_a_mundo (module_check_a_mundo.F:1390-1398): MSKF (cu_physics = 11) on any domain sets icloud = 1,
-        # one value for every domain (a nest without cumulus included)
+        # check_a_mundo (module_check_a_mundo.F:1390-1398): MSKF (cu_physics = 11) on any domain sets icloud = 1
+        # and cu_rad_feedback = .true., one icloud value for every domain (a nest without cumulus included)
         mskf = any(self.get_dom_opt("physics", "cu_physics", d, 0) == 11 for d in range(max(1, self._max_dom)))
-        if icloud not in (0, 1):
+        if mskf:
+            if icloud != 1 or any(
+                    self.get_dom_opt("physics", "cu_physics", d, 0) == 11
+                    and not self.get_dom_opt("physics", "cu_rad_feedback", d, False, fallback_d0=False)
+                    for d in range(max(1, self._max_dom))):
+                self.notice("--- NOTE: cu_physics is 11, setting icloud = 1 and cu_rad_feedback = T")
+        elif icloud not in (0, 1):
             self.error(f"WRF icloud = {icloud} is not supported; CPPWRF supports icloud 0 and 1.")
-        elif mskf and icloud != 1:
-            self.notice(f"Option &physics.icloud = {icloud}: set to 1 with cu_physics = 11 (check_a_mundo).")
         elif (ra_lw != 0 or ra_sw != 0) and icloud != 1:
             sections.setdefault("phys", {})["icloud"] = icloud
 
@@ -2700,26 +2815,40 @@ class WrfTranslator:
             elif cldovrlp != 2:
                 sections.setdefault("phys", {})["cldovrlp"] = cldovrlp
 
+        # module_ra_rrtmg_lw.F:2218-2233 / module_ra_rrtmg_sw.F:1523-1538: idcor == 1 uses latitude-dependent
+        # decorrelation length; any other value uses constant Zo_default = 2500 m (as idcor = 0)
         if self.has_opt("physics", "idcor"):
             idcor = self.get_opt("physics", "idcor", 0)
-            if idcor not in (0, 1):
-                self.error(f"WRF idcor = {idcor} is not supported; CPPWRF supports 0 and 1.")
+            if idcor == 1:
+                sections.setdefault("phys", {})["idcor"] = 1
             elif idcor != 0:
-                sections.setdefault("phys", {})["idcor"] = idcor
+                self.notice(f"Option &physics.idcor = {idcor}: treated as 0 (constant decorrelation length "
+                            "Zo_default = 2500 m; WRF tests idcor == 1).")
 
+        # share/module_check_a_mundo.F:2948-2962: without RRTMG LW or SW on domain 1, WRF resets o3input = 0
         if self.has_opt("physics", "o3input"):
             o3input = self.get_opt("physics", "o3input", 2)
-            if o3input not in (0, 2):
+            if ra_lw != 4 and ra_sw != 4:
+                if o3input != 0:
+                    self.notice("--- NOTE: RRTMG radiation is not used, setting:  o3input=0 to avoid data "
+                                "pre-processing")
+                if ra_lw != 0 or ra_sw != 0:
+                    sections.setdefault("phys", {})["o3input"] = 0
+            elif o3input not in (0, 2):
                 self.error(f"WRF o3input = {o3input} is not supported; CPPWRF supports 0 and 2.")
             elif o3input != 2:
                 sections.setdefault("phys", {})["o3input"] = o3input
 
+        # share/module_check_a_mundo.F:974-1004 & radiation_driver: CAM GHG tables are used only for ghg_input == 1
+        # (and with radiation on); any other value uses default trace gases (as ghg_input = 0)
         if self.has_opt("physics", "ghg_input"):
             ghg_input = self.get_opt("physics", "ghg_input", 1)
-            if ghg_input not in (0, 1):
-                self.error(f"WRF ghg_input = {ghg_input} is not supported; CPPWRF supports 0 and 1.")
-            elif ghg_input != 1:
-                sections.setdefault("phys", {})["ghg_input"] = ghg_input
+            if ghg_input != 1:
+                if ra_lw != 0 or ra_sw != 0:
+                    sections.setdefault("phys", {})["ghg_input"] = 0
+                if ghg_input != 0:
+                    self.notice(f"Option &physics.ghg_input = {ghg_input}: treated as 0 (default trace gases; "
+                                "WRF enables CAM GHG tables only for ghg_input = 1).")
 
         if self.has_opt("physics", "aer_opt"):
             aer_opt = self.get_opt("physics", "aer_opt", 0)
@@ -2798,6 +2927,10 @@ class WrfTranslator:
                         if not shadlen > 0.0:  # the model refuses it too (suite.cpp)
                             self.error(f"WRF shadlen = {shadlen} with topo_shading = 1 is not supported (> 0 only).")
                         ph["shadlen"] = shadlen
+        if all(v == 0 for v in ts) and self.has_opt("physics", "shadlen"):
+            shadlen = float(self.get_opt("physics", "shadlen", 25000.))
+            if shadlen != 25000.0:
+                self.notice(f"Option &physics.shadlen = {shadlen}: no effect with topo_shading = 0.")
 
         for unsup_key, desc in UNSUPPORTED_DYNAMICS_SWITCHES.items():
             if self.has_opt("dynamics", unsup_key):
@@ -2857,13 +2990,15 @@ class WrfTranslator:
         # grav_settling (max_domains, 0; 1, 2): fog water deposition, module_sf_fogdes.F in the surface driver (VDFG,
         # DFGDP into RAINBL) and module_bl_fogdes.F in the PBL driver (qc settling into RQCBLTEN); both read qc_curr
         gs_vals = self.get_opt_list("physics", "grav_settling")[:max(1, self._max_dom)] or [0]
-        if any(v not in (0, 1, 2) for v in gs_vals):
+        if mp_physics == 28:
+            if any(v != 0 for v in gs_vals):
+                # check_a_mundo:2477-2490 resets any non-zero grav_settling to 0 for mp_physics == 28
+                self.notice(f"--- NOTE: mp_physics == 28, already has gravitational fog settling; resetting "
+                            f"grav_settling to 0 (Option &physics.grav_settling = {gs_vals}: reset to 0).")
+        elif any(v not in (0, 1, 2) for v in gs_vals):
             self.error(f"WRF grav_settling = {gs_vals} is not supported; WRF's values are 0, 1 and 2.")
         elif any(v != gs_vals[0] for v in gs_vals):
             self.error(f"WRF grav_settling with different values per domain ({gs_vals}) is not supported by CPPWRF.")
-        elif gs_vals[0] != 0 and mp_physics == 28:
-            # check_a_mundo: mp_physics = 28 already has gravitational fog settling; grav_settling is reset to 0
-            self.notice(f"Option &physics.grav_settling = {gs_vals}: reset to 0 with mp_physics = 28 (check_a_mundo).")
         elif gs_vals[0] != 0:
             if "phys" not in sections or mp_physics == 0 or bl_pbl == 0 or sf_sfclay == 0:
                 self.error("WRF grav_settling > 0 needs a microphysics scheme with qc, a PBL scheme and a surface "
@@ -2960,14 +3095,19 @@ class WrfTranslator:
         for mv_key in ("vortex_interval", "max_vortex_speed", "corral_dist", "track_level",
                        "time_to_move", "move_id", "move_interval", "move_cd_x", "move_cd_y"):
             if self.has_opt("domains", mv_key):
+                reg = REGISTRY_DEFAULTS.get(mv_key)
+                reg_def = reg[1] if reg else 0
+                n_mv = max(1, self._max_dom) if reg and reg[2] == "max_domains" else (
+                    1 if reg and reg[2] == "1" else None)
                 vals = self.get_opt_list("domains", mv_key)
-                if any(v not in (0, False) for v in vals):
+                checked = vals[:n_mv] if n_mv is not None else vals
+                if any(v is not None and not _same_value(v, reg_def) and v not in (0, False) for v in checked):
                     self.error(f"WRF moving nest option &domains.{mv_key} = {vals} is not supported by CPPWRF.")
 
         for vr_key in ("vert_refine_method", "vert_refine_fact"):
             if self.has_opt("domains", vr_key):
                 vals = self.get_opt_list("domains", vr_key)
-                if any((v not in (0, 1) if vr_key == "vert_refine_fact" else v != 0) for v in vals):
+                if any((v != 1 if vr_key == "vert_refine_fact" else v != 0) for v in vals):
                     self.error(f"WRF vertical nest refinement (&domains.{vr_key} = {vals}) is not supported by CPPWRF.")
 
         if max_dom > 1:
@@ -3029,7 +3169,7 @@ class WrfTranslator:
                 if d == 0:
                     continue
 
-                parent_id = self.get_dom_opt("domains", "parent_id", d, dom_id - 1, fallback_d0=False)
+                parent_id = self.get_dom_opt("domains", "parent_id", d, 0, fallback_d0=False)
                 if not isinstance(parent_id, int) or parent_id < 1 or parent_id >= dom_id:
                     self.error(f"Domain {tag}: invalid parent_id = {parent_id} (must satisfy 1 <= parent_id < {dom_id}).")
                     p_idx = 0
@@ -3064,8 +3204,8 @@ class WrfTranslator:
                 if self.has_opt("domains", "e_we"):
                     c_e_we = self.get_dom_opt("domains", "e_we", d, None, fallback_d0=False)
                     p_e_we = self.get_dom_opt("domains", "e_we", p_idx, None, fallback_d0=False)
-                    c_s_we = self.get_dom_opt("domains", "s_we", d, 1)
-                    p_s_we = self.get_dom_opt("domains", "s_we", p_idx, 1)
+                    c_s_we = self.get_dom_opt("domains", "s_we", d, 1, fallback_d0=False)
+                    p_s_we = self.get_dom_opt("domains", "s_we", p_idx, 1, fallback_d0=False)
                     if c_e_we is not None and p_e_we is not None:
                         c_nx = c_e_we - c_s_we
                         p_nx = p_e_we - p_s_we
@@ -3080,8 +3220,8 @@ class WrfTranslator:
                 if self.has_opt("domains", "e_sn"):
                     c_e_sn = self.get_dom_opt("domains", "e_sn", d, None, fallback_d0=False)
                     p_e_sn = self.get_dom_opt("domains", "e_sn", p_idx, None, fallback_d0=False)
-                    c_s_sn = self.get_dom_opt("domains", "s_sn", d, 1)
-                    p_s_sn = self.get_dom_opt("domains", "s_sn", p_idx, 1)
+                    c_s_sn = self.get_dom_opt("domains", "s_sn", d, 1, fallback_d0=False)
+                    p_s_sn = self.get_dom_opt("domains", "s_sn", p_idx, 1, fallback_d0=False)
                     if c_e_sn is not None and p_e_sn is not None:
                         c_ny = c_e_sn - c_s_sn
                         p_ny = p_e_sn - p_s_sn
@@ -3233,7 +3373,7 @@ class WrfTranslator:
                                 sections[tag]["diff_opt"] = 0  # WRF: no diffusion; CPPWRF's default with khdif/kvdif is 1
                 # the other &dynamics max_domains options the translator reads have one value in CPPWRF; WRF runs each
                 # domain with its own entry (a missing entry is the Registry default, pad_max_domains)
-                for nml_k in ("h_sca_adv_order", "v_sca_adv_order", "top_lid", "chem_adv_opt", "momentum_adv_opt",
+                for nml_k in ("h_sca_adv_order", "v_sca_adv_order", "top_lid", "momentum_adv_opt",
                               "phi_adv_z", *UNSUPPORTED_DYNAMICS_SWITCHES):
                     if self.has_opt("dynamics", nml_k):
                         v_d = self.get_dom_opt("dynamics", nml_k, d, None)
@@ -3285,7 +3425,8 @@ class WrfTranslator:
                                f"the namelist).")
                 elif (grp_name, key_name) not in self.used_keys:
                     reg = REGISTRY_DEFAULTS.get(key_name)
-                    n = max(1, self._max_dom) if reg and reg[2] == "max_domains" else 1
+                    n = max(1, self._max_dom) if reg and reg[2] == "max_domains" else (
+                        1 if reg and reg[2] == "1" else len(vals))
                     if key_name in IGNORED_WRF_OPTIONS:
                         self.notice(f"Option &{grp_name}.{key_name} = {vals[0] if vals else None}: {IGNORED_WRF_OPTIONS[key_name]}")
                     elif grp_name not in wrf_groups:

@@ -1273,7 +1273,7 @@ class TestValidationAndWarnings(unittest.TestCase):
 
     def test_sst_skin_tmn_update(self):
         """sst_skin = 1 and tmn_update = 1 (with lagday) with Noah; the other LSMs, lagday = 1, values other than 0 / 1
-        and the adaptive time step are errors; lagday without tmn_update stays an unported option."""
+        and the adaptive time step are errors; lagday without tmn_update has no effect."""
         base = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, sf_sfclay_physics = 1,\n"
                 " sf_surface_physics = {lsm}, bl_pbl_physics = 1, {opts} /\n")
         t = WrfTranslator(parse_namelist(real_case(base.format(lsm=2, opts="sst_skin = 1, tmn_update = 1"))))
@@ -1287,11 +1287,15 @@ class TestValidationAndWarnings(unittest.TestCase):
         self.assertEqual(t.errors, [])
         self.assertEqual(sec["phys"]["lagday"], 5)
         self.assertNotIn("sst_skin", sec["phys"])
+        t = WrfTranslator(parse_namelist(real_case(base.format(lsm=2, opts="lagday = 5"))))
+        sec = t.translate()
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("lagday", sec["phys"])
+        self.assertTrue(any("lagday = 5" in n and "tmn_update = 0" in n for n in t.notices), t.notices)
         for lsm, opts, err in ((4, "sst_skin = 1", "sst_skin = 1 is supported with sf_surface_physics = 2"),
                                (1, "tmn_update = 1", "tmn_update = 1 is supported with sf_surface_physics = 2"),
                                (2, "tmn_update = 1, lagday = 1", "requires lagday=150"),
-                               (2, "sst_skin = 2", "sst_skin = 2 is not supported"),
-                               (2, "lagday = 5", "lagday = [5] is not supported")):
+                               (2, "sst_skin = 2", "sst_skin = 2 is not supported")):
             t = WrfTranslator(parse_namelist(real_case(base.format(lsm=lsm, opts=opts))))
             t.translate()
             self.assertIn(err, " ".join(t.errors), f"{lsm} {opts}: {t.errors}")
@@ -2254,6 +2258,353 @@ class TestWrfNamelistSemantics(unittest.TestCase):
             "&physics ", "&physics sst_update = 1, ")
         t, _ = self.translate(text)
         self.assertTrue(any("sst_update = 1 without" in e for e in t.errors), t.errors)
+
+    def test_ghg_input_non_binary(self):
+        # check_a_mundo:974-1004 & radiation_driver: CAM GHG tables only for ghg_input == 1; other values use 0
+        rad = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, sf_sfclay_physics = 1,"
+               " sf_surface_physics = 2, bl_pbl_physics = 1, ra_lw_physics = 4, ra_sw_physics = 4, ghg_input = 2 /\n")
+        t, sec = self.translate(real_case(rad))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["ghg_input"], 0)
+        self.assertTrue(any("ghg_input = 2" in n for n in t.notices), t.notices)
+        t, sec = self.translate(self.FULL.replace("&physics ", "&physics ghg_input = 2, "))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("phys", sec)
+        self.assertTrue(any("ghg_input = 2" in n for n in t.notices), t.notices)
+
+    def test_tice2tsk_if2cold_with_fractional_seaice_0(self):
+        # check_a_mundo:1010-1016: warning only when fractional_seaice = 0 and tice2tsk_if2cold = .true.
+        noah = self.FULL.replace("sf_sfclay_physics = 0, sf_surface_physics = 0",
+                                 "sf_sfclay_physics = 1, sf_surface_physics = 2")
+        for base in (noah, self.FULL):
+            t, sec = self.translate(base.replace("&physics ", "&physics fractional_seaice = 0, tice2tsk_if2cold = .true., "))
+            self.assertEqual(t.errors, [])
+            self.assertNotIn("tice2tsk_if2cold", sec.get("phys", {}))
+            self.assertTrue(any("You set tice2tsk_if2cold = .true.,  but fractional_seaice = 0" in n
+                                for n in t.notices), t.notices)
+        t, sec = self.translate(noah.replace("&physics ", "&physics fractional_seaice = 1, tice2tsk_if2cold = .true., "))
+        self.assertEqual(t.errors, [])
+        self.assertTrue(sec["phys"]["tice2tsk_if2cold"])
+
+    def test_sf_urban_physics_innermost_domain_copy(self):
+        # check_a_mundo:1063-1077: every domain adopts sf_urban_physics(max_dom)
+        sfc = "sf_sfclay_physics = 2*1, sf_surface_physics = 2*2, bl_pbl_physics = 2*1, "
+        for vals in ("1, 0", "1"):
+            t, sec = self.translate(self.NEST + f"&physics {sfc}sf_urban_physics = {vals} /\n")
+            self.assertEqual(t.errors, [], vals)
+            self.assertNotIn("sf_urban_physics", sec["phys"])
+            self.assertTrue(any("sf_urban_physics option must be identical in each domain" in n
+                                for n in t.notices), (vals, t.notices))
+        for vals in ("0, 1", "1, 1"):
+            t, _ = self.translate(self.NEST + f"&physics {sfc}sf_urban_physics = {vals} /\n")
+            self.assertTrue(any("sf_urban_physics = 1 with nests" in e for e in t.errors), (vals, t.errors))
+
+    def test_mskf_icloud_and_cu_diag_order(self):
+        # check_a_mundo:1390-1398 runs before L2198-2239: MSKF sets icloud = 1 and cu_rad_feedback = .true.
+        base = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, sf_sfclay_physics = 1,"
+                " sf_surface_physics = 2, bl_pbl_physics = 1, ra_lw_physics = 4, ra_sw_physics = 4, {opts} /\n")
+        for ic in (2, 3):
+            t, sec = self.translate(real_case(base.format(opts=f"cu_physics = 11, icloud = {ic}")))
+            self.assertEqual(t.errors, [], ic)
+            self.assertNotIn("icloud", sec["phys"])
+            self.assertTrue(any("cu_physics is 11, setting icloud = 1 and cu_rad_feedback = T" in n
+                                for n in t.notices), t.notices)
+        t, _ = self.translate(real_case(base.format(opts="cu_physics = 1, icloud = 3")))
+        self.assertTrue(any("icloud = 3 is not supported" in e for e in t.errors), t.errors)
+        t, _ = self.translate(real_case(base.format(opts="cu_physics = 11, cu_rad_feedback = .false., cu_diag = 1")))
+        self.assertEqual(t.errors, [])
+        t, _ = self.translate(real_case(base.format(opts="cu_physics = 1, cu_rad_feedback = .false., cu_diag = 1")))
+        self.assertTrue(any("Using cu_diag=1 requires use of one of the following CU schemes" in e
+                            for e in t.errors), t.errors)
+
+    def test_sst_update_0_zeroes_auxinput4(self):
+        # check_a_mundo:1446-1459: sst_update = 0 zeroes io_form_auxinput4 and auxinput4_interval{,_y,_d,_h,_m,_s}
+        noah = self.FULL.replace("sf_sfclay_physics = 0, sf_surface_physics = 0",
+                                 "sf_sfclay_physics = 1, sf_surface_physics = 2")
+        tc = "&time_control io_form_auxinput4 = 2, auxinput4_interval_h = 6, auxinput4_interval_m = 30, auxinput4_interval_s = 10 /"
+        for base in (noah, self.FULL):
+            t, sec = self.translate(base.replace("&time_control /", tc).replace("&physics ", "&physics sst_update = 0, "))
+            self.assertEqual(t.errors, [])
+            self.assertNotIn("sst_update", sec.get("phys", {}))
+            self.assertTrue(any("sst_update is 0, setting io_form_auxinput4 = 0 and auxinput4_interval = 0" in n
+                                for n in t.notices), t.notices)
+
+    def test_mynn_edmf_reset_with_non_mynn_pbl(self):
+        # check_a_mundo:1775-1782: non-MYNN PBL resets bl_mynn_edmf, bl_mynn_edmf_dd and bl_mynn_output to 0
+        opts = "bl_mynn_edmf = 0, bl_mynn_edmf_dd = 1, bl_mynn_output = 1"
+        for pbl, sfc in ((1, 1), (0, 5), (0, 0)):
+            lsm = 2 if (pbl or sfc) else 0
+            text = (f"&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6,"
+                    f" sf_sfclay_physics = {sfc}, sf_surface_physics = {lsm}, bl_pbl_physics = {pbl}, {opts} /\n")
+            t, sec = self.translate(real_case(text))
+            self.assertEqual(t.errors, [], (pbl, sfc))
+            for k in ("bl_mynn_edmf", "bl_mynn_edmf_dd", "bl_mynn_output"):
+                self.assertNotIn(k, sec.get("phys", {}))
+            self.assertTrue(any("bl_mynn_output" in n and "reset to 0" in n for n in t.notices), t.notices)
+
+    def test_mynn_edmf_0_allows_ishallow(self):
+        # check_a_mundo:1788-1800: bl_mynn_edmf > 0 forbids ishallow/shcu_physics; bl_mynn_edmf = 0 allows ishallow = 1
+        base = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, sf_sfclay_physics = 5,"
+                " sf_surface_physics = 2, bl_pbl_physics = 5, cu_physics = 3, {opts} /\n")
+        t, sec = self.translate(real_case(base.format(opts="bl_mynn_edmf = 0, ishallow = 1")))
+        self.assertEqual(t.errors, [])
+        self.assertEqual((sec["phys"]["bl_mynn_edmf"], sec["phys"]["ishallow"]), (0, 1))
+        t, _ = self.translate(real_case(base.format(opts="bl_mynn_edmf = 1, ishallow = 1")))
+        self.assertTrue(any("bl_mynn_edmf > 0 requires both shcu_physics=0 & ishallow=0" in e
+                            for e in t.errors), t.errors)
+        t, _ = self.translate(real_case(base.format(opts="bl_mynn_edmf = 0, shcu_physics = 2")))
+        self.assertTrue(any("shcu_physics = 2" in e for e in t.errors), t.errors)
+
+    def test_icloud_bl_non_mynn_and_positive(self):
+        # check_a_mundo:1806-1821 & radiation_driver:1404: non-MYNN resets icloud_bl = 1 to 0 and accepts 0;
+        # MYNN tests icloud_bl > 0
+        noah = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, sf_sfclay_physics = {sfc},"
+                " sf_surface_physics = 2, bl_pbl_physics = {pbl}, icloud_bl = {val} /\n")
+        t, sec = self.translate(real_case(noah.format(sfc=1, pbl=1, val=0)))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("icloud_bl", sec["phys"])
+        t, sec = self.translate(real_case(noah.format(sfc=1, pbl=1, val=1)))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("icloud_bl", sec["phys"])
+        self.assertTrue(any("Need MYNN PBL for icloud_bl = 1, resetting to 0" in n for n in t.notices), t.notices)
+        t, sec = self.translate(self.FULL.replace("&physics ", "&physics icloud_bl = 0, "))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("phys", sec)
+        t, sec = self.translate(real_case(noah.format(sfc=5, pbl=5, val=2)))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("icloud_bl", sec["phys"])
+        self.assertTrue(any("icloud_bl = 2" in n for n in t.notices), t.notices)
+        t, sec = self.translate(real_case(noah.format(sfc=5, pbl=5, val=0)))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["icloud_bl"], 0)
+
+    def test_lagday_ignored_when_tmn_update_0(self):
+        # check_a_mundo:2325-2330: lagday only checked/used when tmn_update = 1
+        noah = self.FULL.replace("sf_sfclay_physics = 0, sf_surface_physics = 0",
+                                 "sf_sfclay_physics = 1, sf_surface_physics = 2")
+        for base in (noah, self.FULL):
+            for ld in (1, 30):
+                t, sec = self.translate(base.replace("&physics ", f"&physics tmn_update = 0, lagday = {ld}, "))
+                self.assertEqual(t.errors, [], ld)
+                self.assertNotIn("lagday", sec.get("phys", {}))
+                self.assertTrue(any(f"lagday = {ld}" in n and "tmn_update = 0" in n for n in t.notices), t.notices)
+
+    def test_grav_settling_reset_for_mp28_before_validation(self):
+        # check_a_mundo:2477-2490: mp_physics = 28 resets any non-zero grav_settling to 0
+        text = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 28, sf_sfclay_physics = 1,"
+                " sf_surface_physics = 2, bl_pbl_physics = 1, grav_settling = 3 /\n")
+        t, sec = self.translate(real_case(text))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("grav_settling", sec["phys"])
+        self.assertTrue(any("mp_physics == 28, already has gravitational fog settling; resetting grav_settling to 0"
+                            in n for n in t.notices), t.notices)
+
+    def test_scalar_pblmix_wsm3_wsm5_and_mynn(self):
+        # module_pbl_driver: WSM3 (3) and WSM5 (4) have no 4-D scalars; MYNN turns scalar_pblmix off (check_a_mundo)
+        base = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = {mp}, sf_sfclay_physics = {sfc},"
+                " sf_surface_physics = 2, bl_pbl_physics = {pbl}, scalar_pblmix = 1 /\n")
+        for mp in (3, 4):
+            t, _ = self.translate(real_case(base.format(mp=mp, sfc=1, pbl=1)))
+            self.assertEqual(t.errors, [], mp)
+            self.assertTrue(any("scalar_pblmix" in n for n in t.notices), t.notices)
+        t, _ = self.translate(real_case(base.format(mp=8, sfc=1, pbl=1)))
+        self.assertTrue(any("scalar_pblmix = 1" in e for e in t.errors), t.errors)
+        t, _ = self.translate(real_case(base.format(mp=8, sfc=5, pbl=5)))
+        self.assertEqual(t.errors, [])
+        self.assertTrue(any("MYNN is set to mix scalars, turning off scalar_pblmix" in n for n in t.notices), t.notices)
+        t, _ = self.translate(self.FULL.replace("mp_physics = 0", "mp_physics = 8, scalar_pblmix = 1"))
+        self.assertEqual(t.errors, [])
+
+    def test_vert_refine_fact_zero_rejected(self):
+        # Registry default vert_refine_fact = 1; any value != 1 is ndown-specific and unported
+        t, _ = self.translate(self.FULL.replace("&domains ", "&domains vert_refine_fact = 0, "))
+        self.assertTrue(any("vert_refine_fact = [0]" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.FULL.replace("&domains ", "&domains vert_refine_fact = 1, "))
+        self.assertEqual(t.errors, [])
+
+    def test_o3input_reset_for_non_rrtmg(self):
+        # check_a_mundo:2948-2962: non-RRTMG radiation resets o3input = 0
+        base = ("&time_control /\n&domains time_step = 60 /\n&physics sf_sfclay_physics = 1, sf_surface_physics = 2,"
+                " bl_pbl_physics = 1, ra_lw_physics = {lw}, ra_sw_physics = {sw}, o3input = 1 /\n")
+        t, sec = self.translate(real_case(base.format(lw=1, sw=1)))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["o3input"], 0)
+        self.assertTrue(any("RRTMG radiation is not used, setting:  o3input=0 to avoid data pre-processing" in n
+                            for n in t.notices), t.notices)
+        t, sec = self.translate(self.FULL.replace("&physics ", "&physics o3input = 1, "))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("phys", sec)
+        self.assertTrue(any("o3input=0" in n for n in t.notices), t.notices)
+        t, _ = self.translate(real_case(base.format(lw=4, sw=4)))
+        self.assertTrue(any("o3input = 1 is not supported" in e for e in t.errors), t.errors)
+
+    def test_nssl_negative_flags_accepted(self):
+        # check_a_mundo:3485-3509: any < 0 value of the four NSSL flags selects mp_physics = 18's defaults
+        text = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 18, sf_sfclay_physics = 1,"
+                " sf_surface_physics = 2, bl_pbl_physics = 1, nssl_2moment_on = -2, nssl_hail_on = -3,"
+                " nssl_ccn_on = -4, nssl_density_on = -5 /\n")
+        t, sec = self.translate(real_case(text))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["phys"]["mp_physics"], 18)
+        for k in ("nssl_2moment_on", "nssl_hail_on", "nssl_ccn_on", "nssl_density_on"):
+            self.assertTrue(any(k in n and "< 0" in n for n in t.notices), (k, t.notices))
+
+    def test_zdamp_vs_ztop_damp_opt(self):
+        # Only damp_opt = 2 (rk_rayleigh_damp) crashes when zdamp >= ztop; damp_opt = 1 and 3 are bounded
+        ideal = ("&time_control run_minutes = 10 /\n&domains time_step = 3, e_we = 202, e_sn = 3, e_vert = 81,"
+                 " dx = 250, dy = 250{ztop} /\n&dynamics damp_opt = {opt}, zdamp = 20000. /\n"
+                 "&bdy_control periodic_x = .true., periodic_y = .true. /\n&ideal ideal_case = 1 /\n")
+        t, _ = self.translate(ideal.format(opt=2, ztop=""))  # omitted ztop defaults to 15000 m
+        self.assertTrue(any("damp_opt = 2" in e and "zdamp = 20000" in e for e in t.errors), t.errors)
+        for opt in (1, 3):
+            t, sec = self.translate(ideal.format(opt=opt, ztop=", ztop = 15000"))
+            self.assertEqual(t.errors, [], opt)
+            self.assertEqual((sec["dyn"]["damp_opt"], sec["dyn"]["zdamp"]), (opt, 20000))
+
+    def test_mynn_and_acm2_mp_whitelists(self):
+        # MYNN accepts every ported MP carrying qc, qi and qs (4, 6, 8, 10, 14, 16, 17, 18);
+        # ACM2 accepts every ported MP carrying qc and qi (4, 6, 8, 10, 14, 16, 17, 18, 28, 50, 51)
+        def tr(pbl, sfc, mp):
+            text = (f"&time_control /\n&domains time_step = 60 /\n&physics mp_physics = {mp},"
+                    f" sf_sfclay_physics = {sfc}, sf_surface_physics = 2, bl_pbl_physics = {pbl} /\n")
+            return self.translate(real_case(text))
+        for mp in (4, 6, 8, 10, 14, 16, 17, 18):
+            t, _ = tr(5, 5, mp)
+            self.assertEqual(t.errors, [], ("MYNN", mp, t.errors))
+        for mp in (0, 1, 3, 28, 50, 51):
+            t, _ = tr(5, 5, mp)
+            self.assertTrue(len(t.errors) > 0, ("MYNN", mp))
+        for mp in (4, 6, 8, 10, 14, 16, 17, 18, 28, 50, 51):
+            t, _ = tr(7, 1, mp)
+            self.assertEqual(t.errors, [], ("ACM2", mp, t.errors))
+        for mp in (0, 1, 3):
+            t, _ = tr(7, 1, mp)
+            self.assertTrue(any("needs a microphysics with qc and qi" in e for e in t.errors), ("ACM2", mp, t.errors))
+
+    def test_idcor_and_hail_opt_non_binary(self):
+        # WRF treats idcor /= 1 as 0 (Zo_default = 2500 m) and hail_opt /= 1 as 0 (graupel)
+        rad = ("&time_control /\n&domains time_step = 60 /\n&physics mp_physics = {mp}, sf_sfclay_physics = 1,"
+               " sf_surface_physics = 2, bl_pbl_physics = 1, ra_lw_physics = 4, ra_sw_physics = 4,"
+               " idcor = 2, hail_opt = 2 /\n")
+        for mp in (6, 16):
+            t, sec = self.translate(real_case(rad.format(mp=mp)))
+            self.assertEqual(t.errors, [], mp)
+            self.assertNotIn("idcor", sec["phys"])
+            self.assertNotIn("hail_opt", sec["phys"])
+            self.assertTrue(any("idcor = 2" in n and "2500 m" in n for n in t.notices), t.notices)
+            self.assertTrue(any("hail_opt = 2" in n and "graupel" in n for n in t.notices), t.notices)
+
+    def test_ideal_hypsometric_opt_reset_to_1(self):
+        # share/input_wrf.F:1032-1040: ideal cases always use hypsometric_opt = 1
+        ideal = ("&time_control run_minutes = 10 /\n&domains time_step = 3, e_we = 202, e_sn = 3, e_vert = 81,"
+                 " dx = 250, dy = 250, ztop = 20000, hypsometric_opt = 2 /\n"
+                 "&bdy_control periodic_x = .true., periodic_y = .true. /\n&ideal ideal_case = 1 /\n")
+        t, sec = self.translate(ideal)
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("hypsometric_opt", sec["dyn"])
+        self.assertTrue(any("Ideal cases always use hypsometric_opt=1" in n for n in t.notices), t.notices)
+        t = WrfTranslator(parse_namelist(complete(ideal)), override_case="straka")
+        sec = t.translate()
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("hypsometric_opt", sec["dyn"])
+        self.assertTrue(any("Ideal cases always use hypsometric_opt=1" in n for n in t.notices), t.notices)
+        t, sec = self.translate(self.FULL.replace("&domains ", "&domains hypsometric_opt = 1, "))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["dyn"]["hypsometric_opt"], 1)
+
+    def test_non_max_domains_array_options_checked_beyond_index_0(self):
+        # Non-max_domains array options (max_plevs, max_zlevs, max_ocean) must check every supplied element
+        for extra, key in (("&diags press_levels = 0, 85000, 50000 /\n", "press_levels"),
+                           ("&diags z_levels = 0, 500, 1000 /\n", "z_levels"),
+                           ("", "ocean_z")):
+            text = (self.FULL.replace("&domains ", "&domains ocean_z = -1, 10., 20., ") if key == "ocean_z"
+                    else self.FULL + extra)
+            t, _ = self.translate(text)
+            self.assertTrue(any(key in e and "is not supported" in e for e in t.errors), (key, t.errors))
+        t, _ = self.translate(self.FULL + "&diags z_levels = 0, 0, 0 /\n")
+        self.assertEqual(t.errors, [])
+
+    def test_chem_adv_opt_ignored(self):
+        # Registry default chem_adv_opt = 1; stock non-Chem wrf.exe ignores chem_adv_opt
+        for val in (0, 1):
+            t, _ = self.translate(self.FULL.replace("&dynamics ", f"&dynamics chem_adv_opt = {val}, "))
+            self.assertEqual(t.errors, [], val)
+            self.assertEqual(t.warnings, [], val)
+        t, _ = self.translate(self.NEST + "&dynamics chem_adv_opt = 0 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertEqual(t.warnings, [])
+
+    def test_moving_nest_registry_defaults_accepted(self):
+        # Moving-nest options at WRF Registry defaults must not be rejected
+        defaults = ("vortex_interval = 15, max_vortex_speed = 40, corral_dist = 8, track_level = 50000,"
+                    " time_to_move = 0., move_id = 0, move_interval = 999999999, move_cd_x = 0, move_cd_y = 0, ")
+        t, _ = self.translate(self.FULL.replace("&domains ", "&domains " + defaults))
+        self.assertEqual(t.errors, [])
+        for bad in ("vortex_interval = 10, ", "move_interval = 999999999, 60, "):
+            t, _ = self.translate(self.FULL.replace("&domains ", "&domains " + bad))
+            self.assertTrue(any("moving nest option" in e for e in t.errors), (bad, t.errors))
+
+    def test_omitted_nest_parent_id_rejected(self):
+        # Registry default parent_id = 0; omitted nest parent_id must not be inferred as dom_id - 1
+        three = ("&time_control input_from_file = .true., .true., .true. /\n"
+                 "&domains time_step = 60, max_dom = 3, e_we = 120, 121, 91, e_sn = 90, 91, 61, e_vert = 45, 45, 45,"
+                 " dx = 15000, 5000, 1000, dy = 15000, 5000, 1000, parent_id = 0, 1,"
+                 " i_parent_start = 1, 40, 30, j_parent_start = 1, 30, 20,"
+                 " parent_grid_ratio = 1, 3, 5, parent_time_step_ratio = 1, 3, 5 /\n"
+                 "&bdy_control specified = .true., .false., .false. /\n")
+        t, _ = self.translate(three)
+        self.assertTrue(any("Domain d03: invalid parent_id = 0" in e for e in t.errors), t.errors)
+        no_pid = self.NEST.replace("parent_id = 0, 1, ", "")
+        t, _ = self.translate(no_pid)
+        self.assertTrue(any("Domain d02: invalid parent_id = 0" in e for e in t.errors), t.errors)
+
+    def test_nest_s_we_s_sn_no_d0_fallback(self):
+        # Registry default s_we / s_sn = 1: a child omitting its entry gets 1, not d01's value
+        t, _ = self.translate(self.NEST.replace("e_we = 120, 121,", "s_we = 2, e_we = 120, 121,"))
+        self.assertTrue(any("s_we other than 1" in e for e in t.errors), t.errors)
+        self.assertFalse(any("not divisible by parent_grid_ratio" in e for e in t.errors), t.errors)
+
+    def test_inactive_options_accepted_with_notice(self):
+        # Inactive options ignored by WRF: opt_thcnd outside Noah, cugd_avedx outside G3, shadlen with
+        # topo_shading = 0, gwd_dx_factor on domains with gwd_opt = 0
+        for lsm in (1, 3, 4):
+            text = (f"&time_control /\n&domains time_step = 60 /\n&physics mp_physics = 6, sf_sfclay_physics = 1,"
+                    f" sf_surface_physics = {lsm}, bl_pbl_physics = 1, opt_thcnd = 2 /\n")
+            t, sec = self.translate(real_case(text))
+            self.assertEqual(t.errors, [], lsm)
+            self.assertNotIn("opt_thcnd", sec["phys"])
+            self.assertTrue(any("opt_thcnd = 2" in n for n in t.notices), (lsm, t.notices))
+        t, sec = self.translate(self.FULL.replace("&physics ", "&physics opt_thcnd = 2, "))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("phys", sec)
+
+        for text in (real_case("&time_control /\n&domains time_step = 60 /\n&physics sf_sfclay_physics = 1,"
+                               " sf_surface_physics = 2, cu_physics = 1, cugd_avedx = 3 /\n"),
+                     self.FULL.replace("&physics ", "&physics cugd_avedx = 3, maxens3 = 12, ")):
+            t, sec = self.translate(text)
+            self.assertEqual(t.errors, [], text)
+            self.assertNotIn("cugd_avedx", sec.get("phys", {}))
+            self.assertTrue(any("cugd_avedx = 3" in n for n in t.notices), t.notices)
+
+        t, sec = self.translate(self.FULL.replace("&physics ", "&physics topo_shading = 0, shadlen = 50000., "))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("phys", sec)
+        self.assertTrue(any("shadlen = 50000.0" in n for n in t.notices), t.notices)
+
+        t, sec = self.translate(self.NEST + "&dynamics gwd_opt = 1, 0, gwd_dx_factor = 3.0 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertEqual(sec["dyn"]["gwd_dx_factor"], 3.0)
+        t, _ = self.translate(self.NEST + "&dynamics gwd_opt = 1, 1, gwd_dx_factor = 3.0 /\n")
+        self.assertTrue(any("gwd_dx_factor" in e for e in t.errors), t.errors)
+        t, sec = self.translate(self.NEST + "&dynamics gwd_opt = 0, 0, gwd_dx_factor = 3.0 /\n")
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("gwd_dx_factor", sec["dyn"])
+        self.assertTrue(any("gwd_dx_factor" in n for n in t.notices), t.notices)
+
+    def test_grid_allowed_false_default_only_error(self):
+        # grid_allowed = .false. hits DEFAULT_ONLY_OPTIONS with its specific message
+        t, _ = self.translate(self.NEST.replace("max_dom = 2,", "max_dom = 2, grid_allowed = .true., .false.,"))
+        self.assertTrue(any("domains that are not integrated (grid_allowed)" in e for e in t.errors), t.errors)
 
 
 class TestExecution2Steps(unittest.TestCase):

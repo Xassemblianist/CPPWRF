@@ -417,7 +417,7 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `moist_adv_opt`, `scalar_adv_opt`, `tke_adv_opt` | 0, 1, 2 (monotonic: h 5 / v 3 orders), 3 (WENO), 4 (positive-definite WENO) |
 | `momentum_adv_opt` | 1, 3 (WENO) |
 | `hybrid_opt`, `etac` | 0, 2 (real.exe makes the coordinate) |
-| `hypsometric_opt` | 1, 2 |
+| `hypsometric_opt` | 1, 2 (ideal cases reset to 1, as WRF's `input_wrf` does) |
 | `epssm`, `smdiv`, `emdiv`, `time_step_sound`, `top_lid`, `base_temp`, `iso_temp` | any |
 | `gwd_opt` | 0, 1 (GWDO; the same on every domain where it is on) |
 | **&bdy_control** | |
@@ -430,7 +430,7 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `cu_physics`, `cudt` | 0, 1 (Kain-Fritsch; `kfeta_trigger` 1, 3), 2 (Betts-Miller-Janjic), 3 (Grell-Freitas-Li; `ishallow` 0, 1, `clos_choice` 0-16), 5 (Grell-3D; `ishallow` 0, 1, `clos_choice` 0-16, `cugd_avedx` 1, 3), 6 (Tiedtke), 11 (multi-scale Kain-Fritsch; `kfeta_trigger` 1, 3, which MSKF ignores; its clouds always in the radiation), 16 (New Tiedtke); per domain |
 | `bmj_rad_feedback` | per domain, with BMJ only; with the radiation a microphysics scheme with cloud water and ice |
 | `cu_rad_feedback`, `shallowcu_forced_ra`, `convtrans_avglen_m` | per domain (KF and GF clouds in RRTMG) |
-| `bl_pbl_physics`, `bldt` | 0, 1 (YSU; `ysu_topdown_pblmix` 0, 1), 2 (MYJ), 5 (MYNN-EDMF, below), 7 (ACM2, over the surface layer 1 or 7; a microphysics with qc and qi: `mp_physics` 6, 8, 28), 8 (BouLac, over the surface layer 1 or 2), 4 (QNSE, with the surface layer 4; `mfshconv` 0, 1 (the EDKF mass flux, WRF's default)) |
+| `bl_pbl_physics`, `bldt` | 0, 1 (YSU; `ysu_topdown_pblmix` 0, 1), 2 (MYJ), 5 (MYNN-EDMF, below; a microphysics with qc, qi and qs: `mp_physics` 4, 6, 8, 10, 14, 16, 17, 18), 7 (ACM2, over the surface layer 1 or 7; a microphysics with qc and qi: `mp_physics` 4, 6, 8, 10, 14, 16, 17, 18, 28, 50, 51), 8 (BouLac, over the surface layer 1 or 2), 4 (QNSE, with the surface layer 4; `mfshconv` 0, 1 (the EDKF mass flux, WRF's default)) |
 | `bl_mynn_*`, `tke_budget`, `icloud_bl` | `tkeadvect`, `cloudpdf` -2..2, `mixlength` 0..2, `closure` 2.5 / 2.6 / 3.0, `edmf` 0 / 1, `edmf_mom`, `edmf_tke`, `cloudmix`, `mixqt`, `ess`, `mixscalars`, `output` 0 / 1, `tke_budget` 0 / 1, `icloud_bl` 0 / 1 |
 | `sf_sfclay_physics` | 0, 1 (revised MM5; `isfflx` 0, 1, `isftcflx` 0-2, `iz0tlnd` 0-2, `kim_tofd`, `tofd_factor`), 2 (Eta), 4 (QNSE, with the QNSE PBL; `fractional_seaice` 0, `isfflx` 1), 5 (MYNN; `sf_mynn_sfcflux_land` 0-3, `sf_mynn_sfcflux_water` 0-4), 7 (Pleim-Xiu, with ACM2 and Noah, `fractional_seaice` 0, `isfflx` 1) |
 | `grav_settling` | 0, 1, 2 |
@@ -439,7 +439,7 @@ non-default value is an error unless it only concerns WPS / real.exe or I/O quil
 | `rdmaxalb`, `usemonalb`, `rdlai2d`, `fractional_seaice`, `sst_update` | any; any; Noah; 0, 1; 0, 1 |
 | `sst_skin`, `tmn_update`, `lagday` | 0, 1 (skin SST over water, module_sf_sstskin.F); 0, 1 (TMN from the daily mean TSK, module_sf_tmnupdate.F); with `tmn_update = 1` any number of days but 1 (WRF stops there); one value for all domains, Noah (`sf_surface_physics = 2`) only |
 | `ra_lw_physics`, `ra_sw_physics`, `radt` | 0, 1 (RRTM LW / Dudhia SW, paired with each other or with RRTMG), 4 (RRTMG) |
-| `icloud`, `cldovrlp`, `idcor`, `o3input`, `ghg_input`, `aer_opt`, `swrad_scat` | 0, 1; 0-5; 0, 1; 0, 2; 0, 1; 0; any |
+| `icloud`, `cldovrlp`, `idcor`, `o3input`, `ghg_input`, `aer_opt`, `swrad_scat` | 0, 1 (MSKF resets `icloud` to 1); 0-5; 0, 1 (values other than 1 use 0); 0, 2 (resets to 0 without RRTMG); 0, 1 (values other than 1 use 0); 0; any |
 | `topo_wind`, `slope_rad`, `topo_shading`, `shadlen` | 0, 1, 2 (YSU's wind correction; 1 needs VAR_SSO in wrfinput, GOT_VAR_SSO = 1); 0, 1 (with a LW scheme); 0, 1; any > 0: real data, one domain, fixed time step; `topo_shading` not with tiles or MPI ranks |
 | `bucket_mm`, `bucket_J`, `prec_acc_dt` | any (with column physics; `prec_acc_dt` per domain) |
 
