@@ -1,0 +1,40 @@
+# WRF v4.8.0 reference runs of the coverage wave COV5 (tests/verify/cases/75_coverage5.py, data port_cov5_data.tar),
+# for tools/colab/colab_wrfref.sh (REFS format of tools/gcp/gcp_wrfref.sh: NAME BASE_RUN WRF_EXE section.key=value ...;
+# tools/gcp/wrf_ref_run.py). Data: matrix_data.tar (run_P4_r8, run_P8_r8, the WRF executables), matrix_nest.tar
+# (run_N3s_r8), matrix_real.tar (real_P4_r8 met_em
+# files, real.exe). Each reference: run_NAME (10 min, history every 5 min), run_NAME/steps (3 steps, history every
+# step), rst_NAME and rsm_NAME (tests/verify/make_restart_refs.sh, make_resumed_refs.sh). WRF build: r8
+# (stock -r8) for schemes without DOUBLE PRECISION, r8d8 (-r8 -double-8) for Grell-Freitas-Li and New Tiedtke
+# (docs/PHYSICS_SUITE.md).
+#
+# YSU PBL top-down mixing disabled (ysu_topdown_pblmix = 0) in daylight on P4 (06 UTC; real.exe on the P4 met_em files)
+YSUT0_r8 run_P4_r8 wrf_r8.exe physics.ysu_topdown_pblmix=0 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+# Kain-Fritsch RH-dependent trigger (kfeta_trigger = 3) on P4
+KFT3_r8 run_P4_r8 wrf_r8.exe physics.kfeta_trigger=3 time_control.run_seconds=600 time_control.history_interval_s=300
+# Grell-Freitas-Li (cu_physics = 3) on P8 with ishallow = 0 and non-default single closures (clos_choice 1, 4, 7, 10)
+GFSH0_r8 run_P8_r8 wrf_r8d8.exe physics.ishallow=0 time_control.run_seconds=600 time_control.history_interval_s=300
+GFC1_r8 run_P8_r8 wrf_r8d8.exe physics.clos_choice=1 time_control.run_seconds=600 time_control.history_interval_s=300
+GFC4_r8 run_P8_r8 wrf_r8d8.exe physics.clos_choice=4 time_control.run_seconds=600 time_control.history_interval_s=300
+GFC7_r8 run_P8_r8 wrf_r8d8.exe physics.clos_choice=7 time_control.run_seconds=600 time_control.history_interval_s=300
+GFC10_r8 run_P8_r8 wrf_r8d8.exe physics.clos_choice=10 time_control.run_seconds=600 time_control.history_interval_s=300
+# Grell-3D (cu_physics = 5) on P8 with ishallow = 0 and non-default single closures (clos_choice 1, 4, 7, 10;
+# clos_choice 16 is omitted because WRF v4.8.0 module_cu_g3.F reads xf_ens(nall+16) before setting it)
+G3SH0_r8 run_P8_r8 wrf_r8.exe physics.cu_physics=5 physics.ishallow=0 time_control.run_seconds=600 time_control.history_interval_s=300
+G3C1_r8 run_P8_r8 wrf_r8.exe physics.cu_physics=5 physics.clos_choice=1 time_control.run_seconds=600 time_control.history_interval_s=300
+G3C4_r8 run_P8_r8 wrf_r8.exe physics.cu_physics=5 physics.clos_choice=4 time_control.run_seconds=600 time_control.history_interval_s=300
+G3C7_r8 run_P8_r8 wrf_r8.exe physics.cu_physics=5 physics.clos_choice=7 time_control.run_seconds=600 time_control.history_interval_s=300
+G3C10_r8 run_P8_r8 wrf_r8.exe physics.cu_physics=5 physics.clos_choice=10 time_control.run_seconds=600 time_control.history_interval_s=300
+# New Tiedtke (cu_physics = 16) on the two-way nest N3 (d01 dx 15 km, d02 dx 5 km < 15 km scale-aware branch)
+NTN3_r8 run_N3s_r8 wrf_r8d8.exe physics.cu_physics=16,16 time_control.run_seconds=600 time_control.history_interval_s=300,300
+# Noah LSM McCumber-Pielke soil thermal conductivity (opt_thcnd = 2) in daylight on P4 (06 UTC; real.exe)
+THCND2_r8 run_P4_r8 wrf_r8.exe physics.opt_thcnd=2 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+# 5-layer thermal diffusion (slab) LSM with snow-cover limit disabled (ifsnow = 0) in daylight on P4 (06 UTC; real.exe)
+SLAB0_r8 run_P4_r8 wrf_r8.exe physics.sf_surface_physics=1 physics.num_soil_layers=5 physics.ifsnow=0 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+# Revised MM5 surface layer turbulent orographic form drag (kim_tofd = .true.) in daylight on P4 (06 UTC; real.exe)
+KTOFD_r8 run_P4_r8 wrf_r8.exe physics.kim_tofd=.true. time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+# Real-data dynamics options on P4: upper diffusive damping (damp_opt = 1, dampcoef 0.01: WRF's
+# explicit diffusive layer is stable only for a small coefficient) and rigid-lid top boundary (top_lid = .true.)
+DMP1_r8 run_P4_r8 wrf_r8.exe dynamics.damp_opt=1 dynamics.dampcoef=0.01 time_control.run_seconds=600 time_control.history_interval_s=300
+TOPLID_r8 run_P4_r8 wrf_r8.exe dynamics.top_lid=.true. time_control.run_seconds=600 time_control.history_interval_s=300
+# Dudhia shortwave (ra_sw_physics = 1) with WSM3 (mp_physics = 3, no QI / QS fields) in daylight on P4 (06 UTC; real.exe)
+DUDW3_r8 run_P4_r8 wrf_r8.exe physics.mp_physics=3 physics.ra_lw_physics=4 physics.ra_sw_physics=1 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
