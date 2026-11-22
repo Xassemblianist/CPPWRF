@@ -223,29 +223,39 @@ def nearest(d, h):
 def svg(case, dom, pairs, metric, path, vars_=("T2", "U10", "RAIN1H", "T", "U", "QVAPOR")):
     """The metric over time of each pair, one panel per variable, log scale; a self-contained SVG with a light and a
     dark scheme (prefers-color-scheme)."""
-    colors = {"r4-r8": "#1f77b4", "fp32-r8": "#d62728", "fp32-r4": "#7f7f7f", "r8n-r8": "#2ca02c", "fp64-r8": "#9467bd"}
+    colors = {"r4-r8": "#1f77b4", "fp32-r8": "#d62728", "fp32-r4": "#7f7f7f", "r8n-r8": "#2ca02c", "fp64-r8": "#9467bd",
+              "fp32id-r8": "#ff7f0e", "r4best-r8": "#17becf", "r4tuned-r8": "#8c564b", "r8best-r8dm1": "#bcbd22"}
     names = {"r4-r8": "WRF real*4 vs WRF real*8", "fp32-r8": "CPPWRF FP32 vs WRF real*8",
-             "fp32-r4": "CPPWRF FP32 vs WRF real*4", "r8n-r8": "WRF real*8 (MPI, other CPU) vs WRF real*8"}
+             "fp32-r4": "CPPWRF FP32 vs WRF real*4", "r8n-r8": "WRF real*8 (MPI, other CPU) vs WRF real*8",
+             "fp32id-r8": "CPPWRF FP32 identity vs real*8", "r4best-r8": "WRF real*4 (MPI) vs real*8",
+             "r4tuned-r8": "WRF real*4 tuned (MPI) vs real*8", "r8best-r8dm1": "WRF real*8 MPI vs one process"}
+    spare = ["#e377c2", "#393b79", "#637939", "#843c39", "#7b4173"]  # a pair without its own colour
+    for i, p in enumerate([q for q in pairs if q not in colors]):
+        colors[p] = spare[i % len(spare)]
     vars_ = [v for v in vars_ if any(v in pairs.get(p, {}) for p in pairs)]
     if not vars_:
         return False
     W, H, cols = 300, 210, 3
     rows = (len(vars_) + cols - 1) // cols
-    lw = 34
-    tw, th = cols * W, rows * H + lw
+    tw = cols * W
+    leg, x0, y0 = [], 10, 14  # the legend, wrapped to the figure's width
+    for p in pairs:
+        wd = 34 + 6.2 * len(names.get(p, p))
+        if x0 > 10 and x0 + wd > tw:
+            x0, y0 = 10, y0 + 18
+        leg.append((p, x0, y0))
+        x0 += wd
+    lw = y0 + 20
+    th = rows * H + lw
     o = [f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {tw} {th}" width="{tw}" height="{th}" '
          f'font-family="sans-serif" font-size="11">',
          "<style>.bg{fill:#fff}.fg{fill:#222}.ax{stroke:#888;fill:none}.gr{stroke:#ddd}"
          "@media (prefers-color-scheme: dark){.bg{fill:#1b1b1b}.fg{fill:#ddd}.ax{stroke:#999}.gr{stroke:#3a3a3a}}</style>",
          f'<rect class="bg" width="{tw}" height="{th}"/>']
-    x0 = 10
-    for p in pairs:
-        if p not in colors:
-            continue
-        o.append(f'<line x1="{x0}" y1="14" x2="{x0 + 22}" y2="14" stroke="{colors[p]}" stroke-width="2"'
+    for p, x0, y0 in leg:
+        o.append(f'<line x1="{x0}" y1="{y0}" x2="{x0 + 22}" y2="{y0}" stroke="{colors[p]}" stroke-width="2"'
                  f'{" stroke-dasharray=\"4 3\"" if p in ("fp32-r4", "r8n-r8") else ""}/>')
-        o.append(f'<text class="fg" x="{x0 + 26}" y="18">{names.get(p, p)}</text>')
-        x0 += 34 + 6.2 * len(names.get(p, p))
+        o.append(f'<text class="fg" x="{x0 + 26}" y="{y0 + 4}">{names.get(p, p)}</text>')
     for k, v in enumerate(vars_):
         ox, oy = (k % cols) * W, lw + (k // cols) * H
         pl, pr, pt, pb = ox + 46, ox + W - 10, oy + 18, oy + H - 26
