@@ -414,7 +414,7 @@ def job(note):
     for name, dp in (("cuda", "OFF"), ("cuda_dp", "ON")):
         b = f"/content/build-{name}"
         t = time.time()
-        rc = sh(f"cmake -S {SRC} -B {b} -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE={dp} "
+        rc = sh(f"cmake -S {SRC} -B {b} -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE={dp} -DCPPWRF_CUDA_FP32_IDENTITY=OFF "
                 f"&& cmake --build {b} -j{nproc} --target cppwrf", f"build-{name}.log")
         note(f"build {name}: exit {rc}, {time.time() - t:.0f} s")
         if rc == 0:
@@ -426,7 +426,7 @@ def job(note):
             b = f"/content/build-base-{name}"
             t = time.time()
             rc = sh(f"cmake -S {BASE_SRC} -B {b} -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON "
-                    f"-DCPPWRF_DOUBLE={dp} && cmake --build {b} -j{nproc} --target cppwrf", f"build-base-{name}.log")
+                    f"-DCPPWRF_DOUBLE={dp} -DCPPWRF_CUDA_FP32_IDENTITY=OFF && cmake --build {b} -j{nproc} --target cppwrf", f"build-base-{name}.log")
             note(f"build base {name}: exit {rc}, {time.time() - t:.0f} s")
             if rc == 0:
                 base_bins[name] = f"{b}/cppwrf"

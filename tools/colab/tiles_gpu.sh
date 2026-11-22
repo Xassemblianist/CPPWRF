@@ -39,7 +39,7 @@ tar xzf /content/cpu/src.tar.gz -C $G/src
 tar xzf /content/cpu/in/base_src.tar.gz -C $G/base
 build() {  # SRC BUILD DOUBLE
   local t0=$SECONDS
-  cmake -S "$1" -B "$2" -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE="$3" > "$2.log" 2>&1 &&
+  cmake -S "$1" -B "$2" -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE="$3" -DCPPWRF_CUDA_FP32_IDENTITY=OFF > "$2.log" 2>&1 &&
     cmake --build "$2" -j"$(nproc)" --target cppwrf >> "$2.log" 2>&1
   local rc=$?
   echo "build $2: exit $rc, $((SECONDS - t0)) s" >> $J/gpu.txt

@@ -31,7 +31,7 @@ st=
 for b in cuda:OFF cuda_dp:ON; do
   n=${b%%:*}
   t0=$SECONDS
-  cmake -S $G/src -B $G/build-$n -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=${b#*:} \
+  cmake -S $G/src -B $G/build-$n -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=${b#*:} -DCPPWRF_CUDA_FP32_IDENTITY=OFF \
     > $G/build-$n.log 2>&1 && cmake --build $G/build-$n -j"$(nproc)" --target cppwrf >> $G/build-$n.log 2>&1
   st="$st $n=$? (${n}_build_s=$((SECONDS - t0)))"
 done

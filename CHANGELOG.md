@@ -5,9 +5,15 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
-## 1.2.4 (2026-11-23)
+## 1.3.0 (2026-11-23)
 
 ### Changed
+- The GPU FP32 builds are WRF real*4's arithmetic by default: CPPWRF_CUDA_FP32_IDENTITY (and CPPWRF_HIP_FP32_IDENTITY)
+  default to ON, so `-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF` builds the FP32 identity build, bit-identical to the
+  CPU FP32 build and to stock WRF real*4 on the configurations of docs/FP32_IDENTITY.md. The fast FP32 build (FMA
+  contraction, CUDA's math library; 2 to 17 % faster in the paper benchmark) is `-DCPPWRF_CUDA_FP32_IDENTITY=OFF`.
+  The options have no effect on FP64 and CPU builds. The suite, benchmark, tiles and MPI tools that compare the fast
+  build name it explicitly.
 - Translator: aligned WRF namelist validation and automatic resets with WRF v4.8.0 (`share/module_check_a_mundo.F`,
   `share/input_wrf.F` and the physics/dynamics drivers). Automatic resets and inactive options now match WRF with a
   note instead of failing: ideal `hypsometric_opt = 2` resets to 1; `sf_urban_physics` copies the innermost domain's

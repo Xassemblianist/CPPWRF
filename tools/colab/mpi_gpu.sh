@@ -44,10 +44,10 @@ echo "build: exit $?, $((SECONDS - t0)) s" >> $J/gpu.txt
 tail -40 $G/b_dp.log > $J/gpu_build.log
 if [ -n "$FP32" ]; then
   rm -rf $G/base && mkdir -p $G/base && tar xzf /content/cpu/in/base_src.tar.gz -C $G/base
-  ( cmake -S $G/base -B $G/b_base -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF > $G/b_base.log 2>&1 &&
+  ( cmake -S $G/base -B $G/b_base -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF > $G/b_base.log 2>&1 &&
       cmake --build $G/b_base -j"$(nproc)" --target cppwrf >> $G/b_base.log 2>&1
     echo "build base FP32: exit $?" >> $J/gpu.txt ) &
-  ( cmake -S $G/src -B $G/b_sp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_MPI=ON \
+  ( cmake -S $G/src -B $G/b_sp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF -DCPPWRF_MPI=ON \
       -DMPI_CXX_COMPILER="$(command -v mpicxx.openmpi || command -v mpicxx)" > $G/b_sp.log 2>&1 &&
       cmake --build $G/b_sp -j"$(nproc)" --target cppwrf >> $G/b_sp.log 2>&1
     echo "build FP32 with MPI: exit $?" >> $J/gpu.txt ) &
