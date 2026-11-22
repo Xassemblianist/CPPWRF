@@ -6,6 +6,8 @@
 // byte offsets of the machine code (word = offset / 8). Device copies in namespace dev (member v).
 #include <cstdint>
 
+#include "core/gpu_runtime.hpp"
+
 namespace cppwrf::glibc_tables {
 // __exp_data (libm, 2224 bytes)
 inline constexpr std::uint64_t kExpData[278] = {
@@ -3451,7 +3453,7 @@ inline constexpr std::uint64_t kSvmlAtanData[98] = {
     0x0000000000000078ull, 0x0000000000000078ull,
 };
 }  // namespace cppwrf::glibc_tables
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
 namespace cppwrf::glibc_tables::dev {  // device copies (constant-initialised from the host tables)
 template <int N>
 struct Words {

@@ -393,11 +393,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_prep(const RrtmgLwCallConfig& c, const LwColumn
   for (int ilev = 0; ilev < nlayers; ++ilev) {
     if (c.icld != 0 && RSD(v.cldfrac)[ilev] >= rb(1.0e-20)) any_cloud = true;
   }
-#if defined(__CUDA_ARCH__)
-  const bool run_mcica = __any_sync(__activemask(), any_cloud);
-#else
-  const bool run_mcica = any_cloud;
-#endif
+  const bool run_mcica = CPPWRF_WARP_ANY(any_cloud);
   std::uint64_t icld_mask_lo = 0, icld_mask_hi = 0;
   if (run_mcica && any_cloud) {
     KissRng rng;
@@ -472,7 +468,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_setcoef_stage(int lay, rb tsk, const LwViews& v
       v.selffac, v.selffrac, v.indself, v.forfac, v.forfrac, v.indfor, v.minorfrac, v.scaleminor, v.scaleminorn2,
       v.indminor, tables);
   if (lower) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
     atomicAdd(&v.iscal[0], 1);
 #else
 #pragma omp atomic
@@ -538,11 +534,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_gpointstage(int nlayers, int igc, const LwViews
   const rb reflect = rb(1.0) - CSD(v.semiss)[iband];
   const rb pbnd = CSD(v.plankbnd)[iband];
   LwGpointStore st{v.taug, v.fracs, v.cldfmc, v.taucmc, v.gu0, v.gcu0, igc};
-#if defined(__CUDA_ARCH__)
-  const bool fast_clear = __all_sync(__activemask(), CSI(v.iscal)[4] == 0);
-#else
-  const bool fast_clear = CSI(v.iscal)[4] == 0;
-#endif
+  const bool fast_clear = CPPWRF_WARP_ALL(CSI(v.iscal)[4] == 0);
   if (fast_clear)
     rrtmg_lw_gpoint<MAX_LAY, true, SD2>(nlayers, iband, igc, v.secdiff, reflect, pbnd, v.cldfmc, v.taucmc,
                                         v.planklay, v.planklev, v.fracs, v.taug, v.icldlyr, tables, st);

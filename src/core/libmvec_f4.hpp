@@ -17,13 +17,14 @@
 #include <cstdint>
 #include <cstring>
 
+#include "core/gpu_runtime.hpp"
 #include "core/libmvec_f4_tables.hpp"
 #include "core/libmvec_x86.hpp"
 #if defined(CPPWRF_FP32_IDENTITY)
 #include "core/glibc_mathf.hpp"
 #endif
 
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
 namespace cppwrf::mvec::detail {
 static __device__ const DevTable<std::uint64_t, 2048> kPowfTDev = dev_table(::cppwrf::mvec_tables::kPowfT);
 }  // namespace cppwrf::mvec::detail
@@ -32,7 +33,7 @@ static __device__ const DevTable<std::uint64_t, 2048> kPowfTDev = dev_table(::cp
 namespace cppwrf::mvec4 {
 namespace detail {
 CPPWRF_MV float f(std::uint32_t b) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return __uint_as_float(b);
 #else
   float v;
@@ -41,7 +42,7 @@ CPPWRF_MV float f(std::uint32_t b) {
 #endif
 }
 CPPWRF_MV std::uint32_t fb(float v) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return __float_as_uint(v);
 #else
   std::uint32_t b;
@@ -51,7 +52,7 @@ CPPWRF_MV std::uint32_t fb(float v) {
 }
 CPPWRF_MV std::int32_t s32(std::uint32_t b) { return static_cast<std::int32_t>(b); }
 // the scalar functions of the masked lanes: glibc's (the system libm on the host, its port on the device)
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 CPPWRF_MV float sc_exp(float x) { return ::cppwrf::glibcf::expf(x); }
 CPPWRF_MV float sc_log(float x) { return ::cppwrf::glibcf::logf(x); }
 CPPWRF_MV float sc_pow(float x, float y) { return ::cppwrf::glibcf::powf(x, y); }

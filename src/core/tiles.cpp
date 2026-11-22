@@ -21,8 +21,9 @@
 
 #include "core/tiles_internal.hpp"
 
-#if defined(CPPWRF_USE_CUDA)
-#include <cuda_runtime.h>
+#if defined(CPPWRF_USE_GPU)
+#define CPPWRF_GPU_RUNTIME_HOST 1
+#include "core/gpu_runtime.hpp"
 #endif
 #if defined(_OPENMP)
 #include <omp.h>
@@ -1370,10 +1371,10 @@ int run(const Options& o, const std::function<int(int)>& body) {
   std::vector<int> rc(std::size_t(set.n), 0);
   auto thread_main = [&](int t) {
     try {
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
       if (t >= 0) {
-        const cudaError_t e = cudaSetDevice(dev[std::size_t(t)]);
-        if (e != cudaSuccess) throw std::runtime_error(std::string("tiles: cudaSetDevice: ") + cudaGetErrorString(e));
+        const gpuError_t e = gpuSetDevice(dev[std::size_t(t)]);
+        if (e != gpuSuccess) throw std::runtime_error(std::string("tiles: gpuSetDevice: ") + gpuGetErrorString(e));
       }
 #endif
 #if defined(_OPENMP)

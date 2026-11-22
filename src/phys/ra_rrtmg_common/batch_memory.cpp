@@ -9,10 +9,6 @@
 #include "core/backend.hpp"
 #include "phys/ra_rrtmg_common/parkind.hpp"
 
-#if defined(CPPWRF_USE_CUDA)
-#include <cuda_runtime.h>
-#endif
-
 namespace cppwrf::phys {
 
 namespace {
@@ -52,7 +48,7 @@ int rrtmg_chunk_columns(int ncol, std::size_t bytes_per_col) {
   ncol = std::max(ncol, 1);
   bytes_per_col = std::max<std::size_t>(bytes_per_col, 1);
   std::size_t budget = 0;
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   budget = device_work_budget();
 #endif
   {

@@ -36,7 +36,7 @@ struct ColArray {
 
 // A column array as a parameter of a helper or as a second name for an array: ColPtr<T> a, ColCPtr<T> b (read
 // only) are T* and const T* on the host (the caller's local array) and the work buffer's view on the GPU.
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 template <class T>
 using ColPtr = ColArray<T>;
 template <class T>
@@ -67,7 +67,7 @@ class ColumnSlots {
  public:
   CPPWRF_HD ColumnSlots() : base_(nullptr), lane_(0) {}  // a host caller's (local arrays only)
   CPPWRF_HD ColumnSlots(const ColumnWork& w, int, int) : base_(w.base), lane_(0) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
     const unsigned t = ((blockIdx.y * gridDim.x + blockIdx.x) * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
     base_ = w.base + std::size_t(t / 32) * 32 * w.bpc;
     lane_ = int(t % 32);
@@ -102,7 +102,7 @@ class ColumnSlots {
   std::size_t off_ = 0;  // bytes per thread taken so far
 };
 
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_COLUMN_ARRAY(T, name, n) const ::cppwrf::ColArray<T> name = cppwrf_cw_.take<T>(n);
 #define CPPWRF_COLUMN_ARRAY2(T, name, n1, n2) const ::cppwrf::ColArray2<T, n2> name = cppwrf_cw_.take2<T, n2>(n1);
 #else
@@ -111,7 +111,7 @@ class ColumnSlots {
 #endif
 // a struct of column arrays: LIST(CPPWRF_COLUMN_MEMBER) as its members, CPPWRF_COLUMN_STRUCT(Type, var, LIST)
 // declares one (its arrays taken from the cursor in the list's order)
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_COLUMN_MEMBER(T, name, n) ::cppwrf::ColArray<T> name;
 #define CPPWRF_COLUMN_TAKE_(T, name, n) cppwrf_cw_.take<T>(n),
 #define CPPWRF_COLUMN_STRUCT(Type, var, LIST) Type var{LIST(CPPWRF_COLUMN_TAKE_)};
@@ -123,7 +123,7 @@ class ColumnSlots {
 // follow the caller's and are free again when it returns)
 #define CPPWRF_COLUMN_CURSOR [[maybe_unused]] ::cppwrf::ColumnSlots cppwrf_cw_
 // T name[n] = {}: the array zero-filled (CPPWRF_COLUMN_ARRAY0 after CPPWRF_COLUMN_SLOTS or with a cursor parameter)
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_COLUMN_ARRAY0(T, name, n) \
   const ::cppwrf::ColArray<T> name = cppwrf_cw_.take<T>(n); \
   for (int cppwrf_cw_k_ = 0; cppwrf_cw_k_ < (n); ++cppwrf_cw_k_) name[cppwrf_cw_k_] = T();
@@ -153,7 +153,7 @@ inline std::size_t column_for_threads(int ni, int nj) {
 }
 }  // namespace detail
 
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
 // f(chunk, work) for chunks of rows of r whose columns' work arrays (bytes_per_col) fit the buffer (one chunk when
 // it holds every column); work is the buffer of column_for(chunk, ...)'s threads
 template <class F>
@@ -191,7 +191,7 @@ void column_work_chunks(const Range2D& r0, std::size_t bytes_per_col, F f) {
 // is the bytes per column.
 template <class K>
 void column_for_work(const Range2D& r, K k) {
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   column_work_chunks(r, K::kWorkBytes, [&](const Range2D& c, const ColumnWork& w) {
     if constexpr (requires { k.set_work(w); }) k.set_work(w);
     else k.work = w;

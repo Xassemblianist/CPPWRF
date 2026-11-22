@@ -306,11 +306,7 @@ CPPWRF_FORCEINLINE void rrtmg_lw_band(int nlayers, int iband, CSD secdiff, CSD s
                                       CSD2 planklay, CSD2 planklev, CSD plankbnd, CSD2 fracs, CSD2 taut, CSI icldlyr,
                                       SD2 bu, SD2 bd, SD2 bcu, SD2 bcd, const RrtmgLwTables& CPPWRF_RESTRICT tables,
                                       bool clear_col = false) {
-#if defined(__CUDA_ARCH__)
-  const bool fast_clear = __all_sync(__activemask(), clear_col);
-#else
-  const bool fast_clear = clear_col;
-#endif
+  const bool fast_clear = CPPWRF_WARP_ALL(clear_col);
   if (fast_clear)
     rrtmg_lw_band_impl<MAX_LAY, true>(nlayers, iband, secdiff, semiss, cldfmc, taucmc, planklay, planklev, plankbnd,
                                       fracs, taut, icldlyr, bu, bd, bcu, bcd, tables);

@@ -12,16 +12,18 @@
 #include <string>
 #include <vector>
 
-#if defined(CPPWRF_USE_CUDA)
-#include <cuda_runtime.h>
+#if defined(CPPWRF_USE_GPU)
+#define CPPWRF_GPU_RUNTIME_HOST 1
+#include "core/gpu_runtime.hpp"
 #include <cxxabi.h>
 #endif
 
 namespace cppwrf {
 
-#if defined(CPPWRF_USE_CUDA)
-static void ck(cudaError_t e, const char* what) {
-  if (e != cudaSuccess) throw std::runtime_error(std::string("CUDA error in ") + what + ": " + cudaGetErrorString(e));
+#if defined(CPPWRF_USE_GPU)
+static void ck(gpuError_t e, const char* what) {
+  if (e != gpuSuccess)
+    throw std::runtime_error(std::string(CPPWRF_GPU_API_NAME " error in ") + what + ": " + gpuGetErrorString(e));
 }
 namespace ktime {
 namespace {
@@ -54,11 +56,11 @@ bool on() {
   return enabled;
 }
 void begin() {
-  ck(cudaDeviceSynchronize(), "ktime");
+  ck(gpuDeviceSynchronize(), "ktime");
   t0 = std::chrono::steady_clock::now();
 }
 void end(const char* kernel_type) {
-  ck(cudaDeviceSynchronize(), "ktime");
+  ck(gpuDeviceSynchronize(), "ktime");
   const double dt = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   std::lock_guard<std::mutex> lk(table_m);
   auto& e = table().t[kernel_type];
@@ -67,28 +69,33 @@ void end(const char* kernel_type) {
 }
 }  // namespace ktime
 
-void cuda_check_launch(const char* where) {
-  ck(cudaGetLastError(), where);
-#ifdef CPPWRF_CUDA_SYNC_CHECK
-  ck(cudaDeviceSynchronize(), where);
+void gpu_check_launch(const char* where) {
+  ck(gpuGetLastError(), where);
+#if defined(CPPWRF_CUDA_SYNC_CHECK) || defined(CPPWRF_GPU_SYNC_CHECK)
+  ck(gpuDeviceSynchronize(), where);
 #endif
 }
-void* cuda_stream_raw() {
+void* gpu_stream_raw() {
   // one per host thread: the tiles of a tiled run (src/core/tiles.cpp) each launch on their own stream
-  thread_local cudaStream_t s = [] {
-    cudaStream_t t = nullptr;
-    ck(cudaStreamCreate(&t), "cudaStreamCreate");  // blocking: orders with any work on the legacy stream 0
+  thread_local gpuStream_t s = [] {
+    gpuStream_t t = nullptr;
+    ck(gpuStreamCreate(&t), "gpuStreamCreate");  // blocking: orders with any work on the legacy stream 0
     return t;
   }();
   return s;
 }
-static cudaStream_t stream() { return static_cast<cudaStream_t>(cuda_stream_raw()); }
+static gpuStream_t stream() { return static_cast<gpuStream_t>(gpu_stream_raw()); }
 
 // ---- time step graphs (StepScope) and the fatal flags of the step ----
 namespace {
 int graphs_mode() {  // 0 off, 1 on, 2 on with the counts at exit
+#if !defined(CPPWRF_USE_CUDA)
+  // HIP graph capture/update (4-arg hipGraphExecUpdate, 5-arg hipGraphInstantiate, and stream capture of
+  // hipMemcpyFromSymbolAsync) is deferred until verified on AMD hardware.
+  return 0;
+#else
   static const int m = [] {
-#ifdef CPPWRF_CUDA_SYNC_CHECK
+#if defined(CPPWRF_CUDA_SYNC_CHECK) || defined(CPPWRF_GPU_SYNC_CHECK)
     return 0;  // a device synchronisation after every launch cannot be captured
 #endif
     if (ktime::on()) return 0;
@@ -99,6 +106,7 @@ int graphs_mode() {  // 0 off, 1 on, 2 on with the counts at exit
     return *e == '0' ? 0 : 1;
   }();
   return m;
+#endif
 }
 struct Poll {
   int* slot;
@@ -109,22 +117,27 @@ struct Graphs {
   bool in_step = false, capturing = false;
   const void* key = nullptr;
   int seg = 0;
+#if defined(CPPWRF_USE_CUDA)
   std::map<std::pair<const void*, int>, std::vector<cudaGraphExec_t>> cache;  // most recently used first
+#endif
   int* slots = nullptr;  // pinned, 2 banks of kSlots
   int bank = 0;
   std::vector<Poll> cur, pend;  // checks of the open segment; of the launched, unchecked ones
-  cudaEvent_t ev = nullptr;
+  gpuEvent_t ev = nullptr;
   bool ev_pending = false;
   long n_launch = 0, n_update = 0, n_inst = 0, n_seg_nodes = 0;
   void init() {
     if (slots) return;
-    ck(cudaHostAlloc(reinterpret_cast<void**>(&slots), 2 * kSlots * sizeof(int), cudaHostAllocDefault), "cudaHostAlloc");
-    ck(cudaEventCreateWithFlags(&ev, cudaEventDisableTiming), "cudaEventCreate");
+    ck(gpuHostAlloc(reinterpret_cast<void**>(&slots), 2 * kSlots * sizeof(int), gpuHostAllocDefault), "gpuHostAlloc");
+    ck(gpuEventCreateWithFlags(&ev, gpuEventDisableTiming), "gpuEventCreate");
   }
   void begin_capture() {
+#if defined(CPPWRF_USE_CUDA)
     ck(cudaStreamBeginCapture(stream(), cudaStreamCaptureModeThreadLocal), "cudaStreamBeginCapture");
     capturing = true;
+#endif
   }
+#if defined(CPPWRF_USE_CUDA)
   // the instantiated graph of this domain and segment, updated to g's launch parameters (a step of another
   // kind has another topology: up to 4 per segment are kept)
   cudaGraphExec_t exec_for(cudaGraph_t g) {
@@ -148,10 +161,12 @@ struct Graphs {
     v.insert(v.begin(), e);
     return e;
   }
+#endif
   // ends the open segment: launches its graph (after the previous segment's flags were read) and records the
   // event that its fatal checks wait for
   void segment_point() {
     bool launched = false;
+#if defined(CPPWRF_USE_CUDA)
     if (capturing) {
       cudaGraph_t g = nullptr;
       capturing = false;
@@ -168,21 +183,23 @@ struct Graphs {
         n_seg_nodes += long(nn);
       }
       ++seg;
-    } else if (!cur.empty()) {
+    } else
+#endif
+    if (!cur.empty()) {
       flush();
     }
     if (launched || !cur.empty()) {  // at most one step or segment in flight unchecked
       pend.swap(cur);
       cur.clear();
       bank ^= 1;
-      ck(cudaEventRecord(ev, stream()), "cudaEventRecord");
+      ck(gpuEventRecord(ev, stream()), "gpuEventRecord");
       ev_pending = true;
     }
   }
   // reads the flags of the launched checks in the order of the calls; the first raised code stops the run
   void flush() {
     if (!ev_pending) return;
-    ck(cudaEventSynchronize(ev), "cudaEventSynchronize");
+    ck(gpuEventSynchronize(ev), "gpuEventSynchronize");
     ev_pending = false;
     int code = 0;
     for (const Poll& p : pend)
@@ -194,6 +211,7 @@ struct Graphs {
     if (code != 0) fatal_stop(code);
   }
   void abort() {  // an exception inside the step
+#if defined(CPPWRF_USE_CUDA)
     if (capturing) {
       cudaGraph_t g = nullptr;
       cudaStreamEndCapture(stream(), &g);
@@ -201,6 +219,7 @@ struct Graphs {
       (void)cudaGetLastError();
       capturing = false;
     }
+#endif
     cur.clear();
     in_step = false;
   }
@@ -268,32 +287,33 @@ int* fatal_poll_slot(void (*reset)()) {
 void fatal_flush() { graphs().flush(); }
 
 void reserve_local_memory(const void* kernel, const char* kernel_type) {
-  cudaFuncAttributes a{};
-  ck(cudaFuncGetAttributes(&a, kernel), "cudaFuncGetAttributes");
+#if defined(CPPWRF_USE_CUDA)
+  gpuFuncAttributes a{};
+  ck(gpuFuncGetAttributes(&a, kernel), "cudaFuncGetAttributes");
   static std::mutex m;
   static std::map<int, std::size_t> reserved_on;  // per device: the largest frame of the process's launches
   int cur = 0;
-  ck(cudaGetDevice(&cur), "cudaGetDevice");
+  ck(gpuGetDevice(&cur), "cudaGetDevice");
   std::lock_guard<std::mutex> lk(m);
   std::size_t& reserved = reserved_on[cur];
   if (a.localSizeBytes <= reserved) return;
   std::size_t limit = 0;
-  ck(cudaDeviceGetLimit(&limit, cudaLimitStackSize), "cudaDeviceGetLimit");
+  ck(gpuDeviceGetLimit(&limit, gpuLimitStackSize), "cudaDeviceGetLimit");
   if (a.localSizeBytes <= limit) {
     reserved = a.localSizeBytes;
     return;
   }
   int dev = 0, sms = 0, tpsm = 0;
-  ck(cudaGetDevice(&dev), "cudaGetDevice");
-  ck(cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev), "cudaDeviceGetAttribute");
-  ck(cudaDeviceGetAttribute(&tpsm, cudaDevAttrMaxThreadsPerMultiProcessor, dev), "cudaDeviceGetAttribute");
+  ck(gpuGetDevice(&dev), "cudaGetDevice");
+  ck(gpuDeviceGetAttribute(&sms, gpuDevAttrMultiProcessorCount, dev), "cudaDeviceGetAttribute");
+  ck(gpuDeviceGetAttribute(&tpsm, gpuDevAttrMaxThreadsPerMultiProcessor, dev), "cudaDeviceGetAttribute");
   sync_begin();  // inside a step: the captured part runs first (as for an allocation)
   std::size_t free_b = 0, total_b = 0;
-  const cudaError_t mi = cudaMemGetInfo(&free_b, &total_b);
-  const cudaError_t e = cudaDeviceSetLimit(cudaLimitStackSize, a.localSizeBytes);
-  if (e != cudaSuccess) (void)cudaGetLastError();
+  const gpuError_t mi = gpuMemGetInfo(&free_b, &total_b);
+  const gpuError_t e = gpuDeviceSetLimit(gpuLimitStackSize, a.localSizeBytes);
+  if (e != gpuSuccess) (void)gpuGetLastError();
   sync_end();
-  if (e != cudaSuccess) {
+  if (e != gpuSuccess) {
     int st = 0;
     char* dm = abi::__cxa_demangle(kernel_type, nullptr, nullptr, &st);
     const std::string name = (st == 0 && dm) ? dm : kernel_type;
@@ -306,75 +326,88 @@ void reserve_local_memory(const void* kernel, const char* kernel_type) {
                   "%.0f MiB are free (%s). Use a smaller domain, fewer levels or a GPU with more memory.",
                   name.c_str(), std::size_t(a.localSizeBytes), sms, tpsm,
                   double(a.localSizeBytes) * sms * tpsm / mib, double(limit) * sms * tpsm / mib,
-                  mi == cudaSuccess ? double(free_b) / mib : 0., mi == cudaSuccess ? double(total_b) / mib : 0.,
-                  cudaGetErrorString(e));
+                  mi == gpuSuccess ? double(free_b) / mib : 0., mi == gpuSuccess ? double(total_b) / mib : 0.,
+                  gpuGetErrorString(e));
     throw std::runtime_error(msg);
   }
   reserved = a.localSizeBytes;
+#else
+  // On ROCm/AMDGPU scratch memory is managed per queue by HSA/KFD rather than permanently reserved per resident
+  // thread via cudaLimitStackSize; leave as a no-op until validated on AMD hardware.
+  (void)kernel;
+  (void)kernel_type;
+#endif
 }
 }  // namespace detail
 
 void* dev_alloc(std::size_t bytes) {
   sync_begin();
   void* p = nullptr;
-  if (const cudaError_t e = cudaMalloc(&p, bytes); e != cudaSuccess) {
-    (void)cudaGetLastError();
+  if (const gpuError_t e = gpuMalloc(&p, bytes); e != gpuSuccess) {
+    (void)gpuGetLastError();
     std::size_t free_b = 0, total_b = 0;
-    cudaMemGetInfo(&free_b, &total_b);
+    gpuMemGetInfo(&free_b, &total_b);
     const double mib = 1024. * 1024.;
     char msg[320];
     std::snprintf(msg, sizeof msg,
                   "device memory too small: an allocation of %.0f MiB failed (%s); %.0f MiB of %.0f MiB are free. Use "
                   "a smaller domain, fewer levels or a GPU with more memory.",
-                  double(bytes) / mib, cudaGetErrorString(e), double(free_b) / mib, double(total_b) / mib);
+                  double(bytes) / mib, gpuGetErrorString(e), double(free_b) / mib, double(total_b) / mib);
     throw std::runtime_error(msg);
   }
-  ck(cudaMemsetAsync(p, 0, bytes, stream()), "cudaMemset");
-  ck(cudaStreamSynchronize(stream()), "cudaMemset");
+  ck(gpuMemsetAsync(p, 0, bytes, stream()), "gpuMemset");
+  ck(gpuStreamSynchronize(stream()), "gpuMemset");
   sync_end();
   return p;
 }
 void dev_free(void* p) {
   if (!p) return;
   sync_begin();
-  cudaFree(p);
+  gpuFree(p);
   sync_end();
 }
 void copy_to_host(void* d, const void* s, std::size_t n) {
   sync_begin();
-  ck(cudaMemcpyAsync(d, s, n, cudaMemcpyDeviceToHost, stream()), "D2H");
-  ck(cudaStreamSynchronize(stream()), "D2H");
+  ck(gpuMemcpyAsync(d, s, n, gpuMemcpyDeviceToHost, stream()), "D2H");
+  ck(gpuStreamSynchronize(stream()), "D2H");
   sync_end();
 }
 void copy_to_dev(void* d, const void* s, std::size_t n) {
   sync_begin();
-  ck(cudaMemcpyAsync(d, s, n, cudaMemcpyHostToDevice, stream()), "H2D");
-  ck(cudaStreamSynchronize(stream()), "H2D");
+  ck(gpuMemcpyAsync(d, s, n, gpuMemcpyHostToDevice, stream()), "H2D");
+  ck(gpuStreamSynchronize(stream()), "H2D");
   sync_end();
 }
-void copy_dev(void* d, const void* s, std::size_t n) { ck(cudaMemcpyAsync(d, s, n, cudaMemcpyDeviceToDevice, stream()), "D2D"); }
+void copy_dev(void* d, const void* s, std::size_t n) { ck(gpuMemcpyAsync(d, s, n, gpuMemcpyDeviceToDevice, stream()), "D2D"); }
 void dev_sync() {
   sync_begin();
-  ck(cudaDeviceSynchronize(), "sync");
+  ck(gpuDeviceSynchronize(), "sync");
   sync_end();
 }
 int current_device() {
   int d = 0;
-  ck(cudaGetDevice(&d), "cudaGetDevice");
+  ck(gpuGetDevice(&d), "gpuGetDevice");
   return d;
 }
-const char* backend_name() { return "cuda"; }
+const char* backend_name() { return CPPWRF_GPU_BACKEND_NAME; }
 void device_memory_report(const char* when) {
   static const bool on = [] { const char* e = std::getenv("CPPWRF_MEMINFO"); return e && *e && *e != '0'; }();
   if (!on) return;
   dev_sync();
   std::size_t free_b = 0, total_b = 0, limit = 0;
   int dev = 0, sms = 0, tpsm = 0;
-  ck(cudaMemGetInfo(&free_b, &total_b), "cudaMemGetInfo");
-  ck(cudaDeviceGetLimit(&limit, cudaLimitStackSize), "cudaDeviceGetLimit");
-  ck(cudaGetDevice(&dev), "cudaGetDevice");
-  ck(cudaDeviceGetAttribute(&sms, cudaDevAttrMultiProcessorCount, dev), "cudaDeviceGetAttribute");
-  ck(cudaDeviceGetAttribute(&tpsm, cudaDevAttrMaxThreadsPerMultiProcessor, dev), "cudaDeviceGetAttribute");
+  ck(gpuMemGetInfo(&free_b, &total_b), "gpuMemGetInfo");
+#if defined(CPPWRF_USE_CUDA)
+  ck(gpuDeviceGetLimit(&limit, gpuLimitStackSize), "gpuDeviceGetLimit");
+#else
+  if (gpuDeviceGetLimit(&limit, gpuLimitStackSize) != gpuSuccess) {
+    (void)gpuGetLastError();
+    limit = 0;
+  }
+#endif
+  ck(gpuGetDevice(&dev), "gpuGetDevice");
+  ck(gpuDeviceGetAttribute(&sms, gpuDevAttrMultiProcessorCount, dev), "gpuDeviceGetAttribute");
+  ck(gpuDeviceGetAttribute(&tpsm, gpuDevAttrMaxThreadsPerMultiProcessor, dev), "gpuDeviceGetAttribute");
   const double mib = 1024. * 1024.;
   std::printf("cppwrf: device memory %s: %.0f MiB used of %.0f MiB; stack limit %zu bytes x %d resident threads "
               "(%.0f MiB)\n",
@@ -393,7 +426,7 @@ std::size_t device_work_budget() {
     return v > 0 ? std::size_t(v) << 20 : std::size_t(0);
   }();
   std::size_t free_b = 0, total_b = 0;
-  if (cudaMemGetInfo(&free_b, &total_b) != cudaSuccess) return 0;
+  if (gpuMemGetInfo(&free_b, &total_b) != gpuSuccess) return 0;
   if (cap && cap < total_b) total_b = cap;
   return std::min(total_b / 8, free_b / 4) / std::size_t(work_share);
 }

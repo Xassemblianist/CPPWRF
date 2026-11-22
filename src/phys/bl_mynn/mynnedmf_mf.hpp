@@ -41,7 +41,7 @@ template <int K>
 inline constexpr std::size_t kMfWorkBytes = 0 CPPWRF_MYNN_MF_PLUMES(CPPWRF_COLUMN_BYTES2);
 
 // DMP_mf's plume arrays of one column: local arrays on the CPU, the GPU's work arrays (core/column_work.hpp)
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_MYNN_MF_MEMBER(T, name, n1, n2) ::cppwrf::ColArray2<T, n2> name;
 #else
 #define CPPWRF_MYNN_MF_MEMBER(T, name, n1, n2) T name[n1][n2];

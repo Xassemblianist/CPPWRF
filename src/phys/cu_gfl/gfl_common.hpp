@@ -61,7 +61,7 @@ CPPWRF_HOST_DEVICE inline void pow_pair(real x0, real x1, real y, real& r0,
     r1 = glibc::mvec::pow(x1, y);
     return;
   }
-#elif !defined(__CUDA_ARCH__) && defined(__x86_64__) && defined(__GLIBC__)
+#elif !defined(CPPWRF_DEVICE_CODE) && defined(__x86_64__) && defined(__GLIBC__)
   if constexpr (std::is_same_v<real, double>) {
     alignas(16) double out[2];
     _mm_store_pd(out, _ZGVbN2vv_pow(_mm_set_pd(x1, x0), _mm_set1_pd(y)));

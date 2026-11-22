@@ -17,6 +17,10 @@ else()
   set(_cuda_default OFF)
 endif()
 option(CPPWRF_ENABLE_CUDA "Build the CUDA backend" ${_cuda_default})
+option(CPPWRF_ENABLE_HIP "Build the HIP (AMD ROCm) backend" OFF)
+if(CPPWRF_ENABLE_CUDA AND CPPWRF_ENABLE_HIP)
+  message(FATAL_ERROR "CPPWRF_ENABLE_CUDA and CPPWRF_ENABLE_HIP are mutually exclusive; set -DCPPWRF_ENABLE_CUDA=OFF for a HIP build")
+endif()
 
 if(CPPWRF_ENABLE_CUDA)
   if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
@@ -31,6 +35,14 @@ if(CPPWRF_ENABLE_CUDA)
   if(CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 12.1)
     message(FATAL_ERROR "CPPWRF's CUDA build needs CUDA 12.1 or later (kernel parameters above 4 KB); found ${CMAKE_CUDA_COMPILER_VERSION}")
   endif()
+elseif(CPPWRF_ENABLE_HIP)
+  if(NOT DEFINED CMAKE_HIP_ARCHITECTURES)
+    set(CMAKE_HIP_ARCHITECTURES "gfx90a;gfx942;gfx1100")
+  endif()
+  enable_language(HIP)
+  set(CMAKE_HIP_STANDARD 20)
+  set(CMAKE_HIP_STANDARD_REQUIRED ON)
+  find_package(hip REQUIRED)
 else()
   find_package(OpenMP REQUIRED COMPONENTS CXX)
 endif()
@@ -87,6 +99,27 @@ endif()
 if("${CMAKE_CUDA_FLAGS} ${CMAKE_CUDA_FLAGS_${_cppwrf_bt}}" MATCHES
    "(use_fast_math|ftz=true|prec-div=false|prec-sqrt=false|-Xcompiler=?[^ ]*(-Ofast|-ffast-math))")
   message(FATAL_ERROR "CMAKE_CUDA_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
+endif()
+if(CPPWRF_ENABLE_HIP)
+  set(CMAKE_HIP_FLAGS_RELEASE "-O3")
+  # Strict IEEE on both host and device passes: no FMA contraction, IEEE subnormals (no flush-to-zero)
+  add_compile_options($<$<COMPILE_LANGUAGE:HIP>:-ffp-contract=off>
+                      $<$<COMPILE_LANGUAGE:HIP>:-fno-gpu-flush-denormals-to-zero>)
+  option(CPPWRF_HIP_GLIBC_MATH "HIP FP64 build: glibc's math functions on the device (bit-identical to WRF / CPU)" ON)
+  if(CPPWRF_DOUBLE AND NOT CPPWRF_HIP_GLIBC_MATH)
+    add_compile_definitions(CPPWRF_HIP_LIBM)
+  endif()
+  option(CPPWRF_HIP_FP32_IDENTITY "HIP FP32 build: bit-identical to the CPU FP32 build (strict arithmetic, glibc's math on the device)" OFF)
+  if(CPPWRF_HIP_FP32_IDENTITY)
+    if(CPPWRF_DOUBLE OR NOT CPPWRF_HIP_GLIBC_MATH)
+      message(FATAL_ERROR "CPPWRF_HIP_FP32_IDENTITY needs CPPWRF_ENABLE_HIP=ON, CPPWRF_DOUBLE=OFF and CPPWRF_HIP_GLIBC_MATH=ON")
+    endif()
+    add_compile_definitions(CPPWRF_FP32_IDENTITY)
+  endif()
+  if("${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_cppwrf_bt}}" MATCHES
+     "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only|gpu-flush-denormals-to-zero|gpu-approx-transcendentals)|-ffp-contract=(fast|on))")
+    message(FATAL_ERROR "CMAKE_HIP_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
+  endif()
 endif()
 
 enable_testing()
@@ -261,17 +294,19 @@ if(TARGET netCDF::netcdf OR NETCDF_FOUND OR NETCDF_INCDIR)
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(real_vs_wrf_runs PROPERTIES SKIP_RETURN_CODE 77)
   # wrfout/wrfrst files identical to WRF v4.8.0's (CPU FP64 builds; skipped, exit 77, without ${CPPWRF_WRF_RUNS})
-  if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA)
+  if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA AND NOT CPPWRF_ENABLE_HIP)
     add_test(NAME wrf_files_vs_wrf COMMAND bash ${CMAKE_SOURCE_DIR}/tests/verify/run_wrf_files_test.sh ${CMAKE_BINARY_DIR}
              WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     set_tests_properties(wrf_files_vs_wrf PROPERTIES SKIP_RETURN_CODE 77)
   endif()
 endif()
 
-# Single-source kernels: every source of the core is compiled by nvcc in CUDA builds.
+# Single-source kernels: every source of the core is compiled by nvcc (CUDA) or amdclang++ (HIP).
 function(cppwrf_device_sources)
   if(CPPWRF_ENABLE_CUDA)
     set_source_files_properties(${ARGN} PROPERTIES LANGUAGE CUDA)
+  elseif(CPPWRF_ENABLE_HIP)
+    set_source_files_properties(${ARGN} PROPERTIES LANGUAGE HIP)
   endif()
 endfunction()
 
@@ -293,6 +328,25 @@ if(CPPWRF_ENABLE_CUDA)
   target_compile_definitions(cppwrf_core PUBLIC CPPWRF_USE_CUDA)
   target_compile_options(cppwrf_core PUBLIC $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr --extended-lambda>)
   target_link_libraries(cppwrf_core PUBLIC CUDA::cudart)
+  # host OpenMP for the radiation columns (C++ sources only)
+  find_package(OpenMP REQUIRED COMPONENTS CXX)
+  target_link_libraries(cppwrf_core PUBLIC OpenMP::OpenMP_CXX)
+elseif(CPPWRF_ENABLE_HIP)
+  cppwrf_device_sources(${CPPWRF_SOURCES})
+  # RRTMG host code and RRTM LW stay C++, as in CUDA builds; glibc_mathf_host.cpp defines host C math
+  # symbols (expf, ...) and stays C++ so HIP device math overloads are untouched. All HIP sources already
+  # receive -ffp-contract=off globally above.
+  set_source_files_properties(
+    ${CMAKE_SOURCE_DIR}/src/phys/ra_rrtmg_lw/rrtmg_lw.cpp ${CMAKE_SOURCE_DIR}/src/phys/ra_rrtmg_lw/rrtmg_lw_tables.cpp
+    ${CMAKE_SOURCE_DIR}/src/phys/ra_rrtmg_sw/rrtmg_sw.cpp ${CMAKE_SOURCE_DIR}/src/phys/ra_rrtmg_sw/rrtmg_sw_tables.cpp
+    ${CMAKE_SOURCE_DIR}/src/phys/ra_rrtmg_common/cam_gases.cpp ${CMAKE_SOURCE_DIR}/src/phys/ra_rrtmg_common/cam_ozone.cpp
+    ${CMAKE_SOURCE_DIR}/src/phys/ra_rrtm_lw/rrtm_lw.cpp ${CMAKE_SOURCE_DIR}/src/phys/ra_rrtm_lw/rrtm_lw_tables.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp
+    PROPERTIES LANGUAGE CXX)
+  target_compile_definitions(cppwrf_core PUBLIC CPPWRF_USE_HIP)
+  # With native enable_language(HIP), CMake handles device compilation/linking via CMAKE_HIP_ARCHITECTURES;
+  # hip::host supplies amdhip64 and ROCm headers without injecting -x hip into the CXX files above.
+  target_link_libraries(cppwrf_core PUBLIC hip::host)
   # host OpenMP for the radiation columns (C++ sources only)
   find_package(OpenMP REQUIRED COMPONENTS CXX)
   target_link_libraries(cppwrf_core PUBLIC OpenMP::OpenMP_CXX)
@@ -400,7 +454,7 @@ if(CPPWRF_DIFF_TESTS)
   endforeach()
   # scalar advection of the last RK stage (adv_opt 1, 2): ScalarTransport against WRF's module_advect_em /
   # module_em, tolerance 0 (CPU FP64 builds)
-  if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA)
+  if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA AND NOT CPPWRF_ENABLE_HIP)
     add_executable(driver_advection tests/dyn/advection/driver_advection.cpp)
     target_link_libraries(driver_advection PRIVATE cppwrf_core)
     add_test(NAME diff_dyn_advection COMMAND bash ${CMAKE_SOURCE_DIR}/tests/dyn/advection/run_test.sh
@@ -410,7 +464,7 @@ if(CPPWRF_DIFF_TESTS)
   endif()
   # column replays of the model's cumulus calls through WRF's objects (CPU FP64 cppwrf; need
   # CPPWRF_WRF_RUNS and WRF_R8D8_DIR)
-  if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA)
+  if(CPPWRF_DOUBLE AND NOT CPPWRF_ENABLE_CUDA AND NOT CPPWRF_ENABLE_HIP)
     foreach(t cu_gfl cu_ntiedtke)
       add_test(NAME diff_phys_${t} COMMAND bash ${CMAKE_SOURCE_DIR}/tests/phys/${t}/run_test.sh ${CMAKE_BINARY_DIR}
                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})

@@ -465,7 +465,7 @@ struct ThompsonKernel {
 
     // the column arrays of operator()'s parts (stage1, level, stage3): local arrays on the CPU, on the GPU in the
     // work buffer in the order of the list (take_cols: the same places in every kernel of a launch's column)
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_THOMPSON_MEMBER(T, name, n) ::cppwrf::ColArray<T> name;
 #define CPPWRF_THOMPSON_TAKE(T, name, n) cw.take<T>(n),
 #else
@@ -475,7 +475,7 @@ struct ThompsonKernel {
     struct Cols {
         CPPWRF_THOMPSON_COLUMN(CPPWRF_THOMPSON_MEMBER)
     };
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
     static CPPWRF_FORCEINLINE Cols take_cols(ColumnSlots& cw) { return Cols{CPPWRF_THOMPSON_COLUMN(CPPWRF_THOMPSON_TAKE)}; }
 #endif
 
@@ -720,7 +720,7 @@ struct ThompsonKernel {
         if (nz > NL) return;
 
         CPPWRF_COLUMN_SLOTS(work, i, j)
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
         Cols cols = take_cols(cppwrf_cw_);
 #else
         Cols cols;
@@ -2819,7 +2819,7 @@ struct ThompsonLevel0 {
     Range2D chunk;
     int bx, by;
     CPPWRF_HD void operator()([[maybe_unused]] int i, [[maybe_unused]] int j, [[maybe_unused]] int k) const {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
         if (m.nz > NL) return;
         ColumnSlots cw(m.work, i, j, chunk, bx, by);
         auto cols = m.take_cols(cw);
@@ -2832,7 +2832,7 @@ template <typename Real, int NL>
 struct ThompsonStage1 {
     ThompsonKernel<Real, NL> m;
     CPPWRF_HD void operator()([[maybe_unused]] int i, [[maybe_unused]] int j) const {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
         if (m.nz > NL) return;
         CPPWRF_COLUMN_SLOTS(m.work, i, j)
         auto cols = m.take_cols(cppwrf_cw_);
@@ -2847,7 +2847,7 @@ struct ThompsonLevel {
     Range2D chunk;  // column_for's columns of the chunk and its thread blocks (the work buffer's places)
     int bx, by;
     CPPWRF_HD void operator()([[maybe_unused]] int i, [[maybe_unused]] int j, [[maybe_unused]] int k) const {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
         if (m.nz > NL) return;
         ColumnSlots cw(m.work, i, j, chunk, bx, by);
         auto cols = m.take_cols(cw);
@@ -2861,7 +2861,7 @@ template <typename Real, int NL>
 struct ThompsonStage3 {
     ThompsonKernel<Real, NL> m;
     CPPWRF_HD void operator()([[maybe_unused]] int i, [[maybe_unused]] int j) const {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
         if (m.nz > NL) return;
         CPPWRF_COLUMN_SLOTS(m.work, i, j)
         auto cols = m.take_cols(cppwrf_cw_);

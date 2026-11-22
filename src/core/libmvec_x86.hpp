@@ -18,6 +18,7 @@
 #include <cstdint>
 #include <cstring>
 
+#include "core/gpu_runtime.hpp"
 #include "core/libmvec_tables.hpp"
 #if defined(CPPWRF_GLIBC_MATH)
 #include "core/glibc_math.hpp"
@@ -27,7 +28,7 @@
 #define CPPWRF_PORTABLE_LOG 1
 #endif
 
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
 #define CPPWRF_MV __host__ __device__ __forceinline__
 #else
 #define CPPWRF_MV inline
@@ -45,7 +46,7 @@ inline constexpr std::array<double, 2049> kRcp = [] {
   }
   return a;
 }();
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
 // device copies of the tables (constant-initialised from the host ones)
 template <class T, int N>
 struct DevTable {
@@ -67,14 +68,14 @@ static __device__ const DevTable<double, 2049> kRcpDev = dev_table(kRcp);
 static __device__ const DevTable<std::uint64_t, 513> kLogLADev = dev_table(mvec_tables::kLogLA);
 static __device__ const DevTable<std::uint64_t, 513> kLog10LADev = dev_table(mvec_tables::kLog10LA);
 #endif
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_MVT(host, dev) ::cppwrf::mvec::detail::dev.v
 #else
 #define CPPWRF_MVT(host, dev) host
 #endif
 // bit casts (memcpy: std::bit_cast is not available to every nvcc host pass)
 CPPWRF_MV double d(std::uint64_t bits) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return __longlong_as_double(static_cast<long long>(bits));
 #else
   double v;
@@ -83,7 +84,7 @@ CPPWRF_MV double d(std::uint64_t bits) {
 #endif
 }
 CPPWRF_MV std::uint64_t bits(double v) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return static_cast<std::uint64_t>(__double_as_longlong(v));
 #else
   std::uint64_t b;
@@ -109,7 +110,7 @@ CPPWRF_MV double scalar_log10(double x) {
 // cvtpd2ps m; rcpps; cvtps2pd; roundpd $0 (log) or + / - 1.5*2^52 (log10): m in [2^-10, 2^-9)
 CPPWRF_MV double rcp_rounded(double m) {
   const float f = static_cast<float>(m);
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   const std::uint32_t fb = static_cast<std::uint32_t>(__float_as_uint(f));
 #else
   std::uint32_t fb;

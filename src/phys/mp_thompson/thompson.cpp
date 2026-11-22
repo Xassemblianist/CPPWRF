@@ -82,7 +82,7 @@ void run_thompson(
             kernel.refl = refl;
             kernel.rtab = radar;
         }
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
         // the GPU: level0 (per (i, j, k)), stage1, level (per (i, j, k)), stage3 of each chunk of columns (ThompsonKernel::operator())
         using K = ThompsonKernel<Real, decltype(nl)::value>;
         constexpr int NL = decltype(nl)::value;

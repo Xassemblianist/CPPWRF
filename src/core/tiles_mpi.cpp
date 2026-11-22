@@ -17,8 +17,9 @@
 
 #include "core/tiles_internal.hpp"
 
-#if defined(CPPWRF_USE_CUDA)
-#include <cuda_runtime.h>
+#if defined(CPPWRF_USE_GPU)
+#define CPPWRF_GPU_RUNTIME_HOST 1
+#include "core/gpu_runtime.hpp"
 #endif
 
 namespace cppwrf::tile {
@@ -121,7 +122,7 @@ int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body) {
     if (rank == 0) std::printf("cppwrf: %d MPI ranks as %d x %d patches\n", n, o.px, o.py);
     // the log is the writer's (rank 0); errors of every rank go to stderr
     else if (!std::freopen("/dev/null", "w", stdout)) throw std::runtime_error("MPI: cannot silence a rank's stdout");
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
     // the rank's device, by its rank among the ranks of its node (core/tiles.hpp rank_device; docs/MPI.md)
     {
       MPI_Comm node = MPI_COMM_NULL;
@@ -131,7 +132,7 @@ int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body) {
       MPI_Comm_rank(node, &local);
       MPI_Comm_size(node, &nlocal);
       int count = 0;
-      if (cudaGetDeviceCount(&count) != cudaSuccess) count = 0;
+      if (gpuGetDeviceCount(&count) != gpuSuccess) count = 0;
       std::string err;
       int dev = -1;
       try {
@@ -140,14 +141,15 @@ int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body) {
         err = e.what();
       }
       if (err.empty() && dev >= 0) {
-        const cudaError_t ce = cudaSetDevice(dev);
-        if (ce != cudaSuccess) err = std::string("MPI: cudaSetDevice(") + std::to_string(dev) + "): " + cudaGetErrorString(ce);
+        const gpuError_t ce = gpuSetDevice(dev);
+        if (ce != gpuSuccess)
+          err = std::string("MPI: gpuSetDevice(") + std::to_string(dev) + "): " + gpuGetErrorString(ce);
       }
       // the node's ranks on this rank's device (by its UUID: the ranks may see the devices under other numbers)
-      cudaDeviceProp prop{};
+      gpuDeviceProp prop{};
       int cur = 0;
-      if (err.empty() && (cudaGetDevice(&cur) != cudaSuccess || cudaGetDeviceProperties(&prop, cur) != cudaSuccess))
-        err = "MPI: cannot query the rank's CUDA device";
+      if (err.empty() && (gpuGetDevice(&cur) != gpuSuccess || gpuGetDeviceProperties(&prop, cur) != gpuSuccess))
+        err = "MPI: cannot query the rank's " CPPWRF_GPU_API_NAME " device";
       std::vector<char> ids(std::size_t(nlocal) * sizeof(prop.uuid));
       MPI_Allgather(&prop.uuid, int(sizeof(prop.uuid)), MPI_BYTE, ids.data(), int(sizeof(prop.uuid)), MPI_BYTE, node);
       MPI_Comm_free(&node);
@@ -166,7 +168,7 @@ int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body) {
           std::string s;
           for (int r = 0; r < n; ++r)
             s += (r ? ", " : "") + std::to_string(r) + ": " + std::to_string(devs[std::size_t(r)]);
-          std::printf("cppwrf: CUDA device of each rank (rank: device) %s\n", s.c_str());
+          std::printf("cppwrf: " CPPWRF_GPU_API_NAME " device of each rank (rank: device) %s\n", s.c_str());
         }
       }
     }

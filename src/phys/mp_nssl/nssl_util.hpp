@@ -62,8 +62,8 @@ struct Work {
     return r;
   }
   CPPWRF_HD static void overflow() {
-#if defined(__CUDA_ARCH__)
-    __trap();
+#if defined(CPPWRF_DEVICE_CODE)
+    CPPWRF_TRAP();
 #else
     throw_overflow();
 #endif
@@ -104,8 +104,8 @@ CPPWRF_HD inline int nint(float x) { return int(::lround_x86(x)); }
 template <class T>
 CPPWRF_HD inline T fsign(T a, T b) { return std::copysign(a, b); }
 
-#if defined(__CUDA_ARCH__)
-#define NSSL_STOP() __trap()
+#if defined(CPPWRF_DEVICE_CODE)
+#define NSSL_STOP() CPPWRF_TRAP()
 #else
 #define NSSL_STOP() ::cppwrf::phys::mp_nssl::nssl_stop(__LINE__)
 #endif

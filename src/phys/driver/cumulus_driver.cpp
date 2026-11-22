@@ -326,7 +326,7 @@ struct KNTiedtke {
       thftenz[zz] = itimestep == 1 ? real(0.) : rthften(i, j, k);
     }
     real rn = real(0.);
-#if !defined(__CUDA_ARCH__)
+#if !defined(CPPWRF_DEVICE_CODE)
     auto wr = [&](const real* a, int n) { std::fwrite(a + 1, sizeof(real), n, static_cast<std::FILE*>(dump)); };
     if (dump) {
       const double sc[6] = {double(qfx(i, j)), double(hfx(i, j)), double(slimsk), double(delt), double(dx2d(i, j)),
@@ -338,7 +338,7 @@ struct KNTiedtke {
 #endif
     cu_ntiedtke::cu_ntiedtke_run<real>(c, nz, uf, vf, tf, qvf, qcf, qif, qvftenz, thftenz, ghtl, ghti, omg, prsl,
                                        prsi, qfx(i, j), hfx(i, j), rn, slimsk, delt, dx2d(i, j), cppwrf_cw_);
-#if !defined(__CUDA_ARCH__)
+#if !defined(CPPWRF_DEVICE_CODE)
     if (dump) {
       for (const real* a : {uf, vf, tf, qvf, qcf, qif}) wr(a, nz);
       std::fwrite(&rn, sizeof(real), 1, static_cast<std::FILE*>(dump));
@@ -795,7 +795,7 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
     k.rqicuten = pt.rqicuten.view(); k.rucuten = pt.rucuten.view(); k.rvcuten = pt.rvcuten.view();
     k.flag_qc = s.P_QC >= 0; k.flag_qi = s.P_QI >= 0;
     k.dump = nullptr;
-#if !defined(CPPWRF_USE_CUDA)
+#if !defined(CPPWRF_USE_GPU)
     // debug: CPPWRF_NTIEDTKE_DUMP=file CPPWRF_NTIEDTKE_DUMP_STEP=n (OMP_NUM_THREADS=1) writes the scheme's
     // column inputs and outputs of step n (tests/phys/cu_ntiedtke/harness.f90 replays them through WRF)
     const char* d = std::getenv("CPPWRF_NTIEDTKE_DUMP");
@@ -803,7 +803,7 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
     if (d && ds && itimestep == std::atol(ds)) k.dump = std::fopen(d, "wb");
 #endif
     column_for_work(g_.columns(), k);
-#if !defined(CPPWRF_USE_CUDA)
+#if !defined(CPPWRF_USE_GPU)
     if (k.dump) std::fclose(static_cast<std::FILE*>(k.dump));
 #endif
     return;

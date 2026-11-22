@@ -50,11 +50,7 @@ struct CSD {
   CPPWRF_FORCEINLINE CSD(const rb* p_, int s_) : p(p_), s(s_) {}
   CPPWRF_FORCEINLINE CSD(SD v) : p(v.p), s(v.s) {}
   CPPWRF_FORCEINLINE rb operator[](int i) const {
-#if defined(__CUDA_ARCH__)
-    return __ldg(p + std::ptrdiff_t(i) * s);
-#else
-    return p[std::ptrdiff_t(i) * s];
-#endif
+    return CPPWRF_LDG(p + std::ptrdiff_t(i) * s);
   }
 };
 
@@ -65,11 +61,7 @@ struct CSI {
   CPPWRF_FORCEINLINE CSI(const int* p_, int s_) : p(p_), s(s_) {}
   CPPWRF_FORCEINLINE CSI(SI v) : p(v.p), s(v.s) {}
   CPPWRF_FORCEINLINE int operator[](int i) const {
-#if defined(__CUDA_ARCH__)
-    return __ldg(p + std::ptrdiff_t(i) * s);
-#else
-    return p[std::ptrdiff_t(i) * s];
-#endif
+    return CPPWRF_LDG(p + std::ptrdiff_t(i) * s);
   }
 };
 
