@@ -9,6 +9,7 @@ version: "1.3.0"
 date-released: "2026-11-22"
 license: GPL-3.0-or-later
 repository-code: "https://github.com/Xassemblianist/CPPWRF"
+doi: "10.5281/zenodo.24442751"
 keywords:
   - WRF
   - numerical weather prediction
