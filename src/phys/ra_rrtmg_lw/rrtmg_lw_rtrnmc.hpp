@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later AND LicenseRef-AER-RRTMG
 #pragma once
 // WRF rrtmg_lw rtrnmc (McICA radiative transfer), split into independent pieces so that a GPU can
 // run every band and every level of a column in parallel with the same arithmetic as WRF:

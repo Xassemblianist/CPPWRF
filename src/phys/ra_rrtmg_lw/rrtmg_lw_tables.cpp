@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later AND LicenseRef-AER-RRTMG
 #include "phys/ra_rrtmg_lw/rrtmg_lw_tables.hpp"
 
 #include <cstddef>

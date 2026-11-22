@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later AND LicenseRef-UCAR-NoahMP
 #include "phys/lsm_noahmp/noahmp.hpp"
 #include "core/limits.hpp"
 

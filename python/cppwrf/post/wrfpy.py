@@ -1,4 +1,4 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
+# SPDX-License-Identifier: GPL-3.0-or-later AND Apache-2.0
 """The numerical routines of wrf-python 1.3.4.1 (NCAR, Apache License 2.0), ported to numpy.
 
 Each function follows one Fortran routine of wrf-python's `fortran/` directory statement by statement: the same

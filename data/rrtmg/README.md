@@ -18,3 +18,9 @@ The radiation driver looks for them in `phys.rrtmg_tables` (default: the WRF run
 case) and then here (`CPPWRF_DATA_DIR`, set at build time). The ozone climatology
 (`ozone*.formatted`) and `CAMtr_volume_mixing_ratio` are read from `phys.rrtmg_tables` as WRF reads
 them from its run directory.
+
+## Licence
+
+`rrtmg_lw_tables.bin`, `rrtmg_sw_tables.bin`, `rrtmg_lw_tables_r4.bin` and `rrtmg_sw_tables_r4.bin`
+contain AER's RRTMG table data and remain under AER's terms (`licenses/LicenseRef-AER-RRTMG.txt`,
+no sale), not under the GPL; see `NOTICE.md`.

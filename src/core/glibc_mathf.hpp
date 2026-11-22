@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-License-Identifier: GPL-3.0-or-later AND LGPL-2.1-or-later AND MIT
 #pragma once
 // glibc's scalar float libm (Debian 13, glibc 2.41-12, x86-64) on host and device, bit for bit: expf, logf, powf,
 // sinf, cosf (the FMA variants glibc's ifuncs select on CPUs with FMA and AVX2: __expf_fma, __logf_fma, __powf_fma,
