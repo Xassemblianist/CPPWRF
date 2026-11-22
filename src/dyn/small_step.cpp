@@ -12,6 +12,12 @@
 #include "dyn/large_step.hpp"
 #include "dyn/lateral_bc.hpp"
 
+// GPU builds that round every operation on its own (core/precision.hpp): KWSolve's level loops after the sweeps run
+// as a kernel per level (KWPost); the CPU builds and the fast CUDA FP32 build keep them in the column kernel
+#if defined(CPPWRF_USE_GPU) && defined(CPPWRF_LOCAL_ROUNDING)
+#define CPPWRF_W_POST_PASS 1
+#endif
+
 // Discrete forms follow WRF dyn_em/module_small_step_em.F (small_step_prep, calc_p_rho,
 // calc_coef_w, advance_uv, advance_mu_t, advance_w, sumflux, small_step_finish) and
 // calc_p_rho_phi (module_big_step_utilities_em.F, hypsometric_opt = 1 as ideal.exe writes it,
@@ -402,6 +408,9 @@ struct KWSolve {
       wk = w(i, j, k) - gamma(i, j, k) * wk;
       w(i, j, k) = wk;
     }
+#if defined(CPPWRF_W_POST_PASS)
+    (void)m; (void)mts; (void)ope;  // KWPost: the levels after the sweeps
+#else
     if (dampmag != real(0)) {  // damp_opt = 3: implicit Rayleigh damping toward w = 0 near the top
       const real htop = (phs(i, j, nz) + phb(i, j, nz)) / Gr, hbot = htop - hdepth;
       for (int k = nz; k >= 1; --k) {
@@ -415,8 +424,37 @@ struct KWSolve {
       }
     }
     for (int k = nz; k >= 1; --k) ph(i, j, k) = R(i, j, k) + msfty(i, j) * H * dts * Gr * ope * w(i, j, k) / mf(k, mts);
+#endif
   }
 };
+
+#if defined(CPPWRF_W_POST_PASS)
+// KWSolve's work after the sweeps, one thread per level (GPU builds that round every operation on its own): each
+// level's damp_opt = 3 damping of w and its phi'' read only that level's w (and the inputs), so a level computes in
+// its own thread what the column loops computed for it, with the same operations
+struct KWPost {
+  V3 w, ph; C3 R, phs, ws; C2 mut, muts; B3 phb; B2 msfty; VCoef c;
+  real dts, epssm, dampmag, hdepth;
+  real pi;
+  int nz; Edge ed;
+  CPPWRF_HD real mf(int k, real m) const { return c.c1f(k) * m + c.c2f(k); }
+  CPPWRF_HD void operator()(int i, int j, int k) const {  // k = 1 .. nz
+    if (ed.mass(i, j)) return;
+    const real m = mut(i, j), mts = muts(i, j), ope = real(1) + epssm;
+    if (dampmag != real(0)) {
+      const real htop = (phs(i, j, nz) + phb(i, j, nz)) / Gr, hbot = htop - hdepth;
+      const real hk = (phs(i, j, k) + phb(i, j, k)) / Gr;
+      real dampwt = 0;
+      if (hk >= hbot) {
+        const real sn = libm::sin(H * pi * (hk - hbot) / hdepth);
+        dampwt = dampmag * sn * sn;
+      }
+      w(i, j, k) = (w(i, j, k) - dampwt * mf(k, m) * ws(i, j, k)) / (real(1) + dampwt);
+    }
+    ph(i, j, k) = R(i, j, k) + msfty(i, j) * H * dts * Gr * ope * w(i, j, k) / mf(k, mts);
+  }
+};
+#endif
 
 // phase 3 (mass points): calc_p_rho with divergence damping
 struct KWPRho {
@@ -604,6 +642,13 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
                                       b.phb.view(), b.msfty.view(), c, dts, p_.epssm,
                                       p_.damp_opt == 3 ? dts * p_.dampcoef : real(0), p_.zdamp,
                                       real(4) * libm::atan(real(1)), nz, ed});
+#if defined(CPPWRF_W_POST_PASS)
+      parallel_for(Range3D{0, nx, 0, ny, 1, nz + 1},
+                   KWPost{s.w_2.view(), s.ph_2.view(), w_rhs.cview(), ph_save.cview(), w_save.cview(), s.mut.cview(),
+                          s.muts.cview(), b.phb.view(), b.msfty.view(), c, dts, p_.epssm,
+                          p_.damp_opt == 3 ? dts * p_.dampcoef : real(0), p_.zdamp, real(4) * libm::atan(real(1)), nz,
+                          ed});
+#endif
       if (bc_) bc_->update_ph_w(s, ph_save, tend, b, dts);  // spec_bdyupdate_ph, zero_grad_bdy(w)
       parallel_for(g.mass_cells(), KWPRho{s.al.view(), s.p.view(), pm1.view(), s.ph_2.cview(), s.alt.cview(),
                                           s.t_2.cview(), t_save.cview(), c2a.cview(), s.mu_2.cview(), s.muts.cview(),
