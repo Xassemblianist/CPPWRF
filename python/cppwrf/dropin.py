@@ -216,6 +216,10 @@ class WrfRun:
             # CPPWRF counts run.run_time from the simulation start, WRF's run_* from the restart time
             run_time += seconds_between(sim_start, self.start)
             sets += [f"run.restart_file={rst}", f"run.run_time={run_time:g}"]
+            # run.start_date is the simulation start (the translation of an ideal case takes the namelist's start,
+            # which is the restart time here)
+            if "start_date" in tr.sections["run"]:
+                sets.append(f"run.start_date={sim_start}")
             self.end = add_seconds(sim_start, run_time)
         else:
             self.end = add_seconds(self.start, run_time)
