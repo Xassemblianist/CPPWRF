@@ -170,9 +170,9 @@ class Opt:
             elif k == "--gpu": self.gpu = v  # noqa: E701
             elif k == "--gpu-bin": self.gpu_bins.update([v.split("=", 1)])  # noqa: E701
             elif k == "--cpu-bin": self.cpu_bins.update([v.split("=", 1)])  # noqa: E701
-            elif k == "--gpu-threads": self.gpu_threads = int(v)  # noqa: E701
-            elif k == "--proof-threads": self.proof_threads = int(v)  # noqa: E701
-            elif k == "--threads": self.np = int(v)  # noqa: E701
+            elif k == "--gpu-threads": self.gpu_threads = max(1, int(v))  # noqa: E701
+            elif k == "--proof-threads": self.proof_threads = max(1, int(v))  # noqa: E701
+            elif k == "--threads": self.np = max(1, int(v))  # noqa: E701
             elif k == "--nc0":
                 self.nc0 = True
                 i -= 1
@@ -519,7 +519,7 @@ def finish(o, c, res, rec, kind, keep_out=False):
         f"{'ok' if rec['ok'] else 'FAILED'} wall {res.get('wall', 0):.1f} s, stepping "
         f"{tmv if tmv is None else round(tmv, 2)} s" + (f", GPU {res['gpu'].get('energy_j') or 0:.0f} J"
                                                          if res.get("gpu") else ""))
-    if not o.keep and not keep_out:
+    if not o.keep and not (keep_out and rec["ok"]):
         if kind == "wrf":
             shutil.rmtree(res["cwd"], ignore_errors=True)
         elif res.get("out"):
@@ -656,7 +656,7 @@ def timed(o):
                                                                                             o.reps_on, None)]
     for regime, models, nblocks, limit in plan:
         for k in range(nblocks):
-            block = k if regime == "on" else k + 1 if regime == "off" else 0
+            block = 0 if regime == "warm" else k + 1
             last_on = regime == "on" and k == nblocks - 1
             for ci, c in enumerate(cs):
                 present = [m for m in models if not (limit and m == "cpu_fp64" and k >= o.cpu_reps)]
@@ -817,9 +817,13 @@ def verify(o):
         l2(o, c, K, doms)
     st = sorted(glob.glob(os.path.join(o.out, "accuracy", "*.jsonl")))
     if st:
-        subprocess.run([sys.executable, o.src + "/tools/verify/fp32_accuracy.py", "report", *st, "--md",
-                        os.path.join(o.out, "accuracy.md"), "--metric", "rel_l2", "--svg-dir",
-                        os.path.join(o.out, "svg_accuracy")], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, o.src + "/tools/verify/fp32_accuracy.py", "report", *st, "--md",
+                            os.path.join(o.out, "accuracy.md"), "--metric", "rel_l2", "--svg-dir",
+                            os.path.join(o.out, "svg_accuracy"), "--svg-rel", "svg_accuracy"],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            log(o, f"verify: fp32_accuracy.py report exit {r.returncode} {(r.stderr or r.stdout).strip()[-300:]}")
+            raise SystemExit(r.returncode)
 
 
 def l2(o, c, K, doms):
@@ -872,10 +876,14 @@ def report(o, rate=None):
     if os.path.exists(o.out + "/accuracy.md"):
         args += ["--accuracy-md", o.out + "/accuracy.md"]
     r = subprocess.run(args, capture_output=True, text=True)
-    log(o, f"report: bench_stats.py exit {r.returncode} {r.stderr.strip()[-300:]}")
+    log(o, f"report: bench_stats.py exit {r.returncode} {(r.stderr or r.stdout if r.returncode else r.stderr).strip()[-300:]}")
+    if r.returncode != 0:
+        raise SystemExit(r.returncode)
     r = subprocess.run([sys.executable, HERE + "/bench_plot.py", o.out + "/summary.json", "--out", o.out + "/svg"],
                        capture_output=True, text=True)
-    log(o, f"report: bench_plot.py exit {r.returncode} {r.stderr.strip()[-300:]}")
+    log(o, f"report: bench_plot.py exit {r.returncode} {(r.stderr or r.stdout if r.returncode else r.stderr).strip()[-300:]}")
+    if r.returncode != 0:
+        raise SystemExit(r.returncode)
 
 
 # ---- plan

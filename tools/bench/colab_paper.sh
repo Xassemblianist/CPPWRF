@@ -14,7 +14,7 @@
 # --gpu: the runtime (default G4). --set: full (default with G4: WRF and CPPWRF, PROTOCOL.md "Session 1") or gpu
 # (default otherwise: the CUDA builds against the CPU builds, "Session 2", cases C1,C2). --cases: tools/bench/
 # paper_run.py's cases. --wps: WPS 4.6.0's directory (geogrid / ungrib / metgrid executables and tables, ~3 MB
-# uploaded; default ~/wrf_real/WPS-4.6.0). --hours: the longest wait (default 11). --save-lday: put C2's inputs on
+# uploaded when C2 is in --cases without --data-lday; default ~/wrf_real/WPS-4.6.0). --hours: the longest wait (default 11). --save-lday: put C2's inputs on
 # Drive (cppwrf-data/paper_lday_data.tar, ~2 GB) for a later --data-lday session, which reads them instead of making
 # them. --cpu-rate: compute units per hour of a CPU-only runtime with the same CPU, a stated assumption for WRF's
 # cost (bench_stats.py). --dry-run: print the data list, the job's arguments, where each tar is and paper_run.py's
@@ -48,6 +48,8 @@ case $SET in full|gpu) ;; *) echo "--set $SET: full or gpu"; exit 2 ;; esac
 DATA=fp2_data.tar
 case ",$CASES," in *,C4,*) DATA=$DATA,n3_data.tar ;; esac
 [ $LDAY = 0 ] || DATA=$DATA,paper_lday_data.tar
+NEED_WPS=0
+case ",$CASES," in *,C2,*) [ $LDAY = 0 ] && NEED_WPS=1 ;; esac
 STAMP=$(date +%Y%m%d_%H%M%S)
 EST=()
 [ "$SET" = full ] || EST=(--models gpu_fp32,gpu_fp32id,gpu_fp64 --proof cpu_fp64,cpu_fp32)
@@ -59,11 +61,16 @@ if [ $DRY = 1 ]; then
   SUMS=$(timeout 60 curl -sSfL https://github.com/Xassemblianist/cppwrf-data/releases/download/data-v1/SHA256SUMS 2> /dev/null)
   for t in ${DATA//,/ }; do
     w=
+    te=$(printf '%s\n' "$t" | sed 's/\./\\./g')
     timeout 120 rclone lsf "cppwrf-drive:cppwrf-data/$t" 2> /dev/null | grep -qx "$t" && w="Drive"
-    echo "$SUMS" | grep -q "  $t\.part" && w="${w:+$w and }the GitHub release"
+    grep -qE "  ${te}(\.part[0-9a-zA-Z]+)?$" <<< "$SUMS" && w="${w:+$w and }the GitHub release"
     echo "[colab_paper] $t: ${w:-NOT FOUND (Drive or GitHub)}"
   done
-  [ -x "$WPS/geogrid.exe" ] && echo "[colab_paper] WPS: $WPS" || echo "[colab_paper] WPS: $WPS has no geogrid.exe"
+  if [ $NEED_WPS = 1 ]; then
+    [ -x "$WPS/geogrid.exe" ] && echo "[colab_paper] WPS: $WPS" || echo "[colab_paper] WPS: $WPS has no geogrid.exe"
+  else
+    echo "[colab_paper] WPS: not needed"
+  fi
   exit 0
 fi
 command -v colab > /dev/null && command -v rclone > /dev/null || { echo "[colab_paper] needs the colab CLI and rclone"; exit 1; }
@@ -74,12 +81,14 @@ mkdir -p "$OUT/in"
   echo "note: uncommitted changes are not sent (HEAD only)"
 git -C "$REPO" archive --format=tar.gz -o "$OUT/in/src.tar.gz" "$REV" || exit 1
 git -C "$REPO" rev-parse --short "$REV" > "$OUT/in/commit.txt"
-T=$(mktemp -d "$OUT/wps.XXXX"); mkdir -p "$T/geogrid" "$T/metgrid"
-cp -L "$WPS"/geogrid.exe "$WPS"/ungrib.exe "$WPS"/metgrid.exe "$T/" &&
-  cp -L "$WPS/geogrid/GEOGRID.TBL" "$T/geogrid/" && cp -L "$WPS/metgrid/METGRID.TBL" "$T/metgrid/" &&
-  cp -L "$WPS/ungrib/Variable_Tables/Vtable.GFS" "$T/Vtable" && cp "$REPO/tools/bench/namelist.wps" "$T/" ||
-  { echo "[colab_paper] WPS files missing in $WPS"; exit 1; }
-tar czf "$OUT/in/wps.tar.gz" -C "$T" .; rm -rf "$T"
+if [ $NEED_WPS = 1 ]; then
+  T=$(mktemp -d "$OUT/wps.XXXX"); mkdir -p "$T/geogrid" "$T/metgrid"
+  cp -L "$WPS"/geogrid.exe "$WPS"/ungrib.exe "$WPS"/metgrid.exe "$T/" &&
+    cp -L "$WPS/geogrid/GEOGRID.TBL" "$T/geogrid/" && cp -L "$WPS/metgrid/METGRID.TBL" "$T/metgrid/" &&
+    cp -L "$WPS/ungrib/Variable_Tables/Vtable.GFS" "$T/Vtable" && cp "$REPO/tools/bench/namelist.wps" "$T/" ||
+    { echo "[colab_paper] WPS files missing in $WPS"; rm -rf "$T"; exit 1; }
+  tar czf "$OUT/in/wps.tar.gz" -C "$T" .; rm -rf "$T"
+fi
 [ $SAVE = 1 ] && date > "$OUT/in/save_lday"
 echo "[colab_paper] commit $(cat "$OUT/in/commit.txt"), $GPU, set $SET, cases $CASES, data $DATA, paper_run.py ${PR[*]:-}"
 TAG=colab_paper
@@ -104,7 +113,10 @@ fi
 echo 'import os, shutil; os.makedirs("/content/in", exist_ok=True); print("DISK", shutil.disk_usage("/").total // 2**30)' |
   rx 60 | grep DISK || { echo "[$TAG] session not answering"; exit 1; }
 (umask 077; rclone config show cppwrf-drive > "$OUT/in/rclone.conf")
-for f in src.tar.gz commit.txt wps.tar.gz rclone.conf $( [ $SAVE = 1 ] && echo save_lday ); do
+UPLOADS=(src.tar.gz commit.txt rclone.conf)
+[ $NEED_WPS = 1 ] && UPLOADS+=(wps.tar.gz)
+[ $SAVE = 1 ] && UPLOADS+=(save_lday)
+for f in "${UPLOADS[@]}"; do
   ok=0
   for t in 1 2 3; do timeout 900 colab upload -s "$S" "$OUT/in/$f" "/content/in/$f" 2>&1 | grep -q Uploaded && { ok=1; break; }; sleep 20; done
   [ $ok = 1 ] || { echo "[$TAG] upload of $f failed"; exit 1; }

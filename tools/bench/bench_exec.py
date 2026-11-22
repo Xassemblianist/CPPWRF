@@ -32,8 +32,10 @@ and gpu (tools/bench/telemetry.py's summary of the window, with the steady windo
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -83,7 +85,6 @@ class MhzSampler:
     """The mean "cpu MHz" of /proc/cpuinfo once a second during a run (a VM may report a fixed value)."""
 
     def __init__(self, every=1.0):
-        import threading
         self.v, self.every, self.stop_ev = [], every, threading.Event()
         self.t = threading.Thread(target=self.loop, daemon=True)
 
@@ -173,17 +174,42 @@ def execute(job, bins=None):
     stamp = re.compile(job["stamp"]) if job.get("stamp") else None
     stamps = []  # epoch times of the log lines matching job["stamp"] (the first and the last are kept)
     t0, m0 = time.time(), time.monotonic()
-    try:
-        with open(job["log"], "w") as f:
-            if stamp is None:
-                rc = subprocess.run(["bash", "-c", cmd], cwd=job["cwd"], env=env, stdout=f, stderr=subprocess.STDOUT,
-                                    timeout=float(job.get("timeout", 7200))).returncode
-            else:  # the log through a pipe, each line stamped as it arrives (CPPWRF flushes every timing line)
-                p = subprocess.Popen(["bash", "-c", cmd], cwd=job["cwd"], env=env, stdout=subprocess.PIPE,
-                                     stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1)
-                import threading
-                timer = threading.Timer(float(job.get("timeout", 7200)), p.kill)
-                timer.start()
+    timeout_s = float(job.get("timeout", 7200))
+    with open(job["log"], "w") as f:
+        if stamp is None:
+            p = subprocess.Popen(["bash", "-c", cmd], cwd=job["cwd"], env=env, stdout=f, stderr=subprocess.STDOUT,
+                                 start_new_session=True)
+            try:
+                rc = p.wait(timeout=timeout_s)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(p.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                p.wait()
+                rc = 124
+        else:  # the log through a pipe, each line stamped as it arrives (CPPWRF flushes every timing line)
+            p = subprocess.Popen(["bash", "-c", cmd], cwd=job["cwd"], env=env, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, errors="replace", bufsize=1,
+                                 start_new_session=True)
+            kill_lock = threading.Lock()
+            done = False
+            timed_out = False
+
+            def _kill():
+                nonlocal timed_out
+                with kill_lock:
+                    if done:
+                        return
+                    timed_out = True
+                    try:
+                        os.killpg(p.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+
+            timer = threading.Timer(timeout_s, _kill)
+            timer.start()
+            try:
                 for line in p.stdout:
                     f.write(line)
                     if stamp.search(line):
@@ -193,12 +219,14 @@ def execute(job, bins=None):
                         else:
                             stamps[1] = now
                         res["stamp_count"] = res.get("stamp_count", 0) + 1
-                rc = p.wait()
+            finally:
                 timer.cancel()
-                if rc == -9:
-                    rc = 124
-    except subprocess.TimeoutExpired:
-        rc = 124
+                with kill_lock:
+                    done = True
+                p.stdout.close()
+                rc = p.wait()
+            if timed_out and rc != 0:
+                rc = 124
     wall = time.monotonic() - m0
     t1 = time.time()
     res["rapl_j"] = telemetry.rapl_delta_j(r0, telemetry.rapl_read())
@@ -225,7 +253,6 @@ def write_atomic(path, obj):
 
 
 def agent(q, bins=None, idle_exit=36000.0):
-    import threading
     os.makedirs(q, exist_ok=True)
     probe = telemetry.probe()  # also caches the sampler's fields: no probes before each run
     temps = [x for x in (telemetry.temperature() for _ in range(5)) if x is not None]

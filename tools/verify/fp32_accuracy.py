@@ -362,7 +362,14 @@ def report(a):
                 os.makedirs(a.svg_dir, exist_ok=True)
                 name = f"fp32_growth_{case.lower()}_{dom}.svg"
                 if svg(case, dom, pairs, m, os.path.join(a.svg_dir, name)):
-                    lines.append(f"\n![{case} {dom}: {m} over time]({os.path.join(a.svg_rel or a.svg_dir, name)})\n")
+                    rel = a.svg_rel
+                    if not rel and a.md:
+                        rel = os.path.relpath(os.path.abspath(a.svg_dir), os.path.dirname(os.path.abspath(a.md)))
+                    elif not rel:
+                        rel = a.svg_dir
+                    rel = rel.replace(os.sep, "/")
+                    href = name if rel == "." else f"{rel.rstrip('/')}/{name}"
+                    lines.append(f"\n![{case} {dom}: {m} over time]({href})\n")
         if rs:
             summary.append((case, dom, h1, rs))
     out = ["| Case | Domain | Time | median R | largest R (variable) | variables with R > 1.1 |",
@@ -398,7 +405,7 @@ def main():
     r.add_argument("stats", nargs="+")
     r.add_argument("--md", default="")
     r.add_argument("--svg-dir", default="")
-    r.add_argument("--svg-rel", default="", help="the figures' directory as the markdown links name it")
+    r.add_argument("--svg-rel", default="", help="the figures' directory as the markdown links name it (default: relative to --md)")
     r.add_argument("--metric", default="rmse", choices=("rmse", "max_abs", "rel_l2"))
     r.add_argument("--num", default="fp32-r8")
     r.add_argument("--den", default="r4-r8")
