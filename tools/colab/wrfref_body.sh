@@ -22,11 +22,12 @@ if [ -s $J/data_failed ]; then echo "NO_RUNS: $(tr '\n' ' ' < $J/data_failed)" >
 grep -v '^\s*#' $J/refs.txt | grep -v '^\s*$' | while read -r name base exe sets; do
   echo "python3 $J/src/tools/gcp/wrf_ref_run.py $J/data/runs $W $J/data/wrf/$exe $name $base $sets"
 done > $J/cmds.txt
-xargs -P "$(nproc)" -I{} sh -c '{}' < $J/cmds.txt > $J/refs.out 2>&1
+xargs -P "$(nproc)" -I{} sh -c '{}' < $J/cmds.txt > $J/refs.out 2>&1; ref_rc=$?
 names=$(grep -v '^\s*#' $J/refs.txt | awk 'NF {print $1}')
 # shellcheck disable=SC2086
-{ CPPWRF_WRF_RUNS=$W bash $J/src/tests/verify/make_restart_refs.sh $names
-  CPPWRF_WRF_RUNS=$W bash $J/src/tests/verify/make_resumed_refs.sh $names; } >> $J/refs.out 2>&1
+CPPWRF_WRF_RUNS=$W bash $J/src/tests/verify/make_restart_refs.sh $names >> $J/refs.out 2>&1; rst_rc=$?
+# shellcheck disable=SC2086
+CPPWRF_WRF_RUNS=$W bash $J/src/tests/verify/make_resumed_refs.sh $names >> $J/refs.out 2>&1; rsm_rc=$?
 dirs=$(for n in $names; do for p in run rst rsm; do [ -d "$W/${p}_$n" ] && echo "${p}_$n"; done; done)
 # shellcheck disable=SC2086
 ( cd $W && find $dirs -type f \( -name 'wrfout_*' -o -name 'wrfrst_*' -o -name 'auxhist*' -o -name 'wrfinput_*' \
@@ -34,19 +35,39 @@ dirs=$(for n in $names; do for p in run rst rsm; do [ -d "$W/${p}_$n" ] && echo 
 # shellcheck disable=SC2086
 [ "$FETCH" = 0 ] || { mkdir -p $J/fetch && tar cf $J/fetch/refs.tar -C $W $dirs; }
 if [ -n "$STAGE" ]; then  # the suite's tar of these references, to Drive (remote_chroot_job.sh uploads drive/*)
-  # only when every WRF run of refs.txt succeeded, and only a finished tar (written aside, moved into drive/): a
-  # failed reference or packing must not replace the Drive object
+  # only when every WRF run of refs.txt succeeded (exit 0 and every expected SUCCESS line), and only a finished tar
+  # (written aside, moved into drive/): a failed reference or packing must not replace the Drive object
   mkdir -p $J/drive $J/stage_tmp
+  stage_bad= files_bad=
+  [ "$ref_rc" = 0 ] || stage_bad="wrf_ref_run exit $ref_rc"
   if grep -qE '(WRF|REAL)-FAILED' $J/refs.out; then
-    echo "STAGE_SKIPPED: WRF runs failed ($(grep -cE '(WRF|REAL)-FAILED' $J/refs.out))" > $J/stage.log
+    stage_bad="${stage_bad:+$stage_bad; }$(grep -cE '(WRF|REAL)-FAILED' $J/refs.out) failed"
+  fi
+  for n in $names; do
+    steps=1; grep -qE "^\s*$n\s.*\srun\.steps=0(\s|$)" $J/refs.txt && steps=0
+    grep -qx "$n SUCCESS" $J/refs.out || stage_bad="${stage_bad:+$stage_bad; }run_$n"
+    if [ "$steps" = 1 ]; then
+      grep -qx "$n/steps SUCCESS" $J/refs.out || stage_bad="${stage_bad:+$stage_bad; }run_$n/steps"
+      grep -qE "^$n: (wrf\.log:)?[1-9][0-9]*( +\S+)* +[1-9][0-9]* restart files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rst_$n"
+      grep -qE "^$n: (wrf\.log:)?[1-9][0-9]*( +\S+)* +[1-9][0-9]* history files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rsm_$n"
+    fi
+  done
+  [ "$rst_rc" = 0 ] || files_bad="${files_bad:+$files_bad; }make_restart_refs exit $rst_rc"
+  [ "$rsm_rc" = 0 ] || files_bad="${files_bad:+$files_bad; }make_resumed_refs exit $rsm_rc"
+  if [ -n "$stage_bad" ]; then
+    echo "STAGE_SKIPPED: WRF runs failed ($stage_bad)" > $J/stage.log
   else
     obj=${STAGE%%:*}
     CPPWRF_WRF_RUNS=$W python3 $J/src/tools/colab/stage_data.py --whole --only "${STAGE#*:}" "$J/stage_tmp/$obj" > $J/stage.log 2>&1 \
       && mv $J/stage_tmp/$obj $J/drive/$obj && echo "STAGED $obj" >> $J/stage.log
     if [ -n "$FILES" ]; then
       fobj=${obj%_data.tar}_files.tar
-      CPPWRF_WRF_RUNS=$W python3 $J/src/tools/gcp/stage_files_data.py --cases "$FILES" "$J/stage_tmp/$fobj" >> $J/stage.log 2>&1 \
-        && mv $J/stage_tmp/$fobj $J/drive/$fobj && echo "STAGED $fobj" >> $J/stage.log
+      if [ -n "$files_bad" ]; then
+        echo "STAGE_SKIPPED: $fobj: restart/resumed runs failed ($files_bad)" >> $J/stage.log
+      else
+        CPPWRF_WRF_RUNS=$W python3 $J/src/tools/gcp/stage_files_data.py --cases "$FILES" "$J/stage_tmp/$fobj" >> $J/stage.log 2>&1 \
+          && mv $J/stage_tmp/$fobj $J/drive/$fobj && echo "STAGED $fobj" >> $J/stage.log
+      fi
     fi
   fi
   rm -rf $J/stage_tmp

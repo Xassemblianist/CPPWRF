@@ -1,0 +1,36 @@
+# WRF v4.8.0 reference runs of the coverage wave COV3 (tests/verify/cases/73_coverage3.py, data port_cov3_data.tar),
+# for tools/colab/colab_wrfref.sh (REFS format of tools/gcp/gcp_wrfref.sh: NAME BASE_RUN WRF_EXE section.key=value ...;
+# tools/gcp/wrf_ref_run.py). Data: matrix_data.tar (run_P4_r8, run_P6_r8, the WRF executables), matrix_real.tar
+# (real_P4_r8 met_em files, real.exe). Each reference: run_NAME (10 min, history every 5 min), run_NAME/steps (3 steps,
+# history every step), rst_NAME and rsm_NAME (tests/verify/make_restart_refs.sh, make_resumed_refs.sh). WRF build: r8
+# (stock -r8) for schemes without DOUBLE PRECISION, r8d8 (-r8 -double-8) for Thompson, MYNN, Grell-Freitas-Li, New
+# Tiedtke and NSSL 2-moment (docs/PHYSICS_SUITE.md).
+#
+# LES-like no-PBL (bl_pbl_physics 0) with diff_opt 2 / km_opt 2 (1.5-order TKE) and Noah LSM on P4 (diff_opt 2 /
+# km_opt 3 blows up in WRF on this 15 km domain from step 3 on, as in KM3)
+LESK2_r8 run_P4_r8 wrf_r8.exe physics.bl_pbl_physics=0 dynamics.diff_opt=2 dynamics.km_opt=2 time_control.run_seconds=600 time_control.history_interval_s=300
+# Noah-MP (sf_surface_physics 4) in daylight (P6 / P4 from 06 UTC; real.exe on the P4 met_em files) with MYNN (RRTMG
+# radt 1), ACM2, BouLac and QNSE (mfshconv 1)
+NMPMY_r8 run_P6_r8 wrf_r8d8.exe physics.sf_surface_physics=4 physics.sf_sfclay_physics=5 physics.bl_pbl_physics=5 physics.ra_lw_physics=4 physics.ra_sw_physics=4 physics.radt=1 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+NMPAC_r8 run_P4_r8 wrf_r8.exe physics.sf_surface_physics=4 physics.bl_pbl_physics=7 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+NMPBL_r8 run_P4_r8 wrf_r8.exe physics.sf_surface_physics=4 physics.bl_pbl_physics=8 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+NMPQN_r8 run_P4_r8 wrf_r8.exe physics.sf_surface_physics=4 physics.sf_sfclay_physics=4 physics.bl_pbl_physics=4 physics.mfshconv=1 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+# RUC LSM (sf_surface_physics 3, 9 soil levels) with rdlai2d in daylight (P4 from 06 UTC; real.exe makes the RUC input)
+RUCL_r8 run_P4_r8 wrf_r8.exe physics.sf_surface_physics=3 physics.num_soil_layers=9 physics.rdlai2d=.true. time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+# Fog / cloud water gravitational settling (grav_settling 1 and 2) with non-MYNN PBLs (YSU and MYJ / Eta) on P4
+GS1Y_r8 run_P4_r8 wrf_r8.exe physics.grav_settling=1 time_control.run_seconds=600 time_control.history_interval_s=300
+GS2J_r8 run_P4_r8 wrf_r8.exe physics.sf_sfclay_physics=2 physics.bl_pbl_physics=2 physics.grav_settling=2 time_control.run_seconds=600 time_control.history_interval_s=300
+# Diffusion skip flags (*_mix2_off, *_mix6_off) and mix_isotropic 1 on P6 (Thompson carries moist and scalar arrays):
+# MX2I with diff_opt 2 / km_opt 2 (TKE) and diff_6th_opt 2; MX1I with diff_opt 1 / km_opt 3 (3-D Smagorinsky) and diff_6th_opt 2
+MX2I_r8 run_P6_r8 wrf_r8d8.exe dynamics.diff_opt=2 dynamics.km_opt=2 dynamics.diff_6th_opt=2 dynamics.diff_6th_factor=0.12 dynamics.mix_isotropic=1 dynamics.moist_mix2_off=.true. dynamics.scalar_mix2_off=.true. dynamics.tke_mix2_off=.true. dynamics.moist_mix6_off=.true. dynamics.scalar_mix6_off=.true. dynamics.tke_mix6_off=.true. time_control.run_seconds=600 time_control.history_interval_s=300
+MX1I_r8 run_P6_r8 wrf_r8d8.exe dynamics.diff_opt=1 dynamics.km_opt=3 dynamics.diff_6th_opt=2 dynamics.diff_6th_factor=0.12 dynamics.mix_isotropic=1 dynamics.moist_mix2_off=.true. dynamics.scalar_mix2_off=.true. dynamics.moist_mix6_off=.true. dynamics.scalar_mix6_off=.true. time_control.run_seconds=600 time_control.history_interval_s=300
+# Morrison (mp_physics 10) and NSSL 2-moment (mp_physics 18) with non-KF cumulus on P4 (Grell-Freitas-Li, MSKF, New Tiedtke)
+MOGF_r8 run_P4_r8 wrf_r8d8.exe physics.mp_physics=10 physics.cu_physics=3 physics.ishallow=1 time_control.run_seconds=600 time_control.history_interval_s=300
+MOMK_r8 run_P4_r8 wrf_r8.exe physics.mp_physics=10 physics.cu_physics=11 time_control.run_seconds=600 time_control.history_interval_s=300
+NSNT_r8 run_P4_r8 wrf_r8d8.exe physics.mp_physics=18 physics.cu_physics=16 time_control.run_seconds=600 time_control.history_interval_s=300
+NSMK_r8 run_P4_r8 wrf_r8d8.exe physics.mp_physics=18 physics.cu_physics=11 time_control.run_seconds=600 time_control.history_interval_s=300
+# Surface-layer options: sfclayrev isftcflx 2 / iz0tlnd 2 on P4; MYNN sf_mynn_sfcflux_land 1 / _water 0 and _water 2
+# in daylight on P6 (RRTMG radt 1, from 06 UTC; real.exe on the P4 met_em files)
+SFT2_r8 run_P4_r8 wrf_r8.exe physics.isftcflx=2 physics.iz0tlnd=2 time_control.run_seconds=600 time_control.history_interval_s=300
+MYF10_r8 run_P6_r8 wrf_r8d8.exe physics.sf_sfclay_physics=5 physics.bl_pbl_physics=5 physics.ra_lw_physics=4 physics.ra_sw_physics=4 physics.radt=1 physics.sf_mynn_sfcflux_land=1 physics.sf_mynn_sfcflux_water=0 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+MYFW2_r8 run_P6_r8 wrf_r8d8.exe physics.sf_sfclay_physics=5 physics.bl_pbl_physics=5 physics.ra_lw_physics=4 physics.ra_sw_physics=4 physics.radt=1 physics.sf_mynn_sfcflux_water=2 time_control.start_hour=06 time_control.end_hour=12 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
