@@ -155,6 +155,9 @@ port_cov2b_data.tar
 # the third coverage wave's references (LESK2, NMPMY, NMPAC, NMPBL, NMPQN, RUCL, GS1Y, GS2J, MX2I, MX1I, MOGF, MOMK,
 # NSNT, NSMK, SFT2, MYF10, MYFW2; tests/verify/cases/73_coverage3.py, tests/verify/refs/cov3_refs.txt) and their inputs
 port_cov3_data.tar
+# the fourth coverage wave's references (more vertical levels: e_vert 58 and 90; tests/verify/cases/74_levels.py,
+# tests/verify/refs/cov4_refs.txt) and their inputs
+port_cov4_data.tar
 # the WRF v4.8.0 objects (-r8, -r8 -fdefault-double-8 builds) and input subsets of the differential tests
 # (ctest -L diff; tools/gcp/stage_diff_data.sh, tools/gcp/run_diff_tests.sh)
 diff_data.tar
