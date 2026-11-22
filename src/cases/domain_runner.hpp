@@ -32,6 +32,7 @@ class DomainRunner {
   bool start();
   // output field lists and the wrfout writer (idempotent; start() calls it)
   void prepare_output();
+  std::string simulation_start() const;  // SIMULATION_START_DATE of this run's files
 
   // Called before step n (1-based): boundary interval updates, start timing
   void before_step(long n);
@@ -73,7 +74,7 @@ class DomainRunner {
 
 #ifdef CPPWRF_HAVE_NETCDF
   void do_restart(long n, bool ring);
-  void save_restart_file(const std::string& path, long step, double time_sec);
+  void save_restart_file(const std::string& path, long step, double time_sec, bool ring);
   void load_restart_file(const std::string& path);
 #endif
 
@@ -112,7 +113,8 @@ class DomainRunner {
   double rst_ring_time_ = -1.0;
   bool rst_due(long n) const;
   bool rst_one_shot(long n) const;  // the alarm rings at the end of step n by its RingTime (ESMF_ClockAdvance's PRED2)
-  long rst_secs_to_ring(long n) const;  // WRF_ALARM_SECS_TIL_NEXT_RING_51 of a restart file at the end of step n
+  // WRF_ALARM_SECS_TIL_NEXT_RING_51 of a restart file at the end of step n (ring: the alarm rang there)
+  long rst_secs_to_ring(long n, bool ring) const;
   // adaptive time step: the exact time (since this run's start) at the end of step start_step + i, and the history and
   // restart alarms of ESMF_ClockAdvance by time (PrevRingTime + interval <= current time; PrevRingTime += interval)
   std::vector<wrf_time::Interval> t_end_{wrf_time::Interval{}};

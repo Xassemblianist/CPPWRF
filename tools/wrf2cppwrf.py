@@ -1630,14 +1630,20 @@ class WrfTranslator:
             self.error("WRF time_step_fract_num/den (fractional time step) is not supported: WRF's boundary "
                        "time dtbc is a running sum of dt, not verified for a non-integer dt.")
             dt += float(num) / float(den)
-        if adaptive and dt <= 0:
-            # start_em replaces time_step by starting_time_step (NINT(4 * MIN(dx, dy) / 1000) when -1): the
-            # namelist's time_step = 0 of adaptive runs
-            sts = self.get_opt("domains", "starting_time_step", -1)
-            if sts == -1:
-                dxy = min(float(self.get_opt("domains", "dx", 0) or 0), float(self.get_opt("domains", "dy", 0) or 0))
-                sts = int(math.floor(4 * dxy / 1000 + 0.5))
-            dt = float(sts)
+        if adaptive:
+            # start_em replaces time_step by starting_time_step (NINT(4 * MIN(dx, dy) / 1000) when -1; dx, dy:
+            # Registry 200 m) and adapt_timestep's first call takes starting_time_step / starting_time_step_den,
+            # limited by max_time_step and then min_time_step (NINT(8 resp. 3 * MIN(dx, dy) / 1000) when -1). The
+            # model computes the same from [time]; time.dt is that first time step (time_step = 0 in WRF's namelists)
+            dxy = min(float(self.get_opt("domains", "dx", 200.0)), float(self.get_opt("domains", "dy", 200.0)))
+
+            def step(key, factor):
+                n = self.get_opt("domains", key, -1)
+                if n == -1:
+                    n = int(math.floor(factor * dxy / 1000 + 0.5))
+                d = self.get_opt("domains", key + "_den", 0)
+                return float(n) / float(d) if d else float(n)
+            dt = max(min(step("starting_time_step", 4), step("max_time_step", 8)), step("min_time_step", 3))
             if dt <= 0:
                 self.error("WRF use_adaptive_time_step: the starting time step is not positive.")
                 dt = 60.0
