@@ -7,10 +7,40 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+## 1.2.2 (2026-11-22)
+
 ### Documentation
 - NOTICE.md: the parts derived from RRTMG / RRTM (AER) and Noah-MP (UCAR) stay under their own terms, which do not
   allow selling them or a work that contains them; a copy of CPPWRF with them may be redistributed free of charge,
   not sold. Nothing else changes.
+- NOTICE.md: an additional permission under GPLv3 section 7 from the copyright holder of CPPWRF's own code: CPPWRF's
+  code may be conveyed combined with those parts with the parts under AER's and UCAR's terms instead of the GPL.
+
+### Added
+- Suite: coverage wave 2, 18 WRF v4.8.0 r8 references (tests/verify/refs/cov2_refs.txt, cov2b_refs.txt; data
+  port_cov2_data.tar, port_cov2b_data.tar) and 54 cases (36 CPU FP64, 18 CUDA FP64; tests/verify/cases/
+  72_coverage2.py): WRF's tropical suite on P4 (TROP) and CONUS suite on the two-way nest N3 (CONL), the adaptive
+  time step with cudt / bldt (ADCB, ADGT), cudt 5 / bldt 3 (CB53), MYNN with KF + cu_rad_feedback (MYKR) and BMJ +
+  bmj_rad_feedback (MYBR), the UCM under MYJ (UMYJ), RRTM LW + Dudhia SW in daylight (RRDD), Grell-3D and
+  Grell-Freitas-Li with cu_rad_feedback on a two-way nest (G3N, GFN), a one-way N3 (N3OW), use_mp_re 0 (MPRE0),
+  o3input 0 / ghg_input 0 (O3G0), isfflx 0 (ISF0), advection orders 6 / 4 (ADV64), hail_opt 1 with radar
+  reflectivity (HAIL), isftcflx 1 / iz0tlnd 1 (SFT1).
+- `tools/fp32_double_rounding.py`: every decimal literal of src/ (and, with --data, text tables and namelists) whose
+  rounding through binary64 to binary32 differs from gfortran's single rounding of a REAL literal; none does in
+  src/, data/ or WRF v4.8.0's run directory (ctest fp32_double_rounding, fp32_double_rounding_tool).
+- `tools/colab/colab_wrfref.sh` runs without a cloud bucket: data from Drive, else from the data-v1 release (parts
+  checked against SHA256SUMS); `--dry-run` checks the reference list and where each tar is; a tar is staged only
+  when every WRF run of the list succeeded.
+
+### Changed
+- RRTMG LW / SW, their shared code, the radiation driver and Dudhia SW compute in WRF's kind `rb` (the model's real:
+  float in FP32 builds, double in FP64 builds; src/phys/ra_rrtmg_common/parkind.hpp); the table structs are templates
+  on the real type and the WRF -r8 table dump is rounded member by member when an FP32 build reads it. FP64 builds
+  unchanged.
+- FP32 builds read the tables WRF READs into REAL (LANDUSE.TBL, Noah SOILPARM / VEGPARM / GENPARM.TBL, RUC
+  VEGPARM.TBL, URBPARM.TBL, the CAM ozone files, P3's itab) with strtof, as libgfortran, instead of strtod and a
+  rounding to float (src/core/parse_real.hpp); CAMtr_volume_mixing_ratio and P3's itabcoll keep double. No value of
+  the shipped or reference tables rounds differently, so no result changes.
 
 ### Fixed
 - Indexing outside the arrays in columns WRF itself reads outside its arrays (WRF's values there are undefined;
@@ -41,7 +71,8 @@ resumes across versions from WRF's wrfrst files.
 - wrfout / wrfrst / auxhist3: an empty variable attribute (stagger, units, description) is one NUL byte as WRF's
   `ext_ncd_put_var_ti_char` writes it (was 0 bytes; netCDF4-python and ncdump read both as ""). The translator gives
   WRF ideal cases the namelist's start date (Registry default 1993-03-13_12:00:00), as ideal.exe and wrf.exe date
-  their files; it was always 0001-01-01_00:00:00.
+  their files; it was always 0001-01-01_00:00:00. `cppwrf-wrf` gives a resumed run the simulation start of its
+  wrfrst file (the namelist's start is the restart time there).
 - A two-way parent without column physics wrote CTOPO / CTOPO2 of its t = 0 frame from the initial feedback (1 + 1 ulp
   in double precision at the 1064 fed-back points of N2) where WRF's start_domain(parent) resets them to 1
   (start_em.F:1620-1621); visible only where an `iofields_filename` puts them in a history or auxiliary stream (the

@@ -1,3 +1,71 @@
+# CPPWRF 1.2.2 release notes
+
+CPPWRF 1.2.2 is a fix release of 1.2.1. The results of every verified configuration are unchanged: CPU FP64 and CUDA
+FP64 reproduce WRF v4.8.0 real*8 bit for bit, CPU FP32 and the CUDA FP32 identity build reproduce WRF v4.8.0 real*4
+on the configurations of docs/FP32_IDENTITY.md. What changes are columns, grids, restarts and options outside the
+verified set where CPPWRF read outside its arrays, accepted what WRF refuses or continued a run differently from
+WRF, and the verified set itself: 18 more WRF references with 54 cases. It covers [COMMITS PENDING] commits (not
+counting merges) from `v1.2.1` (bd0f7d5) to the 1.2.2 release commit. The 1.2.1 notes follow below.
+
+## Fixed
+
+- **Reads outside the arrays** in columns where WRF itself reads outside its arrays (WRF's values are undefined
+  there; CPPWRF's are now defined and equal WRF's wherever WRF's are defined): MYNN's PBL-height and mixing-length
+  loops at the model top, ACM2 with a mixed layer reaching the top, Kain-Fritsch / multi-scale KF with the LCL at the
+  lowest level, Tiedtke with a cloud top at level 2, YSU at kpbl = 0, RRTMG SW and RRTM LW at the edges of their
+  tables. None of these columns occurs in the verified cases.
+- **Start-up checks** for grids the kernels would index outside their halos (e_vert >= 4, specified boundaries of at
+  least 9 x 9 points, a symmetric axis of at least 3 points, RRTM LW with at most 1022 layers, cppwrf_real's smallest
+  inputs) and for nest geometry written by hand (the translator checked it already).
+- **Restarts as WRF:** CPPWRF's own restart files (format version 6; version 5 files are refused) continue the
+  uninterrupted run also in the alarms and attributes of the WRF files, and a resumed run with another restart,
+  history or auxhist3 interval follows WRF's rules; runs resumed from wrfrst files take STEPRA / STEPBL / STEPCU /
+  STEPFG and the phy_init fields from their own options as wrf.exe does; the adaptive time step resumed from a
+  real*4 wrfrst file starts at the second of the file's Times, not 1 s early.
+- **Options as WRF:** `sst_update` without an interval, WUDAPT LCZ without URBPARM_LCZ.TBL, unknown `physics_suite`
+  values (with WRF's TRIM), iofields lines split as WRF's get_fieldstr, `time_step = 0` with the adaptive time step,
+  the WRF ideal cases' start date from the namelist.
+- **Fatal stops** report the smallest of several codes on host and device, and a decomposed run (tiles, MPI ranks)
+  stops with the same code and message as one patch.
+- **A two-way parent without column physics** wrote CTOPO / CTOPO2 of its t = 0 frame from the initial feedback
+  where WRF resets them to 1 (visible only where `iofields_filename` puts them in a history stream).
+- **FP32 builds:** `cppwrf_real --precision float` no longer calls the host's vector logf / expf; STEPRA / STEPBL /
+  STEPCU and the boundary time in WRF's REAL kind.
+- **CUDA FP64:** `diag.csv` sums in the CPU build's order, so a CUDA FP64 run's diag.csv equals the CPU build's.
+
+## Changed
+
+- RRTMG LW / SW, the radiation driver and Dudhia SW compute in WRF's kind `rb` (the model's real), with the tables
+  templated on the real type; the FP32 builds read the tables WRF READs into REAL with strtof, as libgfortran. No
+  value of the shipped or reference tables rounds differently; results unchanged.
+- NOTICE.md: the RRTMG / RRTM (AER) and Noah-MP (UCAR) derived parts stay under their own terms, which do not allow
+  selling them, and the copyright holder of CPPWRF's own code adds a GPLv3 section 7 permission to convey CPPWRF's
+  code combined with those parts under their terms.
+
+## Added
+
+- **Coverage wave 2:** 18 WRF v4.8.0 r8 references and 54 cases (36 CPU FP64, 18 CUDA FP64): WRF's tropical and
+  CONUS physics suites, the adaptive time step with cudt / bldt, MYNN with KF and BMJ radiation feedback, the urban
+  canopy model under MYJ, RRTM LW with Dudhia SW in daylight, Grell-3D and Grell-Freitas-Li on a two-way nest, a
+  one-way nest, use_mp_re 0, o3input / ghg_input 0, isfflx 0, advection orders 6 / 4, hail_opt with radar
+  reflectivity, isftcflx / iz0tlnd 1.
+- `tools/fp32_double_rounding.py` (no literal or table value of CPPWRF or WRF v4.8.0 rounds differently through
+  double) and `tools/colab/colab_wrfref.sh` without a cloud bucket.
+
+## Verification
+
+| Where | Result |
+|---|---|
+| CPU CI at [CI COMMIT PENDING] (GitHub-hosted runners, Debian 13 container, run [CI RUN PENDING]) | [CI PENDING] |
+| GPU: Colab G4 at [G4 COMMIT PENDING] (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | [G4 PENDING] |
+
+How the counts relate (`tests/verify/wrf_suite.py --list`): the suite defines 982 cases, 514 CPU FP64, 337 CUDA
+FP64, 43 CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`, 54 more than 1.2.1 (the coverage wave). [COUNTS PENDING]
+
+## Known limitations
+
+As 1.2.1 (docs/STATUS.md).
+
 # CPPWRF 1.2.1 release notes
 
 CPPWRF 1.2.1 is a fix release of 1.2.0. The results of every verified configuration are unchanged: CPU FP64 and CUDA
