@@ -14,7 +14,7 @@
 #include <memory>
 
 #include "core/backend.hpp"
-#if !defined(__CUDA_ARCH__)
+#if !defined(CPPWRF_DEVICE_CODE)
 #include <complex>
 #endif
 
@@ -54,7 +54,7 @@ CPPWRF_HD inline Cplx cdiv(Cplx a, Cplx b) {
 CPPWRF_HD inline double cabs_(Cplx z) {
 #if defined(CPPWRF_GLIBC_MATH)
   return glibc::hypot(z.re, z.im);
-#elif defined(__CUDA_ARCH__)
+#elif defined(CPPWRF_DEVICE_CODE)
   return ::hypot(z.re, z.im);
 #else
   return std::abs(std::complex<double>(z.re, z.im));
@@ -65,7 +65,7 @@ CPPWRF_HD inline Cplx clog_(Cplx z) {
   Cplx r;
   glibc::clog(z.re, z.im, &r.re, &r.im);
   return r;
-#elif defined(__CUDA_ARCH__)
+#elif defined(CPPWRF_DEVICE_CODE)
   return {::log(::hypot(z.re, z.im)), ::atan2(z.im, z.re)};
 #else
   const std::complex<double> r = std::log(std::complex<double>(z.re, z.im));
@@ -77,7 +77,7 @@ CPPWRF_HD inline Cplx csqrt_(Cplx z) {
   Cplx r;
   glibc::csqrt(z.re, z.im, &r.re, &r.im);
   return r;
-#elif defined(__CUDA_ARCH__)
+#elif defined(CPPWRF_DEVICE_CODE)
   if (z.re == 0.0 && z.im == 0.0) return {0.0, z.im};
   const double t = ::sqrt(0.5 * (::hypot(z.re, z.im) + ::fabs(z.re)));
   if (z.re >= 0.0) return {t, z.im / (2.0 * t)};

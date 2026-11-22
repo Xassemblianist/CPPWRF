@@ -109,7 +109,7 @@ std::uint32_t bits(float v) {
 }
 bool same(float a, float b) { return (std::isnan(a) && std::isnan(b)) || bits(a) == bits(b); }
 long long count(int fn) { return is_pair(fn) ? (1ll << 20) : (1ll << 32) / 61 + 1; }
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
 __global__ void kport(int fn, long long n, float* out) {
   const long long t = blockIdx.x * (long long)blockDim.x + threadIdx.x;
   if (t >= n) return;
@@ -139,23 +139,23 @@ int main() {
     std::printf("%-8s host vs libm %s: %lld of %lld differ\n", kName[fn], gnu_get_libc_version(), bad, n);
     if (strict) fails += bad;
   }
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
   for (int fn = 0; fn < kNFn; ++fn) {  // the device against the host
 #if !defined(CPPWRF_HAVE_MVEC_F4)
     if (fn >= 8 && fn <= 12) continue;
 #endif
     const long long n = count(fn);
     float* d = nullptr;
-    if (cudaMalloc(&d, n * sizeof(float)) != cudaSuccess) {
-      std::printf("no CUDA device: the device check is skipped\n");
+    if (gpuMalloc(&d, n * sizeof(float)) != gpuSuccess) {
+      std::printf("no " CPPWRF_GPU_API_NAME " device: the device check is skipped\n");
       break;
     }
     kport<<<unsigned((n + 255) / 256), 256>>>(fn, n, d);
     std::vector<float> h(static_cast<std::size_t>(n));
-    cudaMemcpy(h.data(), d, n * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaFree(d);
-    if (cudaGetLastError() != cudaSuccess) {
-      std::printf("CUDA error: the device check fails\n");
+    gpuMemcpy(h.data(), d, n * sizeof(float), gpuMemcpyDeviceToHost);
+    gpuFree(d);
+    if (gpuGetLastError() != gpuSuccess) {
+      std::printf(CPPWRF_GPU_API_NAME " error: the device check fails\n");
       return 1;
     }
     long long bad = 0;

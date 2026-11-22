@@ -12,8 +12,8 @@ namespace cppwrf::phys {
 
 namespace {
 
-// chunk column ci on threadIdx.x (CUDA) or as the outer collapsed loop (OpenMP)
-#if defined(CPPWRF_USE_CUDA)
+// chunk column ci on threadIdx.x (GPU) or as the outer collapsed loop (OpenMP)
+#if defined(CPPWRF_USE_GPU)
 #define SW_CI(a, c) (a)
 #define SW_X(b, c) (c)
 inline Range3D sw_range(int n, int nx) { return Range3D{0, n, 0, 1, 0, nx}; }

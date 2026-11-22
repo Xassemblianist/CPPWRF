@@ -6,13 +6,9 @@
 #include <stdexcept>
 #include <string>
 
-#if defined(CPPWRF_USE_CUDA)
-#include <cuda_runtime.h>
-#endif
-
 namespace cppwrf {
 
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
 namespace {
 // per host thread: the tiles of a tiled run (src/core/tiles.cpp) launch their column physics at the same time
 std::mutex mtx;

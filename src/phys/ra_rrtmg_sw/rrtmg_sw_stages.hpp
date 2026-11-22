@@ -319,11 +319,7 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
   for (int ilev = 0; ilev < nlayers; ++ilev) {
     if (c.icld != 0 && RSD(v.cldfrac)[ilev] >= rb(1.0e-20)) any_cloud = true;
   }
-#if defined(__CUDA_ARCH__)
-  const bool run_mcica = __any_sync(__activemask(), any_cloud);
-#else
-  const bool run_mcica = any_cloud;
-#endif
+  const bool run_mcica = CPPWRF_WARP_ANY(any_cloud);
   int any_cld_subcol = 0;
   if (run_mcica && any_cloud) {
     KissRng rng;

@@ -15,6 +15,8 @@
 #include <cmath>
 #include <type_traits>
 
+#include "core/gpu_runtime.hpp"
+
 #if defined(CPPWRF_GLIBC_MATH)
 #include "core/glibc_math.hpp"
 #endif
@@ -41,19 +43,19 @@ using std::tan;
 using std::tanh;
 using std::tgamma;
 #else
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
 #define CPPWRF_LM __host__ __device__ __forceinline__
 #else
 #define CPPWRF_LM inline
 #endif
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_LM_CONST(x) false
 #else
 #define CPPWRF_LM_CONST(x) __builtin_constant_p(x)
 #endif
-// one argument: float -> std:: (as before; the CUDA FP32 identity build: glibc's float function on the device, Gf),
+// one argument: float -> std:: (as before; the GPU FP32 identity build: glibc's float function on the device, Gf),
 // double -> glibc (a host constant: std::, folded), integral -> double
-#if defined(CPPWRF_FP32_IDENTITY) && defined(__CUDA_ARCH__)
+#if defined(CPPWRF_FP32_IDENTITY) && defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_LM_FLOAT(F, Gf) return Gf(a);
 #else
 #define CPPWRF_LM_FLOAT(F, Gf) return std::F(a);
@@ -91,7 +93,7 @@ CPPWRF_LM double atan2_d(double a, double b) {
 template <class A, class B, std::enable_if_t<std::is_arithmetic_v<A> && std::is_arithmetic_v<B>, int> = 0>
 CPPWRF_LM auto atan2(A a, B b) {
   if constexpr (std::is_same_v<A, float> && std::is_same_v<B, float>) {
-#if defined(CPPWRF_FP32_IDENTITY) && defined(__CUDA_ARCH__)
+#if defined(CPPWRF_FP32_IDENTITY) && defined(CPPWRF_DEVICE_CODE)
     return glibcf::atan2f(a, b);
 #else
     return std::atan2(a, b);
@@ -121,7 +123,7 @@ CPPWRF_LM double pow_d(double a, double b) {
 template <class A, class B, std::enable_if_t<std::is_arithmetic_v<A> && std::is_arithmetic_v<B>, int> = 0>
 CPPWRF_LM auto pow(A a, B b) {
   if constexpr (std::is_same_v<A, float> && std::is_same_v<B, float>) {
-#if defined(CPPWRF_FP32_IDENTITY) && defined(__CUDA_ARCH__)
+#if defined(CPPWRF_FP32_IDENTITY) && defined(CPPWRF_DEVICE_CODE)
     return glibcf::powf(a, b);
 #else
     return std::pow(a, b);

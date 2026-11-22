@@ -20,12 +20,15 @@
 #include <cstring>
 
 #include "core/glibc_math_tables.hpp"
+#include "core/gpu_runtime.hpp"
 
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) && !defined(__HIP__)
 // libm's deliberate divisions by zero and overflowing / underflowing constants (math_err.c, e_gamma_r.c)
 #pragma nv_diagnostic push
 #pragma nv_diag_suppress 39
 #pragma nv_diag_suppress 222
+#endif
+#if defined(CPPWRF_GPUCC)
 #define CPPWRF_GM __host__ __device__ __forceinline__
 #else
 #define CPPWRF_GM inline
@@ -33,13 +36,13 @@
 
 namespace cppwrf::glibc {
 namespace detail {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_GT(name) ::cppwrf::glibc_tables::dev::name.v
 #else
 #define CPPWRF_GT(name) ::cppwrf::glibc_tables::name
 #endif
 CPPWRF_GM double asd(std::uint64_t b) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return __longlong_as_double(static_cast<long long>(b));
 #else
   double v;
@@ -48,7 +51,7 @@ CPPWRF_GM double asd(std::uint64_t b) {
 #endif
 }
 CPPWRF_GM std::uint64_t asu(double v) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return static_cast<std::uint64_t>(__double_as_longlong(v));
 #else
   std::uint64_t b;
@@ -60,7 +63,7 @@ CPPWRF_GM std::uint64_t asu(double v) {
 // an immediate to bits moved from a double register (mov.b64; add.s64) as a DADD of the immediate read as a double;
 // two 32-bit adds with carry on the device keep the integer add
 CPPWRF_GM std::uint64_t addk(std::uint64_t a, std::uint64_t k) {
-#if defined(__CUDA_ARCH__)
+#if defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
   unsigned lo, hi;
   asm("{\n\t.reg .u32 al, ah;\n\tmov.b64 {al, ah}, %2;\n\tadd.cc.u32 %0, al, %3;\n\taddc.u32 %1, ah, %4;\n\t}"
       : "=r"(lo), "=r"(hi)
@@ -71,15 +74,15 @@ CPPWRF_GM std::uint64_t addk(std::uint64_t a, std::uint64_t k) {
 #endif
 }
 CPPWRF_GM double fma(double a, double b, double c) {
-#if defined(__CUDA_ARCH__)
-  return __fma_rn(a, b, c);
+#if defined(CPPWRF_DEVICE_CODE)
+  return CPPWRF_FMA_RN(a, b, c);
 #else
   return std::fma(a, b, c);
 #endif
 }
 // roundpd $0 / roundsd $0: round to nearest, ties to even
 CPPWRF_GM double rint(double a) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::rint(a);
 #else
   return std::nearbyint(a);
@@ -1578,7 +1581,7 @@ struct X87 {
 };
 CPPWRF_GM int clz128(unsigned __int128 v) {
   const std::uint64_t hi = std::uint64_t(v >> 64), lo = std::uint64_t(v);
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return hi ? __clzll((long long)hi) : 64 + __clzll((long long)lo);
 #else
   return hi ? __builtin_clzll(hi) : 64 + __builtin_clzll(lo);
@@ -2326,6 +2329,6 @@ CPPWRF_GM double atan(double x) {
 }
 }  // namespace mvec
 }  // namespace cppwrf::glibc
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) && !defined(__HIP__)
 #pragma nv_diagnostic pop
 #endif

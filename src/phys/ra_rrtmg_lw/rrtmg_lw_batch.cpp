@@ -12,9 +12,9 @@ namespace cppwrf::phys {
 
 namespace {
 
-// Kernel index mapping: chunk column ci and a second index x. CUDA: ci on threadIdx.x (coalesced
+// Kernel index mapping: chunk column ci and a second index x. GPU: ci on threadIdx.x (coalesced
 // column-fastest arrays); OpenMP: ci and x are the two collapsed parallel loops.
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
 #define LW_CI(a, b, c) (a)
 #define LW_X(a, b, c) (c)
 inline Range3D lw_range(int n, int nx) { return Range3D{0, n, 0, 1, 0, nx}; }

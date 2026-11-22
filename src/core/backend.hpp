@@ -16,7 +16,9 @@
 #include <stdexcept>
 #include <vector>
 
-#if defined(__CUDACC__)
+#include "core/gpu_runtime.hpp"
+
+#if defined(CPPWRF_GPUCC)
 #define CPPWRF_HD __host__ __device__
 #define CPPWRF_DEV __device__
 #define CPPWRF_FORCEINLINE __host__ __device__ __forceinline__
@@ -26,26 +28,29 @@
 #define CPPWRF_FORCEINLINE inline
 #endif
 
-#if defined(__GNUC__) || defined(__clang__) || defined(__CUDACC__)
+#if defined(__GNUC__) || defined(__clang__) || defined(CPPWRF_GPUCC)
 #define CPPWRF_RESTRICT __restrict__
 #else
 #define CPPWRF_RESTRICT
 #endif
 
-// CUDA FP64 build: glibc's libm and libmvec algorithms on the device and the host (core/glibc_math.hpp), the
-// results of WRF's real*8 build and of the CPU build; CMake option CPPWRF_CUDA_GLIBC_MATH (default ON; OFF:
-// CPPWRF_CUDA_LIBM, CUDA's math library). The kernels call the math library as cppwrf::libm (core/libm.hpp).
-// CUDA FP32 identity build (CMake option CPPWRF_CUDA_FP32_IDENTITY, CPPWRF_FP32_IDENTITY): the CPU FP32 build's
-// arithmetic and math on the device, bit for bit: glibc's double functions as in the FP64 build, glibc's float
-// functions (core/glibc_mathf.hpp) and libmvec's 4-lane float functions (core/libmvec_f4.hpp) on the device.
-#if defined(CPPWRF_FP32_IDENTITY) && (!defined(CPPWRF_USE_CUDA) || defined(CPPWRF_DOUBLE) || defined(CPPWRF_CUDA_LIBM))
-#error "CPPWRF_FP32_IDENTITY: CUDA FP32 builds with glibc's math only"
+// GPU FP64 build: glibc's libm and libmvec algorithms on the device and the host (core/glibc_math.hpp), the
+// results of WRF's real*8 build and of the CPU build; CMake option CPPWRF_CUDA_GLIBC_MATH / CPPWRF_HIP_GLIBC_MATH
+// (default ON; OFF: CPPWRF_CUDA_LIBM / CPPWRF_HIP_LIBM, device math library). The kernels call the math library as
+// cppwrf::libm (core/libm.hpp).
+// GPU FP32 identity build (CPPWRF_FP32_IDENTITY): the CPU FP32 build's arithmetic and math on the device, bit for
+// bit: glibc's double functions as in the FP64 build, glibc's float functions (core/glibc_mathf.hpp) and libmvec's
+// 4-lane float functions (core/libmvec_f4.hpp) on the device.
+#if defined(CPPWRF_FP32_IDENTITY) && \
+    (!defined(CPPWRF_USE_GPU) || defined(CPPWRF_DOUBLE) || defined(CPPWRF_CUDA_LIBM) || defined(CPPWRF_HIP_LIBM))
+#error "CPPWRF_FP32_IDENTITY: GPU FP32 builds with glibc's math only"
 #endif
-#if defined(CPPWRF_USE_CUDA) && (defined(CPPWRF_DOUBLE) || defined(CPPWRF_FP32_IDENTITY)) && !defined(CPPWRF_CUDA_LIBM)
+#if defined(CPPWRF_USE_GPU) && (defined(CPPWRF_DOUBLE) || defined(CPPWRF_FP32_IDENTITY)) && \
+    !defined(CPPWRF_CUDA_LIBM) && !defined(CPPWRF_HIP_LIBM)
 #define CPPWRF_GLIBC_MATH 1
 #endif
 #include "core/libm.hpp"
-// the device's float functions: CUDA's, or glibc's in the identity build (CPPWRF_GF(expf) ...)
+// the device's float functions: device libm, or glibc's in the identity build (CPPWRF_GF(expf) ...)
 #if defined(CPPWRF_FP32_IDENTITY)
 #include "core/glibc_mathf.hpp"
 #define CPPWRF_GF(f) ::cppwrf::glibcf::f
@@ -56,14 +61,14 @@
 // pow in the working precision on host and device (powf for float, as Fortran REAL ** REAL);
 // unqualified pow(float, float) would resolve to the double C function on the host.
 CPPWRF_HD inline float rpow(float a, float b) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(powf)(a, b);
 #else
   return std::pow(a, b);
 #endif
 }
 CPPWRF_HD inline float rlog(float a) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(logf)(a);
 #else
   return std::log(a);
@@ -72,7 +77,7 @@ CPPWRF_HD inline float rlog(float a) {
 CPPWRF_HD inline double rlog(double a) {
 #if defined(CPPWRF_GLIBC_MATH)
   return cppwrf::libm::log(a);
-#elif defined(__CUDA_ARCH__)
+#elif defined(CPPWRF_DEVICE_CODE)
   return ::log(a);
 #else
   return std::log(a);
@@ -81,7 +86,7 @@ CPPWRF_HD inline double rlog(double a) {
 CPPWRF_HD inline double rpow(double a, double b) {
 #if defined(CPPWRF_GLIBC_MATH)
   return cppwrf::libm::pow_d(a, b);
-#elif defined(__CUDA_ARCH__)
+#elif defined(CPPWRF_DEVICE_CODE)
   return ::pow(a, b);
 #else
   return std::pow(a, b);
@@ -90,7 +95,7 @@ CPPWRF_HD inline double rpow(double a, double b) {
 // gfortran's NINT on x86-64 (lround / lroundf): LONG_MIN for NaN, +-Inf and values at or beyond 2^63. The device's
 // conversion saturates (+Inf -> LONG_MAX, whose int is -1, where the CPU's int is 0): the same result on both.
 CPPWRF_HD inline long lround_x86(double x) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   if (!(x < 9223372036854775808.0)) return LONG_MIN;
   return ::lround(x);
 #else
@@ -98,7 +103,7 @@ CPPWRF_HD inline long lround_x86(double x) {
 #endif
 }
 CPPWRF_HD inline long lround_x86(float x) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   if (!(x < 9223372036854775808.0f)) return LONG_MIN;
   return ::lroundf(x);
 #else
@@ -106,7 +111,7 @@ CPPWRF_HD inline long lround_x86(float x) {
 #endif
 }
 // x**2.0 with the constant exponent 2.0: gcc folds pow(x, 2.0) into x * x (WRF's gfortran build and the CPU build);
-// the device cannot test for a constant, so the CUDA FP64 build writes the product out
+// the device cannot test for a constant, so the GPU FP64 build writes the product out
 template <typename T>
 CPPWRF_HD inline T rpow2c(T a) {
   if constexpr (sizeof(T) == sizeof(float)) return a * a;  // REAL x**2.0: x * x on the host and the device alike
@@ -116,7 +121,7 @@ CPPWRF_HD inline T rpow2c(T a) {
   return rpow(a, T(2.0));
 }
 CPPWRF_HD inline float rexp(float a) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(expf)(a);
 #else
   return std::exp(a);
@@ -125,7 +130,7 @@ CPPWRF_HD inline float rexp(float a) {
 CPPWRF_HD inline double rexp(double a) {
 #if defined(CPPWRF_GLIBC_MATH)
   return cppwrf::libm::exp(a);
-#elif defined(__CUDA_ARCH__)
+#elif defined(CPPWRF_DEVICE_CODE)
   return ::exp(a);
 #else
   return std::exp(a);
@@ -145,7 +150,7 @@ CPPWRF_HD inline T c_max(T a, T b) { return (a > b) ? a : b; }
 // independent and differ from the scalar libm in the last bit for ~30% of arguments. On the host the
 // v* functions below give WRF's value for iteration i (0-based) of an n-trip loop; double only (float
 // and the device use the scalar functions).
-#if defined(__x86_64__) && !defined(__CUDA_ARCH__) && !defined(CPPWRF_NO_LIBMVEC) && !defined(CPPWRF_GLIBC_MATH)
+#if defined(__x86_64__) && !defined(CPPWRF_DEVICE_CODE) && !defined(CPPWRF_NO_LIBMVEC) && !defined(CPPWRF_GLIBC_MATH)
 #include <emmintrin.h>
 extern "C" __m128d _ZGVbN2vv_pow(__m128d, __m128d);
 extern "C" __m128d _ZGVbN2v_log(__m128d);
@@ -158,15 +163,15 @@ extern "C" __m128d _ZGVbN2v_log10(__m128d);
 #endif
 // log and log10: glibc's SSE4 variants with Intel's rcpps (core/libmvec_x86.hpp), the same on any x86-64 CPU
 #include "core/libmvec_x86.hpp"
-// float expf / logf / powf / sinf / cosf as libmvec's 4-lane SSE4 variants (CPU builds on x86-64; the CUDA FP32
+// float expf / logf / powf / sinf / cosf as libmvec's 4-lane SSE4 variants (CPU builds on x86-64; the GPU FP32
 // identity build on the device and the host)
-#if (defined(__x86_64__) && !defined(CPPWRF_USE_CUDA) && !defined(__CUDACC__) && !defined(CPPWRF_NO_LIBMVEC)) || \
+#if (defined(__x86_64__) && !defined(CPPWRF_USE_GPU) && !defined(CPPWRF_GPUCC) && !defined(CPPWRF_NO_LIBMVEC)) || \
     defined(CPPWRF_FP32_IDENTITY)
 #define CPPWRF_HAVE_MVEC_F4 1
 #include "core/libmvec_f4.hpp"
 #endif
 // the 4-lane functions in this compilation pass (CPU builds; the identity build's host and device passes)
-#if defined(CPPWRF_HAVE_MVEC_F4) && (!defined(__CUDA_ARCH__) || defined(CPPWRF_FP32_IDENTITY))
+#if defined(CPPWRF_HAVE_MVEC_F4) && (!defined(CPPWRF_DEVICE_CODE) || defined(CPPWRF_FP32_IDENTITY))
 #define CPPWRF_MVEC_F4_PASS 1
 #endif
 namespace cppwrf {
@@ -230,7 +235,7 @@ CPPWRF_HD inline double exp(double a, int i, int n) {
   if (lane(i, n)) return _mm_cvtsd_f64(_ZGVbN2v_exp(_mm_set1_pd(a)));
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::exp(a);
 #else
   return std::exp(a);
@@ -241,7 +246,7 @@ CPPWRF_HD inline double atan(double a, int i, int n) {
   if (lane(i, n)) return _mm_cvtsd_f64(_ZGVbN2v_atan(_mm_set1_pd(a)));
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::atan(a);
 #else
   return std::atan(a);
@@ -252,7 +257,7 @@ CPPWRF_HD inline double sin(double a, int i, int n) {
   if (lane(i, n)) return _mm_cvtsd_f64(_ZGVbN2v_sin(_mm_set1_pd(a)));
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::sin(a);
 #else
   return std::sin(a);
@@ -263,7 +268,7 @@ CPPWRF_HD inline double cos(double a, int i, int n) {
   if (lane(i, n)) return _mm_cvtsd_f64(_ZGVbN2v_cos(_mm_set1_pd(a)));
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::cos(a);
 #else
   return std::cos(a);
@@ -276,7 +281,7 @@ CPPWRF_HD inline double log10(double a, int i, int n) {
   if (lane(i, n)) return _mm_cvtsd_f64(_ZGVbN2v_log10(_mm_set1_pd(a)));
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::log10(a);
 #else
   return std::log10(a);
@@ -308,7 +313,7 @@ CPPWRF_HD inline float exp(float a, int i, int n) {
   if (lane4(i, n)) return mvec4::expf(a);
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(expf)(a);
 #else
   return std::exp(a);
@@ -322,7 +327,7 @@ CPPWRF_HD inline float atan(float a, int i, int n) {
   if (lane4(i, n)) return mvec4::atanf(a);
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(atanf)(a);
 #else
   return std::atan(a);
@@ -333,7 +338,7 @@ CPPWRF_HD inline float sin(float a, int i, int n) {
   if (lane4(i, n)) return mvec4::sinf(a);
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(sinf)(a);
 #else
   return std::sin(a);
@@ -344,14 +349,14 @@ CPPWRF_HD inline float cos(float a, int i, int n) {
   if (lane4(i, n)) return mvec4::cosf(a);
 #endif
   (void)i; (void)n;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(cosf)(a);
 #else
   return std::cos(a);
 #endif
 }
 CPPWRF_HD inline float log10(float a, int, int) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(log10f)(a);
 #else
   return std::log10(a);
@@ -522,12 +527,12 @@ struct ColumnBlock {
 };
 ColumnBlock column_block();
 
-#if defined(CPPWRF_USE_CUDA)
-void cuda_check_launch(const char* where);
-void* cuda_stream_raw();  // the stream of every launch and copy (created on first use; blocking w.r.t. stream 0)
+#if defined(CPPWRF_USE_GPU)
+void gpu_check_launch(const char* where);
+void* gpu_stream_raw();  // the stream of every launch and copy (created on first use; blocking w.r.t. stream 0)
 namespace detail {
-// Before the first launch of a kernel: the driver reserves the kernel's local memory (its stack frame) for every
-// thread the GPU can hold at once and never gives it back; the stack limit (cudaLimitStackSize) is raised to the
+// Before the first launch of a kernel: on CUDA the driver reserves the kernel's local memory (its stack frame) for
+// every thread the GPU can hold at once and never gives it back; the stack limit (cudaLimitStackSize) is raised to the
 // largest frame launched so far, with an error naming the kernel when the device memory is short for it.
 void reserve_local_memory(const void* kernel, const char* kernel_type);
 int* fatal_poll_slot(void (*reset)());  // inside a step: pinned host slot for this check's flag; else nullptr
@@ -540,9 +545,9 @@ bool on();
 void begin();
 void end(const char* kernel_type);
 }  // namespace ktime
-#if defined(__CUDACC__)
-inline cudaStream_t cuda_launch_stream() {
-  return static_cast<cudaStream_t>(cuda_stream_raw());
+#if defined(CPPWRF_GPUCC)
+inline gpuStream_t gpu_launch_stream() {
+  return static_cast<gpuStream_t>(gpu_stream_raw());
 }
 namespace detail {
 template <class K> __global__ void k3d(K k, Range3D r) {
@@ -577,7 +582,7 @@ template <class F, bool MAX> __global__ void kred(F f, Range3D r, double* part) 
   }
   if (threadIdx.x == 0) part[blockIdx.x] = sh[0];
 }
-// The CUDA FP64 and FP32 identity builds' sums: one thread per k plane adds its values in the CPU build's (j, i) order
+// The GPU FP64 and FP32 identity builds' sums: one thread per k plane adds its values in the CPU build's (j, i) order
 template <class F> __global__ void kred_seq(F f, Range3D r, double* part) {
   const int kk = r.k0 + blockIdx.x;
   double acc = 0.0;
@@ -588,7 +593,7 @@ template <class F> __global__ void kred_seq(F f, Range3D r, double* part) {
 }  // namespace detail
 
 template <class K> void parallel_for(const Range3D& r0, const K& k) {
-  static_assert(__nv_is_extended_host_device_lambda_closure_type(K) || std::is_trivially_copyable_v<K>,
+  static_assert(CPPWRF_IS_GPU_KERNEL_TYPE(K),
                 "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
   Range3D r = r0;
   tile::clip(r);
@@ -600,12 +605,12 @@ template <class K> void parallel_for(const Range3D& r0, const K& k) {
   (void)reserved;
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::k3d<<<g, b, 0, cuda_launch_stream()>>>(k, r);
-  cuda_check_launch("parallel_for");
+  detail::k3d<<<g, b, 0, gpu_launch_stream()>>>(k, r);
+  gpu_check_launch("parallel_for");
   if (kt) ktime::end(typeid(K).name());
 }
 template <class K> void column_for(const Range2D& r0, const K& k) {
-  static_assert(__nv_is_extended_host_device_lambda_closure_type(K) || std::is_trivially_copyable_v<K>,
+  static_assert(CPPWRF_IS_GPU_KERNEL_TYPE(K),
                 "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
   Range2D r = r0;
   tile::clip(r);
@@ -617,11 +622,11 @@ template <class K> void column_for(const Range2D& r0, const K& k) {
   (void)reserved;
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::k2d<<<g, b, 0, cuda_launch_stream()>>>(k, r);
-  cuda_check_launch("column_for");
+  detail::k2d<<<g, b, 0, gpu_launch_stream()>>>(k, r);
+  gpu_check_launch("column_for");
   if (kt) ktime::end(typeid(K).name());
 }
-#endif  // __CUDACC__
+#endif  // CPPWRF_GPUCC
 #else   // ---- CPU / OpenMP ----
 template <class K> void parallel_for(const Range3D& r0, const K& k) {
   static_assert(std::is_trivially_copyable_v<K>, "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
@@ -645,7 +650,7 @@ template <class K> void column_for(const Range2D& r0, const K& k) {
 }
 #endif
 
-#if !defined(CPPWRF_USE_CUDA) || defined(__CUDACC__)
+#if !defined(CPPWRF_USE_GPU) || defined(CPPWRF_GPUCC)
 // column_for on the whole range also in a tiled step: launches whose index is not the point they write (the copies of
 // an edge row or column, (0, j) or (i, 0) for the points (nx, j), (i, ny)); every tile writes every point of the edge
 template <class K> void column_for_whole(const Range2D& r, const K& k) {
@@ -655,7 +660,7 @@ template <class K> void column_for_whole(const Range2D& r, const K& k) {
 #endif
 
 // ---- launch fusion: independent kernels in one launch ----
-// LaunchBatch<K, N> collects up to N kernels of the type K, each with its own range, and launches them as one CUDA
+// LaunchBatch<K, N> collects up to N kernels of the type K, each with its own range, and launches them as one GPU
 // kernel (a full batch launches by itself, run() launches the rest); parallel_fused(part(r1, k1), part(r2, k2), ...)
 // does the same for kernels of different types. Every part computes what its own parallel_for computes: part m
 // takes the blocks z0[m] <= blockIdx.z < z0[m + 1] (its k range) with parallel_for's thread mapping in x and y.
@@ -666,8 +671,8 @@ template <class K> void column_for_whole(const Range2D& r, const K& k) {
 // --fmad=false: every operation is rounded on its own). There only kernels that declare
 // `static constexpr bool kNoMulAdd = true` (copies, zeros, comparisons) are batched; the others are launched one by
 // one with parallel_for, the kernel they had before.
-#if !defined(CPPWRF_USE_CUDA) || defined(__CUDACC__)
-#if defined(CPPWRF_USE_CUDA) && !defined(CPPWRF_DOUBLE)
+#if !defined(CPPWRF_USE_GPU) || defined(CPPWRF_GPUCC)
+#if defined(CPPWRF_USE_GPU) && !defined(CPPWRF_DOUBLE)
 inline constexpr bool kFuseMulAdd = false;
 #else
 inline constexpr bool kFuseMulAdd = true;
@@ -680,7 +685,7 @@ template <class K> struct Part {
 template <class K> Part<K> part(const Range3D& r, const K& k) { return Part<K>{r, k}; }
 namespace detail {
 inline bool range_empty(const Range3D& r) { return r.i1 <= r.i0 || r.j1 <= r.j0 || r.k1 <= r.k0; }
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
 struct LaunchShape {  // the grid over every part: x and y as the largest part, z = the parts' k ranges in turn
   unsigned int gx = 0, nj = 0, nz = 0;
   void add(const Range3D& r) {
@@ -747,7 +752,7 @@ template <class K, int N = 8> class LaunchBatch {
   LaunchBatch() = default;
   LaunchBatch(const LaunchBatch&) = delete;
   LaunchBatch& operator=(const LaunchBatch&) = delete;
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   static_assert(sizeof(detail::BatchArgs<K, N>) <= 32000, "kernel parameters too large: use a smaller batch");
   ~LaunchBatch() { run(); }
   void add(const Range3D& r0, const K& k) {
@@ -774,9 +779,9 @@ template <class K, int N = 8> class LaunchBatch {
     const dim3 b(64, by, 1), g(s.gx, (s.nj + by - 1) / by, s.nz);
     const bool kt = ktime::on();
     if (kt) ktime::begin();
-    detail::kbatch<K, N><<<g, b, 0, cuda_launch_stream()>>>(a_);
+    detail::kbatch<K, N><<<g, b, 0, gpu_launch_stream()>>>(a_);
     a_.n = 0;
-    cuda_check_launch("LaunchBatch");
+    gpu_check_launch("LaunchBatch");
     if (kt) ktime::end(typeid(K).name());
   }
 
@@ -789,7 +794,7 @@ template <class K, int N = 8> class LaunchBatch {
 };
 
 template <class... K> void parallel_fused(const Part<K>&... parts) {
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   if constexpr (!(Fusable<K> && ...)) {
     (parallel_for(parts.r, parts.k), ...);
     return;
@@ -805,8 +810,8 @@ template <class... K> void parallel_fused(const Part<K>&... parts) {
   const dim3 b(64, by, 1), g(s.gx, (s.nj + by - 1) / by, s.nz);
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::kfused<K...><<<g, b, 0, cuda_launch_stream()>>>(a);
-  cuda_check_launch("parallel_fused");
+  detail::kfused<K...><<<g, b, 0, gpu_launch_stream()>>>(a);
+  gpu_check_launch("parallel_fused");
   if (kt) ktime::end(typeid(Args).name());
 #else
   (parallel_for(parts.r, parts.k), ...);
@@ -818,7 +823,7 @@ template <class... K> void parallel_fused(const Part<K>&... parts) {
 // condition (raise_fatal: an atomic minimum on host and device, so that of several codes raised in one call the
 // smallest is reported whatever the order of the threads; a decomposed run takes the smallest over its workers,
 // tile::hooks.first_code) and the host calls fatal_check() right after the physics call, which prints WRF's FATAL
-// block and throws FatalError. The device flag is local to each CUDA translation unit: call fatal_check() in the
+// block and throws FatalError. The device flag is local to each GPU translation unit: call fatal_check() in the
 // file that launches the kernel.
 enum FatalCode : int {
   kFatalNone = 0,
@@ -851,14 +856,14 @@ struct FatalError : std::runtime_error {
 extern int fatal_code_host;
 const char* fatal_message(int code);
 [[noreturn]] void fatal_stop(int code);  // prints WRF's FATAL block, throws FatalError
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
 namespace detail {
 static __device__ int fatal_code_dev;
 }
 #endif
 // the flag becomes the smallest non-zero code raised (codes are positive; 0: none)
 CPPWRF_HD inline void raise_fatal(int code) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   int old = *static_cast<volatile int*>(&detail::fatal_code_dev);
   while (old == 0 || code < old) {
     const int seen = atomicCAS(&detail::fatal_code_dev, old, code);
@@ -872,20 +877,20 @@ CPPWRF_HD inline void raise_fatal(int code) {
   }
 #endif
 }
-#if defined(CPPWRF_USE_CUDA) && defined(__CUDACC__)
+#if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
 namespace detail {
 static inline void fatal_reset_dev() {  // clears this translation unit's device flag after a stop
   const int zero = 0;
-  cudaMemcpyToSymbol(fatal_code_dev, &zero, sizeof(int));
+  gpuMemcpyToSymbol(fatal_code_dev, &zero, sizeof(int));
 }
 }  // namespace detail
 #endif
 static inline void fatal_check() {
-#if defined(CPPWRF_USE_CUDA) && defined(__CUDACC__)
+#if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
   // inside a time step (StepScope): the flag is copied to a pinned slot on the stream and read at the step's end
   if (int* slot = detail::fatal_poll_slot(&detail::fatal_reset_dev)) {
-    cudaMemcpyFromSymbolAsync(slot, detail::fatal_code_dev, sizeof(int), 0, cudaMemcpyDeviceToHost,
-                              cuda_launch_stream());
+    gpuMemcpyFromSymbolAsync(slot, detail::fatal_code_dev, sizeof(int), 0, gpuMemcpyDeviceToHost,
+                             gpu_launch_stream());
     return;
   }
   detail::fatal_flush();
@@ -896,16 +901,16 @@ static inline void fatal_check() {
   // the smallest code raised by any worker in this call. Nothing raised: nothing to clear.
   int code = tile::hooks.first_code ? __atomic_load_n(&fatal_code_host, __ATOMIC_RELAXED)
                                     : __atomic_exchange_n(&fatal_code_host, 0, __ATOMIC_RELAXED);
-#if defined(CPPWRF_USE_CUDA) && defined(__CUDACC__)
+#if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
   int dcode = 0;
   const int zero = 0;
-  cudaStream_t s = cuda_launch_stream();
-  cudaMemcpyFromSymbolAsync(&dcode, detail::fatal_code_dev, sizeof(int), 0, cudaMemcpyDeviceToHost, s);
-  cudaStreamSynchronize(s);
+  gpuStream_t s = gpu_launch_stream();
+  gpuMemcpyFromSymbolAsync(&dcode, detail::fatal_code_dev, sizeof(int), 0, gpuMemcpyDeviceToHost, s);
+  gpuStreamSynchronize(s);
   if (dcode != 0) {
     if (!tile::hooks.first_code) {
-      cudaMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, cudaMemcpyHostToDevice, s);
-      cudaStreamSynchronize(s);
+      gpuMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, gpuMemcpyHostToDevice, s);
+      gpuStreamSynchronize(s);
     }
     if (code == 0 || dcode < code) code = dcode;
   }
@@ -914,9 +919,9 @@ static inline void fatal_check() {
     code = tile::hooks.first_code(code);
     if (code != 0) {
       __atomic_store_n(&fatal_code_host, 0, __ATOMIC_RELAXED);
-#if defined(CPPWRF_USE_CUDA) && defined(__CUDACC__)
-      cudaMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, cudaMemcpyHostToDevice, s);
-      cudaStreamSynchronize(s);
+#if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
+      gpuMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, gpuMemcpyHostToDevice, s);
+      gpuStreamSynchronize(s);
 #endif
     }
   }
@@ -935,12 +940,12 @@ class Reducer {
 
  private:
   int max_k_;
-  double* dpart_ = nullptr;  // device partials (CUDA) or unused
+  double* dpart_ = nullptr;  // device partials (GPU) or unused
   std::vector<double> hpart_;
   // a worker of a decomposed run: the maximum over its points, then over the workers (every worker gets the maximum
   // of the whole range; a maximum does not depend on the order). A sum: the values of the worker's points go to one
   // worker, which adds them in the order of a run with one patch (tile::hooks.sum).
- public:  // a kernel type (CUDA: the template argument of a launch must be accessible)
+ public:  // a kernel type (GPU: the template argument of a launch must be accessible)
   template <class F> struct Values {
     F f;
     double* out;
@@ -992,16 +997,16 @@ class Reducer {
     int nk = r.k1 - r.k0;
     if (nk <= 0) return MAX ? -1e308 : 0.0;
     if (nk > max_k_) throw std::runtime_error("Reducer: k range exceeds max_k");
-#if defined(CPPWRF_USE_CUDA)
-#if defined(__CUDACC__)
+#if defined(CPPWRF_USE_GPU)
+#if defined(CPPWRF_GPUCC)
 #if defined(CPPWRF_FP32_IDENTITY) || defined(CPPWRF_DOUBLE)
     // the FP64 and FP32 identity builds: the CPU build's order (diag.csv as the CPU build's)
-    if constexpr (!MAX) detail::kred_seq<F><<<nk, 1, 0, cuda_launch_stream()>>>(f, r, dpart_);
-    else detail::kred<F, MAX><<<nk, 256, 0, cuda_launch_stream()>>>(f, r, dpart_);
+    if constexpr (!MAX) detail::kred_seq<F><<<nk, 1, 0, gpu_launch_stream()>>>(f, r, dpart_);
+    else detail::kred<F, MAX><<<nk, 256, 0, gpu_launch_stream()>>>(f, r, dpart_);
 #else
-    detail::kred<F, MAX><<<nk, 256, 0, cuda_launch_stream()>>>(f, r, dpart_);
+    detail::kred<F, MAX><<<nk, 256, 0, gpu_launch_stream()>>>(f, r, dpart_);
 #endif
-    cuda_check_launch("Reducer");
+    gpu_check_launch("Reducer");
     copy_to_host(hpart_.data(), dpart_, sizeof(double) * nk);
 #endif
 #else

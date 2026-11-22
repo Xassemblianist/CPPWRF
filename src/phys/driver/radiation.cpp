@@ -20,7 +20,7 @@
 #include "phys/ra_rrtmg_sw/rrtmg_sw.hpp"
 #include "phys/ra_rrtmg_sw/rrtmg_sw_tables.hpp"
 #include "phys/ra_sw_dudhia/dudhia_sw.hpp"
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
 #include "phys/ra_rrtmg_lw/rrtmg_lw_batch.hpp"
 #include "phys/ra_rrtmg_sw/rrtmg_sw_batch.hpp"
 #endif
@@ -33,7 +33,7 @@ namespace cppwrf::phys::driver {
 namespace {
 
 
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
 // device path: model fields -> rb arrays with the column index fastest: the columns the worker owns (a
 // decomposed run: its patch [ci0, ci0 + nx) x [cj0, ...); else the domain), col = (i - ci0) + nx (j - cj0)
 struct KStageAll {
@@ -280,7 +280,7 @@ struct RadiationDriver::Impl {
   CamGases gases;
   CamOzone ozone;
   std::vector<rb> xlat, xlong, ozmixm;  // ozmixm: [the worker's column][month][level] (oznini)
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   std::unique_ptr<RrtmgLwBatch> lwb;
   std::unique_ptr<RrtmgSwBatch> swb;
   std::vector<void*> bufs;
@@ -377,7 +377,7 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
       p_->ozone.pin.assign(CamOzone::levsiz, rb(0.0));
     }
   }
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   {
     Impl& q = *p_;
     // the columns the worker owns (a decomposed run: its patch), row by row
@@ -458,7 +458,7 @@ bool RadiationDriver::run(long itimestep, rb xtime, rb julian, int yr, const Rad
   rb f1 = 0, f2 = 0;
   if (o_.o3input == 2) ozone_time_weights(julian, nm, np, f1, f2);
   const std::size_t per = std::size_t(CamOzone::nmon) * CamOzone::levsiz;
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   {
     (void)per;
     Impl& q = *p_;

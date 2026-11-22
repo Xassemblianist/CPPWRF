@@ -193,7 +193,7 @@ struct KMynnPbl {
       excess_h(i, j) = c.excess_h; excess_q(i, j) = c.excess_q;
     }
   }
-#if !defined(CPPWRF_USE_CUDA)
+#if !defined(CPPWRF_USE_GPU)
   // the CPU: the column's parts in order (the GPU runs them as the kernels KMynnStage / KMynnLevel below)
   template <int K>
   void column(int i, int j) const {
@@ -213,7 +213,7 @@ struct KMynnPbl {
 #endif
 };
 
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
 // mynnedmf's column parts on the GPU (one thread per column of a column_work_chunks chunk; the work buffer holds the
 // column's arrays and scalars from one kernel to the next): S = 0 the driver's column values + stage_a, 1 stage_b,
 // 2 stage_b2, 3 stage_c, 4 stage_d + the driver's column outputs
@@ -221,7 +221,7 @@ template <int K, int S>
 struct KMynnStage {
   KMynnPbl k;
   CPPWRF_HD void operator()([[maybe_unused]] int i, [[maybe_unused]] int j) const {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
     using namespace mynnedmf;
     CPPWRF_COLUMN_SLOTS(k.work, i, j)
     Slots<K> sl = take_slots<K>(cppwrf_cw_, k.nz);
@@ -257,7 +257,7 @@ struct KMynnLevel {
   Range2D chunk;  // column_for's columns of the chunk and its thread blocks (the work buffer's places)
   int bx, by;
   CPPWRF_HD void operator()([[maybe_unused]] int i, [[maybe_unused]] int j, [[maybe_unused]] int kk) const {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
     using namespace mynnedmf;
     const int lev = kk + 1;
     if constexpr (L == kCond || L == kMfSum || L == kBoulac) {  // k = 1 .. kte-1
@@ -455,7 +455,7 @@ void PhysicsSuite::pbl_driver(dyn::State& s, const dyn::BaseState& b) {
     if (o_.mynn.tkeadvect && !k.has_qke_adv)
       throw std::runtime_error("bl_mynn_tkeadvect: the scalar qke_adv is missing");
     if (k.has_qke_adv) { k.qke_adv_1 = s.q_1[s.P_QKE_ADV].view(); k.qke_adv_2 = s.q_2[s.P_QKE_ADV].view(); }
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
     if (g_.nz <= 48)  // the work arrays sized to the column
       run_mynn_gpu<48>(cols, k);
     else

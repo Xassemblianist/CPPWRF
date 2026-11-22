@@ -349,7 +349,7 @@ CPPWRF_HD inline void mynn_tendencies(int kte, real delt, A_dz dz, A_rho rho, A_
   X(elBLmin) X(elBLavg) X(rhoi1) X(dzi1)
 #define CPPWRF_MYNN_WORK3(X) \
   X(s_aw1) X(s_awthl1) X(s_awqt1) X(s_awqv1) X(s_awqc1) X(s_awu1) X(s_awv1) X(s_awqke1) X(s_awqsq1) X(zw1)
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_MYNN_ARR2(name) ::cppwrf::ColArray<real> name;
 #define CPPWRF_MYNN_ARR3(name) ::cppwrf::ColArray<real> name;
 #else
@@ -405,7 +405,7 @@ inline constexpr std::size_t kWorkBytes = 0 CPPWRF_MYNN_COLUMN(CPPWRF_MYNN_BYTES
     CPPWRF_MYNN_WORK3(CPPWRF_MYNN_BYTES3) + sizeof(real) * std::size_t(kScalarsReal) +
     sizeof(int) * std::size_t(kScalarsInt) + kMfWorkBytes<K>;
 
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 // one column's arrays and scalars in the work buffer, at the same places in every kernel of a launch
 template <int K>
 struct Slots {
@@ -814,7 +814,7 @@ CPPWRF_HD inline void mynnedmf_parts(Column<K>& c, Work<K>& w, Scalars& sc, cons
   mynnedmf_stage_d<K>(c, w, sc, op, tke_budget, delt, ust, ps, wspd, uoce, voce);
 }
 
-#if !defined(__CUDA_ARCH__)
+#if !defined(CPPWRF_DEVICE_CODE)
 // mynnedmf on a host column (local work arrays)
 template <int K>
 inline void mynnedmf(Column<K>& c, const Options& op, int tke_budget, int initflag, real delt, real dx, real xland,

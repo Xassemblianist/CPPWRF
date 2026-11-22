@@ -22,10 +22,12 @@
 
 #include "core/glibc_math.hpp"
 
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) && !defined(__HIP__)
 // libm's deliberate division by zero (math_errf.c)
 #pragma nv_diagnostic push
 #pragma nv_diag_suppress 39
+#endif
+#if defined(CPPWRF_GPUCC)
 #define CPPWRF_GMF __host__ __device__ __forceinline__
 #else
 #define CPPWRF_GMF inline
@@ -249,7 +251,7 @@ inline constexpr std::uint64_t kSinhfTb[32] = {
     0x3fed5818dcfba487ull, 0x3fedfc97337b9b5full, 0x3feea4afa2a490daull, 0x3fef50765b6e4540ull,
 };
 }  // namespace cppwrf::glibcf_tables
-#if defined(__CUDACC__)
+#if defined(CPPWRF_GPUCC)
 namespace cppwrf::glibcf_tables::dev {  // device copies (constant-initialised from the host tables)
 template <class T, int N>
 struct Arr {
@@ -275,7 +277,7 @@ static __device__ const Arr<std::uint64_t, 32> kSinhfTb = arr(::cppwrf::glibcf_t
 
 namespace cppwrf::glibcf {
 namespace detail {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
 #define CPPWRF_GFT(name) ::cppwrf::glibcf_tables::dev::name.v
 #else
 #define CPPWRF_GFT(name) ::cppwrf::glibcf_tables::name
@@ -286,7 +288,7 @@ using ::cppwrf::glibc::detail::asd;
 using ::cppwrf::glibc::detail::asu;
 using ::cppwrf::glibc::detail::fma;
 CPPWRF_GMF float asf(std::uint32_t b) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return __uint_as_float(b);
 #else
   float v;
@@ -295,7 +297,7 @@ CPPWRF_GMF float asf(std::uint32_t b) {
 #endif
 }
 CPPWRF_GMF std::uint32_t asuf(float v) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return __float_as_uint(v);
 #else
   std::uint32_t b;
@@ -304,14 +306,14 @@ CPPWRF_GMF std::uint32_t asuf(float v) {
 #endif
 }
 CPPWRF_GMF float fmaf(float a, float b, float c) {
-#if defined(__CUDA_ARCH__)
-  return __fmaf_rn(a, b, c);
+#if defined(CPPWRF_DEVICE_CODE)
+  return CPPWRF_FMAF_RN(a, b, c);
 #else
   return std::fma(a, b, c);
 #endif
 }
 CPPWRF_GMF int clz32(std::uint32_t x) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return __clz(static_cast<int>(x));
 #else
   return __builtin_clz(x);
@@ -797,7 +799,7 @@ CPPWRF_GMF double tanf_rltl(float zf, int* q) {
   const double x = zf;
   const double idl = -0x1.b1bbead603d8bp-32 * x;
   const double idh = 0x1.45f306ep-1 * x;
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   const double id = ::rint(idh);
 #else
   const double id = std::nearbyint(idh);
@@ -806,7 +808,7 @@ CPPWRF_GMF double tanf_rltl(float zf, int* q) {
   return (idh - id) + idl;
 }
 CPPWRF_GMF void tanf_mul64(std::uint64_t a, std::uint64_t b, std::uint64_t* hi, std::uint64_t* lo) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   *hi = __umul64hi(a, b);
   *lo = a * b;
 #else
@@ -985,21 +987,21 @@ CPPWRF_GMF float log10f(float x) {
 // ---- asinf, acosf, erff, tgammaf, sinhf (CORE-MATH, correctly rounded; generic C in libm, no FMA variant) ----
 namespace detail {
 CPPWRF_GMF double sqrtd(double x) {
-#if defined(__CUDA_ARCH__)
-  return __dsqrt_rn(x);
+#if defined(CPPWRF_DEVICE_CODE)
+  return CPPWRF_DSQRT_RN(x);
 #else
   return std::sqrt(x);
 #endif
 }
 CPPWRF_GMF double floord(double x) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::floor(x);
 #else
   return std::floor(x);
 #endif
 }
 CPPWRF_GMF float floorff(float x) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::floorf(x);
 #else
   return std::floor(x);
@@ -1007,7 +1009,7 @@ CPPWRF_GMF float floorff(float x) {
 }
 // roundeven (finite arguments)
 CPPWRF_GMF double roundevend(double x) {
-#if defined(__CUDA_ARCH__)
+#if defined(CPPWRF_DEVICE_CODE)
   return ::rint(x);
 #else
   return std::nearbyint(x);
@@ -1321,6 +1323,6 @@ CPPWRF_GMF float sinhf(float x) {
   return ub;
 }
 }  // namespace cppwrf::glibcf
-#if defined(__CUDACC__)
+#if defined(__CUDACC__) && !defined(__HIP__)
 #pragma nv_diagnostic pop
 #endif
