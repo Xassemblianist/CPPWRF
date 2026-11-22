@@ -2,8 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # The differential tests on a VM (tools/gcp/remote_suite.sh for the full suite, remote_difftests.sh alone): a CPU
 # FP64 build with -DCPPWRF_DIFF_TESTS=ON, `ctest -L diff` against the WRF objects of tools/gcp/stage_diff_data.sh's
-# tar, then the other ctest tests (unit, io_netcdf) except the two that need whole WRF runs (real_vs_wrf,
-# wrf_files_vs_wrf: the suite's files tests and real_variant cover them) and the translator's (run on its own).
+# tar, then the other ctest tests (unit, io_netcdf, real_vs_wrf: cppwrf_real against WRF real.exe in the 43 run
+# directories of ${CPPWRF_WRF_RUNS}/real, real_exe_data.tar of tests/verify/ctest_data.txt) except wrf_files_vs_wrf
+# (the suite's files tests run it) and the translator's (run on its own).
 #
 #   run_diff_tests.sh SRC BUILD DATA OUT [FAULT.patch ...]
 #
@@ -52,7 +53,7 @@ ctest_log() {  # LOG ctest-args...: the run, the skipped tests as SKIPPED lines,
 # serial: the column tests of one directory share its work files
 sel=(); [ -n "${DIFF_TESTS:-}" ] && sel=(-R "$DIFF_TESTS")
 ctest_log "$OUT/diff.log" -L diff "${sel[@]}"; st=$?
-ctest_log "$OUT/ctest.log" -LE diff -E '^(real_vs_wrf|wrf_files_vs_wrf|wrf2cppwrf_translator)$' -j"$(nproc)" "${sel[@]}" || st=1
+ctest_log "$OUT/ctest.log" -LE diff -E '^(wrf_files_vs_wrf|wrf2cppwrf_translator)$' -j"$(nproc)" "${sel[@]}" || st=1
 
 : > "$OUT/faults.log"
 for f in "$@"; do

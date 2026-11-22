@@ -279,7 +279,8 @@ if(TARGET netCDF::netcdf OR NETCDF_FOUND OR NETCDF_INCDIR)
   add_subdirectory(src/wrf_io)
   target_link_libraries(cppwrf_core PUBLIC cppwrf_wrfio)
   add_subdirectory(src/init_real)
-  # cppwrf_real against WRF real.exe output (skipped, exit 77, without ${CPPWRF_WRF_RUNS}/real)
+  # cppwrf_real against WRF real.exe output (skipped, exit 77, without ${CPPWRF_WRF_RUNS}/real: real_exe_data.tar of
+  # tests/verify/ctest_data.txt, which the CI diff job fetches)
   add_test(NAME real_vs_wrf COMMAND bash ${CMAKE_SOURCE_DIR}/tests/init_real/run_real_test.sh ${CMAKE_BINARY_DIR}
            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(real_vs_wrf PROPERTIES SKIP_RETURN_CODE 77)

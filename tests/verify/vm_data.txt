@@ -169,4 +169,6 @@ diff_data.tar
 port_c01_diff.tar
 # P3's p3_lookupTable_1.dat-v5.4_2momI in the -r8 -fdefault-double-8 build's run/ (the mp_physics = 50 / 51 column test)
 port_c09_diff.tar
+# WRF real.exe's runs of ctest real_vs_wrf (wrf_runs/real/run_*, tests/verify/ctest_data.txt)
+real_exe_data.tar
 # not here: the slow cases' data (gcp_run.sh --slow --data ...,long_data.tar,long72_data.tar,long72n3_data.tar)
