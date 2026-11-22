@@ -98,7 +98,11 @@ void NcOut::var(const std::string& name, char type, const std::vector<std::strin
   if (field_type != 0) ck(nc_put_att_int(nc_, id, "FieldType", NC_INT, 1, &field_type), "FieldType");
   for (const char* key : {"MemoryOrder", "description", "units", "stagger", "coordinates"}) {
     auto it = satts.find(key);
-    if (it != satts.end()) ck(nc_put_att_text(nc_, id, key, it->second.size(), it->second.c_str()), key);
+    // an empty one as ext_ncd_put_var_ti_char writes it: one NUL byte (len_trim(char(0)) = 1)
+    if (it != satts.end())
+      ck(it->second.empty() ? nc_put_att_text(nc_, id, key, 1, "")
+                            : nc_put_att_text(nc_, id, key, it->second.size(), it->second.c_str()),
+         key);
   }
   vars_[name] = std::move(info);
 }

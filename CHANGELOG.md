@@ -13,6 +13,35 @@ resumes across versions from WRF's wrfrst files.
   not sold. Nothing else changes.
 
 ### Fixed
+- Indexing outside the arrays in columns WRF itself reads outside its arrays (WRF's values there are undefined;
+  defined values here, identical wherever WRF's are defined): MYNN's PBL-height and mixing-length `DO WHILE` loops
+  stop at the model top; ACM2 at a mixed layer or CBL reaching the top (U3D / V3D and VCI at kte+1 read as 0);
+  Kain-Fritsch and multi-scale KF with the LCL at the lowest level (a saturated one-layer source of more than 50 hPa:
+  K = KLCL-1 = 0 of WRF, here the lowest two levels); Tiedtke with a cloud top at level 2 (the levels from 1; the
+  [jk-1] = -1 writes are gone) and the level-0 winds of `cududv` (0, not the column buffer's bytes); YSU's PBL height
+  at kpbl = 0 of the theta-li loop (the ground, 0); RRTMG SW's `jp(nlayers+1)` / `jp(0)` (model top above 191 hPa,
+  every layer above 95.6 hPa); RRTM LW's Planck rows below 160 K / from 340 K and CORR1 / CORR2 below ~1 Pa (the edge
+  row). None of these columns occurs in the verified cases: P1, P4, Tiedtke, ACM2, MYNN, MSKF, RRTM and adaptive runs
+  of 3 steps are byte-identical.
+- Start-up checks for grids the kernels would index outside their halos: e_vert >= 4 (real, WRF ideal, cppwrf_real),
+  specified boundaries of at least 9 x 9 points (e_we, e_sn >= 10, WRF's smallest decomposed patch), a symmetric
+  axis of at least 3 points (a narrower mirror read the other side's halo while it was written), RRTM LW with at most
+  1022 layers (a fixed level array; WRF's are automatic), cppwrf_real with e_we, e_sn >= 3 and num_metgrid_levels
+  >= 2; a nest's e_vert equal to its parent's, e_we - s_we and e_sn - s_sn divisible by parent_grid_ratio, and the
+  nest inside its parent (the translator checked these; an INI written by hand was not).
+- CUDA FP64: `diag.csv` sums in the CPU build's order (one thread per level, as the FP32 identity build), so a CUDA
+  FP64 run's diag.csv equals the CPU build's; the fast FP32 build keeps the tree.
+- Adaptive time step: `time_step = 0` (start_em replaces it by `starting_time_step`) stopped the translator with a
+  division by zero, and `time.dt = 0` divided by zero in the model; a run resumed from a real*4 wrfrst file whose
+  XTIME rounds below the restart second (3601 s: 60.016666 min) started 1 s early and missed the next boundary time
+  (the resumed clock now takes the second of the file's Times); a WRF_ALARM_SECS_TIL_NEXT_RING_01 < 0 disabled the
+  history output where WRF keeps the namelist's alarm; a resumed run that ends at or before the restart time took
+  one step. STEPRA, STEPBL, STEPCU and the boundary time dtbc in WRF's REAL kind (float in FP32 builds; FP64
+  unchanged).
+- wrfout / wrfrst / auxhist3: an empty variable attribute (stagger, units, description) is one NUL byte as WRF's
+  `ext_ncd_put_var_ti_char` writes it (was 0 bytes; netCDF4-python and ncdump read both as ""). The translator gives
+  WRF ideal cases the namelist's start date (Registry default 1993-03-13_12:00:00), as ideal.exe and wrf.exe date
+  their files; it was always 0001-01-01_00:00:00.
 - A two-way parent without column physics wrote CTOPO / CTOPO2 of its t = 0 frame from the initial feedback (1 + 1 ulp
   in double precision at the 1064 fed-back points of N2) where WRF's start_domain(parent) resets them to 1
   (start_em.F:1620-1621); visible only where an `iofields_filename` puts them in a history or auxiliary stream (the

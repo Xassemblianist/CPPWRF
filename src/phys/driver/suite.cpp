@@ -747,11 +747,11 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     copy_to_dev(d_kf_tables_, &h_kf, sizeof(h_kf));
     nca.fill_host([](int, int, int) { return -100.0; });  // kf_eta_init default for non-restart
   }
-  // bldt = 0: every step; otherwise WRF stepbl = nint(bldt*60/dt), at least 1
-  stepbl = o.bldt == 0 ? 1 : int(std::lround(o.bldt * 60. / g.dt));
+  // bldt = 0: every step; otherwise WRF stepbl = nint(bldt*60/dt), at least 1 (REAL: float in a real*4 build)
+  stepbl = o.bldt == 0 ? 1 : int(std::lround(real(o.bldt) * real(60.) / real(g.dt)));
   if (stepbl < 1) stepbl = 1;
   // cu_init (module_physics_init.F:4025-4026): STEPCU = max(nint(CUDT*60./DT), 1)
-  stepcu = int(std::lround(o.cudt * 60. / g.dt));
+  stepcu = int(std::lround(real(o.cudt) * real(60.) / real(g.dt)));
   if (stepcu < 1) stepcu = 1;
   // fg_init (module_physics_init.F:4953-4954): STEPFG = max(nint(FGDT*60./DT), 1)
   stepfg = int(std::lround(real(o.fdda.fgdt) * real(60.) / real(g.dt)));

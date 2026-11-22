@@ -274,7 +274,7 @@ CPPWRF_HD inline void length1_pre(int kte, real xland, A_dz dz, real dx, A_zw zw
   vsc = real(1.0e-5);
   int k = kts + 1;
   real zwk = zw[k];
-  while (zwk <= pblh2 + c_max(real(200.), c_min(p3 * pblh2, real(600.)))) {
+  while (k <= kte && zwk <= pblh2 + c_max(real(200.), c_min(p3 * pblh2, real(600.)))) {
     const real dzk = p5 * (dz[k] + dz[k - 1]);
     const real qdz = c_min(c_max(qkw[k], real(0.01)), real(30.0)) * dzk;
     elt = elt + qdz * zwk;
@@ -380,7 +380,7 @@ CPPWRF_HD inline void mym_length0(int kte, A_dz dz, A_zw zw, real rmol, real flt
   real vsc = real(1.0e-5);
   int k = kts + 1;
   real zwk = zw[k];
-  while (zwk <= pblh2 + h1) {
+  while (k <= kte && zwk <= pblh2 + h1) {
     const real dzk = p5 * (dz[k] + dz[k - 1]);
     const real qdz = c_max(qkw[k] - qmin, real(0.03)) * dzk;
     elt = elt + qdz * zwk;
@@ -439,7 +439,7 @@ CPPWRF_HD inline void mym_length2(int kte, A_dz dz, A_zw zw, real rmol, real flt
   const real pblh_plus_ent = c_max(pblh + h1, real(100.));
   int k = kts + 1;
   real zwk = zw[k];
-  while (zwk <= pblh_plus_ent) {
+  while (k <= kte && zwk <= pblh_plus_ent) {
     const real dzk = p5 * (dz[k] + dz[k - 1]);
     const real qdz = c_min(c_max(qkw[k] - qmin, real(0.03)), real(30.0)) * dzk;
     elt = elt + qdz * zwk;

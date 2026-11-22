@@ -43,6 +43,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
   // WRF zeroes sfluxzen first (module_ra_rrtmg_sw.F taumol_sw): with laytrop = nlayers (model top at more
   // than ~191 hPa) bands 16, 17, 27, 28 and 29 never reach their laysolfr and keep 0
   for (int ig = 0; ig < 112; ++ig) sfluxzen[ig] = rb(0.0);
+  // laysolfr: WRF reads jp(nlayers+1) (laytrop = nlayers; never set, and either outcome gives laytrop) and jp(0)
+  // (laytrop = 0, every layer above 95.6 hPa), outside the layers; here neither is read (lay > 0, lay + 1 < nlayers)
 
   // Band 16 (2600-3250 cm-1): ng16 = 6, offset = 0
   {
@@ -91,7 +93,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
 
     int laysolfr = nlayers - 1;
     for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
       rb tauray = colmol[lay] * b.rayl;
@@ -156,7 +158,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
 
     int laysolfr = nlayers - 1;
     for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
       rb speccomb = colh2o[lay] + b.strrat * colco2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -205,7 +207,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
     int offset = 18;
     int laysolfr = laytrop - 1;
     for (int lay = 0; lay < laytrop; ++lay) {
-      if (jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr) laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
       rb speccomb = colh2o[lay] + b.strrat * colch4[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -273,7 +276,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
     int offset = 26;
     int laysolfr = laytrop - 1;
     for (int lay = 0; lay < laytrop; ++lay) {
-      if (jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr) laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
       rb speccomb = colh2o[lay] + b.strrat * colco2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -341,7 +345,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
     int offset = 34;
     int laysolfr = laytrop - 1;
     for (int lay = 0; lay < laytrop; ++lay) {
-      if (jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr) laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
       int ind0 = ((jp[lay] - 1) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = (jp[lay] * 5 + (jt1[lay] - 1)) * 1 + 1;
       int inds = indself[lay];
@@ -390,7 +395,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
     int offset = 44;
     int laysolfr = laytrop - 1;
     for (int lay = 0; lay < laytrop; ++lay) {
-      if (jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr) laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
       rb speccomb = colh2o[lay] + b.strrat * colco2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -482,7 +488,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
     int laysolfr = laytrop - 1;
     constexpr rb o2adj = rb(1.6);
     for (int lay = 0; lay < laytrop; ++lay) {
-      if (jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr) laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
       rb o2cont = rb(4.35e-4) * colo2[lay] / (rb(350.0) * rb(2.0));
       rb speccomb = colh2o[lay] + o2adj * b.strrat * colo2[lay];
       rb specparm = colh2o[lay] / speccomb;
@@ -554,7 +561,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
     int offset = 56;
     int laysolfr = laytrop - 1;
     for (int lay = 0; lay < laytrop; ++lay) {
-      if (jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr) laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
       int ind0 = ((jp[lay] - 1) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = (jp[lay] * 5 + (jt1[lay] - 1)) * 1 + 1;
       int inds = indself[lay];
@@ -591,7 +599,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
     int offset = 66;
     int laysolfr = laytrop - 1;
     for (int lay = 0; lay < laytrop; ++lay) {
-      if (jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr) laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
       rb speccomb = colh2o[lay] + b.strrat * colo2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -662,7 +671,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
     int offset = 74;
     int laysolfr = laytrop - 1;
     for (int lay = 0; lay < laytrop; ++lay) {
-      if (jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr) laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
       int ind0 = ((jp[lay] - 1) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = (jp[lay] * 5 + (jt1[lay] - 1)) * 1 + 1;
 
@@ -724,7 +734,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
 
     int laysolfr = nlayers - 1;
     for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
 
@@ -782,7 +792,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
 
     int laysolfr = nlayers - 1;
     for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
       rb speccomb = colo3[lay] + b.strrat * colo2[lay];
       rb specparm = colo3[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -850,7 +860,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
 
     int laysolfr = nlayers - 1;
     for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
       rb tauray = colmol[lay] * b.rayl;

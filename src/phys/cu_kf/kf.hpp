@@ -595,6 +595,9 @@ struct KFKernel {
                 klcl = nk;
                 if (zlcl <= z0[nk]) break;
             }
+            // klcl = 0 (an LCL at or below the lowest level: a one-layer source at k = 1 that is saturated): WRF's
+            // K = KLCL-1 = 0 is outside its 1:KX arrays and W0AVG; the lowest two levels are used instead
+            if (klcl < 1) klcl = 1;
             if (zlcl > z0[kl - 1]) {
                 ishall = 2;  // KF_eta_PARA: no convection (WRFCuP accounting)
                 return;
@@ -1412,6 +1415,7 @@ struct KFKernel {
                 klcl = nk;
                 if (zlcl <= z0[nk]) break;
             }
+            if (klcl < 1) klcl = 1;
             int k_lcl_adj = klcl - 1;
             T dlp = (zlcl - z0[k_lcl_adj]) / (z0[klcl] - z0[k_lcl_adj]);
             T tenv = tg[k_lcl_adj] + (tg[klcl] - tg[k_lcl_adj]) * dlp;

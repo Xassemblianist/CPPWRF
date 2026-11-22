@@ -102,9 +102,13 @@ void init_real_case(const io::Config& cfg, Model& m) {
   g.dt = cfg.get_double("time.dt", d.dt);
   g.p_top = d.p_top;
   g.bc_x = g.bc_y = BC::Specified;
+  check_grid_size(g);
   tile::set_domain(g);
   m.run_time = cfg.get_double("run.run_time", 0.0);
-  m.nsteps = std::lround(m.run_time / g.dt);
+  // the adaptive time step replaces time.dt by the starting time step (start_em; init_adaptive sets nsteps)
+  const bool adaptive = cfg.get_bool("time.adaptive", false);
+  if (!(g.dt > 0.0) && !adaptive) throw std::runtime_error("time.dt must be > 0");
+  m.nsteps = g.dt > 0.0 ? std::lround(m.run_time / g.dt) : 0;
   m.xlat = d.xlat;
   m.xlong = d.xlong;
   m.hybrid_opt = d.hybrid_opt;
@@ -503,7 +507,6 @@ void init_real_case(const io::Config& cfg, Model& m) {
   // WRF's dtbc is a running sum of dt, reset only when the model time equals a boundary time exactly
   // (mediation_integrate.F); dtbc = t0 - need * interval below is that sum only when dt is an integer
   // (exact sums) that divides the interval
-  const bool adaptive = cfg.get_bool("time.adaptive", false);
   if (!adaptive && (g.dt != std::floor(g.dt) || std::fmod(interval, g.dt) != 0.0))
     throw std::runtime_error("real: time.dt must be an integer number of seconds that divides the boundary interval");
   if (adaptive && (interval != std::floor(interval) ||

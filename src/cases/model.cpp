@@ -22,6 +22,18 @@ BC parse_bc(const std::string& s) {
   throw std::runtime_error("unknown boundary condition '" + s + "' (periodic|symmetric|specified|open)");
 }
 
+void check_grid_size(const Grid& g) {
+  if (g.nz < 3)
+    throw std::runtime_error("domain: " + std::to_string(g.nz) + " vertical levels (e_vert = " + std::to_string(g.nz + 1) +
+                             "); at least 3 (e_vert >= 4) are needed");
+  if ((g.bc_x == BC::Symmetric && g.nx < Grid::halo) || (g.bc_y == BC::Symmetric && g.ny > 1 && g.ny < Grid::halo))
+    throw std::runtime_error("domain: a symmetric boundary on an axis of fewer than " + std::to_string(Grid::halo) +
+                             " points (" + std::to_string(g.nx) + " x " + std::to_string(g.ny) + ") is not supported");
+  if ((g.bc_x == BC::Specified && g.nx < 9) || (g.bc_y == BC::Specified && g.ny < 9))
+    throw std::runtime_error("domain: specified boundaries need at least 9 x 9 points (e_we, e_sn >= 10); this one has " +
+                             std::to_string(g.nx) + " x " + std::to_string(g.ny));
+}
+
 std::vector<std::string> split_list(const std::string& s) {
   std::vector<std::string> out;
   std::string cur;
@@ -79,6 +91,7 @@ static void init_ideal(const io::Config& cfg, Model& m, const std::string& cname
   g.bc_x = parse_bc(cfg.get_string("domain.bc_x", "periodic"));
   g.bc_y = parse_bc(cfg.get_string("domain.bc_y", "periodic"));
   g.dt = cfg.get_double("time.dt");
+  check_grid_size(g);
   tile::set_domain(g);
   m.run_time = cfg.get_double("run.run_time", 0.0);
   m.nsteps = std::lround(m.run_time / g.dt);

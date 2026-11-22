@@ -515,7 +515,10 @@ struct YSUKernel {
       } else {
         brint = (brcr - brdn) / (brup - brdn);
       }
-      hpbl(i, j) = za[kpbl - 1] + brint * (za[kpbl] - za[kpbl - 1]);
+      // kpbl = 0 (the first unstable level of the theta-li loop is its last, kte-1): WRF reads za(i, 0), below
+      // its kts:kte array; the ground (0) instead, which gives hpbl < zq(2) and kpbl = 0 as below
+      const real za_below = kpbl > 0 ? za[kpbl - 1] : real(0.0);
+      hpbl(i, j) = za_below + brint * (za[kpbl] - za_below);
       if (hpbl(i, j) < zq[1]) kpbl = 0;
       if (kpbl <= 0) pblflg = false;
     }

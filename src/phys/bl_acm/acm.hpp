@@ -165,8 +165,10 @@ CPPWRF_HD inline void acm_mix(const Column<K>& c, real* eddy, real (*vci)[K + 1]
     // tendency of the CBL concentrations: semi-implicit solution
     for (int k = 2; k <= kcbl; ++k)
       for (int l = 0; l < NSP; ++l) {
+        // k = kl (KCBL = kte): WRF reads DZH, MDWN and VCI at kte+1, outside its arrays (MDWN(kte+1) = 0)
+        const real vup = k < kl ? vci[l][k + 1] : real(0.);
         const real delc = dts * (mbarks[k] * vci[l][1] - mdwn[k] * vci[l][k] +
-                                 c.dzh[k + 1] * c.dzhi[k] * mdwn[k + 1] * vci[l][k + 1]);
+                                 c.dzh[k + 1] * c.dzhi[k] * mdwn[k + 1] * vup);
         di[l][k] = vci[l][k] + (real(1.0) - crankp) * delc;
       }
     for (int k = kcbl + 1; k <= kl; ++k)
@@ -294,8 +296,11 @@ struct AcmKernel {
     if (kmix > ksrc) {
       const real fintt = (th1 - thetav[kmix]) / (thetav[kmix + 1] - thetav[kmix]);
       zmix = fintt * (c.za[kmix + 1] - c.za[kmix]) + c.za[kmix];
-      umix = fintt * (US(kmix + 1) - US(kmix)) + US(kmix);
-      vmix = fintt * (VS(kmix + 1) - VS(kmix)) + VS(kmix);
+      // kmix = kte: WRF reads U3D / V3D at kte+1 (u_phy there is never set: 0) and THETAV / ZA beyond kte
+      // (0 here)
+      const real uup = kmix < kte ? US(kmix + 1) : real(0.), vup = kmix < kte ? VS(kmix + 1) : real(0.);
+      umix = fintt * (uup - US(kmix)) + US(kmix);
+      vmix = fintt * (vup - VS(kmix)) + VS(kmix);
     } else {
       zmix = zh1;
       umix = uh1;
