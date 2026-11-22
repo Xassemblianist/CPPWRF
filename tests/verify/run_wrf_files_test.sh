@@ -27,11 +27,13 @@ fi
 BUILD_DIR=${1:-${REPO_ROOT}/build}; shift || true
 EXE=${BUILD_DIR}/cppwrf
 CMP="python3 ${REPO_ROOT}/tests/init_real/compare_real.py$([ "${CPPWRF_FILES_NO_VALUES:-0}" = 1 ] && echo " --no-values") --ignore"
-# the variables not compared in WRF's file $1 (case $2): RQCBLTEN / RQIBLTEN without QCLOUD / QICE, f1's QZ0 / USTM
+# the variables not compared in WRF's file $1 (case $2): RQCBLTEN / RQIBLTEN without QCLOUD / QICE, LH with isfflx 0
+# (wrf_suite.uninitialised), f1's QZ0 / USTM
 ignored() {
   python3 -c 'import sys, netCDF4
-v = netCDF4.Dataset(sys.argv[1]).variables
+d = netCDF4.Dataset(sys.argv[1]); v = d.variables
 print(",".join([x for x, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")) if q not in v]
+               + (["LH"] if "ISFFLX" in d.ncattrs() and int(d.getncattr("ISFFLX")) == 0 else [])
                + (["QZ0", "USTM"] if sys.argv[2] == "f1" else []) or ["-"]))' "$1" "$2"
 }
 WORK=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}/wrf_files_test

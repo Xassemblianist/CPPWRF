@@ -17,6 +17,8 @@ J=$1 FILES=$2 CASES=$3 STAGE=$4 FETCH=$5 REAL=${6:-}
 W=$J/wrf_runs; mkdir -p $W
 set -x
 touch $J/setup.out
+# a data tar that did not arrive (remote_chroot_job.sh): no run on partial data, nothing staged
+if [ -s $J/data_failed ]; then echo "NO_RUNS: $(tr '\n' ' ' < $J/data_failed)" >> $J/setup.out; exit 0; fi
 grep -v '^\s*#' $J/refs.txt | grep -v '^\s*$' | while read -r name base exe sets; do
   echo "python3 $J/src/tools/gcp/wrf_ref_run.py $J/data/runs $W $J/data/wrf/$exe $name $base $sets"
 done > $J/cmds.txt
@@ -31,15 +33,23 @@ dirs=$(for n in $names; do for p in run rst rsm; do [ -d "$W/${p}_$n" ] && echo 
     -o -name 'wrfbdy_*' -o -name 'wrflowinp_*' -o -name 'wrffdda_*' \) | sort | xargs -r md5sum | awk '{print "MD5", $2, $1}' ) > $J/refs_md5.txt
 # shellcheck disable=SC2086
 [ "$FETCH" = 0 ] || { mkdir -p $J/fetch && tar cf $J/fetch/refs.tar -C $W $dirs; }
-if [ -n "$STAGE" ]; then  # the suite's tar of these references, to Drive
-  mkdir -p $J/drive
-  CPPWRF_WRF_RUNS=$W python3 $J/src/tools/colab/stage_data.py --whole --only "${STAGE#*:}" "$J/drive/${STAGE%%:*}" > $J/stage.log 2>&1 \
-    && echo "STAGED ${STAGE%%:*}" >> $J/stage.log
-  if [ -n "$FILES" ]; then
-    fobj=${STAGE%%:*}; fobj=${fobj%_data.tar}_files.tar
-    CPPWRF_WRF_RUNS=$W python3 $J/src/tools/gcp/stage_files_data.py --cases "$FILES" "$J/drive/$fobj" >> $J/stage.log 2>&1 \
-      && echo "STAGED $fobj" >> $J/stage.log
+if [ -n "$STAGE" ]; then  # the suite's tar of these references, to Drive (remote_chroot_job.sh uploads drive/*)
+  # only when every WRF run of refs.txt succeeded, and only a finished tar (written aside, moved into drive/): a
+  # failed reference or packing must not replace the Drive object
+  mkdir -p $J/drive $J/stage_tmp
+  if grep -qE '(WRF|REAL)-FAILED' $J/refs.out; then
+    echo "STAGE_SKIPPED: WRF runs failed ($(grep -cE '(WRF|REAL)-FAILED' $J/refs.out))" > $J/stage.log
+  else
+    obj=${STAGE%%:*}
+    CPPWRF_WRF_RUNS=$W python3 $J/src/tools/colab/stage_data.py --whole --only "${STAGE#*:}" "$J/stage_tmp/$obj" > $J/stage.log 2>&1 \
+      && mv $J/stage_tmp/$obj $J/drive/$obj && echo "STAGED $obj" >> $J/stage.log
+    if [ -n "$FILES" ]; then
+      fobj=${obj%_data.tar}_files.tar
+      CPPWRF_WRF_RUNS=$W python3 $J/src/tools/gcp/stage_files_data.py --cases "$FILES" "$J/stage_tmp/$fobj" >> $J/stage.log 2>&1 \
+        && mv $J/stage_tmp/$fobj $J/drive/$fobj && echo "STAGED $fobj" >> $J/stage.log
+    fi
   fi
+  rm -rf $J/stage_tmp
 fi
 [ -n "$FILES$CASES$REAL" ] || exit 0
 targets=cppwrf; [ -z "$REAL" ] || targets="cppwrf cppwrf_real"

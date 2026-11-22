@@ -7,27 +7,34 @@
 #   remote_chroot_job.sh BUCKET DATA ARG...
 #
 # /content/cpu holds src.tar.gz (git archive), in/ (in/body.sh, the job, and its input files), rclone.conf (the Drive
-# remote cppwrf-drive, tools/colab/drive_sync.sh) and gcs.tok (a read-only token for the bucket,
-# tools/colab/gcs_token.py, renewed by the caller). Per session (cached for the next run of a --keep session): the
-# chroot /content/deb13 and the data tars in /content/tars. A tar comes from Drive (cppwrf-drive:cppwrf-data), else
-# from the bucket, and is then put on Drive for the next runs. The tars are unpacked into /opt/job/data in DATA's order
+# remote cppwrf-drive, tools/colab/drive_sync.sh), gcs.tok (a read-only token for the bucket,
+# tools/colab/gcs_token.py, renewed by the caller; BUCKET "-": no bucket, no token) and drive_results (a Drive folder
+# for the results, or "-"; read and deleted at the start). Per session (cached for the next run of a --keep session):
+# the chroot /content/deb13 and the data tars in /content/tars. A tar comes from Drive (cppwrf-drive:cppwrf-data), else
+# from the bucket (and is then put on Drive for the next runs), else from the public GitHub release
+# Xassemblianist/cppwrf-data data-v1 (512 MiB parts, each checked against the release's SHA256SUMS). The tars are unpacked into /opt/job/data in DATA's order
 # (a later one replaces an earlier one's files), in/ is copied to /opt/job, and `bash /opt/job/body.sh /opt/job ARG...`
 # runs in the chroot, as the GCP VMs' jobs in /opt/job. Logs: /content/cpu/job.log, versions.txt (packages, CPU,
 # RAM, disk), mem.log (used RAM and the largest processes every minute), data.txt ("TAR name bytes seconds source",
 # "DATA_TOTAL seconds" from the first fetch to the last tar unpacked),
 # setup.out (not Intel, a missing tar, a failed setup; the job's own setup.out is appended); the job's *.log, *.out
 # and *.txt and these in /content/cpu/results.tar.gz; the job's /opt/job/fetch/ (large results) moves to
-# /content/cpu/fetch/, the files of /opt/job/drive/ go to the Drive folder (data.txt: "DRIVE name bytes").
+# /content/cpu/fetch/, the files of /opt/job/drive/ go to the Drive folder (data.txt: "DRIVE name bytes"); with
+# drive_results, results.tar.gz and the files of fetch/ also go to that Drive folder (data.txt: "RESULTS name bytes").
 # gcs.tok is deleted when the data are in place, rclone.conf at the end.
 B=$1 DATA=$2; shift 2
+[ "$B" = - ] && B=
 C=/content/cpu R=/content/deb13 T=/content/tars
 J=$R/opt/job
+GH=https://github.com/Xassemblianist/cppwrf-data/releases/download/data-v1
 cd $C || exit 1
 exec > $C/job.log 2>&1
-rm -rf $C/done $C/data_done $C/results.tar.gz $C/fetch $C/res
+rm -rf $C/done $C/data_done $C/results.tar.gz $C/fetch $C/res $C/SHA256SUMS
+DRES=$(cat $C/drive_results 2> /dev/null); rm -f $C/drive_results
+[ "$DRES" = - ] && DRES=
 : > $C/setup.out; : > $C/data.txt
 finish() {
-  rm -f $C/gcs.tok $C/rclone.conf
+  rm -f $C/gcs.tok
   df -h / | awk 'NR == 2 {print "disk at the end", $2, "used", $3, "free", $4}' >> $C/versions.txt
   # a streamed runtime whose disk is full: the job's inputs go before its results are packed (only then: a data-only
   # job, such as the merge train's GPU proof, leaves the data for the host side)
@@ -36,8 +43,20 @@ finish() {
   ( cd $J 2> /dev/null && cp -f ./*.log ./*.out ./*.txt $C/res/ 2> /dev/null )
   cat $C/res/setup.out >> $C/setup.out 2> /dev/null; rm -f $C/res/setup.out
   [ -d $J/fetch ] && mv $J/fetch $C/fetch
+  # the results on Drive too (the caller's fallback to colab download): the large files first, so that their RESULTS
+  # lines and drive_results.log are in results.tar.gz; results.tar.gz itself last
+  todrive() {
+    rclone --config $C/rclone.conf copyto "$1" "cppwrf-drive:$DRES/$(basename "$1")" --drive-chunk-size 256M \
+      >> $C/drive_results.log 2>&1 && echo "RESULTS $(basename "$1") $(stat -c %s "$1")" >> $C/data.txt ||
+      echo "RESULTS_FAILED $(basename "$1")" >> $C/data.txt
+  }
+  if [ -n "$DRES" ] && [ -f $C/rclone.conf ]; then
+    for f in $C/fetch/*; do [ -f "$f" ] && todrive "$f"; done
+  fi
   cp -f $C/*.log $C/*.out $C/*.txt $C/res/ 2> /dev/null
   tar czf $C/results.tar.gz -C $C/res .
+  [ -n "$DRES" ] && [ -f $C/rclone.conf ] && todrive $C/results.tar.gz
+  rm -f $C/rclone.conf
   date > $C/done
 }
 trap finish EXIT
@@ -71,7 +90,8 @@ tar xzf $C/src.tar.gz -C $J/src || { echo "SRC_FAILED" >> $C/setup.out; exit 1; 
 cp -r $C/in/. $J/
 # the tars: three fetched at a time (Drive, else the bucket), unpacked one by one in the list's order
 gcs() {  # an expired token (it lives as long as the workstation's gcloud token, 5 to 60 min): the caller sends a
-  local i  # new one every 5 min, so retry for 20 min
+  local i  # new one every 5 min, so retry for 20 min. No bucket: fails at once
+  [ -n "$B" ] || return 1
   for i in $(seq 20); do
     gcloud storage --access-token-file=$C/gcs.tok cp "gs://$B/$1" "$T/$1" > "$C/try_$1.log" 2>&1; local r=$?
     cat "$C/try_$1.log" >> "$C/fetch_$1.log"; [ $r = 0 ] && return 0
@@ -79,6 +99,25 @@ gcs() {  # an expired token (it lives as long as the workstation's gcloud token,
     rm -f "$T/$1"; sleep 60
   done
   return 1
+}
+gh_has() {  # TAR is in the GitHub release (its SHA256SUMS lists TAR's parts)
+  [ -s $C/SHA256SUMS ] ||
+    { curl -sSfL --retry 5 -o $C/SHA256SUMS.$BASHPID "$GH/SHA256SUMS" 2>> $C/gh.log && mv -f $C/SHA256SUMS.$BASHPID $C/SHA256SUMS; }
+  grep -qF "  $1.part" $C/SHA256SUMS 2> /dev/null
+}
+gh_cat() {  # TAR from the GitHub release to stdout: its parts downloaded one by one into $T/parts, checked, concatenated
+  local t=$1 sum p i ok
+  mkdir -p $T/parts
+  grep -F "  $t.part" $C/SHA256SUMS | while read -r sum p; do
+    ok=0
+    for i in 1 2 3 4 5; do
+      curl -sSfL --retry 5 -o "$T/parts/$p" "$GH/$p" 2>> "$C/fetch_$t.log" &&
+        [ "$(sha256sum "$T/parts/$p" | cut -c1-64)" = "$sum" ] && { ok=1; break; }
+      echo "retry $p $i" >> "$C/fetch_$t.log"; sleep 20
+    done
+    [ $ok = 1 ] || { echo "PART_FAILED $p" >> "$C/fetch_$t.log"; rm -f "$T/parts/$p"; exit 1; }
+    cat "$T/parts/$p"; rm -f "$T/parts/$p"
+  done
 }
 fetch() {
   local t=$1 t0=$SECONDS src=cache
@@ -88,6 +127,7 @@ fetch() {
     elif rm -f "$T/$t"; gcs "$t"; then
       src=bucket  # for the next runs: on Drive too, while the job runs (rclone.conf is deleted after it)
       touch "$T/$t.todrive"
+    elif rm -f "$T/$t"; gh_has "$t" && ( set -o pipefail; gh_cat "$t" > "$T/$t" ) && [ -s "$T/$t" ]; then src=github
     else rm -f "$T/$t"; touch "$T/$t.failed"; return; fi
     touch "$T/$t.ok"
   fi
@@ -116,7 +156,12 @@ if [ "${CPPWRF_COLAB_STREAM:-auto}" = 1 ] || { [ "${CPPWRF_COLAB_STREAM:-auto}" 
       sleep 30
     done
     if [ $ok = 1 ]; then echo "TAR $t 0 $((SECONDS - t0)) stream" >> $C/data.txt; continue; fi
-    fetch "$t"  # not on Drive: the bucket, then unpack and delete
+    if gh_has "$t"; then  # the GitHub release's parts streamed into tar x (the bucket's path keeps the tar on disk)
+      if ( set -o pipefail; gh_cat "$t" | tar xf - -C $J/data ); then echo "TAR $t 0 $((SECONDS - t0)) github-stream" >> $C/data.txt
+      else echo "DATA_FAILED $t (github)" >> $C/setup.out; fi
+      continue
+    fi
+    fetch "$t"  # not on Drive: the bucket (else the GitHub release), then unpack and delete
     if [ -e "$T/$t.ok" ]; then
       tar xf "$T/$t" -C $J/data || echo "DATA_FAILED $t (unpack)" >> $C/setup.out
       [ -e "$T/$t.todrive" ] || rm -f "$T/$t" "$T/$t.ok"
@@ -136,6 +181,8 @@ fi
 wait
 echo "DATA_TOTAL $((SECONDS - DT0)) s for $(echo ${DATA//,/ } | wc -w) tars (fetched and unpacked)" >> $C/data.txt
 rm -f $C/gcs.tok
+# the tars that did not arrive, for the job (tools/colab/wrfref_body.sh then runs nothing on partial data)
+grep '^DATA_FAILED' $C/setup.out > $J/data_failed 2> /dev/null || rm -f $J/data_failed
 touch $C/data_done
 for f in $T/*.todrive; do  # the tars that came from the bucket, to Drive next to the job
   [ -e "$f" ] || continue
@@ -155,6 +202,6 @@ kill $MEM
 wait $TODRIVE
 for f in $J/drive/*; do  # the job's tars for the next runs (wrfref_body.sh STAGE)
   [ -f "$f" ] || continue
-  if rclone --config $C/rclone.conf copyto "$f" "cppwrf-drive:cppwrf-data/$(basename "$f")" --drive-chunk-size 256M > $C/drive.log 2>&1
+  if rclone --config $C/rclone.conf copyto "$f" "cppwrf-drive:cppwrf-data/$(basename "$f")" --drive-chunk-size 256M >> $C/drive.log 2>&1
   then echo "DRIVE $(basename "$f") $(stat -c %s "$f")" >> $C/data.txt; else echo "DRIVE_FAILED $(basename "$f") (drive.log)" >> $C/setup.out; fi
 done

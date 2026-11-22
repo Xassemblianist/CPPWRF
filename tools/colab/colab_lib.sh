@@ -1,8 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # The workstation side of a job in the Debian 13 chroot of a Colab runtime with an Intel CPU
 # (tools/colab/remote_chroot_job.sh), sourced by tools/colab/colab_suite.sh and colab_wrfref.sh. They set REPO, BK
-# (the bucket), OUT (local results; OUT/src.tar.gz is the source to send), TAG (log prefix), S (session; empty: a new
-# one) and KEEP (1: leave the session running), then call:
+# (the bucket; empty: no bucket, the tars come from Drive, else from the GitHub release cppwrf-data data-v1), OUT
+# (local results; OUT/src.tar.gz is the source to send), TAG (log prefix), S (session; empty: a new one), KEEP (1:
+# leave the session running) and optionally DRIVE_RESULTS (a folder of the Drive remote, e.g.
+# cppwrf-g4results/wrfref_<date>: the runtime also puts results.tar.gz and the job's fetch/ files there, and
+# cj_results / cj_fetch read them from there when `colab download` fails), then call:
 #   cj_start GPU          new session (or S; GPU CPU: a CPU-only runtime), stop it on exit; fails unless the CPU is
 #                         Intel or ANY_CPU=1 (then the job runs with CPPWRF_ANY_CPU=1); sets NPROC
 #   cj_send FILE NAME     local FILE -> /content/cpu/NAME (in/NAME: an input of the job, copied to /opt/job)
@@ -11,7 +14,10 @@
 #                         token each time while the data are fetched (it expires with the workstation's gcloud token,
 #                         5 to 60 min; the runtime retries a 401 for 20 min); fails when the job died or took longer
 #   cj_results            OUT gets the job's logs (results.tar.gz), prints versions.txt and data.txt
-# The runtime gets only the rclone section of the Drive remote cppwrf-drive and read-only bucket tokens
+#   cj_fetch NAME DEST    the job's large result /content/cpu/fetch/NAME -> DEST (colab download, else DRIVE_RESULTS)
+#   cj_salvage            after a failed cj_wait: the logs so far (runtime and job) -> OUT/partial/, before the stop
+# Download errors go to OUT/download.log; a partial file of a failed download is deleted.
+# The runtime gets only the rclone section of the Drive remote cppwrf-drive and, with a bucket, read-only bucket tokens
 # (tools/colab/gcs_token.py); the token is deleted when the data are in place, both at the end and on exit.
 
 rx() { timeout "$(( $1 + 120 ))" colab exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'; }  # python on stdin
@@ -49,7 +55,8 @@ cj_send() {  # the contents API takes files up to ~100 MB (the source and the in
   timeout 900 colab upload -s "$S" "$1" "/content/cpu/$2" 2>&1 | grep Uploaded > /dev/null || { echo "[$TAG] upload of $1 failed"; return 1; }
 }
 
-cj_token() {  # a new read-only bucket token (at most 1 h)
+cj_token() {  # a new read-only bucket token (at most 1 h); nothing without a bucket
+  [ -n "$BK" ] || return 0
   (umask 077; python3 "$REPO/tools/colab/gcs_token.py" "$BK" > "$OUT/gcs.tok") && cj_send "$OUT/gcs.tok" gcs.tok.new &&
     echo 'import os; os.replace("/content/cpu/gcs.tok.new", "/content/cpu/gcs.tok"); print("TOKEN")' | rx 60 | grep TOKEN > /dev/null
   local r=$?; rm -f "$OUT/gcs.tok"; return $r
@@ -61,9 +68,11 @@ cj_launch() {
   cj_send "$OUT/src.tar.gz" src.tar.gz && cj_send "$body" in/body.sh &&
     cj_send "$REPO/tools/colab/remote_chroot_job.sh" remote_chroot_job.sh && cj_send "$OUT/rclone.conf" rclone.conf || return 1
   rm -f "$OUT/rclone.conf"
+  # the Drive folder for the results (remote_chroot_job.sh reads and deletes drive_results; "-": none)
+  echo "${DRIVE_RESULTS:--}" > "$OUT/drive_results"; cj_send "$OUT/drive_results" drive_results || return 1
   cj_token || { echo "[$TAG] token upload failed"; return 1; }
   echo "[$TAG] uploaded $(( $(stat -c %s "$OUT/src.tar.gz") / 1024 )) KiB of source and tools in $((SECONDS - t0)) s"
-  for a in "$BK" "$data" "$@"; do args="$args '${a//\'/}'"; done
+  for a in "${BK:--}" "$data" "$@"; do args="$args '${a//\'/}'"; done
   local env=; [ "${ANY_CPU:-0}" = 1 ] && env="CPPWRF_ANY_CPU=1 "
   echo "import subprocess; subprocess.Popen(\"chmod 600 /content/cpu/rclone.conf /content/cpu/gcs.tok; ${env}nohup bash /content/cpu/remote_chroot_job.sh$args > /dev/null 2>&1 &\", shell=True); print('started')" |
     rx 60 | grep started > /dev/null || { echo "[$TAG] the job did not start"; return 1; }
@@ -93,11 +102,41 @@ EOF
   done
 }
 
+cj_get() {  # REMOTE DEST DRIVE_NAME TIMEOUT: colab download, else the Drive copy (DRIVE_RESULTS); errors in download.log
+  echo "== $(date +%H:%M) $1" >> "$OUT/download.log"
+  timeout "$4" colab download -s "$S" "$1" "$2" >> "$OUT/download.log" 2>&1 && return 0
+  rm -f "$2"
+  [ -n "${DRIVE_RESULTS:-}" ] || return 1
+  timeout "$4" rclone copyto "cppwrf-drive:$DRIVE_RESULTS/$3" "$2" >> "$OUT/download.log" 2>&1 &&
+    { echo "[$TAG] $3 from Drive ($DRIVE_RESULTS)"; return 0; }
+  rm -f "$2"; return 1
+}
+
 cj_results() {
-  timeout 1800 colab download -s "$S" /content/cpu/results.tar.gz "$OUT/results.tar.gz" > /dev/null 2>&1 || { echo "[$TAG] download failed"; return 1; }
+  cj_get /content/cpu/results.tar.gz "$OUT/results.tar.gz" results.tar.gz 1800 ||
+    { echo "[$TAG] download failed ($OUT/download.log)"; return 1; }
   tar xzf "$OUT/results.tar.gz" -C "$OUT" && rm -f "$OUT/results.tar.gz" "$OUT/src.tar.gz"
   echo "[$TAG] results in $OUT"; cat "$OUT/versions.txt" 2>/dev/null || true
   awk '$1 == "TAR" {printf "[%s] data %s: %.0f MB in %d s from %s\n", tag, $2, $3 / 1e6, $4, $5}
        $1 == "DRIVE" {printf "[%s] to Drive: %s (%.0f MB)\n", tag, $2, $3 / 1e6}
        $1 == "DATA_TOTAL" {printf "[%s] data: %s\n", tag, substr($0, 12)}' tag="$TAG" "$OUT/data.txt" 2>/dev/null || true
+}
+
+cj_fetch() {  # NAME DEST: /content/cpu/fetch/NAME by colab download, else from DRIVE_RESULTS
+  cj_get "/content/cpu/fetch/$1" "$2" "$1" 7200
+}
+
+cj_salvage() {  # the logs of a job that did not finish (or of a session that stopped answering), into OUT/partial
+  rx 300 <<'EOF' | grep -q SALVAGED || { echo "[$TAG] no logs salvaged"; return 1; }
+import glob, os, tarfile
+with tarfile.open("/content/cpu/partial.tar.gz", "w:gz") as t:
+    for d, pre in (("/content/cpu", ""), ("/content/deb13/opt/job", "job_")):
+        for p in glob.glob(d + "/*.log") + glob.glob(d + "/*.out") + glob.glob(d + "/*.txt"):
+            t.add(p, arcname=pre + os.path.basename(p))
+print("SALVAGED")
+EOF
+  mkdir -p "$OUT/partial"
+  timeout 900 colab download -s "$S" /content/cpu/partial.tar.gz "$OUT/partial.tar.gz" >> "$OUT/download.log" 2>&1 &&
+    tar xzf "$OUT/partial.tar.gz" -C "$OUT/partial" && rm -f "$OUT/partial.tar.gz" &&
+    echo "[$TAG] the logs so far in $OUT/partial"
 }

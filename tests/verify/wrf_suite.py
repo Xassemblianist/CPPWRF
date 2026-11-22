@@ -169,6 +169,16 @@ def slow(sets):
 _NC = threading.RLock()
 
 
+def uninitialised(ds):
+    """The variables of WRF's file `ds` that WRF leaves uninitialised, not compared: RQCBLTEN / RQIBLTEN without qc /
+    qi, and LH with isfflx = 0 (sf_sfclayrev skips lh = xlv * qfx and copies its uninitialised local lh_hv; the LSM
+    is skipped too; the file's global attribute ISFFLX)."""
+    out = [x for x, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")) if q not in ds.variables]
+    if "ISFFLX" in ds.ncattrs() and int(ds.getncattr("ISFFLX")) == 0:
+        out.append("LH")
+    return out
+
+
 def exact_case(refs, out, t, sets):
     with _NC:
         return _exact_case(refs, out, t, sets)
@@ -194,10 +204,9 @@ def _exact_case(refs, out, t, sets):
                 for f in glob.glob(os.path.join(o, f"wrfout_{d}_*")) + glob.glob(os.path.join(o, d, f"wrfout_{d}_*"))]
         dif, n = exact.compare_stream(mine, [w], subset=True, until=final[0],
                                       global_atts=os.path.exists(os.path.join(os.path.dirname(w), "namelist.input")))
-        with netCDF4.Dataset(w) as ds:  # WRF leaves RQCBLTEN / RQIBLTEN uninitialised without qc / qi
-            for v, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")):
-                if q not in ds.variables:
-                    dif.pop(v, None)
+        with netCDF4.Dataset(w) as ds:  # the variables WRF leaves uninitialised
+            for v in uninitialised(ds):
+                dif.pop(v, None)
         frames += n
         bad += [f"{d}.{k}: {v}" for k, v in dif.items()]
         # output_diagnostics: the auxhist3 files next to the reference wrfout, compared as the wrfout files
@@ -239,7 +248,7 @@ def wrfrst_case(refs, out, skip=()):
         for name in sorted(set(ref) & set(mine)):
             with _NC:
                 with netCDF4.Dataset(ref[name]) as ds:
-                    noise = [x for x, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")) if q not in ds.variables]
+                    noise = uninitialised(ds)
                 dif, _ = exact.compare_stream([mine[name]], [ref[name]])
             bad += [f"{name}.{k}: {v}" for k, v in dif.items() if k not in noise]
             n += 1
@@ -302,7 +311,7 @@ def restarted_case(b, cfg, sets, refs, t, mid, out, native=False):
             continue
         with _NC:
             with netCDF4.Dataset(wr) as ds:
-                noise = [x for x, q in (("RQCBLTEN", "QCLOUD"), ("RQIBLTEN", "QICE")) if q not in ds.variables]
+                noise = uninitialised(ds)
             dif, _ = exact.compare_stream(mine, [wr])
         bad += [f"{d}.wrfrst.{k}: {v}" for k, v in dif.items() if k not in noise]
     return bad, f"{what}, restarted at {mid:g}s (wrfrst identical)" if not bad else what

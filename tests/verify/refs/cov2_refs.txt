@@ -1,0 +1,41 @@
+# WRF v4.8.0 reference runs of the coverage wave COV2 (tests/verify/cases/72_coverage2.py), for
+# tools/colab/colab_wrfref.sh (REFS format of tools/gcp/gcp_wrfref.sh: NAME BASE_RUN WRF_EXE section.key=value ...;
+# tools/gcp/wrf_ref_run.py). Data: matrix_data.tar (run_P4_r8, run_P6_r8, run_P8_r8, the WRF executables),
+# matrix_nest.tar (run_N3s_r8), matrix_real.tar (real_P4_r8, real_N3s met_em files, real.exe). Each reference: run_NAME
+# (10 min, history every 5 min; 20 min, history every 10 min where cudt / bldt > 0), run_NAME/steps (3 steps, history
+# every step), rst_NAME and rsm_NAME (tests/verify/make_restart_refs.sh, make_resumed_refs.sh). WRF build: r8 (stock
+# -r8) for the schemes without DOUBLE PRECISION, r8d8 (-r8 -double-8) for New Tiedtke, Thompson, Grell-Freitas-Li,
+# MYNN and the radar reflectivity (docs/PHYSICS_SUITE.md).
+#
+# 1 tropical suite: WSM6, New Tiedtke, RRTMG, YSU, sfclayrev, Noah (module_check_a_mundo.F 'tropical')
+TROP_r8 run_P4_r8 wrf_r8d8.exe physics.cu_physics=16 time_control.run_seconds=600 time_control.history_interval_s=300
+# 2 the CONUS suite (Thompson, Tiedtke, RRTMG radt 15, MYJ, Eta, Noah, fractional_seaice 1, gwd_opt 1 on d01, diff_opt
+# 2 / km_opt 4, w_damping 0) on the two-way nest N3; real.exe makes the inputs (the gravity-wave drag fields)
+# CONN_r8 (in port_cov2_data.tar, no case reads it): superseded in cov2b_refs.txt, 10 min reach no second radiation call at radt 15
+# 3 / 11 the adaptive time step with cudt / bldt > 0: P4 (Kain-Fritsch, YSU) and P8 (Grell-Freitas-Li, no stepping to
+# the history times, target_cfl 1.0); 11 the fixed step with cudt 5 / bldt 3 on P4
+ADCB_r8 run_P4_r8 wrf_r8.exe domains.use_adaptive_time_step=.true. physics.cudt=5 physics.bldt=2 time_control.run_seconds=1200 time_control.history_interval_s=600
+# ADGF_r8 (in port_cov2_data.tar, no case reads it): superseded in cov2b_refs.txt, step_to_output_time .false. writes no frame at the case times
+CB53_r8 run_P4_r8 wrf_r8.exe physics.cudt=5 physics.bldt=3 time_control.run_seconds=1200 time_control.history_interval_s=600
+# 5 MYNN-EDMF (icloud_bl 1) with cumulus and its radiation feedback: Kain-Fritsch + cu_rad_feedback, BMJ +
+# bmj_rad_feedback with icloud_bl 0 (the MYNN physics of tests/verify/cases/35_mynn.py: P6 + MYNN SL / PBL, RRTMG radt 10)
+# MYKF_r8 (in port_cov2_data.tar, no case reads it): superseded in cov2b_refs.txt, radt 10 in 10 min: one radiation call, before the cumulus and PBL clouds exist
+# MYBJ_r8 (in port_cov2_data.tar, no case reads it): superseded in cov2b_refs.txt, radt 10 in 10 min: one radiation call, before the cumulus and PBL clouds exist
+# 6 the single-layer urban canopy model with MYJ / Eta (real.exe gives the wrfinput attribute SF_URBAN_PHYSICS = 1)
+UMYJ_r8 run_P4_r8 wrf_r8.exe physics.sf_urban_physics=1 physics.sf_sfclay_physics=2 physics.bl_pbl_physics=2 time_control.run_seconds=600 time_control.history_interval_s=300 run.real=real_r8.exe:real_P4_r8
+# 8 RRTM LW + Dudhia SW with swrad_scat 1.5
+# RRDU_r8 (in port_cov2_data.tar, no case reads it): superseded in cov2b_refs.txt, 00 UTC on P4 is night: Dudhia and swrad_scat do nothing
+# 9 Grell-3D and Grell-Freitas-Li (ishallow 1) on the two-way nest N3 with cu_rad_feedback
+G3N_r8 run_N3s_r8 wrf_r8.exe physics.cu_physics=5,5 physics.cu_rad_feedback=.true.,.true. time_control.run_seconds=600 time_control.history_interval_s=300,300
+GFN_r8 run_N3s_r8 wrf_r8d8.exe physics.cu_physics=3,3 physics.ishallow=1 physics.cu_rad_feedback=.true.,.true. time_control.run_seconds=600 time_control.history_interval_s=300,300
+# 10 the one-way nest with physics (N3 with feedback 0)
+N3OW_r8 run_N3s_r8 wrf_r8.exe domains.feedback=0 time_control.run_seconds=600 time_control.history_interval_s=300,300
+# 12 / 13 / 16 / 17 / 20 on P4: use_mp_re 0; o3input 0 with ghg_input 0; isfflx 0; centered advection (orders 6 / 4);
+# hail_opt 1 with WSM6 and the radar reflectivity
+MPRE0_r8 run_P4_r8 wrf_r8.exe physics.use_mp_re=0 time_control.run_seconds=600 time_control.history_interval_s=300
+O3G0_r8 run_P4_r8 wrf_r8.exe physics.o3input=0 physics.ghg_input=0 time_control.run_seconds=600 time_control.history_interval_s=300
+ISF0_r8 run_P4_r8 wrf_r8.exe physics.isfflx=0 time_control.run_seconds=600 time_control.history_interval_s=300
+ADV64_r8 run_P4_r8 wrf_r8.exe dynamics.h_mom_adv_order=6 dynamics.h_sca_adv_order=6 dynamics.v_mom_adv_order=4 dynamics.v_sca_adv_order=4 time_control.run_seconds=600 time_control.history_interval_s=300
+HAIL_r8 run_P4_r8 wrf_r8d8.exe physics.hail_opt=1 physics.do_radar_ref=1 time_control.run_seconds=600 time_control.history_interval_s=300
+# 15 sfclayrev's isftcflx 1 (Donelan Ck / Garratt Cd over water) and iz0tlnd 1 (Chen-Zhang thermal roughness over land)
+SFT1_r8 run_P4_r8 wrf_r8.exe physics.isftcflx=1 physics.iz0tlnd=1 time_control.run_seconds=600 time_control.history_interval_s=300
