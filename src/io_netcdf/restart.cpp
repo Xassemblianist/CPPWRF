@@ -71,6 +71,10 @@ void write_restart(const std::string& path, const RestartMeta& meta,
   if (!meta.date_str.empty()) {
     NC_CHECK(nc_put_att_text(ncid, NC_GLOBAL, "CURRENT_DATE", meta.date_str.size(), meta.date_str.data()));
   }
+  if (!meta.sim_start_date.empty()) {
+    NC_CHECK(nc_put_att_text(ncid, NC_GLOBAL, "SIMULATION_START_DATE", meta.sim_start_date.size(),
+                             meta.sim_start_date.data()));
+  }
   NC_CHECK(nc_put_att_int(ncid, NC_GLOBAL, "CPPWRF_RESTART_VERSION", NC_INT, 1, &meta.version));
   if (meta.restart_secs_to_ring >= 0) {
     const int secs = int(meta.restart_secs_to_ring);

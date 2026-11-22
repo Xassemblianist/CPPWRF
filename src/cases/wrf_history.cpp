@@ -324,15 +324,16 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
   // max(nint(X*60./DT), 1) in WRF's REAL (ra_init, bl_init, cu_init, fg_init; float in a real*4 build)
   auto step_of = [&](double m) { return double(std::max(1L, std::lround(real(m) * real(60.) / real(g.dt)))); };
   auto stepn = [&](const char* opt) { return step_of(wc_->num(opt)); };
-  // the configuration's radt / fgdt where it has them (a resumed run with another radt: ra_init's STEPRA of that one),
-  // else the namelist's
+  // the configuration's radt / bldt / cudt / fgdt where it has them (a resumed run with another radt: ra_init's STEPRA
+  // of that one; a run without column physics: bl_init's and cu_init's of the configured bldt / cudt), else the
+  // namelist's
   auto stepc = [&](const char* key, const char* opt) {
     if (!cfg.has(key)) return stepn(opt);
     return step_of(cfg.get_double(key, 0.0));
   };
   phy_init_["STEPRA"] = {stepc("phys.radt", "radt")};
-  phy_init_["STEPBL"] = {m_.suite ? double(m_.suite->stepbl) : stepn("bldt")};
-  phy_init_["STEPCU"] = {m_.suite ? double(m_.suite->stepcu) : stepn("cudt")};
+  phy_init_["STEPBL"] = {m_.suite ? double(m_.suite->stepbl) : stepc("phys.bldt", "bldt")};
+  phy_init_["STEPCU"] = {m_.suite ? double(m_.suite->stepcu) : stepc("phys.cudt", "cudt")};
   // fg_init (phy_init, every run): STEPFG = max(nint(FGDT*60./DT), 1)
   phy_init_["STEPFG"] = {m_.suite && m_.suite->options().fdda.grid_fdda == 1 ? double(m_.suite->stepfg)
                                                                               : stepc("fdda.fgdt", "fgdt")};

@@ -46,6 +46,20 @@ resumes across versions from WRF's wrfrst files.
   boundary interpolation).
 - Tiedtke: the comment on cududv's level 0 (times pmfu(1) = cmfctop * pmfu(2) with a cloud top at level 2, where
   WRF's value is undefined; times 0 at level 3). No code change.
+- CPPWRF's own restart file records the simulation start (SIMULATION_START_DATE), and a run resumed from it dates
+  its files from it, as from a wrfrst file: in a chain wrfrst -> restart_NNNNNN.nc -> resumed run with run.start_date
+  = the restart time (the translation of a resumed run's namelist), every date of the last run shifted by the first
+  restart time.
+- CPPWRF's own restart file at a last step that does not ring, with a resumed run's RingTime still pending: the
+  seconds to the alarm's next ring are those to the earlier of RingTime and PrevRingTime + interval (ESMF_ClockAdvance
+  rings at either; was the seconds to RingTime), so that a run resumed from it with another restart.interval rings
+  there. With the adaptive time step the file's seconds come from the clock (were from step * the current time
+  step; such files are not read back, results unchanged).
+- WRF_ALARM_SECS_TIL_NEXT_RING_51 with a time step that is not a whole number of seconds (time.dt_den, a nest's
+  parent_dt / parent_time_step_ratio): the whole seconds of the exact clock (60 / 11 s and a 55 s interval: 50 s at
+  60 s, was 51 s; n * dt lay just below the whole second).
+- A run without column physics writes STEPBL and STEPCU of the configuration's phys.bldt / phys.cudt into its wrfrst
+  files (bl_init, cu_init), as STEPRA and STEPFG; was the namelist's when the two differ.
 
 ## 1.2.2 (2026-11-22)
 
