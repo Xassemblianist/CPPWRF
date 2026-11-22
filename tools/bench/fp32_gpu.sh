@@ -27,7 +27,7 @@ done
 pip -q install netCDF4 > $G/pip.log 2>&1
 mkdir -p $G/src && tar xzf /content/cpu/src.tar.gz -C $G/src
 st=
-# cuda (FP32), cuda_dp (FP64); with FP32_EXTRA_BUILDS=1 (the FP2 cases): cuda_nofma (FP32, no FMA contraction in any
+# cuda (the fast FP32 build, -DCPPWRF_CUDA_FP32_IDENTITY=OFF), cuda_dp (FP64); with FP32_EXTRA_BUILDS=1 (the FP2 cases): cuda_nofma (FP32, no FMA contraction in any
 # kernel) and cpu (CPU FP32: glibc's libm, no FMA)
 B="cuda:ON:OFF cuda_dp:ON:ON"
 [ "${FP32_EXTRA_BUILDS:-0}" = 1 ] && B="$B cuda_nofma:ON:OFF cpu:OFF:OFF"
@@ -36,7 +36,7 @@ for b in $B; do
   t0=$SECONDS
   x=; [ "$n" = cuda_nofma ] && x=--fmad=false
   cmake -S $G/src -B $G/build-$n -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=${r%%:*} -DCPPWRF_DOUBLE=${r#*:} \
-    ${x:+-DCMAKE_CUDA_FLAGS=$x} > $G/build-$n.log 2>&1 && cmake --build $G/build-$n -j"$(nproc)" --target cppwrf >> $G/build-$n.log 2>&1
+    -DCPPWRF_CUDA_FP32_IDENTITY=OFF ${x:+-DCMAKE_CUDA_FLAGS=$x} > $G/build-$n.log 2>&1 && cmake --build $G/build-$n -j"$(nproc)" --target cppwrf >> $G/build-$n.log 2>&1
   st="$st $n=$? (${n}_build_s=$((SECONDS - t0)))"
 done
 echo "builds:$st" >> $G/gpu.txt

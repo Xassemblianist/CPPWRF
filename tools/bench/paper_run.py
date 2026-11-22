@@ -52,7 +52,7 @@ OPTIONS (defaults: the Colab G4 session of tools/bench/colab_paper.sh):
 
 Models: wrf_r4 / wrf_r8 (WRF v4.8.0 real*4 / real*8 at the fastest screened layout), wrf_r4t (real*4 with
 FCOPTIM = -O3 -march=native -funroll-loops, builds WRF-r4t / WRF-r4tsm), gpu_fp32 (CUDA FP32, the fast
-default build "cuda"), gpu_fp32id (CUDA FP32 identity build "cuda_sp_id"), gpu_fp64 ("cuda_dp"), cpu_fp64
+build "cuda", -DCPPWRF_CUDA_FP32_IDENTITY=OFF), gpu_fp32id (CUDA FP32 identity build "cuda_sp_id"), gpu_fp64 ("cuda_dp"), cpu_fp64
 (CPU FP64 "cpu-dp" at the fastest screened thread count). CPPWRF runs with output.wrf_timing = true (WRF's timing
 lines; tools/bench/bench_parse.py splits both models' times the same way) and output.diag_interval = 1000000 (no
 diag.csv reductions: WRF computes none); CPPWRF_MEMINFO=1 only in the warm-up runs. Every run is one JSON line of
