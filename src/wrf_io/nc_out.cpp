@@ -2,6 +2,7 @@
 #include "wrf_io/nc_out.hpp"
 
 #include "wrf_io/nc_deflate.hpp"
+#include "wrf_io/output_queue.hpp"
 
 #include <netcdf.h>
 
@@ -18,16 +19,30 @@ void ck(int st, const std::string& what) {
 }
 }  // namespace
 
+NcOut::Batch::~Batch() {
+  if (group) {  // a batch dropped before its flush (an error): its chunks may still be compressing
+    deflate::wait(*group);
+    deflate::clear(*group);
+  }
+}
+
 NcOut::NcOut(const std::string& path, bool netcdf4) : nc4_(netcdf4) {
+  const NcCall lk;
   if (netcdf4) deflate::install();
   ck(nc_create(path.c_str(), netcdf4 ? (NC_CLOBBER | NC_NETCDF4) : (NC_CLOBBER | NC_64BIT_OFFSET), &nc_), "create " + path);
 }
 
 NcOut::~NcOut() {
-  if (nc_ >= 0) nc_close(nc_);
+  {
+    const NcCall lk;
+    if (nc_ >= 0) nc_close(nc_);  // may compress chunks still in HDF5's cache: the precomputed ones stay till here
+  }
+  flushed_.clear();
+  batch_.reset();
 }
 
 void NcOut::dim(const std::string& name, std::size_t len) {
+  const NcCall lk;
   int id;
   ck(nc_def_dim(nc_, name.c_str(), len == 0 ? NC_UNLIMITED : len, &id), "dim " + name);
   dims_[name] = id;
@@ -35,18 +50,25 @@ void NcOut::dim(const std::string& name, std::size_t len) {
 }
 
 void NcOut::att(const std::string& name, const std::string& v) {
+  const NcCall lk;
   ck(nc_put_att_text(nc_, NC_GLOBAL, name.c_str(), v.size(), v.c_str()), "att " + name);
 }
-void NcOut::att(const std::string& name, int v) { ck(nc_put_att_int(nc_, NC_GLOBAL, name.c_str(), NC_INT, 1, &v), "att " + name); }
+void NcOut::att(const std::string& name, int v) {
+  const NcCall lk;
+  ck(nc_put_att_int(nc_, NC_GLOBAL, name.c_str(), NC_INT, 1, &v), "att " + name);
+}
 void NcOut::att_f(const std::string& name, float v) {
+  const NcCall lk;
   ck(nc_put_att_float(nc_, NC_GLOBAL, name.c_str(), NC_FLOAT, 1, &v), "att " + name);
 }
 void NcOut::att_d(const std::string& name, double v) {
+  const NcCall lk;
   ck(nc_put_att_double(nc_, NC_GLOBAL, name.c_str(), NC_DOUBLE, 1, &v), "att " + name);
 }
 
 void NcOut::var(const std::string& name, char type, const std::vector<std::string>& dims,
                 const std::map<std::string, std::string>& satts, int field_type) {
+  const NcCall lk;
   std::vector<int> ids;
   for (const std::string& dn : dims) {
     auto it = dims_.find(dn);
@@ -107,9 +129,18 @@ void NcOut::var(const std::string& name, char type, const std::vector<std::strin
   vars_[name] = std::move(info);
 }
 
-void NcOut::enddef() { ck(nc_enddef(nc_), "enddef"); }
+void NcOut::enddef() {
+  const NcCall lk;
+  ck(nc_enddef(nc_), "enddef");
+}
 
-void NcOut::sync() { ck(nc_sync(nc_), "sync"); }
+void NcOut::sync() {
+  {
+    const NcCall lk;
+    ck(nc_sync(nc_), "sync");
+  }
+  flushed_.clear();  // the chunks of the flushed records are in the file now
+}
 
 void NcOut::put(const std::string& name, const std::vector<double>& v, std::size_t rec) {
   stage(name, v, rec);
@@ -121,22 +152,56 @@ void NcOut::put_int(const std::string& name, const std::vector<int>& v, std::siz
   flush();
 }
 
+std::unique_ptr<NcOut::Batch> NcOut::new_batch() {
+  auto b = std::make_unique<Batch>();
+  b->group = deflate::new_group();
+  std::lock_guard<std::mutex> lk(spare_m_);
+  if (!spare_.empty()) {  // the buffers of an earlier record: no new pages
+    b->spare = std::move(spare_.back());
+    spare_.pop_back();
+  }
+  return b;
+}
+
+std::size_t NcOut::bytes(const Batch& b) {
+  std::size_t n = 0;
+  for (const Staged& s : b.staged) n += s.bytes.size();
+  return n;
+}
+
 void NcOut::stage(const std::string& name, const std::vector<double>& v, std::size_t rec) {
+  if (!batch_) batch_ = new_batch();
+  stage(*batch_, name, v, rec);
+}
+
+void NcOut::stage_int(const std::string& name, const std::vector<int>& v, std::size_t rec) {
+  if (!batch_) batch_ = new_batch();
+  stage_int(*batch_, name, v, rec);
+}
+
+void NcOut::flush() {
+  if (!batch_) return;
+  flush(*batch_);
+  flushed_.push_back(std::move(batch_));  // its precomputed chunks until the next sync (HDF5 may compress them there)
+}
+
+void NcOut::stage(Batch& b, const std::string& name, const std::vector<double>& v, std::size_t rec) {
   if (vars_.at(name).type == 'f')  // converted here, as the float put did
-    stage_bytes(name, 'f', v.size(), sizeof(float), rec, [&](unsigned char* p) {
+    stage_bytes(b, name, 'f', v.size(), sizeof(float), rec, [&](unsigned char* p) {
       float* f = reinterpret_cast<float*>(p);
       for (std::size_t i = 0; i < v.size(); ++i) f[i] = float(v[i]);
     });
   else
-    stage_bytes(name, 'd', v.size(), sizeof(double), rec,
+    stage_bytes(b, name, 'd', v.size(), sizeof(double), rec,
                 [&](unsigned char* p) { std::memcpy(p, v.data(), v.size() * sizeof(double)); });
 }
 
-void NcOut::stage_int(const std::string& name, const std::vector<int>& v, std::size_t rec) {
-  stage_bytes(name, 'i', v.size(), sizeof(int), rec, [&](unsigned char* p) { std::memcpy(p, v.data(), v.size() * sizeof(int)); });
+void NcOut::stage_int(Batch& b, const std::string& name, const std::vector<int>& v, std::size_t rec) {
+  stage_bytes(b, name, 'i', v.size(), sizeof(int), rec,
+              [&](unsigned char* p) { std::memcpy(p, v.data(), v.size() * sizeof(int)); });
 }
 
-void NcOut::stage_bytes(const std::string& name, char mem, std::size_t n, std::size_t esize, std::size_t rec,
+void NcOut::stage_bytes(Batch& b, const std::string& name, char mem, std::size_t n, std::size_t esize, std::size_t rec,
                         const std::function<void(unsigned char*)>& fill_in) {
   const VarInfo& vi = vars_.at(name);
   Staged s;
@@ -144,7 +209,7 @@ void NcOut::stage_bytes(const std::string& name, char mem, std::size_t n, std::s
   s.name = name;
   s.mem = mem;
   s.rec = rec;
-  if (staged_.size() < spare_.size()) s.bytes = std::move(spare_[staged_.size()]);  // the previous record's buffer
+  if (b.staged.size() < b.spare.size()) s.bytes = std::move(b.spare[b.staged.size()]);  // an earlier record's buffer
   s.bytes.resize(n * esize);
   if (n) fill_in(s.bytes.data());
   // the chunks HDF5 will compress: one record, memory type = file type, every value given
@@ -163,15 +228,16 @@ void NcOut::stage_bytes(const std::string& name, char mem, std::size_t n, std::s
     if (mem == 'f') { const float f = NC_FILL_FLOAT; std::memcpy(r.fill.data(), &f, esize); }
     else if (mem == 'd') { const double d = NC_FILL_DOUBLE; std::memcpy(r.fill.data(), &d, esize); }
     else { const int i = NC_FILL_INT; std::memcpy(r.fill.data(), &i, esize); }
-    deflate::submit(r);
+    deflate::submit(r, *b.group);
   }
-  staged_.push_back(std::move(s));
+  b.staged.push_back(std::move(s));  // the buffer moves, its data pointer (r.data) stays
 }
 
-void NcOut::flush() {
-  if (staged_.empty()) return;
-  deflate::wait();
-  for (Staged& s : staged_) {
+void NcOut::flush(Batch& b) {
+  if (b.staged.empty()) return;
+  deflate::wait(*b.group);
+  const deflate::UseGroup use(b.group.get());
+  for (Staged& s : b.staged) {
     const VarInfo& vi = *s.v;
     const std::size_t nd = vi.len.size();
     std::vector<std::size_t> st(nd), ct(nd);
@@ -179,6 +245,7 @@ void NcOut::flush() {
       st[d] = d == 0 ? s.rec : 0;
       ct[d] = d == 0 ? 1 : vi.len[d];
     }
+    const NcCall lk;  // one put at a time: the model's thread may read other files in between
     if (s.mem == 'f')
       ck(nc_put_vara_float(nc_, vi.id, st.data(), ct.data(), reinterpret_cast<const float*>(s.bytes.data())), "put " + s.name);
     else if (s.mem == 'd')
@@ -186,13 +253,16 @@ void NcOut::flush() {
     else
       ck(nc_put_vara_int(nc_, vi.id, st.data(), ct.data(), reinterpret_cast<const int*>(s.bytes.data())), "put " + s.name);
   }
-  // the buffers stay for the next record (the same variables in the same order: no new pages)
-  if (spare_.size() < staged_.size()) spare_.resize(staged_.size());
-  for (std::size_t k = 0; k < staged_.size(); ++k) spare_[k] = std::move(staged_[k].bytes);
-  staged_.clear();
+  // the buffers stay for a next record (the same variables in the same order: no new pages); at most two sets
+  std::vector<std::vector<unsigned char>> set(b.staged.size());
+  for (std::size_t k = 0; k < b.staged.size(); ++k) set[k] = std::move(b.staged[k].bytes);
+  b.staged.clear();
+  std::lock_guard<std::mutex> lk(spare_m_);
+  if (spare_.size() < 2) spare_.push_back(std::move(set));
 }
 
 void NcOut::put_text(const std::string& name, const std::string& s, std::size_t rec) {
+  const NcCall lk;
   int id = vars_.at(name).id;
   std::size_t st[2] = {rec, 0}, ct[2] = {1, s.size()};
   ck(nc_put_vara_text(nc_, id, st, ct, s.c_str()), "put " + name);

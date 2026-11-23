@@ -4,6 +4,7 @@
 #include <zlib.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
@@ -23,6 +24,15 @@
 
 namespace cppwrf::wrf_io::deflate {
 
+struct Group {
+  std::mutex m;
+  std::condition_variable done;
+  long pending = 0;
+  std::atomic<long> precomputed{0};
+};
+
+std::shared_ptr<Group> new_group() { return std::make_shared<Group>(); }
+
 namespace {
 
 using clk = std::chrono::steady_clock;
@@ -32,6 +42,7 @@ double since(clk::time_point t0) { return std::chrono::duration<double>(clk::now
 struct Entry {
   std::uint64_t key = 0;
   int level = 0;
+  const Group* group = nullptr;  // clear(group) drops it
   std::vector<unsigned char> in, out;
 };
 
@@ -59,13 +70,8 @@ class Pool {
     {
       std::lock_guard<std::mutex> lk(m_);
       q_.push_back(std::move(f));
-      ++pending_;
     }
     cv_.notify_one();
-  }
-  void wait() {
-    std::unique_lock<std::mutex> lk(m_);
-    done_.wait(lk, [this] { return pending_ == 0; });
   }
 
  private:
@@ -79,14 +85,11 @@ class Pool {
         q_.pop_front();
       }
       f();
-      std::lock_guard<std::mutex> lk(m_);
-      if (--pending_ == 0) done_.notify_all();
     }
   }
   std::mutex m_;
-  std::condition_variable cv_, done_;
+  std::condition_variable cv_;
   std::deque<std::function<void()>> q_;
-  long pending_ = 0;
 };
 
 int pool_threads() {
@@ -104,8 +107,16 @@ Pool& pool() {
 
 std::mutex g_mutex;  // the results
 std::unordered_multimap<std::uint64_t, std::unique_ptr<Entry>> g_ready;  // by sample_key
-bool g_installed = false;
-Stats g_stats;
+std::atomic<bool> g_installed{false};
+// the counters: pool threads, the writing threads and the timing report use them
+std::atomic<long> g_precomputed{0}, g_hits{0}, g_misses{0};
+std::mutex g_time_mutex;
+thread_local const Group* t_group = nullptr;  // UseGroup
+double g_miss_s = 0, g_wait_s = 0, g_download_s = 0;
+void add_time(double& t, double s) {
+  std::lock_guard<std::mutex> lk(g_time_mutex);
+  t += s;
+}
 
 // cut chunk c (index over the chunk grid, row-major) of r, pad with the fill value, shuffle as HDF5's shuffle filter
 // (H5Zshuffle.c: byte j of element i goes to j * n + i, for elements of more than 1 byte and more than 1 element)
@@ -157,9 +168,10 @@ std::vector<unsigned char> cut_chunk(const Record& r, std::size_t c) {
   return sh;
 }
 
-void compress_chunk(const Record& r, std::size_t c) {
+void compress_chunk(const Record& r, std::size_t c, Group& g) {
   auto e = std::make_unique<Entry>();
   e->level = r.level;
+  e->group = &g;
   e->in = cut_chunk(r, c);
   e->key = sample_key(e->in.data(), e->in.size());
   uLongf n = compressBound(uLong(e->in.size()));
@@ -169,7 +181,8 @@ void compress_chunk(const Record& r, std::size_t c) {
   std::lock_guard<std::mutex> lk(g_mutex);
   const std::uint64_t key = e->key;
   g_ready.emplace(key, std::move(e));
-  ++g_stats.precomputed;
+  ++g_precomputed;
+  ++g.precomputed;
 }
 
 #ifdef CPPWRF_HAVE_HDF5
@@ -178,15 +191,19 @@ bool take(int level, const unsigned char* p, std::size_t n, std::vector<unsigned
   const std::uint64_t key = sample_key(p, n);
   std::lock_guard<std::mutex> lk(g_mutex);
   // the entries of this key only (equal inputs give equal outputs: any entry of the same bytes and level will do)
-  auto [it, end] = g_ready.equal_range(key);
-  for (; it != end; ++it) {
-    Entry& e = *it->second;
-    if (e.level == level && e.in.size() == n && std::memcmp(e.in.data(), p, n) == 0) {
-      out = std::move(e.out);
-      g_ready.erase(it);
-      return true;
+  // the writing thread's own group first (UseGroup): another file's record with the same values (wrfrst and the
+  // history frame of the same time) keeps its own entries for its own puts
+  const auto [b, end] = g_ready.equal_range(key);
+  for (int pass = 0; pass < 2; ++pass)
+    for (auto it = b; it != end; ++it) {
+      Entry& e = *it->second;
+      if ((pass == 1 || e.group == t_group) && e.level == level && e.in.size() == n &&
+          std::memcmp(e.in.data(), p, n) == 0) {
+        out = std::move(e.out);
+        g_ready.erase(it);
+        return true;
+      }
     }
-  }
   return false;
 }
 
@@ -248,12 +265,12 @@ size_t filter(unsigned flags, size_t cd_nelmts, const unsigned cd_values[], size
   if (hit) {
     std::memcpy(outbuf, pre.data(), pre.size());
     dst_n = uLongf(pre.size());
-    ++g_stats.hits;
+    ++g_hits;
   } else {
     const auto t0 = clk::now();
     const int status = compress2(static_cast<Bytef*>(outbuf), &dst_n, static_cast<const Bytef*>(*buf), uLong(nbytes), level);
-    g_stats.miss_s += since(t0);
-    ++g_stats.misses;
+    add_time(g_miss_s, since(t0));
+    ++g_misses;
     if (status != Z_OK) {  // overflow, memory or other deflate error
       H5free_memory(outbuf);
       return 0;
@@ -275,13 +292,18 @@ void install() {
   static std::once_flag once;
   std::call_once(once, [] {
     if (pool_threads() == 0) return;  // CPPWRF_NC_THREADS=0: HDF5's own filter
-    // the public H5Zregister refuses the predefined filter ids (< H5Z_FILTER_RESERVED); the library's own
-    // H5Z_register (H5Z.c, "allows filters to be set for predefined method numbers", the same signature in HDF5 1.10 to
-    // 1.14) replaces the table entry of H5Z_FILTER_DEFLATE. The library and its filter table are initialised first
-    // (H5open, H5Zfilter_avail), so that the built-in registration cannot come after this one. Without the symbol
-    // HDF5's own filter stays (the same bytes, compressed in the writing thread).
+    // HDF5's public H5Zregister refuses the predefined filter ids (H5Z.c: "unable to modify predefined filters" for
+    // an id below H5Z_FILTER_RESERVED), and a filter of another id changes the filter pipeline message of every
+    // variable (docs/PERF.md, IO2). The library's own H5Z_register (H5Z.c, "allows filters to be set for predefined
+    // method numbers") replaces the table entry of H5Z_FILTER_DEFLATE. It is used only with the HDF5 versions whose
+    // H5Z_register and H5Z__filter_deflate this file follows (1.10 to 1.14: the same signature and the same deflate
+    // filter); another version, a library without the exported symbol (a static build) or a failed registration
+    // keeps HDF5's own filter: the same bytes, compressed in the writing thread. The library and its filter table are
+    // initialised first (H5open, H5Zfilter_avail), so that the built-in registration cannot come after this one.
+    unsigned maj = 0, min = 0, rel = 0;
+    if (H5open() < 0 || H5get_libversion(&maj, &min, &rel) < 0 || maj != 1 || min < 10 || min > 14) return;
+    if (H5Zfilter_avail(H5Z_FILTER_DEFLATE) <= 0) return;
     using RegisterFn = herr_t (*)(const H5Z_class2_t*);
-    if (H5open() < 0 || H5Zfilter_avail(H5Z_FILTER_DEFLATE) <= 0) return;
     auto reg = reinterpret_cast<RegisterFn>(dlsym(RTLD_DEFAULT, "H5Z_register"));
     if (!reg) return;
     // same id and name as HDF5's own class (H5Zdeflate.c H5Z_DEFLATE): the name goes into the filter pipeline messages
@@ -291,30 +313,59 @@ void install() {
 #endif
 }
 
-void submit(const Record& r) {
+void submit(const Record& r, Group& g) {
   if (!active() || r.len.empty() || r.len.size() != r.chunk.size() || r.fill.size() != r.elsize) return;
   std::size_t nc = 1;
   for (std::size_t d = 0; d < r.len.size(); ++d) {
     if (r.chunk[d] == 0 || r.len[d] == 0) return;
     nc *= (r.len[d] + r.chunk[d] - 1) / r.chunk[d];
   }
+  {
+    std::lock_guard<std::mutex> lk(g.m);
+    g.pending += long(nc);
+  }
   auto shared = std::make_shared<Record>(r);
-  for (std::size_t c = 0; c < nc; ++c) pool().submit([shared, c] { compress_chunk(*shared, c); });
+  for (std::size_t c = 0; c < nc; ++c)
+    pool().submit([shared, c, &g] {
+      compress_chunk(*shared, c, g);
+      std::lock_guard<std::mutex> lk(g.m);
+      if (--g.pending == 0) g.done.notify_all();
+    });
 }
 
-void wait() {
-  if (!active()) return;
+void wait(Group& g) {
   const auto t0 = clk::now();
-  pool().wait();
-  g_stats.wait_s += since(t0);
+  std::unique_lock<std::mutex> lk(g.m);
+  if (g.pending == 0) return;
+  g.done.wait(lk, [&g] { return g.pending == 0; });
+  lk.unlock();
+  add_wait(since(t0));
 }
 
-void clear() {
+void clear(Group& g) {
   std::lock_guard<std::mutex> lk(g_mutex);
-  g_ready.clear();
+  for (auto it = g_ready.begin(); it != g_ready.end();)
+    it = it->second->group == &g ? g_ready.erase(it) : std::next(it);
 }
 
-Stats& stats() { return g_stats; }
+long precomputed(const Group& g) { return g.precomputed; }
+
+UseGroup::UseGroup(const Group* g) : saved_(t_group) { t_group = g; }
+UseGroup::~UseGroup() { t_group = saved_; }
+
+Stats stats() {
+  Stats s;
+  s.precomputed = g_precomputed;
+  s.hits = g_hits;
+  s.misses = g_misses;
+  std::lock_guard<std::mutex> lk(g_time_mutex);
+  s.miss_s = g_miss_s;
+  s.wait_s = g_wait_s;
+  s.download_s = g_download_s;
+  return s;
+}
+void add_download(double s) { add_time(g_download_s, s); }
+void add_wait(double s) { add_time(g_wait_s, s); }
 
 bool timing() {
   static const bool t = [] {

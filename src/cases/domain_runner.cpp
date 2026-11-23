@@ -27,6 +27,7 @@
 #include "core/precision.hpp"
 #include "dyn/diagnostics.hpp"
 #include "wrf_io/global_atts.hpp"
+#include "wrf_io/output_queue.hpp"
 
 namespace cppwrf::cases {
 
@@ -1050,6 +1051,15 @@ bool DomainRunner::start() {
   stop_on_nonfinite_ = cfg_.get_bool("run.stop_on_nonfinite", true);
   write_native_restart_ = cfg_.get_bool("restart.native", true);
   wrf_timing_ = cfg_.get_bool("output.wrf_timing", false);
+#ifdef CPPWRF_HAVE_NETCDF
+  {  // output.write_queue_mb: the WRF-format files written by a writer thread while the model steps on (0: here)
+    const long mb = cfg_.get_int("output.write_queue_mb", 1024);
+    if (mb < 0) throw std::runtime_error("output.write_queue_mb must be >= 0 (got " + std::to_string(mb) + ")");
+    // a decomposed run (tiles, MPI ranks) writes in the model's thread: its host work holds tile::Serial, not the
+    // NetCDF lock (wrf_io/output_queue.hpp)
+    wrf_io::output_queue::configure(tile::tiled() ? 0 : std::size_t(mb) << 20);
+  }
+#endif
   // the non-finite check of every step (else on the diagnostic steps only, output.diag_interval)
   nonfinite_every_step_ = cfg_.get_bool("run.check_nonfinite_every_step", false);
   start_date_ = simulation_start();
@@ -1268,6 +1278,9 @@ void DomainRunner::adapt_before_step(long n) {
 }
 
 void DomainRunner::before_step(long n) {
+#ifdef CPPWRF_HAVE_NETCDF
+  wrf_io::output_queue::check();  // an error of the output writer stops the run at the next step, with its message
+#endif
   if (m_.adapt) adapt_before_step(n);
 #ifdef CPPWRF_HAVE_NETCDF
   if (write_wrfout_ && wrfout_ && (hist_due(n) || n == m_.nsteps || rst_due(n) || aux3_due(n)))
@@ -1388,6 +1401,9 @@ bool DomainRunner::after_step(long n) {
 }
 
 void DomainRunner::finish() {
+#ifdef CPPWRF_HAVE_NETCDF
+  wrf_io::output_queue::drain();  // the queued records written (an error of the writer: its message)
+#endif
   if (!tile::writer()) return;
   if (m_.nsteps > start_step) {
     double cells = double(m_.g.nx) * m_.g.ny * m_.g.nz;
