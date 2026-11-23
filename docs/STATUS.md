@@ -5,11 +5,13 @@ Version 1.3.0 (docs/RELEASE_NOTES.md: the verified scope of the release).
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
 is verified against WRF, and the current results. All numbers come from `tests/verify/wrf_suite.py`
 (at 318159a, version 1.3.0: 1153 cases, 618 CPU FP64, 404 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`, against
-WRF real*4) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart configurations. The CPU CI runs 527 checks, i.e.
-the 464 CPU FP64 cases outside `--slow`, 18 restart checks, the Straka check and the 44 `cpu_sp` cases, all passing at
-fbbcf57; the 154 slow CPU cases are the 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases. For 1.1.0 the
-Colab G4 ran all 319 CUDA FP64 cases, the 18 GPU restart checks and the GPU Straka check, 338 checks, all passing
-at tolerance 0, and the 43 CUDA FP32 cases with restart_p1_fp32_cuda, 44 runs within their tolerances; the 1.2.0,
+WRF real*4) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart configurations. CPU CI at 318159a reported 527
+passes, including the 464 CPU FP64 cases outside `--slow`, 18 restart checks, the legacy `straka_wrf` RMS check
+against WRF real*4 at 1e-4 K, and the 44 `cpu_sp` cases. The `ideal_grav2d_x` cases verify the Straka density current
+against WRF real*8 at tolerance 0 on CPU and CUDA. The 154 slow CPU cases are the 9 runs of 24 h, 30 h and 72 h and
+145 Noah-MP option cases. For 1.1.0 the Colab G4 reported 338 CUDA FP64 passes, including all 319 cases at tolerance 0,
+18 GPU restart checks and the legacy `straka_wrf_cuda` RMS check. The 43 CUDA FP32 cases with
+restart_p1_fp32_cuda gave 44 runs within their tolerances. The 1.2.0,
 1.2.1, 1.2.2, 1.2.3 and 1.3.0 GPU runs (1.3.0: all 423 CUDA FP64 checks run) are in docs/RELEASE_NOTES.md) and `tests/verify/run_wrf_files_test.sh` (WRF output files).
 
 ## Implemented
@@ -166,9 +168,9 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | W3 | P4 with WSM3 (mp_physics 3) instead of WSM6; restarted at 30 min | 1 h |
 | G3P8 | P8 with the Grell-3D cumulus (cu_physics 5, ishallow 1; restarted at 30 min) | 1 h |
 | G3P4 | P4 with Grell-3D instead of Kain-Fritsch (cugd_avedx 1 and 3) | 1 h |
-| V1 | tropics (Bay of Bengal), Mercator, 15 km, P4 physics | 6 h |
-| V2 | Arctic (Svalbard), polar stereographic, 15 km, P4 physics (sea ice, glacier land ice) | 6 h |
-| V3 | Alps, Lambert, 3 km, Thompson + MYJ + Eta + Noah-MP + RRTMG (radt 5), no cumulus | 2 h |
+| V1 | tropics (Bay of Bengal), Mercator, 15 km, P4 physics | 2 h |
+| V2 | Arctic (Svalbard), polar stereographic, 15 km, P4 physics (sea ice, glacier land ice) | 2 h |
+| V3 | Alps, Lambert, 3 km, Thompson + MYJ + Eta + Noah-MP + RRTMG (radt 5), no cumulus | 30 min |
 | Q1 | P1 with the QNSE PBL and surface layer (bl_pbl_physics 4, sf_sfclay_physics 4, mfshconv 0) | 1 h |
 | Q4 | P4 with the QNSE PBL and surface layer (restarted at 30 min) | 1 h |
 | Q1M | Q1 with the EDKF mass flux of the QNSE PBL (mfshconv 1; restarted at 30 min) | 1 h |
@@ -187,7 +189,7 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | MO4 | P4 with monotonic moist / scalar advection (moist_adv_opt 2, scalar_adv_opt 2) | 1 h |
 | MOK4 | P4 with diff_opt 2 / km_opt 2, monotonic moist and TKE advection (moist_adv_opt 2, tke_adv_opt 2) | 1 h |
 | MOMY | MYNN with monotonic moist / scalar advection (qni, qnr, qke_adv) | 1 h |
-| MON3 | two-way nest N3 with monotonic moist / scalar advection on both domains | 1 h |
+| MON3 | two-way nest N3 with monotonic moist / scalar advection on both domains (3 min: both domains compared; 1 h: d01 only) | 3 min, 1 h |
 | WE4 | P4 with WENO moist / scalar advection (moist_adv_opt 3, scalar_adv_opt 3) | 1 h |
 | WP4 | P4 with positive-definite WENO moist / scalar advection (4, 4) | 1 h |
 | WM4 | P4 with WENO momentum advection (momentum_adv_opt 3) | 1 h |
@@ -223,10 +225,10 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | N3F1 / N3M | N3 with d02 land use differing at the fed-back points / with MYNN and km_opt 4, 2 | 3 parent steps |
 | N3 | two-way nest with the P4 physics on both domains (physics feedback, nest ozone from the parent) | 1 h |
 | P4, P6, P9, N3 long runs | inputs from real.exe for 24 h / 72 h (wrfbdy every 6 h; 24-72 h from the GFS forecast through WPS), history every 3 h, CPPWRF restarted in the middle from its own wrfrst files | 24 h; 72 h (P4, P6, P9) |
-| D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains | resumed from CPPWRF's wrfrst and native restart files (SR1: native only) between the radiation, PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run's | 15-20 min |
+| D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains | resumed from CPPWRF's wrfrst and native restart files (SR1: native only) between the radiation, PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run's | 15-20 min (SR1: 280 min) |
 | P4D16 | P4 with dt = 16 s and radt = 10 min on the 72 h inputs, history every hour (WRF's clock past one day: XTIME, coszen) | 30 h |
 | N3D50 | N3 with d01 dt = 50 s, so a nest step of 50/3 s (WRF's clock with a fraction of a second: XTIME, julian) | 1 h |
-| RSA | P4 with dt = 50 s and restart_interval = 2 min (not a multiple of dt), history every 150 s; the wrfrst files too; resumed from its wrfrst file of 150 s with restart_interval = 2 and = 0 (WRF's restart alarm of a resumed run: the first ring at the file's seconds to the next ring) | 700 s |
+| RSA | P4 with dt = 50 s and restart_interval = 2 min (not a multiple of dt), history every 150 s; the wrfrst files too; resumed from its wrfrst file of 150 s with restart_interval = 2 and = 0 (WRF's restart alarm of a resumed run: the first ring at the file's seconds to the next ring) | 600 s |
 | OVL1 | P4 with cldovrlp 1 (RRTMG McICA random overlap) | 1 h |
 | OVL3 | P4 with cldovrlp 3 (maximum overlap) | 1 h |
 | OVL4I | P4 with cldovrlp 4 (exponential overlap) and idcor 1 (latitude-dependent decorrelation length) | 1 h |
@@ -274,17 +276,18 @@ The differential tests run WRF's objects on the test machine: their Fortran driv
 tests/phys/libmvec_intel.cpp, whose `_ZGVbN2v_log` / `_ZGVbN2v_log10` are these Intel-equivalent functions
 (on Intel identical to libmvec), so WRF's side gives Intel's bits on AMD too (with libmvec's own log / log10 it
 differed on AMD EPYC by 1 ulp in KF, Noah-MP, the MYNN surface layer and the WSM6 / Thompson reflectivity).
-The full CPU suite therefore runs on AMD CPUs: on every push to main on GitHub-hosted runners (AMD EPYC; for 1.1.0
-at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 33/33, all exact; for
+The full CPU suite therefore runs on AMD CPUs: on every push to main on GitHub-hosted runners (AMD EPYC or Intel Xeon; for 1.1.0
+at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 33/33; for
 1.2.0 at 0bc4652, in a Debian 13 container: suite PASS 386 with the 44 `cpu_sp` cases, WRF output files 42, ideal
-files 14, `ctest -L diff` 32/32, ctest 35/35, all exact; for 1.2.1 at 4a57df7: suite PASS 387, WRF output files 42,
-ideal files 14, `ctest -L diff` 32/32, ctest 36/36, all exact; for 1.2.2 at fbbcf57: suite PASS 423, WRF output files
-42, ideal files 14, `ctest -L diff` 32/32, ctest 40/40, all exact; for 1.2.3 at c29a32d / ca4de31: suite PASS 527, WRF
-output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 40/40, all exact; for 1.3.0 at 318159a: suite PASS 527,
+files 14, `ctest -L diff` 32/32, ctest 35/35; for 1.2.1 at 4a57df7: suite PASS 387, WRF output files 42,
+ideal files 14, `ctest -L diff` 32/32, ctest 36/36; for 1.2.2 at fbbcf57: suite PASS 423, WRF output files
+42, ideal files 14, `ctest -L diff` 32/32, ctest 40/40; for 1.2.3 at c29a32d / ca4de31: suite PASS 527, WRF
+output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 40/40; for 1.3.0 at 318159a: suite PASS 527,
 WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 39/40 (the generated option tables, fixed in c0de113)), and
 on the AMD CPU of Colab's G4 runtime (`tools/colab/colab_suite.sh --gpu G4 --any-cpu --jobs 12 --threads 4`: the CPU
 suite, the output files, ideal files, differential and ctest tests); the Intel L4 runtime and the GCP VMs stay
-possible.
+possible. The historical CPU suite totals include the legacy `straka_wrf` RMS check at 1e-4 K. The CPU FP64 cases
+against WRF real*8, including `ideal_grav2d_x`, use tolerance 0.
 The CPU result does not depend on the OpenMP thread count or on the Intel machine: P4, P6, P8, P9, MYNN,
 P1 with Noah-MP and the two-way nest N3s (1 h, both domains) and em_quarter_ss (30 min) with 1, 16 and 44
 threads are bit-identical to serial WRF on c3 (Sapphire Rapids) and n2 machines (`run.threads` in
@@ -322,11 +325,13 @@ fraction of a second; both pass at tolerance 0 on the CPU (Colab L4, Intel) and 
 CUDA FP64 is bit-identical to WRF and to the CPU build: every `cuda_dp` case of the suite passes with tolerance 0
 (tests/verify/exact.py, every frame and variable of the history). For 1.1.0 the Colab G4 (RTX PRO 6000 Blackwell
 Server Edition, sm_120, CUDA 13.0, 2026-11-20) ran all of them at fb158f3, which has the model code of 78e46c2: 319
-cases, 18 GPU restart checks and the GPU Straka check, 338 PASS, 0 FAIL; the device glibc math proof was identical
+cases, 18 GPU restart checks and the legacy `straka_wrf_cuda` RMS check, 338 PASS, 0 FAIL; the device glibc math proof was identical
 and ctest passed 35/35 in the FP64 and the FP32 CUDA build. For 1.2.2 (fbbcf57, 2026-11-22): 337 cases, 18 GPU
-restart checks and the GPU Straka check, 356 PASS, 0 FAIL. For 1.2.3 (c29a32d, 2026-11-22): 404 cases, 18 GPU
-restart checks and the GPU Straka check, 422 PASS, 0 FAIL, 1 not run (its data tar was missing from the GPU data list). For 1.3.0 (318159a,
-2026-11-22): 404 cases, 18 GPU restart checks and the GPU Straka check, 423 PASS, 0 FAIL, 0 SKIP. Earlier subsets also ran on Colab's L4 (sm_89) and A100
+restart checks and the legacy RMS check, 356 PASS, 0 FAIL. For 1.2.3 (c29a32d, 2026-11-22): 404 cases, 18 GPU
+restart checks and the legacy RMS check, 422 PASS, 0 FAIL, 1 not run (its data tar was missing from the GPU data list).
+For 1.3.0 (318159a, 2026-11-22): 404 cases, 18 GPU restart checks and the legacy RMS check, 423 PASS, 0 FAIL, 0 SKIP.
+The legacy RMS check used WRF real*4 and a tolerance of 1e-4 K. The `ideal_grav2d_x` case uses tolerance 0 against
+WRF real*8. Earlier subsets also ran on Colab's L4 (sm_89) and A100
 (sm_80); H100 was not available. The FP64 device code
 computes as WRF's gfortran real*8 build on x86-64:
 
@@ -406,8 +411,9 @@ real*4 history at tolerance 0. The default CUDA FP32 build (`-DCPPWRF_ENABLE_CUD
 `CPPWRF_CUDA_FP32_IDENTITY=ON` by default: no FMA contraction, glibc 2.41's float functions on the device) gives the
 same bits on the GPU: the 44 `cuda_sp_id` cases pass on an RTX 2060 (sm_75) and on a Colab G4 (sm_120). The FP32
 executables define glibc 2.41's float functions themselves (src/core/glibc_mathf_host.cpp), so binaries built on Ubuntu
-24.04 (glibc 2.39) pass these cases too. The opt-in fast CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, 2 to 17 %
-faster in the paper benchmark) is compared by relative L2 (above and docs/FP32_ACCURACY.md). docs/FP32_IDENTITY.md
+24.04 (glibc 2.39) pass these cases too. The opt-in fast CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) is compared
+by relative L2 (above and docs/FP32_ACCURACY.md). In the [v1.3.0 paper benchmark](#performance), the identity build
+takes 2.1 to 18.0 % longer in steady stepping than the fast build (identity time / fast time - 1). docs/FP32_IDENTITY.md
 has the method, the case table, the proofs of the ported functions, the cost and what is not identical yet (moving
 nests, more than two domains, restarts, configurations without a WRF real*4 reference, other compilers for WRF).
 
@@ -440,29 +446,36 @@ schemes that no suite case runs on the GPU.
 
 ## Performance
 
-WRF v4.8.0 and CPPWRF were measured on one Google Colab G4 runtime: an AMD EPYC 9B45 with 48 hardware threads and an
-NVIDIA RTX PRO 6000 Blackwell. WRF was built there from the release source with its GNU `configure`, MPI and
-MPI + OpenMP, real*4 and real*8; its fastest of five process layouts counts. Each case ran for 1 h with history off
-and on: R1, P4 (radt 1 and 15 min), the nest N3 and a 9.1 times larger domain made on the runtime with WPS and
-real.exe. `tools/bench/colab_bench.sh` reproduces it in one session.
+The v1.3.0 paper benchmark (CPPWRF commit `9f9bb77`) ran WRF v4.8.0 and CPPWRF on a Google Colab G4 with an AMD
+EPYC 9B45 (24 cores, 48 hardware threads) and an NVIDIA RTX PRO 6000 Blackwell. Each case ran for 6 to 24 h. WRF uses
+its stock GNU real*4 and real*8 builds and the fastest of eight screened MPI or MPI + OpenMP layouts for each case
+and precision. The CPU FP64 column uses the selected thread count for each case.
 
-Stepping time in seconds per simulated hour, history off (rerun at main c9c95c5, 2026-11-16, fast GPU FP32 build
-`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`; WRF's best layout):
+The table gives steady stepping seconds per simulated hour with history off from the unrounded `step_s` medians in
+the benchmark's `runs.csv` and `summary.json`.
 
-| Case | WRF real*4 | WRF real*8 | CPPWRF GPU FP32 | CPPWRF GPU FP64 | CPPWRF CPU FP64 (48 threads) |
+| Case | WRF real*4 | WRF real*8 | CPPWRF GPU FP32 (fast) | CPPWRF GPU FP64 | CPPWRF CPU FP64 |
+|---|---|---|---|---|---|
+| C1: P4, radt 15 min | 2.90 | 4.36 | 0.46 | 1.54 | 5.49 |
+| C2: L (359 x 269 x 44), radt 15 min | 28.60 | 50.38 | 2.78 | 9.16 | 49.83 |
+| C3: MORR, radt 1 min | 11.77 | 14.43 | 1.61 | 5.00 | 11.99 |
+| C4: N3 | 30.00 | 39.63 | 3.32 | 9.78 | 36.05 |
+
+Across the four cases, the steady stepping medians give speed-ups over WRF real*4 of 6.33x to 10.28x for fast GPU
+FP32 and 5.36x to 10.07x for identity GPU FP32. GPU FP64 runs 2.83x to 5.50x faster than WRF real*8.
+
+The earlier `c9c95c5` benchmark (2026-11-16, docs/PERF.md) also measured these 1 h cases with history off, before
+RRTMG computed in single precision in CUDA FP32 builds. `tools/bench/colab_bench.sh` reproduces that benchmark.
+
+| Case | WRF real*4 | WRF real*8 | CPPWRF GPU FP32 (fast) | CPPWRF GPU FP64 | CPPWRF CPU FP64 (48 threads) |
 |---|---|---|---|---|---|
 | R1 | 0.84 | 1.99 | 0.11 | 0.44 | 4.69 |
 | P4 | 7.46 | 10.71 | 1.47 | 2.35 | 11.40 |
-| P4, radt 15 min | 2.43 | 4.22 | 0.47 | 1.36 | 7.79 |
-| N3 | 24.14 | 34.09 | 4.46 | 8.26 | 38.56 |
-| L (359 x 269 x 44) | 25.72 | 45.18 | 2.50 | 7.52 | 52.43 |
 
-Fast GPU FP32 is 5.1 to 10.3 times faster than WRF real*4, GPU FP64 3.1 to 6.0 times faster than WRF real*8
-(docs/PERF.md has the first run and the layouts). This run predates RRTMG in single precision in CUDA FP32 builds; no
-new benchmark was run for 1.1.0 or 1.2.0 (docs/PERF.md says what was and was not measured again; 1.2.0's GPU changes
-left the G4's 1 h stepping times within a second, docs/RELEASE_NOTES.md).
+No new benchmark was run for 1.1.0 or 1.2.0 (docs/PERF.md says what was and was not measured again; 1.2.0's GPU
+changes left the G4's 1 h stepping times within a second, docs/RELEASE_NOTES.md).
 
-Agreement in these runs:
+Agreement in the five `c9c95c5` cases:
 - The CPU FP64 output is bit-identical to the suite's WRF real*8 references for P4 and N3 (both domains).
 - The GPU FP64 output is bit-identical to the CPU FP64 output in all five cases.
 - With this CPU's own libmvec log (`CPPWRF_PORTABLE_LIBMVEC=OFF`), the CPU FP64 output is bit-identical over the

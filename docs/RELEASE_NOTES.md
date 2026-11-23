@@ -11,9 +11,11 @@ covers 12 commits (not counting merges) from `v1.2.3` to the 1.3.0 release commi
 
 - **GPU FP32 = WRF real*4 by default:** CPPWRF_CUDA_FP32_IDENTITY and CPPWRF_HIP_FP32_IDENTITY default to ON (no
   effect on FP64 and CPU builds). Who built `gpu-fp32` without options before gets the identity build now; the fast
-  build (FMA contraction, CUDA's math library; 2 to 17 % faster in the paper benchmark, docs/FP32_ACCURACY.md) is
-  `-DCPPWRF_CUDA_FP32_IDENTITY=OFF`. The release tarballs, containers, Spack package and Python package's `gpu-fp32`
-  follow the default. The suite, benchmark, tiles and MPI tools that test the fast build name it explicitly.
+  build (FMA contraction and CUDA's math library) is `-DCPPWRF_CUDA_FP32_IDENTITY=OFF`. In the v1.3.0 paper benchmark
+  (`9f9bb77`), the identity build takes 2.1 to 18.0 % longer in steady stepping than the fast build (identity time /
+  fast time - 1, from the `step_s` medians in `runs.csv` and `summary.json`). The release tarballs, containers, Spack
+  package and Python package's `gpu-fp32` follow the default. The suite, benchmark, tiles and MPI tools that test the
+  fast build name it explicitly.
 - **Translator as WRF's check_a_mundo:** WRF v4.8.0's automatic resets and refusals (MSKF's icloud and
   cu_rad_feedback, the innermost domain's sf_urban_physics, o3input and ghg_input, sst_update 0, MYNN-only options,
   icloud_bl, scalar_pblmix, grav_settling with mp_physics 28, idcor / hail_opt values, zdamp only with damp_opt 2,
@@ -40,10 +42,14 @@ covers 12 commits (not counting merges) from `v1.2.3` to the 1.3.0 release commi
 
 | Where | Result |
 |---|---|
-| CPU CI at 318159a (GitHub-hosted runners, Debian 13 container, run 45017066167) | suite PASS 527 FAIL 0 SKIP 0 at tolerance 0; WRF output files 42 / 42; ideal files 14; differential tests 32 / 32; ctest 39 / 40, the one failure being docs_options_current (generated option tables not regenerated after the translator change), fixed in c0de113 |
+| CPU CI at 318159a (GitHub-hosted runners, Debian 13 container, run 45017066167) | suite PASS 527 FAIL 0 SKIP 0; WRF output files 42 / 42; ideal files 14; differential tests 32 / 32; ctest 39 / 40, the one failure being docs_options_current (generated option tables not regenerated after the translator change), fixed in c0de113 |
 | CPU CI at 5de6edb (the FP32 default and its documentation, affected cases, run 45024599983) | PASS 10 FAIL 0 SKIP 0 |
-| GPU: Colab G4 at 318159a (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 423 / 423 at tolerance 0, FAIL 0, SKIP 0; CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; device glibc math proof identical; ctest 41 / 42 (FP64) and 42 / 43 (FP32), the one failure being docs_options_current, fixed in c0de113 |
+| GPU: Colab G4 at 318159a (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 423 / 423, FAIL 0, SKIP 0; CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; device glibc math proof identical; ctest: FP64 35 passed, 6 skipped (reference data not on the runtime), 1 failed (docs_options_current, fixed in c0de113); FP32 36 passed, 6 skipped (reference data not on the runtime), 1 failed (docs_options_current, fixed in c0de113) |
 | HIP compile on Colab (ROCm 6.4.1, no AMD GPU) | FP64 (gfx90a), fast FP32 and FP32 identity (gfx942) build to the end |
+
+The FP64 comparisons against WRF real*8 used tolerance 0, including `ideal_grav2d_x` for the Straka density current.
+The CPU FP32 comparisons against WRF real*4 also used tolerance 0. The FP64 suite totals include the legacy
+`straka_wrf` and `straka_wrf_cuda` RMS checks against WRF real*4 at 1e-4 K.
 
 The G4 run's commit 318159a predates the change of the default. For the binaries it tested the change is none: CMake
 at 318159a and at 5c1a7de gives the same compile flags for CUDA FP64, for the fast FP32 build (old default, new
@@ -95,14 +101,15 @@ the CUDA FP32 identity build reproduce WRF v4.8.0 real*4 on the configurations o
 
 | Where | Result |
 |---|---|
-| CPU CI at c29a32d (GitHub-hosted runners, Debian 13 container, run 44999293731) | suite PASS 527 FAIL 0 SKIP 0 at tolerance 0 (with the 104 new CPU FP64 cases and the 44 `cpu_sp` cases); ideal files 14; differential tests 32 / 32 |
+| CPU CI at c29a32d (GitHub-hosted runners, Debian 13 container, run 44999293731) | suite PASS 527 FAIL 0 SKIP 0 (with the 104 new CPU FP64 cases and the 44 `cpu_sp` cases); ideal files 14; differential tests 32 / 32 |
 | CPU CI at ca4de31 (the test fixes on top of c29a32d, run 45004618168) | WRF output files 42 / 42; ideal files 14; differential tests 32 / 32; ctest 40 / 40 |
-| GPU: Colab G4 at c29a32d (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 422 / 422 run at tolerance 0, FAIL 0 (one more check, `real_kesskf_r8_fp64_cuda_t3x1`, was not run: its data tar was missing from the GPU data list); CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; device glibc math proof identical; ctest 41 / 42 (FP64) and 42 / 43 (FP32), the one failure being the Python test affected_cases, fixed in ca4de31 |
+| GPU: Colab G4 at c29a32d (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 422 / 422 run, FAIL 0 (one more check, `real_kesskf_r8_fp64_cuda_t3x1`, was not run: its data tar was missing from the GPU data list); CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; device glibc math proof identical; ctest 41 / 42 (FP64) and 42 / 43 (FP32), the one failure being the Python test affected_cases, fixed in ca4de31 |
 
 How the counts relate (`tests/verify/wrf_suite.py --list`): the suite defines 1153 cases, 618 CPU FP64, 404 CUDA
 FP64, 43 CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`, 171 more than 1.2.2. The CI's 527 checks are the 464 CPU FP64
-cases that are not `--slow`, 18 restart checks, the Straka check and the 44 `cpu_sp` cases; the G4's 423 CUDA FP64
-checks are the 404 cases, 18 restart checks and the Straka check.
+cases that are not `--slow`, 18 restart checks, the legacy `straka_wrf` RMS check and the 44 `cpu_sp` cases; the G4's
+423 CUDA FP64 checks are the 404 cases, 18 restart checks and the legacy `straka_wrf_cuda` RMS check. The legacy
+checks used 1e-4 K against WRF real*4. The FP64 cases against WRF real*8 and the `cpu_sp` cases used tolerance 0.
 
 The commits after c29a32d change tests, documentation and version strings only.
 
@@ -168,13 +175,14 @@ counting merges) from `v1.2.1` (bd0f7d5) to the 1.2.2 release commit. The 1.2.1 
 
 | Where | Result |
 |---|---|
-| CPU CI at fbbcf57 (GitHub-hosted runners, Debian 13 container, run 44978966008) | suite PASS 423 FAIL 0 SKIP 0 at tolerance 0 (with the 36 new CPU FP64 cases and the 44 `cpu_sp` cases); WRF output files 42; ideal files 14; differential tests 32 / 32; ctest 40 / 40 |
-| GPU: Colab G4 at fbbcf57 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 356 / 356 at tolerance 0 (with the 18 new CUDA FP64 cases); CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 42 / 42 (FP64) and 43 / 43 (FP32); device glibc math proof identical |
+| CPU CI at fbbcf57 (GitHub-hosted runners, Debian 13 container, run 44978966008) | suite PASS 423 FAIL 0 SKIP 0 (with the 36 new CPU FP64 cases and the 44 `cpu_sp` cases); WRF output files 42; ideal files 14; differential tests 32 / 32; ctest 40 / 40 |
+| GPU: Colab G4 at fbbcf57 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-22 | CUDA FP64 356 / 356 (with the 18 new CUDA FP64 cases); CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 42 / 42 (FP64) and 43 / 43 (FP32); device glibc math proof identical |
 
 How the counts relate (`tests/verify/wrf_suite.py --list`): the suite defines 982 cases, 514 CPU FP64, 337 CUDA
 FP64, 43 CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`, 54 more than 1.2.1 (the coverage wave). The CI's 423 checks are the 360 CPU FP64 cases that are not `--slow`, 18
-restart checks, the Straka check and the 44 `cpu_sp` cases; the G4's 356 CUDA FP64 checks are the 337 cases, 18
-restart checks and the Straka check.
+restart checks, the legacy `straka_wrf` RMS check and the 44 `cpu_sp` cases; the G4's 356 CUDA FP64 checks are the
+337 cases, 18 restart checks and the legacy `straka_wrf_cuda` RMS check. The legacy checks used 1e-4 K against WRF
+real*4. The FP64 cases against WRF real*8 and the `cpu_sp` cases used tolerance 0.
 
 The commits after fbbcf57 change documentation and version strings only.
 
@@ -226,14 +234,15 @@ to the 1.2.1 release commit. The 1.2.0 notes follow below.
 
 | Where | Result |
 |---|---|
-| CPU CI at 4a57df7 (GitHub-hosted runners, Debian 13 container, run 44908377629) | suite PASS 387 FAIL 0 SKIP 0 at tolerance 0 (with the new `real_a05g_r8_fp64_cpu_1h_t2x2` and the 44 `cpu_sp` cases); WRF output files 42; ideal files 14; differential tests 32 / 32; ctest 36 / 36 |
-| GPU: Colab G4 at 4a57df7 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-21 | CUDA FP64 338 / 338 at tolerance 0; CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 38 / 38 (FP64) and 39 / 39 (FP32); device glibc math proof identical |
+| CPU CI at 4a57df7 (GitHub-hosted runners, Debian 13 container, run 44908377629) | suite PASS 387 FAIL 0 SKIP 0 (with the new `real_a05g_r8_fp64_cpu_1h_t2x2` and the 44 `cpu_sp` cases); WRF output files 42; ideal files 14; differential tests 32 / 32; ctest 36 / 36 |
+| GPU: Colab G4 at 4a57df7 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-21 | CUDA FP64 338 / 338; CUDA FP32 identity 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 38 / 38 (FP64) and 39 / 39 (FP32); device glibc math proof identical |
 
 How the counts relate (`tests/verify/wrf_suite.py --list` at 4a57df7): the suite defines 928 cases, 478 CPU FP64
 (154 of them `--slow`), 319 CUDA FP64, 43 CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`, one more CPU FP64 case than
 1.2.0 (`real_a05g_r8_fp64_cpu_1h_t2x2`). The CI's 387 checks are the other 324 CPU FP64 cases, 18 restart checks,
-the Straka check and the 44 `cpu_sp` cases; the G4's 338 CUDA FP64 checks are the 319 cases, 18 restart checks and
-the Straka check.
+the legacy `straka_wrf` RMS check and the 44 `cpu_sp` cases; the G4's 338 CUDA FP64 checks are the 319 cases, 18
+restart checks and the legacy `straka_wrf_cuda` RMS check. The legacy checks used 1e-4 K against WRF real*4. The
+FP64 cases against WRF real*8 and the `cpu_sp` cases used tolerance 0.
 
 The commits after 4a57df7 change documentation and version strings only.
 
@@ -331,19 +340,21 @@ the GPU proofs:
 
 | Check | Result |
 |---|---|
-| `tests/verify/wrf_suite.py`: CPU FP64 against WRF v4.8.0 real*8 and CPU FP32 (`cpu_sp`) against WRF v4.8.0 real*4, at tolerance 0 | PASS 386, FAIL 0, SKIP 0 (342 CPU FP64 checks and the 44 `cpu_sp` cases) |
+| `tests/verify/wrf_suite.py`: CPU FP64 and CPU FP32 (`cpu_sp`) | PASS 386, FAIL 0, SKIP 0 (342 CPU FP64 checks and the 44 `cpu_sp` cases) |
 | WRF output files (wrfout / wrfrst values, attributes, metadata) | PASS 42 |
 | Ideal-case output files | PASS 14 |
 | Differential tests against WRF's compiled Fortran (`ctest -L diff`) | PASS 32 / 32 |
 | ctest | PASS 35 / 35 |
 | Host-libm independence: Colab G4, NVIDIA RTX PRO 6000 Blackwell Server Edition (sm_120), CUDA 13.0, binaries built on Ubuntu 24.04 (gcc 13.3, glibc 2.39), 2026-11-21 | `cpu_sp` 44 / 44 and `cuda_sp_id` 44 / 44 at tolerance 0 |
-| GPU: Colab G4 at 0bc4652 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-21 | CUDA FP64 338 / 338 at tolerance 0 (319 cases, 18 restart checks, Straka); CUDA FP32 identity (`cuda_sp_id`) 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 37 / 37 (FP64) and 38 / 38 (FP32); device glibc math proof identical |
+| GPU: Colab G4 at 0bc4652 (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120, CUDA 13.0), 2026-11-21 | CUDA FP64 338 / 338 (319 cases, 18 restart checks, legacy `straka_wrf_cuda` RMS check); CUDA FP32 identity (`cuda_sp_id`) 44 / 44 at tolerance 0; fast CUDA FP32 44 / 44 within the measured tolerances; ctest 37 / 37 (FP64) and 38 / 38 (FP32); device glibc math proof identical |
 
 How the suite counts relate (`tests/verify/wrf_suite.py --list` at 0bc4652): the suite defines 927 cases, 477 CPU
 FP64, 319 CUDA FP64, 43 CUDA FP32, 44 CPU FP32 (`cpu_sp`) and 44 CUDA FP32 identity (`cuda_sp_id`), and 18 restart
 configurations, each with a CPU and a CUDA FP64 check. The CI's 342 CPU FP64 checks are, as in 1.1, the 323 CPU FP64
-cases outside `--slow`, the 18 CPU restart checks and the Straka check; the 154 slow CPU cases run on request. The
-`cuda_sp_id` cases also all passed on an RTX 2060 (sm_75) during development (docs/FP32_IDENTITY.md).
+cases outside `--slow`, the 18 CPU restart checks and the legacy `straka_wrf` RMS check; the 154 slow CPU cases run on
+request. The legacy checks used 1e-4 K against WRF real*4. The FP64 cases against WRF v4.8.0 real*8 and the `cpu_sp`
+cases against WRF v4.8.0 real*4 used tolerance 0. The `cuda_sp_id` cases also all passed on an RTX 2060 (sm_75)
+during development (docs/FP32_IDENTITY.md).
 
 ## Known limitations
 
@@ -538,28 +549,30 @@ Pleim-Xiu, CLM and SSiB land surface models.
 
 ## Verification
 
-Full CPU CI run on 78e46c2 (GitHub-hosted runners, AMD EPYC, run 44689341507), all exact (tolerance 0), and the GPU
+Full CPU CI run on 78e46c2 (GitHub-hosted runners, AMD EPYC, run 44689341507) and the GPU
 proof on the Colab G4:
 
 | Check | Result |
 |---|---|
-| `tests/verify/wrf_suite.py`, CPU FP64 against WRF v4.8.0 real*8 at tolerance 0 | PASS 342, FAIL 0, SKIP 0 |
+| `tests/verify/wrf_suite.py`, CPU FP64 | PASS 342, FAIL 0, SKIP 0 |
 | WRF output files (wrfout / wrfrst values, attributes, metadata) | PASS 42 |
 | Ideal-case output files | PASS 14 |
 | Differential tests against WRF's compiled Fortran (`ctest -L diff`) | PASS 32 / 32 |
 | ctest (includes `real_vs_wrf_runs`: `cppwrf_real` against WRF real.exe on 14 runs) | PASS 33 / 33 |
-| GPU: Colab G4, NVIDIA RTX PRO 6000 Blackwell Server Edition (sm_120), CUDA 13.0, at fb158f3 (the model code of 78e46c2) | CUDA FP64 suite PASS 338, FAIL 0 at tolerance 0; device glibc math proof identical; ctest 35 / 35 in the FP64 and in the FP32 CUDA build; CUDA FP32 suite 44 runs within their measured tolerances (see below) |
+| GPU: Colab G4, NVIDIA RTX PRO 6000 Blackwell Server Edition (sm_120), CUDA 13.0, at fb158f3 (the model code of 78e46c2) | CUDA FP64 suite PASS 338, FAIL 0; device glibc math proof identical; ctest 35 / 35 in the FP64 and in the FP32 CUDA build; CUDA FP32 suite 44 runs within their measured tolerances (see below) |
 
 How the suite counts relate (tests/verify/cases at 78e46c2): the suite defines 839 cases, 477 CPU FP64, 319 CUDA
 FP64 and 43 CUDA FP32, and 18 restart configurations, each with a CPU and a CUDA FP64 check.
 - CPU: 154 of the 477 CPU FP64 cases are `--slow`: the 9 runs of 24 h, 30 h and 72 h, and 145 Noah-MP option cases
   whose reference data do not fit on one GitHub runner next to the rest. The CI's 342 checks are the other 323
-  cases, the 18 CPU restart checks and the Straka check. The slow cases run on request (`wrf_suite.py --slow`) and
+  cases, the 18 CPU restart checks and the legacy `straka_wrf` RMS check. The slow cases run on request (`wrf_suite.py --slow`) and
   were not part of this CI run.
 - CUDA FP64: the G4's 338 checks are all 319 `cuda_dp` cases (including the 137 slow ones, the CUDA twins of the
-  Noah-MP option cases), the 18 GPU restart checks and the GPU Straka check.
+  Noah-MP option cases), the 18 GPU restart checks and the legacy `straka_wrf_cuda` RMS check.
 - CUDA FP32: the 44 runs are the 43 `cuda` cases and `restart_p1_fp32_cuda`.
 - v1.0.0 had 242 cases (153 CPU FP64, 71 CUDA FP64, 18 CUDA FP32; 8 slow) and 17 restart configurations.
+
+The FP64 cases against WRF v4.8.0 real*8 used tolerance 0. The legacy RMS checks used 1e-4 K against WRF real*4.
 
 fb158f3 and 78e46c2 have the same model code: 78e46c2 only adds the CPU case N3M and changes two FP32 tolerances.
 In the G4 run, ACM7's W (relative L2 3.02e-2) was just above its earlier tolerance of 3e-2, and Q4's U and QV had
@@ -731,7 +744,8 @@ tolerance 0 (NaN equals only NaN, -0 differs from +0).
 | Check | Scope |
 |---|---|
 | Model runs against WRF (`tests/verify/wrf_suite.py`) | 242 cases: 153 CPU FP64 and 71 GPU FP64 cases at tolerance 0, 18 GPU FP32 cases by relative L2; 8 of them are the 24 h and 72 h runs of `--slow` |
-| Restarts | a run restarted from its own restart files equals the uninterrupted run: 17 CPU and 17 GPU FP64 configurations, also one FP32, and the Straka checks |
+| Restarts | a run restarted from its own restart files equals the uninterrupted run: 17 CPU and 17 GPU FP64 configurations, also one FP32 |
+| Straka | legacy `straka_wrf` and `straka_wrf_cuda` density-current RMS checks against WRF real*4 at 1e-4 K |
 | WRF output files | the wrfout and wrfrst files of the CPU FP64 runs equal WRF's in values, variables, dimensions, attributes and global attributes (66 runs), also when resumed from WRF's wrfrst files; the wrfout files of WRF's ideal cases (14 runs) |
 | GPU FP64 | the 71 GPU FP64 cases and 17 GPU restart checks (88 runs) at tolerance 0 on NVIDIA RTX PRO 6000 Blackwell (sm_120); earlier subsets also on L4 (sm_89) and A100 (sm_80) |
 | Schemes against WRF's own objects | the differential tests (`ctest -L diff`) link each scheme's driver to the objects of the WRF build that made the references: Kessler, WSM6, Thompson, YSU, MYJ, MYNN, the surface layers, Noah, Noah-MP, Kain-Fritsch, diffusion, nest numerics, the physics driver, Grell-Freitas and New Tiedtke column replays |

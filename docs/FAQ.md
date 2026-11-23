@@ -6,9 +6,10 @@ Yes, in FP64, for the configurations CPPWRF verifies. `cpu-fp64` and `gpu-fp64` 
 at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must equal NaN, and -0 must differ from
 +0.
 
-- **What was compared.** The verification suite runs 483 CPU FP64 checks against WRF on every push (464 cases, 18 restart
-  checks and the Straka check at 318159a, version 1.3.0; 154 more cases with `--slow`), and 423 CUDA FP64
-  checks on a GPU for each release:
+- **What was compared.** At 318159a (version 1.3.0), the CPU FP64 CI run reported 483 passes (464 cases, 18 restart
+  checks and the legacy `straka_wrf` RMS check). Another 154 cases run with `--slow`. The CUDA FP64 release run
+  reported 423 passes. The Straka density current is verified on CPU and CUDA by `ideal_grav2d_x` against WRF real*8
+  at tolerance 0. The suite runs CPU checks on each push and GPU checks for each release.
   - real-data domains in the mid-latitudes, the tropics, the Arctic and the Alps;
   - 24 h and 72 h forecasts;
   - nests, restarts, and WRF's idealized cases;
@@ -26,18 +27,20 @@ at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must
 
 ### Why FP32?
 
-Speed. On the GPU, the fast FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) is 1.6 to 4 times faster than FP64 in the
-benchmark of docs/STATUS.md (rerun at main c9c95c5, before RRTMG ran in single precision in CUDA FP32), and FP32
-needs about 60 % of the memory. On a 359 x 269 x 44 domain, an hour of forecast steps in 2.50 s in fast FP32 against
-7.52 s in FP64. WRF real*4 at its best layout on the same machine (48 hardware threads) takes 25.72 s (docs/STATUS.md,
-"Performance").
+Speed. In the v1.3.0 paper benchmark (`9f9bb77`), the fast GPU FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) is 2.9 to
+3.4 times faster than GPU FP64 in steady stepping. Both FP32 builds use 60 to 70 % of FP64's peak GPU memory across
+the benchmark cases. On a 359 x 269 x 44 domain (C2, 6 h run), steady stepping takes 2.78 s per simulated hour in fast
+FP32, 2.84 s in identity FP32, and 9.16 s in GPU FP64. WRF real*4 at its best stock layout on the same machine
+(48 hardware threads) takes 28.60 s. These figures use the history-off medians from `runs.csv` and `summary.json`.
 
 The default `gpu-fp32` build (`CPPWRF_CUDA_FP32_IDENTITY=ON`) is bit-identical to `cpu-fp32` and to stock WRF v4.8.0
-real*4 on the 24 configurations of docs/FP32_IDENTITY.md. The opt-in fast build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`,
-2 to 17 % faster than the identity build in the paper benchmark) is not bit-identical to WRF real*4; its difference
-from WRF real*8 is about the size of the difference between WRF's own real*4 and real*8 builds (for U after an hour,
-a relative L2 error of 2e-4 to 8e-4; docs/FP32_ACCURACY.md). Most operational WRF runs use the real*4 build, so FP32
-is the natural choice for forecasts and ensembles. Use FP64 when you need WRF real*8's exact numbers.
+real*4 on the 24 configurations of docs/FP32_IDENTITY.md. In the v1.3.0 paper benchmark the identity build takes
+2.1 to 18.0 % longer in steady stepping than the fast build (identity time / fast time - 1). The opt-in fast build
+(`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) is not bit-identical to WRF real*4. Its difference from WRF real*8 is about the
+size of the difference between WRF's own real*4 and real*8 builds. The benchmark's accuracy files give a relative L2 error of
+3.2e-4 to 7.9e-4 for U after an hour against CPPWRF GPU FP64 (see also docs/FP32_ACCURACY.md). Most operational
+WRF runs use the real*4 build, so FP32 is the natural choice for forecasts and ensembles. Use FP64 when you need WRF
+real*8's exact numbers.
 
 ### What GPU do I need?
 
@@ -51,23 +54,27 @@ Other architectures compile for their `CMAKE_CUDA_ARCHITECTURES` value but have 
 GPU.
 
 FP64 is fast only on data-centre GPUs (A100, H100). Consumer GeForce cards run FP64 at 1/32 or 1/64 of their FP32
-speed, so use `gpu-fp32` on them. AMD and Intel GPUs are not supported. Without a GPU, `cpu-fp64` runs on any x86-64
-CPU with SSE4.1, FMA and AVX2.
+speed, so use `gpu-fp32` on them. Intel GPUs are not supported; AMD GPUs have an opt-in HIP / ROCm build path
+(`-DCPPWRF_ENABLE_HIP=ON`, docs/HIP.md) that has not been run or verified on AMD hardware. Without a GPU, `cpu-fp64`
+runs on any x86-64 CPU with SSE4.1, FMA and AVX2.
 
 ### How big a domain fits?
 
-On the GPU, the domain has to fit in the GPU's memory. Measured peaks with full physics (docs/PERF.md):
+On the GPU, the domain has to fit in the GPU's memory. Measured peaks with full P4 physics on an RTX PRO 6000 Blackwell
+in the v1.3.0 paper benchmark (`9f9bb77`), from the history-off `mem_used_peak_mib` medians in `runs.csv`:
 
-| Domain | FP32 | FP64 |
-|---|---|---|
-| 119 x 89 x 44 (0.47 M cells) | 8.3 GB | 13.7 GB |
-| the same with a 120 x 90 x 44 nest | 9.5 GB | 15.4 GB |
-| 359 x 269 x 44 (4.25 M cells) | 20.8 GB | 30.0 GB |
+| Domain | FP32 (identity, default) | FP32 (fast) | FP64 |
+|---|---|---|---|
+| 119 x 89 x 44 (0.47 M cells) | 6.1 GiB (6209 MiB) | 6.1 GiB (6205 MiB) | 8.8 GiB (9051 MiB) |
+| the same with a 120 x 90 x 44 nest | 7.0 GiB (7191 MiB) | 7.0 GiB (7187 MiB) | 10.4 GiB (10667 MiB) |
+| 359 x 269 x 44 (4.25 M cells) | 16.5 GiB (16935 MiB) | 16.5 GiB (16931 MiB) | 27.5 GiB (28115 MiB) |
 
-Part of each peak is a stack reserve: CUDA reserves a kernel's local arrays for every thread the GPU can hold, so it
-grows with the GPU (about 3 GB on an RTX PRO 6000, 0.4 GB on an RTX 2060). The large per-column arrays of the column
-physics live in a work buffer of at most 1/8 of the device memory instead (docs/USER_GUIDE.md, "GPU memory").
-Beyond that, large domains take about 4 KB per cell in FP32 and 5 KB in FP64.
+Part of each peak is a stack reserve. CUDA reserves a kernel's local arrays for every thread the GPU can hold.
+The benchmark's `CPPWRF_MEMINFO` warm-up logs give 3018 MiB in FP32 and 2965 MiB in FP64 on the RTX PRO 6000.
+The earlier RTX 2060 estimate is about 0.4 GB. The large per-column arrays of the column physics live in a work
+buffer of at most 1/8 of the device memory (docs/USER_GUIDE.md, "GPU memory").
+From the difference between the two single-domain P4 cases (C2 and C1), peak memory grows by about 2.9 KiB per cell
+in FP32 and 5.2 KiB in FP64.
 
 `cppwrf-fit namelist.input` estimates the memory and the run time of your namelist on your machine. On the CPU, the
 limit is the machine's RAM. One run is one machine: MPI ranks and tiles are proved on one machine only (docs/MPI.md).
