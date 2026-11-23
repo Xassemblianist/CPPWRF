@@ -7,6 +7,8 @@
 Per output time: max abs / relative L2 difference of U, V, W, PH (full), MU (full), P (full),
 THM (theta_m), QVAPOR (and the hydrometeors, RAINNC, REFL_10CM when present), over the whole domain and over the interior (N points away from the
 lateral boundaries, default 6). The caller sets the tolerances. Invalid comparisons exit nonzero.
+--y-slab: a periodic-y slab that WRF ran with e_sn = 3 (two mass rows, three V rows) and CPPWRF with one row: every
+WRF row must equal the first bit for bit, and the first row is compared; any other shape difference still fails.
 """
 import math
 import os
@@ -19,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import verify as V  # noqa: E402
 
 
-def main(wrfout, d, inner):
+def main(wrfout, d, inner, y_slab=False):
     ds = nc.Dataset(wrfout)
     steps = V.list_steps(d)
     xt = np.array(ds.variables["XTIME"][:], dtype=float) * 60.0
@@ -75,6 +77,11 @@ def main(wrfout, d, inner):
         if "THM" in ds.variables and "theta_m" in sn:
             pairs["THM"] = (g("THM") + 300.0, sn["theta_m"])
         for k, (a, b) in pairs.items():
+            if y_slab and a.ndim >= 2 and b.ndim == a.ndim and b.shape[-2] == 1 and a.shape[-2] > 1 \
+                    and a.shape[:-2] == b.shape[:-2] and a.shape[-1] == b.shape[-1]:
+                if not all(np.array_equal(a[..., j, :], a[..., 0, :]) for j in range(1, a.shape[-2])):
+                    sys.exit(f"t={t:g} {k}: --y-slab but WRF's rows differ")
+                a = a[..., :1, :]
             if a.shape != b.shape:
                 sys.exit(f"t={t:g} {k}: WRF shape {a.shape} differs from CPPWRF shape {b.shape}")
             e = b - a
@@ -89,4 +96,4 @@ if __name__ == "__main__":
         print(__doc__)
         sys.exit(2)
     inner = int(sys.argv[sys.argv.index("--interior") + 1]) if "--interior" in sys.argv else 6
-    main(sys.argv[1], sys.argv[2], inner)
+    main(sys.argv[1], sys.argv[2], inner, "--y-slab" in sys.argv)

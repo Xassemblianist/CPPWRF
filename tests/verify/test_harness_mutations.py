@@ -446,6 +446,37 @@ class ComparatorMutations(ScratchMutationCase):
                     self.assertRaisesRegex(RuntimeError, "truncated output"):
                 wrf_suite.compare("reference", "candidate", 60)
 
+    def test_l2_y_slab_needs_the_flag_and_identical_wrf_rows(self):
+        wrf, out = self.root / "slab.nc", self.root / "slab"
+        out.mkdir(exist_ok=True)
+        with Dataset(wrf, "w") as ds:
+            for name, length in (("Time", 1), ("z", 2), ("y", 2), ("ys", 3), ("x", 13)):
+                ds.createDimension(name, length)
+            ds.createVariable("XTIME", "f8", ("Time",))[:] = [1]
+            for name in ("U", "V", "W", "PH", "PHB", "MU", "MUB", "P", "PB"):
+                dims = ("Time", "y", "x") if name in ("MU", "MUB") else \
+                    ("Time", "z", "ys" if name == "V" else "y", "x")
+                ds.createVariable(name, "f8", dims)[:] = 0 if name in ("PHB", "MUB", "PB") else 1
+        fields = []
+        with (out / "snap_000001.bin").open("wb") as data:
+            for name in ("u", "v", "w", "ph", "mu", "p"):
+                shape = (1 if name == "mu" else 2, 1, 13)
+                fields.append({"name": name, "shape": shape, "dtype": "float64", "offset": data.tell()})
+                data.write(np.ones(shape, dtype="<f8").tobytes())
+        (out / "snap_000001.json").write_text(json.dumps({"time": 60, "step": 1, "variables": fields}))
+        cmd = [sys.executable, ROOT / "tests/verify/compare_real.py", wrf, out]
+        self.assertEqual(subprocess.run(cmd + ["--y-slab"], capture_output=True, text=True).returncode, 0)
+        with self.subTest(mutation="no --y-slab"):
+            r = subprocess.run(cmd, capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("WRF shape", r.stderr)
+        with self.subTest(mutation="WRF rows differ"):
+            with Dataset(wrf, "r+") as ds:
+                ds["W"][0, 1, 1, 5] = 2
+            r = subprocess.run(cmd + ["--y-slab"], capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertIn("rows differ", r.stderr)
+
     def test_real_comparator_preserves_int64(self):
         wrf, cpp = self.root / "wrf", self.root / "cpp"
         cmd = [sys.executable, ROOT / "tests/init_real/compare_real.py", cpp, wrf]

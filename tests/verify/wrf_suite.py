@@ -1216,9 +1216,20 @@ def compare_dumps(a, b):
     return res or ["identical"]
 
 
+def y_slab(wrfout):
+    """WRF's run of wrfout is a periodic-y slab with e_sn = 3 (namelist.input next to it): compare_real.py --y-slab."""
+    nl = os.path.join(os.path.dirname(wrfout), "namelist.input")
+    if not os.path.exists(nl):
+        return False
+    txt = open(nl).read().lower()
+    per = re.search(r"^\s*periodic_y\s*=\s*\.true\.", txt, re.M)
+    esn = re.search(r"^\s*e_sn\s*=\s*3\s*,", txt, re.M)
+    return bool(per and esn)
+
+
 def compare(wrfout, out, t):
-    r = subprocess.run([sys.executable, os.path.join(REPO, "tests/verify/compare_real.py"), wrfout, out],
-                       capture_output=True, text=True)
+    r = subprocess.run([sys.executable, os.path.join(REPO, "tests/verify/compare_real.py"), wrfout, out]
+                       + (["--y-slab"] if y_slab(wrfout) else []), capture_output=True, text=True)
     if r.returncode:
         raise RuntimeError(f"L2 comparator exited {r.returncode}: {r.stderr.strip() or r.stdout.strip()}")
     res = {}
