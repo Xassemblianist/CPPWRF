@@ -20,7 +20,7 @@ _P4 = ["real.dir=" + f"{WR}/run_CHP4_r8", "phys.radt=10", "phys.bldt=5", "phys.c
 # the nest N3 (P4's physics on both domains) with radiation every 4 min on d01 and every 2 min on d02: resumed at
 # 10 min, where d02's radiation runs before d01's (d02 reads the ozone d01 computed at 8 min)
 _N3 = ["real.dir=" + f"{WR}/run_CHN3_r8", "phys.table_dir=" + f"{WR}/run_CHN3_r8", "phys.radt=4", "d02.phys_radt=2",
-       "output.out_interval=5", "output.diag_interval=5", "d02.out_interval=45", "d02.diag_interval=45"]
+       "output.out_interval=5", "output.diag_interval=5", "d02.out_interval=45", "d02.diag_interval=15"]
 
 
 def _wrf(n):  # WRF's run of the chain's configuration (tests/verify/refs/chain_refs.txt), d01's file (every domain compared)
