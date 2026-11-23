@@ -1129,7 +1129,7 @@ struct KSfclayrevSeaBlend {
     bl(rmol, rmol_sea); bl(ust, ust_sea); bl(wspd, wspd_sea); bl(zol, zol_sea);
     bl(cd, cd_sea); bl(cda, cda_sea); bl(ck, ck_sea); bl(cka, cka_sea);
     bl(q2, q2_sea); bl(t2, t2_sea); bl(th2, th2_sea); bl(u10, u10_sea);
-    bl(ustm, ustm_sea);  // WRF: USTM_SEA is an uninitialised local (zero here)
+    bl(ustm, ustm_sea);  // USTM_SEA: 0 on entry to the open-water call (see the call)
     bl(v10, v10_sea);
   }
 };
@@ -1324,6 +1324,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
                      fm.view(), fh.view(), znt.view(), zol.view(), ust.view(), cpm.view(), chs2.view(), cqs2.view(),
                      chs.view(), flhc.view(), flqc.view(), qgh.view(), ustm.view(), lh.view(), u10.view(), v10.view(),
                      th2.view(), t2.view(), q2.view(), ck.view(), cka.view(), cd.view(), cda.view());
+      column_for(cols, KCopy2{ch.view(), chs.cview()});  // ch = chs (EM_CORE; not after the sea-ice wrapper)
     } else {  // sfclayrev_seaice_wrapper: the ice portion, then the open-water portion of the sea-ice points
       SeaIceFields& w = *sea_;
       column_for(cols, KSfclayrevSeaPre{
@@ -1343,6 +1344,14 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
                      psih.view(), fm.view(), fh.view(), znt.view(), zol.view(), ust.view(), cpm.view(), chs2.view(),
                      cqs2.view(), chs.view(), flhc.view(), flqc.view(), qgh.view(), ustm.view(), lh.view(), u10.view(),
                      v10.view(), th2.view(), t2.view(), q2.view(), ck.view(), cka.view(), cd.view(), cda.view());
+      // USTM_SEA is an automatic array of sfclayrev_seaice_wrapper that nothing sets before this call, which reads it
+      // (ustm = 0.5*ustm + 0.5*karman*wspdi/psix). gfortran allocates the wrapper's automatic arrays with malloc on
+      // every call (55 malloc / free pairs in module_surface_driver.o of the WRF r8 build, no -fstack-arrays), so
+      // WRF's value is what the heap hands back: zero for fresh pages, stale data of earlier calls otherwise, not
+      // reproducible. CPPWRF takes 0 on every call (a fresh allocation; no state across steps or restarts). USTM
+      // reaches the model only through diff_opt 2 with km_opt 2 or without a PBL scheme; the files test does not
+      // compare f1's USTM (wrfrst) for this reason.
+      column_for(cols, KCopy2{w.ustm_sea.view(), slice0(zero3_)});
       sfclayrev_call(w.tsk_sea.cview(), w.xland_sea.cview(), w.mavail_sea.cview(), w.regime_sea.view(),
                      w.hfx_sea.view(), w.qfx_sea.view(), w.qsfc_sea.view(), w.mol_sea.view(), w.rmol_sea.view(),
                      w.gz1oz0_sea.view(), w.wspd_sea.view(), w.br_sea.view(), w.psim_sea.view(), w.psih_sea.view(),
@@ -1361,7 +1370,6 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
           zol.view(), cd.view(), cda.view(), ck.view(), cka.view(), q2.view(), t2.view(), th2.view(), u10.view(),
           ustm.view(), v10.view(), xice_threshold});
     }
-    column_for(cols, KCopy2{ch.view(), chs.cview()});  // ch = chs (EM_CORE)
   } else if (o_.sf_sfclay_physics == 2) {
     // MYJSFC (module_sf_myjsfc.F: u_phy, v_phy, p_phy=grid%p_hyd, p8w=grid%p_hyd_w)
     const C2 ht_v = b.ht.uniform() ? slice0(zero3_) : C2{b.ht.data(), int(b.ht.layout().sj)};

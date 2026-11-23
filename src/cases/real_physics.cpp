@@ -345,6 +345,12 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   o.ysu_topdown_pblmix = int(cfg.get_int("phys.ysu_topdown_pblmix", 1));
   o.kim_tofd = cfg.get_bool("phys.kim_tofd", false);
   o.isftcflx = int(cfg.get_int("phys.isftcflx", 0));  // sfclayrev: z0t / z0q and roughness over water
+  // sfclayrev's shallow-water roughness (shalwater_z0, with shalwater_init's WATER_DEPTH) and the single-column
+  // model's prescribed surface fluxes (scm_force_flux, with the SCM forcing) are not wired: rejected, not ignored
+  if (cfg.get_int("phys.shalwater_z0", 0) != 0)
+    throw std::runtime_error("phys.shalwater_z0 = 1 (shallow-water roughness, shalwater_init) is not supported");
+  if (cfg.get_int("phys.scm_force_flux", 0) != 0)
+    throw std::runtime_error("phys.scm_force_flux = 1 (single-column model surface fluxes) is not supported");
   o.iz0tlnd = int(cfg.get_int("phys.iz0tlnd", 0));    // sfclayrev: z0t over land (czil)
   o.sf_mynn_sfcflux_land = int(cfg.get_int("phys.sf_mynn_sfcflux_land", 0));    // MYNN surface layer
   o.sf_mynn_sfcflux_water = int(cfg.get_int("phys.sf_mynn_sfcflux_water", 1));
@@ -480,6 +486,19 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   put2(su.snow, snow); put2(su.snowc, snowc); put2(su.lai, rd2("LAI"));
   put2(su.lakemask, in.has("LAKEMASK") ? rd2("LAKEMASK") : std::vector<double>(n2, 0.0));
   if (in.has("VAR")) put2(su.var2d, rd2("VAR"));  // subgrid orography std. dev. (kim_tofd; history VAR)
+  // sea-surface currents (Registry UOCE / VOCE i0124rd: wrfinput, auxinput4, wrfrst); the surface driver subtracts
+  // them from the lowest-level wind, YSU and MYNN take them as the ocean's velocity. real.exe writes zeros unless the
+  // met_em files hold them
+  if (in.has("UOCE")) put2(su.uoce, rd2("UOCE"));
+  if (in.has("VOCE")) put2(su.voce, rd2("VOCE"));
+  // U_FRAME / V_FRAME (Registry ir, idealized moving frames): the drivers take 0 (u_phytmp = u_phy + u_frame)
+  for (const char* n : {"U_FRAME", "V_FRAME"})
+    if (in.has(n)) {
+      const std::vector<double> f = in.var(n, 1);
+      if (f[0] != 0.0)
+        throw std::runtime_error(std::string("real physics: the wrfinput's ") + n + " is not 0: a moving frame "
+                                 "(u_frame / v_frame) is not supported");
+    }
   if (o.gwd_opt == 1) {  // package gwd_used_1
     const std::pair<const char*, Field2*> gw[] = {{"CON", &su.oc12d}, {"OA1", &su.oa1}, {"OA2", &su.oa2}, {"OA3", &su.oa3},
                                                   {"OA4", &su.oa4}, {"OL1", &su.ol1}, {"OL2", &su.ol2}, {"OL3", &su.ol3},

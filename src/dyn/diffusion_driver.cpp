@@ -224,7 +224,7 @@ void DiffusionDriver::dynamics(const State& s, const BaseState& b, Tendencies& t
                                 xkmv_.cview(), has_tke,
                                 s.u_2.cview(), s.v_2.cview(), pr.th_phy.cview(),
                                 b.qv_base_1d.view(), true, ustm.cview(), true, hfx.cview(), true, qfx.cview(), true,
-                                p_.isfflx == 0 ? hfx.view() : View2<real>{});  // hfx = heat_flux*cpm*rho
+                                p_.isfflx == 0 || p_.isfflx == 2 ? hfx.view() : View2<real>{});  // hfx = heat_flux*cpm*rho
       for (int n = 0; n < s.n_scalars(); ++n) {
         if (n == s.P_QV || n == s.P_TKE) continue;
         column_for(Range2D{is_s, is_e, js_s, js_e},

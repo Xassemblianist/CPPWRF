@@ -95,8 +95,6 @@ CPPWRF_HD inline void get_pblh(
     const T* zw1d,
     const T* dz1d,
     T landsea) {
-  using std::max;
-  using std::min;
   using std::tanh;
 
   constexpr T sbl_lim = static_cast<T>(200.0);
@@ -109,7 +107,7 @@ CPPWRF_HD inline void get_pblh(
   T minthv = static_cast<T>(9.e9);
 
   while (k < nz && zw1d[k] <= static_cast<T>(500.0)) {
-    T qtke = max(qke1d[k], static_cast<T>(0.0));
+    T qtke = c_max(qke1d[k], static_cast<T>(0.0));
     if (maxqke < qtke) {
       maxqke = qtke;
       ktke = k;
@@ -122,8 +120,8 @@ CPPWRF_HD inline void get_pblh(
   }
 
   T tkeeps = maxqke / static_cast<T>(40.0);
-  tkeeps = max(tkeeps, static_cast<T>(0.025));
-  tkeeps = min(tkeeps, static_cast<T>(0.25));
+  tkeeps = c_max(tkeeps, static_cast<T>(0.025));
+  tkeeps = c_min(tkeeps, static_cast<T>(0.25));
 
   T delt_thv = ((landsea - static_cast<T>(1.5)) >= static_cast<T>(0.0)) ? static_cast<T>(0.75) : static_cast<T>(1.5);
 
@@ -134,7 +132,7 @@ CPPWRF_HD inline void get_pblh(
   while (zi == static_cast<T>(0.0) && k < nz) {
     if (thetav1d[k] >= (minthv + delt_thv)) {
       zi = zw1d[k] - dz1d[k - 1] *
-           min((thetav1d[k] - (minthv + delt_thv)) / max(thetav1d[k] - thetav1d[k - 1], static_cast<T>(1e-6)), static_cast<T>(1.0));
+           c_min((thetav1d[k] - (minthv + delt_thv)) / c_max(thetav1d[k] - thetav1d[k - 1], static_cast<T>(1e-6)), static_cast<T>(1.0));
     }
     k++;
     if (k == nz - 2) zi = zw1d[1];
@@ -144,12 +142,12 @@ CPPWRF_HD inline void get_pblh(
   T pblh_tke = static_cast<T>(0.0);
   k = ktke + 1;
   while (pblh_tke == static_cast<T>(0.0) && k < nz) {
-    T qtke = max(qke1d[k] / static_cast<T>(2.0), static_cast<T>(0.0));
-    T qtkem1 = max(qke1d[k - 1] / static_cast<T>(2.0), static_cast<T>(0.0));
+    T qtke = c_max(qke1d[k] / static_cast<T>(2.0), static_cast<T>(0.0));
+    T qtkem1 = c_max(qke1d[k - 1] / static_cast<T>(2.0), static_cast<T>(0.0));
     if (qtke <= tkeeps) {
       pblh_tke = zw1d[k] - dz1d[k - 1] *
-                 min((tkeeps - qtke) / max(qtkem1 - qtke, static_cast<T>(1e-6)), static_cast<T>(1.0));
-      pblh_tke = max(pblh_tke, zw1d[1]);
+                 c_min((tkeeps - qtke) / c_max(qtkem1 - qtke, static_cast<T>(1e-6)), static_cast<T>(1.0));
+      pblh_tke = c_max(pblh_tke, zw1d[1]);
     }
     k++;
     if (k == nz - 2) pblh_tke = zw1d[1];
@@ -237,8 +235,6 @@ struct YSUKernel {
   CPPWRF_HD void compute(int i, int j) const {
     using std::abs;
     using std::exp;
-    using std::max;
-    using std::min;
     using std::pow;
     using std::sqrt;
 
@@ -402,7 +398,7 @@ struct YSUKernel {
     for (int k = 1; k < nz; ++k) {
       if (!stable) {
         brdn = brup;
-        real spdk2 = max(ux(i, j, k) * ux(i, j, k) + vx(i, j, k) * vx(i, j, k), real(1.0));
+        real spdk2 = c_max(ux(i, j, k) * ux(i, j, k) + vx(i, j, k) * vx(i, j, k), real(1.0));
         brup = (thvx[k] - thermal) * (g * za[k] / thvx[0]) / spdk2;
         kpbl = k;
         stable = (brup > brcr);
@@ -424,18 +420,18 @@ struct YSUKernel {
     // Similarity functions and scales (WRF lines 650-679)
     real fm_val = psim(i, j);
     real fh_val = psih(i, j);
-    real zol1 = max(br(i, j) * fm_val * fm_val / fh_val, rimin);
+    real zol1 = c_max(br(i, j) * fm_val * fm_val / fh_val, rimin);
     if (sfcflg) {
-      zol1 = min(zol1, -zfmin);
+      zol1 = c_min(zol1, -zfmin);
     } else {
-      zol1 = max(zol1, zfmin);
+      zol1 = c_max(zol1, zfmin);
     }
     real hol1 = zol1 * hpbl(i, j) / zl1 * sfcfrac;
     real phim, phih, wstar3;
     if (sfcflg) {
       phim = libm::pow(real(1.0) - aphi16 * hol1, real(-1.0 / 4.0));
       phih = libm::pow(real(1.0) - aphi16 * hol1, real(-1.0 / 2.0));
-      real bfx0 = max(sflux, real(0.0));
+      real bfx0 = c_max(sflux, real(0.0));
       wstar3 = govrth * bfx0 * hpbl(i, j);
       wstar(i, j) = libm::pow(wstar3, h1);
     } else {
@@ -446,19 +442,19 @@ struct YSUKernel {
     }
     real ust3 = libm::pow(ust(i, j), real(3.0));
     wscale = libm::pow(ust3 + phifac * karman * wstar3 * real(0.5), h1);
-    wscale = min(wscale, ust(i, j) * aphi16);
-    wscale = max(wscale, ust(i, j) / aphi5);
+    wscale = c_min(wscale, ust(i, j) * aphi16);
+    wscale = c_max(wscale, ust(i, j) / aphi5);
 
     // Thermal estimation under unstable conditions (WRF lines 683-700)
     if (sfcflg && sflux > real(0.0)) {
       real gamfac = bfac / rhox / wscale;
-      hgamt = min(gamfac * hfx(i, j) / cp, gamcrt);
-      hgamq = min(gamfac * qfx(i, j), gamcrq);
+      hgamt = c_min(gamfac * hfx(i, j) / cp, gamcrt);
+      hgamq = c_min(gamfac * qfx(i, j), gamcrq);
       real vpert = (hgamt + ep1 * thx[0] * hgamq) / bfac * afac;
-      thermal = thermal + max(vpert, real(0.0)) * min(za[0] / (sfcfrac * hpbl(i, j)), real(1.0));
-      thermalli = thermalli + max(vpert, real(0.0)) * min(za[0] / (sfcfrac * hpbl(i, j)), real(1.0));
-      hgamt = max(hgamt, real(0.0));
-      hgamq = max(hgamq, real(0.0));
+      thermal = thermal + c_max(vpert, real(0.0)) * c_min(za[0] / (sfcfrac * hpbl(i, j)), real(1.0));
+      thermalli = thermalli + c_max(vpert, real(0.0)) * c_min(za[0] / (sfcfrac * hpbl(i, j)), real(1.0));
+      hgamt = c_max(hgamt, real(0.0));
+      hgamq = c_max(hgamq, real(0.0));
       brint = real(-15.9) * ust(i, j) * ust(i, j) / wspd(i, j) * wstar3 / libm::pow(wscale, real(4.0));
       hgamu = brint * ux(i, j, 0);
       hgamv = brint * vx(i, j, 0);
@@ -477,7 +473,7 @@ struct YSUKernel {
       for (int k = 1; k < nz; ++k) {
         if (!stable && pblflg) {
           brdn = brup;
-          real spdk2 = max(ux(i, j, k) * ux(i, j, k) + vx(i, j, k) * vx(i, j, k), real(1.0));
+          real spdk2 = c_max(ux(i, j, k) * ux(i, j, k) + vx(i, j, k) * vx(i, j, k), real(1.0));
           brup = (thvx[k] - thermal) * (g * za[k] / thvx[0]) / spdk2;
           kpbl = k;
           stable = (brup > brcr);
@@ -491,7 +487,7 @@ struct YSUKernel {
       int kpblold = kpbl;
       bool definebrup = false;
       for (int k = kpblold; k < nz - 1; ++k) {
-        real spdk2 = max(ux(i, j, k) * ux(i, j, k) + vx(i, j, k) * vx(i, j, k), real(1.0));
+        real spdk2 = c_max(ux(i, j, k) * ux(i, j, k) + vx(i, j, k) * vx(i, j, k), real(1.0));
         real bruptmp = (thlix[k] - thermalli) * (g * za[k] / thlix[0]) / spdk2;
         stable = (bruptmp >= brcr);
         if (definebrup) {
@@ -535,7 +531,7 @@ struct YSUKernel {
     if (!stable && (xland(i, j) - real(1.5)) >= real(0.0)) {
       real wspd10 = sqrt(u10(i, j) * u10(i, j) + v10(i, j) * v10(i, j));
       real ross = wspd10 / (cori * znt(i, j));
-      brcr_sbro = min(real(0.16) * libm::pow(real(1.e-7) * ross, real(-0.18)), real(0.3));
+      brcr_sbro = c_min(real(0.16) * libm::pow(real(1.e-7) * ross, real(-0.18)), real(0.3));
     }
 
     if (!stable) {
@@ -548,7 +544,7 @@ struct YSUKernel {
       for (int k = 1; k < nz; ++k) {
         if (!stable) {
           brdn = brup;
-          real spdk2 = max(ux(i, j, k) * ux(i, j, k) + vx(i, j, k) * vx(i, j, k), real(1.0));
+          real spdk2 = c_max(ux(i, j, k) * ux(i, j, k) + vx(i, j, k) * vx(i, j, k), real(1.0));
           brup = (thvx[k] - thermal) * (g * za[k] / thvx[0]) / spdk2;
           kpbl = k;
           stable = (brup > brcr);
@@ -580,8 +576,8 @@ struct YSUKernel {
       real wm3 = wstar3 + real(5.0) * ust3;
       wm2 = libm::pow(wm3, h2);
       bfxpbl = real(-0.15) * thvx[0] / g * wm3 / hpbl(i, j);
-      dthvx = max(thvx[k + 1] - thvx[k], tmin);
-      we = max(bfxpbl / dthvx, -sqrt(wm2));
+      dthvx = c_max(thvx[k + 1] - thvx[k], tmin);
+      we = c_max(bfxpbl / dthvx, -sqrt(wm2));
 
       if ((qcxl[k] + qixl[k]) > real(0.01e-3) && ysu_topdown_pblmix) {
         if (kpbl >= 1) {
@@ -590,15 +586,15 @@ struct YSUKernel {
           real rvls = real(100.0) * real(6.112) * libm::exp(real(17.67) * (templ - real(273.16)) / (templ - real(29.65))) * (ep2 / p2di(i, j, k + 1));
           real temps = templ + ((qvx(i, j, k) + qcxl[k]) - rvls) / (cp / xlv + ep2 * xlv * rvls / (rd * (templ * templ)));  // rd*templ**2
           rvls = real(100.0) * real(6.112) * libm::exp(real(17.67) * (temps - real(273.15)) / (temps - real(29.65))) * (ep2 / p2di(i, j, k + 1));
-          real rcldb = max((qvx(i, j, k) + qcxl[k]) - rvls, real(0.0));
+          real rcldb = c_max((qvx(i, j, k) + qcxl[k]) - rvls, real(0.0));
 
           // WRF reads level k+2 unguarded (past the column when kpbl reaches the top); clamped here
           const int k2 = k + 2 < nz ? k + 2 : nz - 1;
           real dthvx_cloud = (thlix[k2] + thx[k2] * ep1 * (qvx(i, j, k2) + qcxl[k2])) -
                              (thlix[k] + thx[k] * ep1 * (qvx(i, j, k) + qcxl[k]));
-          dthvx_cloud = max(dthvx_cloud, real(0.1));
+          dthvx_cloud = c_max(dthvx_cloud, real(0.1));
           real tmp1 = xlv / cp * rcldb / (pi2d(i, j, k) * dthvx_cloud);
-          real ent_eff = min(real(0.2) * real(8.0) * tmp1, real(0.4));
+          real ent_eff = c_min(real(0.2) * real(8.0) * tmp1, real(0.4));
 
           real radsum = real(0.0);
           for (int kk = 0; kk <= kpbl - 1; ++kk) {
@@ -606,32 +602,32 @@ struct YSUKernel {
             radflux = radflux * cp / g * (p2di(i, j, kk) - p2di(i, j, kk + 1));
             if (radflux < real(0.0)) radsum = abs(radflux) + radsum;
           }
-          radsum = max(radsum, real(0.0));
+          radsum = c_max(radsum, real(0.0));
 
-          real bfx0 = max(sflux, real(0.0));
+          real bfx0 = c_max(sflux, real(0.0));
           wm3 = (govrth * bfx0 * hpbl(i, j)) + real(5.0) * ust3;
           wm2 = libm::pow(wm3, h2);
           bfxpbl = real(-0.15) * thvx[0] / g * wm3 / hpbl(i, j);
-          dthvx = max(thvx[k + 1] - thvx[k], tmin);
-          we = max(bfxpbl / dthvx, -sqrt(wm2));
+          dthvx = c_max(thvx[k + 1] - thvx[k], tmin);
+          we = c_max(bfxpbl / dthvx, -sqrt(wm2));
 
-          bfx0 = max(radsum / rhox2[k] / cp, real(0.0));
+          bfx0 = c_max(radsum / rhox2[k] / cp, real(0.0));
           wm3 = (g / thvx[k] * bfx0 * hpbl(i, j));
           wm2 = wm2 + libm::pow(wm3, h2);
           bfxpbl = -ent_eff * bfx0;
-          dthvx = max(thvx[k + 1] - thvx[k], real(0.1));
-          we = we + max(bfxpbl / dthvx, -sqrt(libm::pow(wm3, h2)));
+          dthvx = c_max(thvx[k + 1] - thvx[k], real(0.1));
+          we = we + c_max(bfxpbl / dthvx, -sqrt(libm::pow(wm3, h2)));
 
           wstar3_2 = (g / thvx[k] * bfx0 * hpbl(i, j));
           wscale = libm::pow(ust3 + phifac * karman * (wstar3 + wstar3_2) * real(0.5), h1);
-          wscale = min(wscale, ust(i, j) * aphi16);
-          wscale = max(wscale, ust(i, j) / aphi5);
+          wscale = c_min(wscale, ust(i, j) * aphi16);
+          wscale = c_max(wscale, ust(i, j) / aphi5);
           real gamfac = bfac / rhox / wscale;
-          hgamt = min(gamfac * hfx(i, j) / cp, gamcrt);
-          hgamq = min(gamfac * qfx(i, j), gamcrq);
+          hgamt = c_min(gamfac * hfx(i, j) / cp, gamcrt);
+          hgamq = c_min(gamfac * qfx(i, j), gamcrq);
           gamfac = bfac / rhox2[k] / wscale;
-          real hgamt2_k = min(gamfac * radsum / cp, gamcrt);
-          hgamt = max(hgamt, real(0.0)) + max(hgamt2_k, real(0.0));
+          real hgamt2_k = c_min(gamfac * radsum / cp, gamcrt);
+          hgamt = c_max(hgamt, real(0.0)) + c_max(hgamt2_k, real(0.0));
           brint = real(-15.9) * ust(i, j) * ust(i, j) / wspd(i, j) * (wstar3 + wstar3_2) / libm::pow(wscale, real(4.0));
           hgamu = brint * ux(i, j, 0);
           hgamv = brint * vx(i, j, 0);
@@ -639,31 +635,31 @@ struct YSUKernel {
       }
 
       real prpbl = real(1.0);
-      real dthx = max(thx[k + 1] - thx[k], tmin);
-      real dqx = min(qvx(i, j, k + 1) - qvx(i, j, k), real(0.0));
+      real dthx = c_max(thx[k + 1] - thx[k], tmin);
+      real dqx = c_min(qvx(i, j, k + 1) - qvx(i, j, k), real(0.0));
       hfxpbl = we * dthx;
       qfxpbl = we * dqx;
 
       real dux = ux(i, j, k + 1) - ux(i, j, k);
       real dvx = vx(i, j, k + 1) - vx(i, j, k);
       if (dux > tmin) {
-        ufxpbl = max(prpbl * we * dux, -ust(i, j) * ust(i, j));
+        ufxpbl = c_max(prpbl * we * dux, -ust(i, j) * ust(i, j));
       } else if (dux < -tmin) {
-        ufxpbl = min(prpbl * we * dux, ust(i, j) * ust(i, j));
+        ufxpbl = c_min(prpbl * we * dux, ust(i, j) * ust(i, j));
       } else {
         ufxpbl = real(0.0);
       }
 
       if (dvx > tmin) {
-        vfxpbl = max(prpbl * we * dvx, -ust(i, j) * ust(i, j));
+        vfxpbl = c_max(prpbl * we * dvx, -ust(i, j) * ust(i, j));
       } else if (dvx < -tmin) {
-        vfxpbl = min(prpbl * we * dvx, ust(i, j) * ust(i, j));
+        vfxpbl = c_min(prpbl * we * dvx, ust(i, j) * ust(i, j));
       } else {
         vfxpbl = real(0.0);
       }
 
       real delb = govrth * d3 * hpbl(i, j);
-      delta(i, j) = min(d1 * hpbl(i, j) + d2 * wm2 / delb, real(100.0));
+      delta(i, j) = c_min(d1 * hpbl(i, j) + d2 * wm2 / delb, real(100.0));
     }
 
     // Entrainment factor entfac (WRF lines 927-935)
@@ -679,7 +675,7 @@ struct YSUKernel {
     // Diffusion coefficients below PBL (WRF lines 939-979)
     for (int k = 0; k < nz; ++k) {
       if (k < kpbl) {
-        real zfac_k = min(max(real(1.0) - (zq[k + 1] - zl1) / (hpbl(i, j) - zl1), zfmin), real(1.0));
+        real zfac_k = c_min(c_max(real(1.0) - (zq[k + 1] - zl1) / (hpbl(i, j) - zl1), zfmin), real(1.0));
         zfacent[k] = libm::pow(real(1.0) - zfac_k, real(3.0));
         real wscalek_k = libm::pow(ust3 + phifac * karman * wstar3 * (real(1.0) - zfac_k), h1);
         real wscalek2_k = libm::pow(phifac * karman * wstar3_2 * zfac_k, h1);
@@ -688,7 +684,7 @@ struct YSUKernel {
         if (sfcflg) {
           prfac = conpr;
           prfac2 = real(15.9) * (wstar3 + wstar3_2) / ust3 / (real(1.0) + real(4.0) * karman * (wstar3 + wstar3_2) / ust3);
-          real term = max(zq[k + 1] - sfcfrac * hpbl(i, j), real(0.0));
+          real term = c_max(zq[k + 1] - sfcfrac * hpbl(i, j), real(0.0));
           prnumfac = -(real(3.0) * (term * term) / (hpbl(i, j) * hpbl(i, j)));  // -3.*x**2./hpbl**2.
         } else {
           prfac = real(0.0);
@@ -696,11 +692,11 @@ struct YSUKernel {
           prnumfac = real(0.0);
           real phim8z = real(1.0) + aphi5 * zol1 * zq[k + 1] / zl1;
           wscalek_k = ust(i, j) / phim8z;
-          wscalek_k = max(wscalek_k, real(0.001));
+          wscalek_k = c_max(wscalek_k, real(0.001));
         }
 
         real prnum0 = (phih / phim + prfac);
-        prnum0 = max(min(prnum0, prmax), prmin);
+        prnum0 = c_max(c_min(prnum0, prmax), prmin);
         // zfac**pfac and (1 - zfac)**pfac with the parameter pfac = 2.0: gfortran (and gcc for the CPU build) folds
         // pow(x, 2.0) into x * x, which the CUDA FP64 build computes too (rpow2c; device code has no constant folding)
         static_assert(pfac == real(2.0));
@@ -719,9 +715,9 @@ struct YSUKernel {
         xkzm[k] = xkzm[k] + xkzminm;
         xkzh[k] = xkzh[k] + xkzminh;
         xkzq[k] = xkzq[k] + xkzminh;
-        xkzm[k] = min(xkzm[k], xkzmax);
-        xkzh[k] = min(xkzh[k], xkzmax);
-        xkzq[k] = min(xkzq[k], xkzmax);
+        xkzm[k] = c_min(xkzm[k], xkzmax);
+        xkzh[k] = c_min(xkzh[k], xkzmax);
+        xkzq[k] = c_min(xkzq[k], xkzmax);
       }
     }
 
@@ -745,27 +741,27 @@ struct YSUKernel {
         }
 
         real zk = karman * zq[k + 1];
-        real rlamdz = min(max(real(0.1) * dza[k + 1], rlam), real(300.0));
-        rlamdz = min(dza[k + 1], rlamdz);
+        real rlamdz = c_min(c_max(real(0.1) * dza[k + 1], rlam), real(300.0));
+        rlamdz = c_min(dza[k + 1], rlamdz);
         real rl2 = (zk * rlamdz / (rlamdz + zk)) * (zk * rlamdz / (rlamdz + zk));
         real dk = rl2 * sqrt(ss);
 
         if (ri < real(0.0)) {
-          ri = max(ri, rimin);
+          ri = c_max(ri, rimin);
           real sri = sqrt(-ri);
           xkzm[k] = dk * (real(1.0) + real(8.0) * (-ri) / (real(1.0) + real(1.746) * sri));
           xkzh[k] = dk * (real(1.0) + real(8.0) * (-ri) / (real(1.0) + real(1.286) * sri));
         } else {
           xkzh[k] = dk / ((real(1.0) + real(5.0) * ri) * (real(1.0) + real(5.0) * ri));
           real prnum = real(1.0) + real(2.1) * ri;
-          prnum = min(prnum, prmax);
+          prnum = c_min(prnum, prmax);
           xkzm[k] = xkzh[k] * prnum;
         }
 
         xkzm[k] = xkzm[k] + xkzminm;
         xkzh[k] = xkzh[k] + xkzminh;
-        xkzm[k] = min(xkzm[k], xkzmax);
-        xkzh[k] = min(xkzh[k], xkzmax);
+        xkzm[k] = c_min(xkzm[k], xkzmax);
+        xkzh[k] = c_min(xkzh[k], xkzmax);
         xkzml[k] = xkzm[k];
         xkzhl[k] = xkzh[k];
       }
@@ -798,8 +794,8 @@ struct YSUKernel {
       } else if (pblflg && k >= kpbl && entfac[k] < real(4.6)) {
         xkzh[k] = -we * dza[kpbl] * libm::exp(-entfac[k]);
         xkzh[k] = sqrt(xkzh[k] * xkzhl[k]);
-        xkzh[k] = max(xkzh[k], xkzminh);
-        xkzh[k] = min(xkzh[k], xkzmax);
+        xkzh[k] = c_max(xkzh[k], xkzminh);
+        xkzh[k] = c_min(xkzh[k], xkzmax);
         f1[k + 1] = thx[k + 1] - real(300.0);
       } else {
         f1[k + 1] = thx[k + 1] - real(300.0);
@@ -863,8 +859,8 @@ struct YSUKernel {
       } else if (pblflg && k >= kpbl && entfac[k] < real(4.6)) {
         xkzq[k] = -we * dza[kpbl] * libm::exp(-entfac[k]);
         xkzq[k] = sqrt(xkzq[k] * xkzhl[k]);
-        xkzq[k] = max(xkzq[k], xkzminh);
-        xkzq[k] = min(xkzq[k], xkzmax);
+        xkzq[k] = c_max(xkzq[k], xkzminh);
+        xkzq[k] = c_min(xkzq[k], xkzmax);
         f1[k + 1] = qvx(i, j, k + 1);
       } else {
         f1[k + 1] = qvx(i, j, k + 1);
@@ -940,8 +936,8 @@ struct YSUKernel {
       real zk = karman * zq[k + 1];
       real rlamdz;
       if (k >= kpbl) {
-        rlamdz = min(max(real(0.1) * dza[k + 1], rlam), real(300.0));
-        rlamdz = min(dza[k + 1], rlamdz);
+        rlamdz = c_min(c_max(real(0.1) * dza[k + 1], rlam), real(300.0));
+        rlamdz = c_min(dza[k + 1], rlamdz);
       } else {
         rlamdz = real(150.0);
       }
@@ -960,7 +956,7 @@ struct YSUKernel {
 
     real vconv = real(0.0);
     if (xland(i, j) < real(1.5)) {
-      real fluxc = max(sflux, real(0.0));
+      real fluxc = c_max(sflux, real(0.0));
       vconv = libm::pow(g / thvx[0] * pblh_ysu * fluxc, real(0.33));
     }
     real vconvfx = vconv;
@@ -969,8 +965,8 @@ struct YSUKernel {
     real fric = ust(i, j) * ust(i, j) / wspd1 * rhox * g / del[0] * dt2 * (wspd_ratio * wspd_ratio);
 
     // module_bl_ysu.F always passes ctopo and ctopo2 (present() is true in bl_ysu_run)
-    real vconvnew = real(0.9) * vconvfx + real(1.5) * (max((pblh_ysu - real(500.0)) / real(1000.0), real(0.0)));
-    real vconvlim = min(vconvnew, real(1.0));
+    real vconvnew = real(0.9) * vconvfx + real(1.5) * (c_max((pblh_ysu - real(500.0)) / real(1000.0), real(0.0)));
+    real vconvlim = c_min(vconvnew, real(1.0));
     ad[0] = real(1.0) + fric * vconvlim + ctopo(i, j) * fric * (real(1.0) - vconvlim);
 
     f1[0] = ux(i, j, 0) + uoxl * (ust(i, j) * ust(i, j)) * rhox * g / del[0] * dt2 / wspd1 * (wspd_ratio * wspd_ratio);
@@ -993,8 +989,8 @@ struct YSUKernel {
       } else if (pblflg && k >= kpbl && entfac[k] < real(4.6)) {
         xkzm[k] = real(1.0) * xkzh[k];
         xkzm[k] = sqrt(xkzm[k] * xkzml[k]);
-        xkzm[k] = max(xkzm[k], xkzminm);
-        xkzm[k] = min(xkzm[k], xkzmax);
+        xkzm[k] = c_max(xkzm[k], xkzminm);
+        xkzm[k] = c_min(xkzm[k], xkzmax);
         f1[k + 1] = ux(i, j, k + 1);
         f2[k + 1] = vx(i, j, k + 1);
       } else {
@@ -1093,7 +1089,7 @@ void run_ysu(
     int nz,
     bool f_qc = true,
     bool f_qi = true,
-    bool ysu_topdown_pblmix = false,
+    bool ysu_topdown_pblmix = true,  // WRF's default (Registry ysu_topdown_pblmix = 1)
     bool have_surface_diag = true,
     real cp = real(cst::cp),
     real g = real(cst::g),

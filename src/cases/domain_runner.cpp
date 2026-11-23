@@ -123,7 +123,7 @@ std::vector<std::string> wrf_names(const std::string& n) {
       {"sfc_xlat_sfc", "XLAT"}, {"sfc_xlong_sfc", "XLONG"}, {"sfc_rthratenlw", "RTHRATLW"},
       {"sfc_rthratensw", "RTHRATSW"}, {"sfc_rthratenlwc", "RTHRATLWC"}, {"sfc_rthratenswc", "RTHRATSWC"},
       {"sfc_t2mvxy", "T2V"}, {"sfc_t2mbxy", "T2B"}, {"sfc_q2mvxy", "Q2V"}, {"sfc_q2mbxy", "Q2B"},
-      {"sfc_ht_shad", "HGT_SHAD"},
+      {"sfc_ht_shad", "HGT_SHAD"}, {"sfc_var2d", "VAR"},  // VAR2D (Registry i012rhd)
       // grid%ch is in no stream (WRF restarts it at 0); a Noah-MP file's CH is CHXY
       {"sfc_ch", "ch"}};
   auto r = renamed.find(n);

@@ -173,7 +173,6 @@ template <typename T>
 CPPWRF_HD inline T depth_dependent_z0(T water_depth, T z0, T ust) {
   using std::exp;
   using std::log;
-  using std::min;
   T effective_depth;
   if (water_depth < static_cast<T>(10.0)) {
     effective_depth = static_cast<T>(10.0);
@@ -185,7 +184,7 @@ CPPWRF_HD inline T depth_dependent_z0(T water_depth, T z0, T ust) {
   T depth_b = static_cast<T>(1.0 / 30.0) * libm::log(static_cast<T>(1260.0) / effective_depth);
   T res = libm::exp((static_cast<T>(2.7) * ust - static_cast<T>(1.8) / depth_b) /
               (ust + static_cast<T>(0.17) / depth_b));
-  return min(res, static_cast<T>(0.1));
+  return c_min(res, static_cast<T>(0.1));
 }
 
 template <typename T>
@@ -286,8 +285,6 @@ struct SFClayRevKernel {
     using std::abs;
     using std::exp;
     using std::log;
-    using std::max;
-    using std::min;
     using std::pow;
     using std::sqrt;
 
@@ -366,19 +363,19 @@ struct SFClayRevKernel {
 
     real vconv;
     if (xland(i, j) < real(1.5)) {
-      real fluxc = max(hfx(i, j) / rhox / cp + ep1 * tskv * qfx(i, j) / rhox, real(0.0));
+      real fluxc = c_max(hfx(i, j) / rhox / cp + ep1 * tskv * qfx(i, j) / rhox, real(0.0));
       vconv = vconvc * libm::pow(g / tgdsa * pblh(i, j) * fluxc, real(0.33));
     } else {
       real dthvm = (-dthvdz >= real(0.0)) ? -dthvdz : real(0.0);
       vconv = sqrt(dthvm);
     }
 
-    real vsgd = real(0.32) * libm::pow(max(dx(i, j) / real(5000.0) - real(1.0), real(0.0)), real(0.33));
+    real vsgd = real(0.32) * libm::pow(c_max(dx(i, j) / real(5000.0) - real(1.0), real(0.0)), real(0.33));
     wspd(i, j) = sqrt(wspd(i, j) * wspd(i, j) + vconv * vconv + vsgd * vsgd);
-    wspd(i, j) = max(wspd(i, j), real(0.1));
+    wspd(i, j) = c_max(wspd(i, j), real(0.1));
     br(i, j) = govrth * za * dthvdz / (wspd(i, j) * wspd(i, j));
     if (mol(i, j) < real(0.0)) {
-      br(i, j) = min(br(i, j), real(0.0));
+      br(i, j) = c_min(br(i, j), real(0.0));
     }
     rmol(i, j) = -govrth * dthvdz * za * karman;
 
@@ -432,11 +429,11 @@ struct SFClayRevKernel {
       pq2 = psih_unstable(zl2, tbl) - psih_unstable(zl, tbl);
       pq10 = psih_unstable(zl10, tbl) - psih_unstable(zl, tbl);
 
-      psih(i, j) = min(psih(i, j), real(0.9) * gz1oz0(i, j));
-      psim(i, j) = min(psim(i, j), real(0.9) * gz1oz0(i, j));
-      psih2 = min(psih2, real(0.9) * gz2oz0);
-      psim10 = min(psim10, real(0.9) * gz10oz0);
-      psih10 = min(psih10, real(0.9) * gz10oz0);
+      psih(i, j) = c_min(psih(i, j), real(0.9) * gz1oz0(i, j));
+      psim(i, j) = c_min(psim(i, j), real(0.9) * gz1oz0(i, j));
+      psih2 = c_min(psih2, real(0.9) * gz2oz0);
+      psim10 = c_min(psim10, real(0.9) * gz10oz0);
+      psih10 = c_min(psih10, real(0.9) * gz10oz0);
       rmol(i, j) = zol(i, j) / za;
     } else if (br(i, j) == real(0.0)) {
       // Class 3: Forced convection
@@ -489,8 +486,8 @@ struct SFClayRevKernel {
       real visc = (real(1.32) + real(0.009) * (scr3 - real(273.15))) * real(1.0e-5);
       real restar = ust(i, j) * znt(i, j) / visc;
       real z0t = (real(5.5e-5)) * libm::pow(restar, real(-0.60));
-      z0t = min(z0t, real(1.0e-4));
-      z0t = max(z0t, real(2.0e-9));
+      z0t = c_min(z0t, real(1.0e-4));
+      z0t = c_max(z0t, real(2.0e-9));
       real z0q = z0t;
 
       zolzz = zol(i, j) * (za + z0t) / za;
@@ -639,8 +636,8 @@ struct SFClayRevKernel {
     constexpr real ca_square = real(0.4) * real(0.4);
     real cf = real(0.);
     if (kim_tofd && varf(i, j) > varf_min) {
-      const real zf = min(varf(i, j) * tofd_factor, za);
-      const real fri = min(max(real(1.) - br(i, j), real(0.)), real(1.));
+      const real zf = c_min(varf(i, j) * tofd_factor, za);
+      const real fri = c_min(c_max(real(1.) - br(i, j), real(0.)), real(1.));
       const real ff = libm::log((za + zf) / zf);
       cf = ca_square / (ff * ff) * fri;
     }
@@ -704,7 +701,7 @@ struct SFClayRevKernel {
     t2(i, j) = th2(i, j) * libm::pow(psfcpa(i, j) / p1000mb, rovcp);
 
     if ((xland(i, j) - real(1.5)) < real(0.0)) {
-      ust(i, j) = max(ust(i, j), real(0.001));
+      ust(i, j) = c_max(ust(i, j), real(0.001));
     }
     mol(i, j) = karman * dtg / psit / prt;
     real denomq = psiq;
@@ -726,17 +723,17 @@ struct SFClayRevKernel {
           znt(i, j) = depth_dependent_z0(water_depth(i, j), znt(i, j), ust(i, j));
         } else {
           znt(i, j) = czo * ust(i, j) * ust(i, j) / g + real(0.11) * real(1.5e-5) / ust(i, j);
-          znt(i, j) = min(znt(i, j), real(2.85e-3));
+          znt(i, j) = c_min(znt(i, j), real(2.85e-3));
         }
 
         if (isftcflx != 0) {
-          real zw = min(libm::pow(ust(i, j) / real(1.06), real(0.3)), real(1.0));
+          real zw = c_min(libm::pow(ust(i, j) / real(1.06), real(0.3)), real(1.0));
           real zn1 = real(0.011) * ust(i, j) * ust(i, j) / g + ozo;
           real zn2 = real(10.0) * libm::exp(real(-9.5) * libm::pow(ust(i, j), real(-0.3333))) +
-                     real(0.11) * real(1.5e-5) / max(ust(i, j), real(0.01));
+                     real(0.11) * real(1.5e-5) / c_max(ust(i, j), real(0.01));
           znt(i, j) = (real(1.0) - zw) * zn1 + zw * zn2;
-          znt(i, j) = min(znt(i, j), real(2.85e-3));
-          znt(i, j) = max(znt(i, j), real(1.27e-7));
+          znt(i, j) = c_min(znt(i, j), real(2.85e-3));
+          znt(i, j) = c_max(znt(i, j), real(1.27e-7));
         }
         zl = znt(i, j);
       } else {
