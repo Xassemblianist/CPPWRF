@@ -23,7 +23,7 @@ _N3 = ["real.dir=" + f"{WR}/run_CHN3_r8", "phys.table_dir=" + f"{WR}/run_CHN3_r8
        "output.out_interval=5", "output.diag_interval=5", "d02.out_interval=45", "d02.diag_interval=15"]
 
 
-def _wrf(n):  # WRF's run of the chain's configuration (tests/verify/refs/chain_refs.txt), d01's file (every domain compared)
+def _wrf(n):  # WRF's run of the chain's configuration (refs/chain_refs.txt), d01's file (every domain compared)
     return f"suite.chain_wrf={WR}/run_{n}_r8/wrfout_d01_{_D}"
 
 
@@ -44,13 +44,13 @@ CASES = [
      _ref("CHP4"), 900, {}),
     # G2 (P2 with GWDO, gwd_opt 1) with PBL and cumulus every 5 min (WRF: CHG2_r8)
     ("real_g2_r8_fp64_cpu_chain", "cpu_dp", "configs/real_g2_r8.ini",
-     ["real.dir=" + f"{WR}/run_CHG2_r8", "phys.bldt=5", "phys.cudt=5", "output.out_interval=3", "output.diag_interval=3",
-      "suite.chain=360,180", _wrf("CHG2")], _ref("CHG2"), 900, {}),
+     ["real.dir=" + f"{WR}/run_CHG2_r8", "phys.bldt=5", "phys.cudt=5", "output.out_interval=3",
+      "output.diag_interval=3", "suite.chain=360,180", _wrf("CHG2")], _ref("CHG2"), 900, {}),
     # P8 (Grell-Freitas-Li, ishallow 1; WRF r8d8: CHP8_r8) and NMP1 (Noah-MP; WRF: CHNMP1_r8) with PBL (and
     # cumulus) every 5 min
     ("real_p8_r8_fp64_cpu_chain", "cpu_dp", "configs/real_p8_r8.ini",
-     ["real.dir=" + f"{WR}/run_CHP8_r8", "phys.bldt=5", "phys.cudt=5", "output.out_interval=3", "output.diag_interval=3",
-      "suite.chain=360,180", _wrf("CHP8")], _ref("CHP8"), 900, {}),
+     ["real.dir=" + f"{WR}/run_CHP8_r8", "phys.bldt=5", "phys.cudt=5", "output.out_interval=3",
+      "output.diag_interval=3", "suite.chain=360,180", _wrf("CHP8")], _ref("CHP8"), 900, {}),
     ("real_nmp1_r8_fp64_cpu_chain", "cpu_dp", "configs/real_nmp1_r8.ini",
      ["real.dir=" + f"{WR}/run_CHNMP1_r8", "phys.bldt=5", "output.out_interval=3", "output.diag_interval=3",
       "suite.chain=360,180", _wrf("CHNMP1")], _ref("CHNMP1"), 900, {}),
@@ -78,8 +78,9 @@ CASES = [
 
 STATUS = [
     ('D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains', 'resumed from CPPWRF\'s wrfrst and native restart files (SR1: native only) between the radiation, '
-     'PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run\'s, '
-     'and the straight and resumed runs equal WRF\'s run of the same configuration (every domain) at tolerance 0',
+     'PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight '
+     'run\'s, and the straight and resumed runs equal WRF\'s run of the same configuration (every domain) '
+     'at tolerance 0',
      '15-20 min'),
 ]
 

@@ -15,8 +15,9 @@ _VARS = ("U", "W", "THM", "QV", "QCLOUD", "QRAIN", "QICE", "QSNOW", "QGRAUP")
 
 CASES = [
     ("real_n3t_r8_fp64_cpu", "cpu_dp", "configs/real_n3t_r8.ini",
-     ["real.dir=" + f"{WR}/run_N3T_r8/steps", "run.run_time=180", "output.out_interval=1", "output.diag_interval=1",
-      "d02.out_interval=3", "d02.diag_interval=3", "d03.out_interval=9", "d03.diag_interval=9"],
+     ["real.dir=" + f"{WR}/run_N3T_r8/steps", "phys.table_dir=" + f"{WR}/run_N3T_r8/steps", "run.run_time=180",
+      "output.out_interval=1", "output.diag_interval=1", "d02.out_interval=3", "d02.diag_interval=3",
+      "d03.out_interval=9", "d03.diag_interval=9"],
      {d: f"{WR}/run_N3T_r8/steps/wrfout_{d}_{_D}" for d in _DOMS}, 180,
      {f"{d}.{x}": 0.0 for d in _DOMS for x in _VARS}),
     *[(f"real_n3t_r8_fp64_{b}_1h", f"{b}_dp", "configs/real_n3t_r8.ini", [],
