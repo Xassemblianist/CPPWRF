@@ -24,6 +24,7 @@
 
 #ifdef CPPWRF_HAVE_NETCDF
 #include "io_netcdf/wrf_readers.hpp"
+#include "wrf_io/output_queue.hpp"
 #include <netcdf.h>
 #endif
 
@@ -1076,7 +1077,12 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       const tile::Use use(d.model.g);
       d.runner->before_step(n);
       serial.unlock();
-      d.model.rk->step(*d.model.st, *d.model.tend, *d.model.base);
+      {
+#ifdef CPPWRF_HAVE_NETCDF
+        const wrf_io::NcReleased io;  // the time step makes no NetCDF call: the output writer thread may (output_queue)
+#endif
+        d.model.rk->step(*d.model.st, *d.model.tend, *d.model.base);
+      }
       serial.lock();
       d.runner->after_solve(n);
     }

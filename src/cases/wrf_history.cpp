@@ -47,7 +47,7 @@ Layout download_timed(const F& f, V& h) {
   } else {
     f.download(h);
   }
-  wrf_io::deflate::stats().download_s += std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+  wrf_io::deflate::add_download(std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count());
   return L;
 }
 

@@ -13,6 +13,9 @@
 #include "core/tiles.hpp"
 #include "io/config.hpp"
 #include "io/option_tiers.hpp"
+#ifdef CPPWRF_HAVE_NETCDF
+#include "wrf_io/output_queue.hpp"
+#endif
 
 using namespace cppwrf;
 
@@ -70,6 +73,10 @@ static int run(int argc, char** argv, bool mpi) {
 
   const tile::Options tiles = tile::options(cfg.get_string("run.tiles", "1"));
   const std::string ranks = cfg.get_string("run.ranks", "");  // the layout of an MPI run (a known key in every run)
+#ifdef CPPWRF_HAVE_NETCDF
+  // a decomposed run writes its files in the model's thread (output.write_queue_mb has no effect)
+  if (mpi || tiles.on()) wrf_io::output_queue::forbid();
+#endif
   if (mpi) {  // several MPI ranks: each is the worker of one patch (docs/MPI.md)
     if (tiles.on()) throw std::runtime_error("run.tiles: an MPI run has one patch per rank (run.ranks)");
     const bool nests = cases::has_nests(cfg);  // every domain in the same P x Q patches
@@ -95,8 +102,13 @@ static int run(int argc, char** argv, bool mpi) {
   const bool overlap = step_graphs_on();
   for (long n = r.start_step + 1; n <= m.nsteps; ++n) {
     r.before_step(n);
-    m.rk->step(*m.st, *m.tend, *m.base);
-    if (!overlap || n == m.nsteps) dev_sync();
+    {
+#ifdef CPPWRF_HAVE_NETCDF
+      const wrf_io::NcReleased io;  // the time step makes no NetCDF call: the output writer thread may (output_queue)
+#endif
+      m.rk->step(*m.st, *m.tend, *m.base);
+      if (!overlap || n == m.nsteps) dev_sync();
+    }
     if (!r.after_step(n)) return 3;
   }
   r.finish();
@@ -110,9 +122,15 @@ int main(int argc, char** argv) {
     rc = run(argc, argv, mpi);
   } catch (const std::exception& e) {
     std::fprintf(stderr, "cppwrf: error: %s\n", e.what());
+#ifdef CPPWRF_HAVE_NETCDF
+    wrf_io::output_queue::finish();  // the records queued before the error are written, as the synchronous writer had
+#endif
     tile::mpi_abort(2);
     rc = 2;
   }
+#ifdef CPPWRF_HAVE_NETCDF
+  wrf_io::output_queue::finish();
+#endif
   tile::mpi_finish();
   return rc;
 }

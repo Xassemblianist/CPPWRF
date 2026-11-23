@@ -25,11 +25,14 @@ class StreamFile {
  public:
   StreamFile(const std::string& path, std::vector<OutVar> vars, const WrfConfig& c, const DomainAtts& d,
              Stream s, bool netcdf4);
-  void write(const std::string& date, const StreamValueFn& value);  // appends one record
+  // appends one record: the values are gathered here; the NetCDF calls (Times, the puts in order, nc_sync) run on
+  // the output writer thread when it is on (wrf_io/output_queue.hpp), else here. The file stays open until the last
+  // of its records is written and the StreamFile is gone.
+  void write(const std::string& date, const StreamValueFn& value);
   std::size_t records() const { return rec_; }
 
  private:
-  std::unique_ptr<NcOut> nc_;
+  std::shared_ptr<NcOut> nc_;
   std::vector<OutVar> vars_;
   std::size_t rec_ = 0;
   std::string path_;

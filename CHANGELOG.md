@@ -48,6 +48,15 @@ resumes across versions from WRF's wrfrst files.
   file of version 6 or older is refused with a pointer to the run's wrfrst file (native restart files belong to the
   sources that wrote them). Every `HALO_<name>` of a field the file has is required on reading. The file is written
   as `restart_<step>.nc.partial` and renamed once complete (fields and halo points).
+- WRF-format output off the model's thread (files unchanged, byte for byte): the values of a wrfout / auxhist3 /
+  wrfrst record are copied from the model's fields as before, then a writer thread makes the record's NetCDF calls
+  (Times, the puts in order, nc_sync) while the model steps on. One NetCDF lock for the process: the model's thread
+  holds it outside its time steps (its readers of wrfinput, wrflowinp, wrffdda, restart files), the writer takes it per
+  call. New key `output.write_queue_mb` (default 1024: the memory of the records waiting; 0 writes in the model's
+  thread as before); a writer error stops the run at the next step or at the end with the same message. Decomposed runs
+  (tiles, MPI ranks) write in the model's thread. The precomputed chunks are kept per record (a wrfrst file and the
+  history frame of the same time no longer take each other's), and the replacement of HDF5's deflate filter is used
+  only with HDF5 1.10 to 1.14 (another version keeps HDF5's own filter: the same bytes); docs/PERF.md IO2.
 
 ### Fixed
 - sfclayrev with fractional_seaice = 1: USTM_SEA is 0 on entry to every open-water call (WRF's automatic array has
