@@ -4,7 +4,8 @@ import argparse
 import struct
 import numpy as np
 
-def generate_ysu_inputs(num_cols=2500, nz=50, dt=60.0, out_path="ysu_input.bin", seed=42, topdown=1, flag_q=1):
+def generate_ysu_inputs(num_cols=2500, nz=50, dt=60.0, out_path="ysu_input.bin", seed=42, topdown=1, flag_q=1,
+                        currents=0):
     np.random.seed(seed)
 
     # Physical constants (WRF share/module_model_constants.F)
@@ -197,6 +198,11 @@ def generate_ysu_inputs(num_cols=2500, nz=50, dt=60.0, out_path="ysu_input.bin",
         v10[i] = v3d[0, i] * 0.75
 
     # Write binary file
+    if currents:  # sea-surface currents UOCE / VOCE (wrfinput, auxinput4), their own generator: the other fields
+        rng = np.random.default_rng(seed + 1)  # stay those of the runs without currents
+        uoce[:] = rng.uniform(-1.5, 1.5, num_cols)
+        voce[:] = rng.uniform(-1.5, 1.5, num_cols)
+
     with open(out_path, "wb") as f:
         # Dimensions
         f.write(struct.pack("<ii", num_cols, nz))
@@ -248,5 +254,6 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--topdown", type=int, default=1, help="ysu_topdown_pblmix")
     parser.add_argument("--flag-q", type=int, default=1, help="flag_qc = flag_qi")
+    parser.add_argument("--currents", type=int, default=0, help="1: nonzero UOCE / VOCE")
     args = parser.parse_args()
-    generate_ysu_inputs(args.cols, args.nz, args.dt, args.out, args.seed, args.topdown, args.flag_q)
+    generate_ysu_inputs(args.cols, args.nz, args.dt, args.out, args.seed, args.topdown, args.flag_q, args.currents)

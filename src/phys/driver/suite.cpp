@@ -1120,7 +1120,7 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
                     &psfc, &ch, &snow, &snowh, &snowc, &canwat, &lai, &snotime, &qz0, &rainbl, &raincv, &raincv_a,
                     &raincv_b, &rainncv,
                     &rainshv, &sr, &glw, &swdown, &gsw, &smstav, &smstot, &sfcrunoff, &udrunoff, &acsnom, &acsnow,
-                    &snopcx, &potevp, &noahres, &sfcevp, &sfcexc, &achfx, &aclhf, &acgrdflx, &dx2d, &uoce, &voce,
+                    &snopcx, &potevp, &noahres, &sfcevp, &sfcexc, &achfx, &aclhf, &acgrdflx, &dx2d, &var2d, &uoce, &voce,
                     &ctopo, &ctopo2, &ck, &cka, &cd, &cda, &wstar, &delta, &hol, &rainc, &rainsh, &pratec, &pratesh, &nca, &htop, &hbot,
                     &cutop, &cubot, &cuppt, &coszen})
     v.emplace_back("sfc_" + f->name(), f);
