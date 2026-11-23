@@ -30,6 +30,7 @@ class Config {
   std::vector<std::string> unaccessed_keys() const;
   void mark_accessed(const std::string& key) const;
   const std::map<std::string, std::string>& entries() const { return data_; }  // every key = value (not marked read)
+  void erase_section(const std::string& section);  // removes every section.key (an ensemble's member: [ensemble])
 
  private:
   std::map<std::string, std::string> data_;

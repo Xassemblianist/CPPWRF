@@ -7,6 +7,14 @@ resumes across versions from WRF's wrfrst files.
 
 ## Unreleased
 
+### Added
+- Ensembles in one process (docs/ENSEMBLE.md, USER_GUIDE section 7): an `[ensemble]` section (`members`,
+  `memberI` = '|'-separated overrides, `mode` = threads | sequential) runs every member of a single-domain
+  configuration; with threads each member has its own host thread, CUDA stream, graphs and fields on the one GPU,
+  sharing the stack reserve and the device tables; the members' host work runs one member at a time. Every member's
+  files are byte-identical to its single run (ctest `ensemble`; `--set ensemble.member=I` runs member I alone).
+  Single runs are unchanged.
+
 ### Changed
 - CPPWRF's own restart file (`restart_<step>.nc`) no longer depends on the decomposition: a decomposed run (tiles,
   MPI ranks) writes the halo points of its fields beyond the domain's edges (`HALO_<name>`, gathered from the edge

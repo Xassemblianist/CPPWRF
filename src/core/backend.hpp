@@ -489,6 +489,10 @@ void copy_to_host(void* dst, const void* src, std::size_t bytes);
 void copy_to_dev(void* dst, const void* src, std::size_t bytes);
 void copy_dev(void* dst, const void* src, std::size_t bytes);
 void dev_sync();
+// Ensemble members (cases/ensemble.hpp; one host thread each, all on one device): dev_sync of the calling thread
+// waits for the thread's own stream only, so the other members' work runs on. Off (the default): the whole device.
+// CPU build: no effect.
+void set_thread_stream_sync(bool on);
 // A host buffer of at least `bytes` to build an upload in (Field::fill_host): one per host thread, reused (grown as
 // needed, kept for the run) instead of a new allocation per field, pinned on the GPU (a faster copy). A nested use
 // while the thread's buffer is held gets a buffer of its own.

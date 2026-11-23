@@ -587,6 +587,28 @@ runtime, `tools/colab/colab_mpi.sh` runs suite cases under `mpirun` with several
 `--gpu-cases` with several ranks on the runtime's GPU), each against the WRF references and byte for byte against
 the run with one rank; `tools/bench/colab_bench.sh --scaling` measures the strong scaling next to WRF dmpar.
 
+### Ensembles (several members in one process)
+
+An `[ensemble]` section runs several members, each a whole single-domain run of the configuration with its own
+overrides, in one process (docs/ENSEMBLE.md):
+
+```ini
+[ensemble]
+members = 3
+member1 =                                    ; the configuration as it is
+member2 = phys.mp_physics=6 | moist.species=qv,qc,qr,qi,qs,qg
+member3 = real.dir=/data/run_perturbed_b
+mode = threads                               ; threads (default) | sequential
+```
+
+`memberI` lists `section.key=value` overrides separated by `|`, applied after the command line's `--set`. Member I
+writes to `<output.dir>/memberI` unless its overrides set `output.dir`. With `mode = threads` every member runs on
+its own host thread, with its own CUDA stream, CUDA graphs and fields on the one GPU (one stack reserve and one copy
+of the shared tables for all); the members' host work (input, output, boundaries) runs one member at a time, their
+time steps at the same time. Every member's files are byte-identical to the member run alone
+(`cppwrf ens.ini --set ensemble.member=I` runs member I alone into the same directory). Not yet: nested members,
+tiles or MPI ranks in an ensemble.
+
 ---
 
 ## 8. Configuration Reference (INI Keys)

@@ -217,6 +217,14 @@ void Config::apply_overrides(const std::vector<std::string>& overrides) {
   }
 }
 
+void Config::erase_section(const std::string& section) {
+  const std::string pre = section + ".";
+  for (auto it = data_.begin(); it != data_.end();) {
+    if (it->first.rfind(pre, 0) == 0) it = data_.erase(it);
+    else ++it;
+  }
+}
+
 Config Config::load(const std::string& path, const std::vector<std::string>& overrides) {
   std::ifstream in(path, std::ios::in | std::ios::binary);
   if (!in.is_open()) {
