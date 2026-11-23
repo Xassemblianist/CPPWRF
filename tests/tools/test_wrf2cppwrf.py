@@ -1453,6 +1453,9 @@ class TestValidationAndWarnings(unittest.TestCase):
             ("&physics ra_lw_physics = 4, ra_sw_physics = 4, cldovrlp = 9 /", "cldovrlp = 9"),
             ("&physics ra_lw_physics = 4, ra_sw_physics = 4, cldovrlp = -1 /", "cldovrlp = -1"),
             ("&physics shcu_physics = 2 /", "shcu_physics"),
+            # the diagnostics name WRF's group (Registry.EM_COMMON: shalwater_z0 &physics, scm_force_flux &scm)
+            ("&physics shalwater_z0 = 2 /", "WRF &physics.shalwater_z0 = 2 (Shallow-water roughness"),
+            ("&scm scm_force_flux = 1 /", "WRF &scm.scm_force_flux = 1 (Single-column model prescribed surface flux"),
             ("&physics topo_wind = 3 /", "topo_wind = [3]"),
             ("&dynamics moist_adv_opt = 5 /", "moist_adv_opt = 5"),
             ("&dynamics scalar_adv_opt = -1 /", "scalar_adv_opt = -1"),

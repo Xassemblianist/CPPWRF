@@ -630,6 +630,8 @@ UNSUPPORTED_PHYSICS_SWITCHES = {
     "shalwater_z0": "Shallow-water roughness formulation",
     "scm_force_flux": "Single-column model prescribed surface flux",
 }
+# the namelist group of a switch above other than &physics (Registry.EM_COMMON: scm_force_flux is &scm, one value)
+UNSUPPORTED_SWITCH_GROUPS = {"scm_force_flux": "scm"}
 
 IGNORED_WRF_OPTIONS = {
     # &time_control
@@ -2982,9 +2984,10 @@ class WrfTranslator:
 
         # every domain's value: sf_lake_physics, topo_wind, shalwater_z0, ... are max_domains options in the Registry
         for unsup_key, desc in UNSUPPORTED_PHYSICS_SWITCHES.items():
-            for val in self.get_opt_list("physics", unsup_key)[:max(1, self._max_dom)]:
+            grp = UNSUPPORTED_SWITCH_GROUPS.get(unsup_key, "physics")
+            for val in self.get_opt_list(grp, unsup_key)[:max(1, self._max_dom)]:
                 if val not in (0, False):
-                    self.error(f"WRF {unsup_key} = {val} ({desc}) is not supported by CPPWRF.")
+                    self.error(f"WRF &{grp}.{unsup_key} = {val} ({desc}) is not supported by CPPWRF.")
                     break
 
         # grav_settling (max_domains, 0; 1, 2): fog water deposition, module_sf_fogdes.F in the surface driver (VDFG,

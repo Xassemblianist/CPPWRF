@@ -7,6 +7,8 @@
 #include <limits>
 #include <numbers>
 #include <stdexcept>
+#include <string>
+#include <utility>
 
 #include "core/constants.hpp"
 #include "core/halo.hpp"
@@ -347,6 +349,15 @@ Model Model::build(const io::Config& cfg) {
   dc.pbl = cfg.get_int("phys.bl_pbl_physics", 0) != 0;
   dc.isfflx = int(cfg.get_int("phys.isfflx", 1));
   if (dc.isfflx != 0 && dc.isfflx != 1) throw std::runtime_error("phys.isfflx must be 0 or 1");
+  // sfclayrev's shallow-water roughness (WRF &physics shalwater_z0, with shalwater_init's WATER_DEPTH) and the
+  // single-column model's prescribed surface fluxes (WRF &scm scm_force_flux, with the SCM forcing) are not wired:
+  // a nonzero value is refused whichever schemes the run has, not ignored
+  for (const auto& [key, what] : {std::pair<const char*, const char*>{"phys.shalwater_z0",
+                                                                      "shallow-water roughness, shalwater_init"},
+                                  {"phys.scm_force_flux", "single-column model surface fluxes"}})
+    if (const long v = cfg.get_int(key, 0); v != 0)
+      throw std::runtime_error(std::string(key) + " = " + std::to_string(v) + " (" + what +
+                               ") is not supported: CPPWRF takes 0");
   dc.use_theta_m = int(cfg.get_int("dyn.use_theta_m", 1));
   if (dc.use_theta_m != 1) throw std::runtime_error("dyn.use_theta_m must be 1 (use_theta_m = 0 is not verified against WRF)");
   if (cfg.has("dyn.legacy_diffusion"))
