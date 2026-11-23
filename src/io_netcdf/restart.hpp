@@ -11,12 +11,13 @@ namespace cppwrf::io_netcdf {
 
 // the format of CPPWRF's own restart file (the global attribute CPPWRF_RESTART_VERSION): raise it when the file's
 // contents change; a file of another version is refused (WRF's wrfrst files are the cross-version restart)
-inline constexpr int kRestartVersion = 6;  // 2: WRF_ALARM_SECS_TIL_NEXT_RING_51; 3: the scalars (SCALAR_*);
+inline constexpr int kRestartVersion = 7;  // 2: WRF_ALARM_SECS_TIL_NEXT_RING_51; 3: the scalars (SCALAR_*);
 // 4: WW, WW_M, PHP, ALT, the carried diagnostics of the restart stream (O3RAD, HRANG, URATX, ...); 5: the run's start
 // step (RUN_START_STEP), convtrans_prep's STEPAVE_COUNT, the history / auxhist3 / auxinput4 / auxinput10 alarms,
 // REFL_10CM, Noah-MP's noahmp_ranland; 6: RUN_START_STEP without column physics too, the configured history /
 // auxhist3 intervals (HIST_IV_CFG, AUX3_IV_CFG), the restart alarm's PrevRingTime and one-shot RingTime (RST_PREV,
-// RST_RING_TIME)
+// RST_RING_TIME); 7: the column physics' sfc_var2d (VAR), the halo points HALO_<name> of every real field in every
+// file, of a decomposed run too (gathered from the edge patches), each required on reading (rank 1, its halo count)
 
 struct RestartMeta {
   int version = kRestartVersion;  // read: 0 when the file has none (written before the version was recorded)

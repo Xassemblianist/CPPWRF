@@ -4,8 +4,12 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
+#include "io_netcdf/nc_read.hpp"
 #include "io_netcdf/netcdf_common.hpp"
 #include "io_netcdf/restart.hpp"
 
@@ -167,10 +171,88 @@ static void test_precision(DType dt) {
   std::printf("PASS: Bitwise identity verified for %s (memcmp == 0)\n", is_dp ? "FP64" : "FP32");
 }
 
+// read_record (the bounded read of HALO_<name> in a CPPWRF restart file and of UOCE, VOCE, VAR, U_FRAME, V_FRAME in a
+// wrfinput / wrfrst file): the shape is checked before anything is read, a mismatch is an error naming file and variable
+static void test_bounded_read() {
+  std::printf("Testing the bounded NetCDF read (read_record)...\n");
+  std::filesystem::create_directories("tests/io_netcdf/test_out");
+  const std::string f = "tests/io_netcdf/test_out/bounded_read.nc";
+  const std::size_t nx = 5, ny = 4, nh = 12;
+  {
+    ScopedNcFile id;
+    NC_CHECK(nc_create(f.c_str(), NC_CLOBBER | NC_64BIT_OFFSET, id.ptr()));
+    int t, sn, we, wes, h, h2a, h2b, v;
+    NC_CHECK(nc_def_dim(id, "Time", NC_UNLIMITED, &t));
+    NC_CHECK(nc_def_dim(id, "south_north", ny, &sn));
+    NC_CHECK(nc_def_dim(id, "west_east", nx, &we));
+    NC_CHECK(nc_def_dim(id, "west_east_stag", nx + 1, &wes));
+    NC_CHECK(nc_def_dim(id, ("halo_" + std::to_string(nh)).c_str(), nh, &h));
+    NC_CHECK(nc_def_dim(id, "halo_a", 3, &h2a));
+    NC_CHECK(nc_def_dim(id, "halo_b", 4, &h2b));
+    const int d_h[1] = {h}, d_h2[2] = {h2a, h2b}, d_t[1] = {t}, d_m[3] = {t, sn, we}, d_u[3] = {t, sn, wes};
+    NC_CHECK(nc_def_var(id, "HALO_mu_2", NC_DOUBLE, 1, d_h, &v));       // the writer's shape
+    NC_CHECK(nc_def_var(id, "HALO_rank2", NC_DOUBLE, 2, d_h2, &v));     // a repacked rank-2 copy (3 x 4 = 12 values)
+    NC_CHECK(nc_def_var(id, "U_FRAME", NC_DOUBLE, 1, d_t, &v));         // two records
+    NC_CHECK(nc_def_var(id, "UOCE", NC_DOUBLE, 3, d_m, &v));            // mass grid
+    NC_CHECK(nc_def_var(id, "UOCE_STAG", NC_DOUBLE, 3, d_u, &v));       // staggered in X
+    NC_CHECK(nc_enddef(id));
+    std::vector<double> a(nh), b(2 * ny * (nx + 1));
+    for (std::size_t n = 0; n < a.size(); ++n) a[n] = double(n) + 0.5;
+    for (std::size_t n = 0; n < b.size(); ++n) b[n] = 100.0 + double(n);
+    int vid;
+    NC_CHECK(nc_inq_varid(id, "HALO_mu_2", &vid));
+    NC_CHECK(nc_put_var_double(id, vid, a.data()));
+    NC_CHECK(nc_inq_varid(id, "HALO_rank2", &vid));
+    NC_CHECK(nc_put_var_double(id, vid, a.data()));
+    const double fr[2] = {0.0, 5.0};
+    const std::size_t st1[1] = {0}, ct1[1] = {2};
+    NC_CHECK(nc_inq_varid(id, "U_FRAME", &vid));
+    NC_CHECK(nc_put_vara_double(id, vid, st1, ct1, fr));
+    const std::size_t st3[3] = {0, 0, 0}, cm[3] = {2, ny, nx}, cu[3] = {2, ny, nx + 1};
+    NC_CHECK(nc_inq_varid(id, "UOCE", &vid));
+    NC_CHECK(nc_put_vara_double(id, vid, st3, cm, b.data()));
+    NC_CHECK(nc_inq_varid(id, "UOCE_STAG", &vid));
+    NC_CHECK(nc_put_vara_double(id, vid, st3, cu, b.data()));
+  }
+  ScopedNcFile id;
+  NC_CHECK(nc_open(f.c_str(), NC_NOWRITE, id.ptr()));
+  auto rejects = [&](const char* var, const std::vector<DimSpec>& dims, const char* what) {
+    try {
+      (void)read_record(id, f, var, dims);
+    } catch (const std::runtime_error& e) {
+      const std::string m = e.what();
+      assert(m.find(f) != std::string::npos && m.find(var) != std::string::npos && m.find(what) != std::string::npos);
+      std::printf("  rejected %s: %s\n", var, m.c_str());
+      return;
+    }
+    std::printf("FAIL: %s was read\n", var);
+    assert(false);
+  };
+  const std::vector<DimSpec> halo = {{"halo_" + std::to_string(nh), nh}};
+  const std::vector<double> h = read_record(id, f, "HALO_mu_2", halo);
+  assert(h.size() == nh && h[0] == 0.5 && h[nh - 1] == double(nh - 1) + 0.5);
+  rejects("HALO_rank2", halo, "has rank 2, expected 1");                              // a rank-2 HALO_ variable
+  rejects("HALO_mu_2", {{"halo_" + std::to_string(nh), nh + 1}}, "has length 12, expected 13");  // another count
+  rejects("HALO_mu_2", {{"halo_13", 13}}, "is halo_12, expected halo_13");
+  rejects("HALO_missing", halo, "is missing");
+  bool present = true;
+  assert(read_record(id, f, "HALO_missing", halo, 0, &present).empty() && !present);
+  // a frame value of two records: record 0 alone (no overrun of the one-value buffer); record 2 does not exist
+  assert(read_record(id, f, "U_FRAME", {{"Time", 0}}).size() == 1 && read_record(id, f, "U_FRAME", {{"Time", 0}})[0] == 0.0);
+  assert(read_record(id, f, "U_FRAME", {{"Time", 0}}, 1)[0] == 5.0);
+  rejects("U_FRAME", {{"Time", 0}, {"south_north", ny}}, "has rank 1, expected 2");
+  const std::vector<DimSpec> mass = {{"Time", 0}, {"south_north", ny}, {"west_east", nx}};
+  const std::vector<double> u = read_record(id, f, "UOCE", mass);
+  assert(u.size() == nx * ny && u[0] == 100.0 && u[nx * ny - 1] == 100.0 + double(nx * ny - 1));
+  rejects("UOCE_STAG", mass, "is west_east_stag, expected west_east");  // a staggered copy of the currents
+  std::printf("PASS: bounded read\n");
+}
+
 int main() {
   std::printf("Running test_restart acceptance test...\n");
   test_precision(DType::F32);
   test_precision(DType::F64);
+  test_bounded_read();
   std::printf("RESTART BITWISE TEST PASSED!\n");
   return 0;
 }

@@ -795,9 +795,9 @@ run_time = 7200
 restart_file = out/real/restart_000060.nc   # or .../wrfrst_d01_2026-10-12_01:00:00
 ```
 
-CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 6: the scalars NSTEPS,
+CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 7: the scalars NSTEPS,
 DECLIN and SOLCON as `SCALAR_<name>` attributes; WW, WW_M, PHP, ALT; the halo points of every field beyond the
-domain's edges as `HALO_<name>`, the same in every decomposition; the step the run started at, convtrans_prep's averaging counter and the history, auxhist3,
+domain's edges as `HALO_<name>`, the same in every decomposition and required when the file is read; the column physics' `VAR`; the step the run started at, convtrans_prep's averaging counter and the history, auxhist3,
 auxinput4 and auxinput10 alarms with the configured history / auxhist3 / restart intervals, the restart alarm's
 PrevRingTime and one-shot RingTime; REFL_10CM and Noah-MP's land-point flag, which WRF's restart stream leaves out; so
 that a run resumed from the file continues the uninterrupted one bit for bit, also between two radiation, PBL or
@@ -805,7 +805,8 @@ cumulus calls, within a bucket, `prec_acc_dt`, `auxhist3` (output_diagnostics), 
 (`CPPWRF_COMMIT`) and the run's options (`CPPWRF_OPTIONS`: every configuration key except `[run]`, `[restart]`,
 `[output]`, `[real]`, `time.history_interval_s`, `phys.auxhist3_interval` and `phys.table_dir`). A resumed run
 refuses a file of another format version, of another commit (unless `run.restart_any_commit = true`) or of a run with
-other options, and names the differing options. WRF's `wrfrst` files are the restart across versions and changed
+other options, and names the differing options. The file is written as `restart_<step>.nc.partial` and renamed when it
+is complete. WRF's `wrfrst` files are the restart across versions and changed
 options.
 
 A run resumed from a `wrfrst` file between two radiation calls equals WRF's resumed run, which is not always the

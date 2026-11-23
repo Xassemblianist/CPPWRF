@@ -10,6 +10,8 @@
   output_diagnostics = 1 is refused (CLWRF's sums of the file's interval).
 - A run resumed from a wrfrst file computes phy_init's step counts from its own options as wrf.exe does (bldt 2 min,
   radt 2 min: STEPBL = STEPRA = 2 in its next wrfrst file, not the file's 1).
+- A moving frame (U_FRAME / V_FRAME not 0) in the wrfrst file of a resumed run or in the wrfinput file is refused
+  with the file and the value; so is a wrfinput UOCE on the staggered grid (the bounded read checks the shape).
 
   restart_resume_test.py CPPWRF_BINARY WORK_DIR   (from the repository root; exit 77 without
                                                    ${CPPWRF_WRF_RUNS}/run_P1_r8/steps or without NetCDF)
@@ -111,6 +113,39 @@ def main():
     with netCDF4.Dataset(f"{r}/wrfrst_d01_2026-10-12_00:03:00") as ds:
         check("wrfrst resume with phys.bldt = phys.radt = 2: STEPBL, STEPRA of the next wrfrst file",
               (int(ds["STEPBL"][0]), int(ds["STEPRA"][0])), (2, 2))
+    # U_FRAME of the wrfrst file (Registry ir: a resumed wrf.exe takes the file's value; the drivers here take 0): a
+    # moving frame in the restart file is refused with the file and the value, as in the wrfinput file
+    wf = f"{w}/wrfrst_d01_2026-10-12_00:01:00"
+    fr = os.path.join(work, "frame_rst", os.path.basename(wf))
+    os.makedirs(os.path.dirname(fr), exist_ok=True)
+    shutil.copy(wf, fr)
+    with netCDF4.Dataset(fr, "a") as ds:
+        ds["U_FRAME"][0] = 5.0
+    rc, out = run("wrfrst_frame", ["run.run_time=180", "restart.native=false", f"run.restart_file={fr}"], fail=True)
+    check("wrfrst resume with U_FRAME = 5: refused, naming the file and the value",
+          (rc != 0, f"{fr}: U_FRAME = 5, not 0" in out), (True, True))
+    # the wrfinput's U_FRAME, V_FRAME, UOCE (one record, mass grid) in another shape or with a frame: refused before
+    # anything is read (a staggered copy of the currents, two records of the frame value)
+    import numpy
+    from restart_guard_test import copy_nc
+    with netCDF4.Dataset(os.path.join(data, "wrfinput_d01")) as ds:
+        nx, ny = len(ds.dimensions["west_east"]), len(ds.dimensions["south_north"])
+    stage = os.path.join(work, "stage")
+    for name, edit, want in (
+            ("frame", lambda n: None, "wrfinput_d01: V_FRAME = -2.5, not 0"),
+            ("uoce_stag", lambda n: (("Time", "south_north", "west_east_stag"), numpy.zeros((1, ny, nx + 1)))
+             if n == "UOCE" else None, "UOCE dimension 2 is west_east_stag, expected west_east")):
+        shutil.rmtree(stage, ignore_errors=True)
+        os.makedirs(stage)
+        for f in os.listdir(data):
+            if f != "wrfinput_d01":
+                os.symlink(os.path.abspath(os.path.join(data, f)), os.path.join(stage, f))
+        copy_nc(os.path.join(data, "wrfinput_d01"), os.path.join(stage, "wrfinput_d01"), edit_var=edit)
+        if name == "frame":
+            with netCDF4.Dataset(os.path.join(stage, "wrfinput_d01"), "a") as ds:
+                ds["V_FRAME"][0] = -2.5
+        rc, out = run(f"input_{name}", ["run.run_time=60", "restart.interval=0", f"real.dir={stage}"], fail=True)
+        check(f"wrfinput with {name}: refused", (rc != 0, want in out), (True, True))
     shutil.rmtree(work, ignore_errors=True)
     return 1 if fails else 0
 

@@ -30,6 +30,8 @@
 #include "wrf_io/namelist.hpp"
 #ifdef CPPWRF_HAVE_NETCDF
 #include <netcdf.h>
+
+#include "io_netcdf/nc_read.hpp"
 #endif
 
 namespace cppwrf::cases {
@@ -137,13 +139,44 @@ class NcIn {
     int v = 0;
     return nc_inq_varid(id_, name, &v) == NC_NOERR;
   }
+  // name's n values: the whole variable holds n values, or its first record does (a record dimension Time of more
+  // records); any other size is an error before anything is read
   std::vector<double> var(const char* name, std::size_t n) const {
-    int v = 0;
-    std::vector<double> out(n);
-    if (nc_inq_varid(id_, name, &v) != NC_NOERR || nc_get_var_double(id_, v, out.data()) != NC_NOERR)
+    int v = 0, nd = 0;
+    if (nc_inq_varid(id_, name, &v) != NC_NOERR || nc_inq_varndims(id_, v, &nd) != NC_NOERR)
       throw std::runtime_error(std::string("real physics: ") + path_ + " lacks " + name);
+    std::vector<int> dids(std::size_t(nd) + 1);
+    std::vector<std::size_t> len(std::size_t(nd) + 1, 1);
+    if (nc_inq_vardimid(id_, v, dids.data()) != NC_NOERR)
+      throw std::runtime_error(std::string("real physics: ") + path_ + ": cannot read the dimensions of " + name);
+    std::size_t total = 1;
+    for (int d = 0; d < nd; ++d) {
+      if (nc_inq_dimlen(id_, dids[std::size_t(d)], &len[std::size_t(d)]) != NC_NOERR)
+        throw std::runtime_error(std::string("real physics: ") + path_ + ": cannot read the dimensions of " + name);
+      total *= len[std::size_t(d)];
+    }
+    std::vector<double> out(n);
+    int rc = NC_NOERR;
+    if (total == n) {
+      rc = nc_get_var_double(id_, v, out.data());
+    } else {
+      char d0[NC_MAX_NAME + 1] = {};
+      if (nd < 1 || nc_inq_dimname(id_, dids[0], d0) != NC_NOERR || std::string(d0) != "Time" || len[0] == 0 ||
+          total / len[0] != n)
+        throw std::runtime_error(std::string("real physics: ") + path_ + ": " + name + " holds " +
+                                 std::to_string(total) + " values, expected " + std::to_string(n));
+      std::vector<std::size_t> st(std::size_t(nd), 0), ct(len.begin(), len.begin() + nd);
+      ct[0] = 1;
+      rc = nc_get_vara_double(id_, v, st.data(), ct.data(), out.data());
+    }
+    if (rc != NC_NOERR) throw std::runtime_error(std::string("real physics: ") + path_ + ": cannot read " + name);
     return out;
   }
+  // record 0 of name with exactly the dimensions dims (io_netcdf::read_record)
+  std::vector<double> rec(const char* name, const std::vector<io_netcdf::DimSpec>& dims) const {
+    return io_netcdf::read_record(id_, path_, name, dims);
+  }
+  const std::string& path() const { return path_; }
   std::string att_str(const char* name, const std::string& def) const {
     std::size_t len = 0;
     if (nc_inq_attlen(id_, NC_GLOBAL, name, &len) != NC_NOERR) return def;
@@ -345,12 +378,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   o.ysu_topdown_pblmix = int(cfg.get_int("phys.ysu_topdown_pblmix", 1));
   o.kim_tofd = cfg.get_bool("phys.kim_tofd", false);
   o.isftcflx = int(cfg.get_int("phys.isftcflx", 0));  // sfclayrev: z0t / z0q and roughness over water
-  // sfclayrev's shallow-water roughness (shalwater_z0, with shalwater_init's WATER_DEPTH) and the single-column
-  // model's prescribed surface fluxes (scm_force_flux, with the SCM forcing) are not wired: rejected, not ignored
-  if (cfg.get_int("phys.shalwater_z0", 0) != 0)
-    throw std::runtime_error("phys.shalwater_z0 = 1 (shallow-water roughness, shalwater_init) is not supported");
-  if (cfg.get_int("phys.scm_force_flux", 0) != 0)
-    throw std::runtime_error("phys.scm_force_flux = 1 (single-column model surface fluxes) is not supported");
+  // phys.shalwater_z0 and phys.scm_force_flux: refused in build_model's option checks (model.cpp)
   o.iz0tlnd = int(cfg.get_int("phys.iz0tlnd", 0));    // sfclayrev: z0t over land (czil)
   o.sf_mynn_sfcflux_land = int(cfg.get_int("phys.sf_mynn_sfcflux_land", 0));    // MYNN surface layer
   o.sf_mynn_sfcflux_water = int(cfg.get_int("phys.sf_mynn_sfcflux_water", 1));
@@ -485,19 +513,23 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   put2(su.vegfra, rd2("VEGFRA")); put2(su.shdmax, rd2("SHDMAX")); put2(su.shdmin, rd2("SHDMIN"));
   put2(su.snow, snow); put2(su.snowc, snowc); put2(su.lai, rd2("LAI"));
   put2(su.lakemask, in.has("LAKEMASK") ? rd2("LAKEMASK") : std::vector<double>(n2, 0.0));
-  if (in.has("VAR")) put2(su.var2d, rd2("VAR"));  // subgrid orography std. dev. (kim_tofd; history VAR)
+  // VAR, UOCE, VOCE: mass-grid fields of one record (Registry VAR2D, UOCE, VOCE: ij, no staggering), checked shape
+  const std::vector<io_netcdf::DimSpec> mass = {{"Time", 0}, {"south_north", std::size_t(ny)},
+                                                {"west_east", std::size_t(nx)}};
+  if (in.has("VAR")) put2(su.var2d, in.rec("VAR", mass));  // subgrid orography std. dev. (kim_tofd; history VAR)
   // sea-surface currents (Registry UOCE / VOCE i0124rd: wrfinput, auxinput4, wrfrst); the surface driver subtracts
   // them from the lowest-level wind, YSU and MYNN take them as the ocean's velocity. real.exe writes zeros unless the
   // met_em files hold them
-  if (in.has("UOCE")) put2(su.uoce, rd2("UOCE"));
-  if (in.has("VOCE")) put2(su.voce, rd2("VOCE"));
-  // U_FRAME / V_FRAME (Registry ir, idealized moving frames): the drivers take 0 (u_phytmp = u_phy + u_frame)
+  if (in.has("UOCE")) put2(su.uoce, in.rec("UOCE", mass));
+  if (in.has("VOCE")) put2(su.voce, in.rec("VOCE", mass));
+  // U_FRAME / V_FRAME (Registry ir, idealized moving frames): the drivers take 0 (u_phytmp = u_phy + u_frame); a
+  // run resumed from a wrfrst file checks the file's values as well (DomainRunner::load_restart_file)
   for (const char* n : {"U_FRAME", "V_FRAME"})
     if (in.has(n)) {
-      const std::vector<double> f = in.var(n, 1);
-      if (f[0] != 0.0)
-        throw std::runtime_error(std::string("real physics: the wrfinput's ") + n + " is not 0: a moving frame "
-                                 "(u_frame / v_frame) is not supported");
+      const double f = in.rec(n, {{"Time", 0}})[0];
+      if (f != 0.0)
+        throw std::runtime_error("real physics: " + in.path() + ": " + n + " = " + io_netcdf::value_str(f) +
+                                 ", not 0: a moving frame (u_frame / v_frame) is not supported");
     }
   if (o.gwd_opt == 1) {  // package gwd_used_1
     const std::pair<const char*, Field2*> gw[] = {{"CON", &su.oc12d}, {"OA1", &su.oa1}, {"OA2", &su.oa2}, {"OA3", &su.oa3},
@@ -678,7 +710,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
       throw std::runtime_error("topo_wind requires VAR_SSO data");  // start_em.F:236-239 (grid%got_var_sso)
     const std::vector<double> zero(n2, 0.0);
     su.init_topo(rd2("HGT"), rd2("MAPFAC_MX"), rd2("MAPFAC_MY"), rd2("SINALPHA"), rd2("COSALPHA"), m.xlat, m.xlong,
-                 xland, in.has("VAR_SSO") ? rd2("VAR_SSO") : zero, in.has("VAR") ? rd2("VAR") : zero);
+                 xland, in.has("VAR_SSO") ? rd2("VAR_SSO") : zero, in.has("VAR") ? in.rec("VAR", mass) : zero);
   }
   if (auto* pc = m.rk->physics(); pc && pc->params().microp_re)
     su.set_effective_radii(&pc->re_cloud, &pc->re_ice, pc->p3() ? nullptr : &pc->re_snow);  // P3: has_reqs = 0

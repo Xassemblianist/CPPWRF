@@ -11,6 +11,9 @@
 
 #ifdef CPPWRF_HAVE_NETCDF
 #include <netcdf.h>
+
+#include "io_netcdf/nc_read.hpp"
+#include "io_netcdf/netcdf_common.hpp"
 #endif
 
 #include <algorithm>
@@ -152,20 +155,26 @@ std::vector<double> halo_points(const V& h, const Layout& L) {
   return o;
 }
 
+// the number of halo points of the whole field of layout L (halo_points' length)
+std::size_t halo_count(const Layout& L) {
+  const Layout W = tile::whole_layout(L);
+  std::size_t n = 0;
+  for (int k = 0; k < std::max(1, W.nz); ++k)
+    for (int j = W.wj0; j < W.wj1; ++j)
+      for (int i = W.wi0; i < W.wi1; ++i) n += (i < 0 || i >= W.nx || j < 0 || j >= W.ny) ? 1 : 0;
+  return n;
+}
+
 // the halo points o (halo_points of the whole field) into f: a decomposed run's worker sets those its allocation
 // holds. False when o does not fit the field.
 template <class F>
 bool set_halo_points(F& f, const std::vector<double>& o) {
   const Layout& L = f.layout();
   const Layout W = tile::whole_layout(L);
-  std::size_t n = 0;
-  for (int k = 0; k < std::max(1, W.nz); ++k)
-    for (int j = W.wj0; j < W.wj1; ++j)
-      for (int i = W.wi0; i < W.wi1; ++i) n += (i < 0 || i >= W.nx || j < 0 || j >= W.ny) ? 1 : 0;
-  if (n != o.size()) return false;
+  if (halo_count(L) != o.size()) return false;
   std::vector<real> h;
   f.download(h);
-  n = 0;
+  std::size_t n = 0;
   for (int k = 0; k < std::max(1, W.nz); ++k)
     for (int j = W.wj0; j < W.wj1; ++j)
       for (int i = W.wi0; i < W.wi1; ++i)
@@ -175,6 +184,21 @@ bool set_halo_points(F& f, const std::vector<double>& o) {
         }
   copy_to_dev(f.data() - L.offset, h.data(), L.total * sizeof(real));
   return true;
+}
+
+// U_FRAME / V_FRAME of a WRF restart file (Registry ir: input and restart stream; a resumed wrf.exe takes the file's
+// values): the column physics drivers take 0 (u_phytmp = u_phy + u_frame), so a moving frame is refused here as it
+// is in the wrfinput file (init_real_physics)
+void check_no_frame(const std::string& path) {
+  io_netcdf::ScopedNcFile id;
+  if (nc_open(path.c_str(), NC_NOWRITE, id.ptr()) != NC_NOERR) throw std::runtime_error("cannot open " + path);
+  for (const char* n : {"U_FRAME", "V_FRAME"}) {
+    bool present = false;
+    const std::vector<double> v = io_netcdf::read_record(id, path, n, {{"Time", 0}}, 0, &present);
+    if (present && v[0] != 0.0)
+      throw std::runtime_error(path + ": " + n + " = " + io_netcdf::value_str(v[0]) +
+                               ", not 0: a moving frame (u_frame / v_frame) is not supported");
+  }
 }
 
 // Restart fields from a WRF wrfrst file (Time = 0); WRF's kms:kme arrays give their first nz levels
@@ -293,7 +317,9 @@ void check_native_restart(const std::string& path, const io_netcdf::RestartMeta&
   if (f.version != io_netcdf::kRestartVersion)
     throw std::runtime_error(path + ": CPPWRF restart format version " + std::to_string(f.version) +
                              (f.version == 0 ? " (none recorded)" : "") + ", this build reads version " +
-                             std::to_string(io_netcdf::kRestartVersion) + ": resume from the run's wrfrst file");
+                             std::to_string(io_netcdf::kRestartVersion) +
+                             " (a CPPWRF restart file belongs to the sources that wrote it, CHANGELOG.md): resume "
+                             "from the run's wrfrst file");
   if (f.commit != CPPWRF_COMMIT && !cfg.get_bool("run.restart_any_commit", false))
     throw std::runtime_error(path + ": written by commit " + f.commit + ", this build is " + CPPWRF_COMMIT +
                              ": resume from the run's wrfrst file (or set run.restart_any_commit = true)");
@@ -465,31 +491,41 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
     }
   }
 
-  io_netcdf::write_restart(path, meta, vars);
-  if (!halos.empty()) {  // HALO_<name> (halo_points), one dimension per variable
-    int id;
-    if (nc_open(path.c_str(), NC_WRITE, &id) != NC_NOERR) throw std::runtime_error("cannot reopen " + path);
-    nc_redef(id);
-    std::vector<int> vids(halos.size(), -1);
-    std::map<std::size_t, int> dims;  // one dimension per length
-    for (std::size_t n = 0; n < halos.size(); ++n) {
-      const std::size_t len = halos[n].second.size();
-      if (len == 0) continue;
-      auto d = dims.find(len);
-      if (d == dims.end()) {
-        int dim;
-        if (nc_def_dim(id, ("halo_" + std::to_string(len)).c_str(), len, &dim) != NC_NOERR)
-          throw std::runtime_error(path + ": cannot define halo_" + std::to_string(len));
-        d = dims.emplace(len, dim).first;
+  // the whole file (fields, then their halo points) under a temporary name, renamed to path once complete: a run
+  // stopped while writing leaves no restart_<step>.nc without its halos
+  const std::string part = path + ".partial";
+  try {
+    io_netcdf::write_restart(part, meta, vars);
+    if (!halos.empty()) {  // HALO_<name> (halo_points), one dimension per length
+      io_netcdf::ScopedNcFile id;
+      if (nc_open(part.c_str(), NC_WRITE, id.ptr()) != NC_NOERR) throw std::runtime_error("cannot reopen " + part);
+      if (nc_redef(id) != NC_NOERR) throw std::runtime_error(part + ": cannot define the halo points");
+      std::vector<int> vids(halos.size(), -1);
+      std::map<std::size_t, int> dims;
+      for (std::size_t n = 0; n < halos.size(); ++n) {
+        const std::size_t len = halos[n].second.size();
+        if (len == 0) continue;
+        auto d = dims.find(len);
+        if (d == dims.end()) {
+          int dim;
+          if (nc_def_dim(id, ("halo_" + std::to_string(len)).c_str(), len, &dim) != NC_NOERR)
+            throw std::runtime_error(part + ": cannot define halo_" + std::to_string(len));
+          d = dims.emplace(len, dim).first;
+        }
+        if (nc_def_var(id, ("HALO_" + halos[n].first).c_str(), NC_DOUBLE, 1, &d->second, &vids[n]) != NC_NOERR)
+          throw std::runtime_error(part + ": cannot define HALO_" + halos[n].first);
       }
-      if (nc_def_var(id, ("HALO_" + halos[n].first).c_str(), NC_DOUBLE, 1, &d->second, &vids[n]) != NC_NOERR)
-        throw std::runtime_error(path + ": cannot define HALO_" + halos[n].first);
+      if (nc_enddef(id) != NC_NOERR) throw std::runtime_error(part + ": cannot define the halo points");
+      for (std::size_t n = 0; n < halos.size(); ++n)
+        if (vids[n] >= 0 && nc_put_var_double(id, vids[n], halos[n].second.data()) != NC_NOERR)
+          throw std::runtime_error(part + ": cannot write HALO_" + halos[n].first);
+      if (nc_close(id.release()) != NC_NOERR) throw std::runtime_error(part + ": cannot close");
     }
-    nc_enddef(id);
-    for (std::size_t n = 0; n < halos.size(); ++n)
-      if (vids[n] >= 0 && nc_put_var_double(id, vids[n], halos[n].second.data()) != NC_NOERR)
-        throw std::runtime_error(path + ": cannot write HALO_" + halos[n].first);
-    nc_close(id);
+    std::filesystem::rename(part, path);
+  } catch (...) {
+    std::error_code ec;
+    std::filesystem::remove(part, ec);
+    throw;
   }
 }
 
@@ -624,6 +660,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
     throw std::runtime_error("time.adaptive: resume from the wrfrst file of the run, not " + path);
   long native_run_start = 0;  // CPPWRF's own file: the step the run that wrote it started at
   if (wrf_file) {
+    if (m_.suite) check_no_frame(path);
     read_wrfrst(path, meta, vars);
     meta.dx = g.dx; meta.dy = g.dy;
   } else {
@@ -792,19 +829,22 @@ void DomainRunner::load_restart_file(const std::string& path) {
     const std::vector<real> h = tile::local_part(f, whole);
     copy_to_dev(f.data() - f.layout().offset, h.data(), f.layout().total * sizeof(real));
   };
-  // CPPWRF's own file: the halo points as the run had them (HALO_<name>, save_restart_file)
-  int hid = -1;
-  if (!wrf_file && nc_open(path.c_str(), NC_NOWRITE, &hid) != NC_NOERR) hid = -1;
+  // CPPWRF's own file: the halo points as the run had them (HALO_<name>, save_restart_file). The format version
+  // (check_native_restart) has them for every field the file has: each one must be there, of rank 1 with the
+  // field's halo count (dimension halo_<count>), read only after those checks
+  io_netcdf::ScopedNcFile hid;
+  if (!wrf_file) {
+    const int rc = nc_open(path.c_str(), NC_NOWRITE, hid.ptr());
+    if (rc != NC_NOERR) throw std::runtime_error(path + ": cannot reopen for the halo points: " + nc_strerror(rc));
+  }
   auto halo_of = [&](auto& f, const std::string& name) {
     fill_halo(f, g);
-    int vid, dim;
-    std::size_t len = 0;
-    if (hid < 0 || nc_inq_varid(hid, ("HALO_" + name).c_str(), &vid) != NC_NOERR) return;
-    nc_inq_vardimid(hid, vid, &dim);
-    nc_inq_dimlen(hid, dim, &len);
-    std::vector<double> o(len);
-    if (nc_get_var_double(hid, vid, o.data()) != NC_NOERR || !set_halo_points(f, o))
-      throw std::runtime_error(path + ": HALO_" + name + " does not fit the field");
+    if (wrf_file) return;
+    const std::size_t n = halo_count(f.layout());
+    if (n == 0) return;
+    const std::vector<double> o =
+        io_netcdf::read_record(hid, path, "HALO_" + name, {{"halo_" + std::to_string(n), n}});
+    if (!set_halo_points(f, o)) throw std::runtime_error(path + ": HALO_" + name + " does not fit the field");
   };
   for (const auto& t : targets3) {
     put(*t.f, bufs[t.buf_idx]);
@@ -814,7 +854,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
     put(*t.f, bufs[t.buf_idx]);
     halo_of(*t.f, t.name);
   }
-  if (hid >= 0) nc_close(hid);
+  hid.close();
   std::vector<HaloField> base_halos;
   for (const auto& t : targets_b) {
     if (t.f3) put(*t.f3, bufs[t.buf_idx]);

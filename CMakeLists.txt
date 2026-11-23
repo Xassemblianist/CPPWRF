@@ -454,6 +454,13 @@ if(TARGET cppwrf)
            $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/input_interval WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(input_interval PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                        ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
+  # CPPWRF's own restart file in another shape (a rank-2 HALO_ variable, a missing one, format version 6) is refused,
+  # in one patch and in 2 x 2 patches (tests/verify/restart_guard_test.py; a tiny em_quarter_ss, skipped without
+  # WRF's input_sounding)
+  add_test(NAME restart_guard COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/restart_guard_test.py
+           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/restart_guard WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(restart_guard PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                       ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
   # runs resumed from CPPWRF's own restart file and from a wrfrst file with changed intervals
   # (tests/verify/restart_resume_test.py; P1, skipped without ${CPPWRF_WRF_RUNS}/run_P1_r8/steps)
   add_test(NAME restart_resume COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/restart_resume_test.py
