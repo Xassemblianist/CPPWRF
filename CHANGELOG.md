@@ -19,6 +19,39 @@ resumes across versions from WRF's wrfrst files.
 - docs/MPI.md section 6: the CUDA FP64 build with MPI on two T4 GPUs of one Kaggle node (`tools/kaggle/kaggle_mpi.sh`):
   seven cuda_dp checks in seven layouts (one process, one rank, one rank per GPU, two ranks per GPU, tiles over the
   GPUs) equal the WRF references at tolerance 0.
+- Verification: every suite check says what it compared (`[vs WRF tol 0]`, `[vs WRF rel L2]` or `[self only]`) and
+  requires complete coverage: every scheduled frame, stream, domain and restart file of the configuration, one time
+  window for compared and reference counts, no duplicate or clock-only records, integers compared exactly, variables
+  without a Time dimension and the metadata of every file compared; a check with zero comparisons fails. Restart
+  checks resume from WRF's own wrfrst file as WRF's resumed run was configured, and the P4, G2, P8, NMP1, SLAB1, N3
+  and D0 restart chains are compared with WRF's runs of their configurations at tolerance 0 (were self-consistency
+  checks). tools/gcp/suite_status.sh fails on any FAIL, SKIP or ERROR and reconciles the results with the cases
+  requested. Mutation tests of the comparator and the harness: tests/verify/test_exact_mutations.py,
+  test_harness_mutations.py, test_cdx9_mutations.py.
+- Suite: N3T, three domains (d03 at 1.67 km inside d02 inside d01, two-way feedback, smooth_option 2, P4 physics),
+  against WRF real*8 at tolerance 0 on every domain, CPU and CUDA FP64. straka_wrf / straka_wrf_cuda (an RMS check
+  against WRF real*4) leave the suite; WRF's em_grav2d_x real*8 run is ideal_grav2d_x_fp64_cpu / _cuda at tolerance 0.
+- Build: CMake refuses x87 arithmetic (-mfpmath=387, -m32, -mno-sse2, -fexcess-precision=fast) and, in the CUDA FP64
+  and FP32 identity builds, --fmad=true; precision.hpp asserts `__FLT_EVAL_METHOD__ == 0`.
+- GPU nests and stepping (results unchanged): history-only feedback runs when the parent next reads the fields,
+  smooth_option 2 without the field copies, the boundary slabs of a field in one launch, force and feedback as CUDA
+  graphs; a step segment's graph is launched before the wait for the previous one; host uploads through a reusable
+  per-thread buffer.
+- sfclayrev / YSU: `phys.shalwater_z0`, `phys.scm_force_flux != 0` and a nonzero U_FRAME / V_FRAME in wrfinput are
+  refused (not ported; were ignored).
+
+### Fixed
+- sfclayrev with fractional_seaice = 1: USTM_SEA is 0 on entry to every open-water call (WRF's automatic array has
+  no defined value; CPPWRF carried the last call's) and ch = chs only in the non-fractional branch, as
+  module_surface_driver.F.
+- UOCE / VOCE (ocean currents) are read from wrfinput on a cold start (were 0); VAR (orographic variance) is carried
+  in CPPWRF's restart file and read from WRF's wrfrst. Native restart files of earlier versions lack VAR and are not
+  read (CPPWRF's native restart files are bound to the commit that wrote them; resume from wrfrst instead).
+- YSU and sfclayrev use Fortran's MIN / MAX (the second argument on ties and NaN) instead of std::min / std::max
+  (bit-neutral on every suite case); ysu_topdown_pblmix defaults to WRF's 1 in ysu::run_ysu.
+- GPU step segments: a failed graph launch or a later device error reports the fatal flag the previous segment raised
+  first; tile workers free their upload staging buffer at exit.
+- ctest: real_vs_wrf and real_vs_wrf_runs each use a work directory of their own (they ran at once in one directory).
 
 ## 1.3.0 (2026-11-22)
 
