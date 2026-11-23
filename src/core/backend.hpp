@@ -501,6 +501,8 @@ class HostStaging {
   bool held_ = false;  // the thread's buffer
   std::vector<unsigned char> own_;
 };
+// frees the calling thread's staging buffer (a worker thread at its exit; the device must still be there)
+void release_host_staging();
 int current_device();  // the calling thread's CUDA device (0 on the CPU)
 const char* backend_name();
 // CPPWRF_MEMINFO=1: prints the device memory in use and the stack (local memory) reserved per GPU thread

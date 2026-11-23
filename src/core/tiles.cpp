@@ -1399,6 +1399,7 @@ int run(const Options& o, const std::function<int(int)>& body) {
     }
     track = nullptr;
     ref_reg = nullptr;
+    release_host_staging();  // the thread ends: its upload buffer is not kept for the process
   };
   std::vector<std::thread> th;
   for (int t = 0; t < set.n; ++t) th.emplace_back(thread_main, t);
