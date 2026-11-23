@@ -40,6 +40,16 @@ std::string path_key(const std::string& p) {
   const std::filesystem::path a = std::filesystem::absolute(p, ec);
   return (ec ? std::filesystem::path(p) : a).lexically_normal().string();
 }
+// the closed file's path out of the set; nothing escapes (called from the destructor: a scoped lock there made
+// GCC 14 emit __cxa_call_terminate, absent from GCC 13's libstdc++ that a CUDA build with a GCC 13 host links)
+void forget_path(const std::string& key) noexcept {
+  try {
+    std::lock_guard<std::mutex> g(open_m);
+    auto& s = open_paths();
+    if (auto it = s.find(key); it != s.end()) s.erase(it);
+  } catch (...) {
+  }
+}
 }  // namespace
 
 NcOut::NcOut(const std::string& path, bool netcdf4) : nc4_(netcdf4), key_(path_key(path)) {
@@ -63,8 +73,7 @@ NcOut::~NcOut() {
     const NcCall lk;
     if (nc_ >= 0) {
       nc_close(nc_);  // may compress chunks still in HDF5's cache: the precomputed ones stay till here
-      std::lock_guard<std::mutex> g(open_m);
-      if (auto it = open_paths().find(key_); it != open_paths().end()) open_paths().erase(it);
+      forget_path(key_);
     }
   }
   flushed_.clear();
