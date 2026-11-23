@@ -68,12 +68,14 @@ SPECIAL = (["restart_p1_fp32_cuda"] + [f"restart_{t}_fp64" for t, _, _ in RESTAR
            + [f"restart_{t}_fp64_cuda" for t, _, _ in RESTARTS])
 
 
-def run(binary, cfg, sets, out, extra_env=None):
+def run(binary, cfg, sets, out, extra_env=None, *, clear_env=()):
     shutil.rmtree(out, ignore_errors=True)
     cmd = [binary, os.path.join(REPO, cfg), "--set", f"output.dir={out}"]
     for s in sets:
         cmd += ["--set", s]
     env = dict(os.environ, OMP_NUM_THREADS=os.environ.get("OMP_NUM_THREADS", "3"), **(extra_env or {}))
+    for name in clear_env:
+        env.pop(name, None)
     r = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True)
     return r.returncode, r.stdout + r.stderr
 
@@ -919,7 +921,122 @@ def layout_restart_at(sets):
     if not v:
         return None
     lay, iv = v.split(",")
-    return lay, float(iv)
+    return lay.strip(), float(iv)
+
+
+_LAYOUT_ENV = ("CPPWRF_TILES", "CPPWRF_TILE_DEVICES", "CPPWRF_TILE_CHECK", "CPPWRF_TILE_CHECK_LOG",
+               "CPPWRF_TILE_TRACE", "CPPWRF_RANKS", "CPPWRF_RANK_DEVICES")
+
+
+def layout_restart_worker_error(log, layout):
+    tiles = re.findall(r"^cppwrf: (\d+) x (\d+) tiles(.*), \d+ OpenMP threads each$", log, re.MULTILINE)
+    ranks = re.findall(r"^cppwrf: \d+ MPI ranks as (\d+) x (\d+) patches$", log, re.MULTILINE)
+    requested = tuple(map(str, layout))
+    # main.cpp takes the serial branch without a tile banner. DomainRunner still reports its setup.
+    if not (tiles or ranks) and re.search(r"^cppwrf: case=\S+ grid=", log, re.MULTILINE):
+        actual = ("1", "1")
+    elif len(tiles) == 1 and not ranks and not tiles[0][2]:
+        actual = tiles[0][:2]
+    else:
+        actual = None
+    if actual != requested:
+        report = "x".join(actual) if actual else "no matching worker report"
+        return f"expected effective layout {'x'.join(requested)}, log shows {report}"
+    return None
+
+
+def layout_restart_schedule(conf, refs):
+    """Expected restart filenames keyed by domain, using the fixed-step alarm and the native final checkpoint."""
+    from fractions import Fraction
+
+    ref_by_domain = case_domains(refs)
+    domains = sorted(configured_domains(conf))
+    if not domains:
+        raise ValueError("layout_restart requires at least one domain")
+    dts, expected = {}, set()
+    for dom in domains:
+        opts = domain_options(conf, dom) if len(domains) > 1 else {}
+        base = configuration(os.path.expandvars(opts["config"]), []) if opts.get("config") else conf
+        run_opts, time_opts, rst, output = (base.get(s, {}) for s in ("run", "time", "restart", "output"))
+        output_interval = opts.get("output.restart_interval", opts.get("restart_interval",
+                                   output.get("restart_interval", "0")))
+        interval = float(opts.get("restart.interval", rst.get("interval", output_interval)))
+        if not math.isfinite(interval) or interval <= 0:
+            raise ValueError(f"{dom}: layout_restart requires a positive restart.interval")
+        if opts.get("run.restart_file", run_opts.get("restart_file")) or \
+                opts.get("time.adaptive", time_opts.get("adaptive", "false")).lower() in ("1", "true", "yes"):
+            raise ValueError(f"{dom}: layout_restart requires a fixed-step cold start")
+        if dom == "d01":
+            dt = float(opts.get("time.dt", opts.get("dt", time_opts.get("dt", "0"))))
+        else:
+            parent = f"d{int(opts.get('parent_id', int(dom[1:]) - 1)):02d}"
+            default_ratio = conf["domains"].get("parent_time_step_ratio", 1) if dom == "d02" else 1
+            ratio = int(opts.get("parent_time_step_ratio", default_ratio))
+            if ratio < 1 or parent not in dts:
+                raise ValueError(f"{dom}: invalid parent time step ratio or parent domain")
+            dt = dts[parent] / ratio
+        if not math.isfinite(dt) or dt <= 0:
+            raise ValueError(f"{dom}: layout_restart requires a positive time.dt")
+        dts[dom] = dt
+        end = float(opts.get("run.run_time", run_opts.get("run_time", "0")))
+        cutoff = math.floor(float(opts.get("restart.end", rst.get("end", 0))) / dt + 0.5)
+        last = math.floor(end / dt + 0.5)
+        end_step = min(last, cutoff) if cutoff > 0 else last
+        rings = {round(sec / dt) for sec in restart_schedule(dt, interval, end_step * dt)}
+        if not rings:
+            raise ValueError(f"{dom}: layout_restart schedules no wrfrst files")
+        native = rings | ({last} if last == end_step else set())
+        origin = opts.get("run.start_date", run_opts.get("start_date")) or simulation_start(ref_by_domain[dom])
+        # WRF names its files with the whole seconds of the rational model clock.
+        clock_step = Fraction(dt).limit_denominator(100000)
+        stamps = {times_at(origin[:19], math.floor(step * clock_step)) for step in rings}
+        if len(stamps) != len(rings):
+            raise ValueError(f"{dom}: multiple restart ticks have the same wrfrst timestamp")
+        expected.update((dom, f"restart_{step:06d}.nc") for step in native)
+        expected.update((dom, f"wrfrst_{dom}_{stamp}") for stamp in stamps)
+    return expected
+
+
+def layout_restart_inventory(out, expected):
+    """Find both streams in the output root and its domain directories."""
+    files, bad = {}, []
+    for pattern in ("restart_*.nc", "wrfrst_d[0-9][0-9]_*"):
+        paths = glob.glob(os.path.join(out, pattern)) + glob.glob(os.path.join(out, "d[0-9][0-9]", pattern))
+        for path in sorted(paths):
+            if not os.path.isfile(path):
+                continue
+            directory, name = os.path.split(os.path.relpath(path, out))
+            domain = name.split("_")[1] if name.startswith("wrfrst_") else directory or "d01"
+            key = domain, name
+            if directory and directory != domain:
+                bad.append(f"misplaced restart {path}, expected domain {domain}")
+            if key in files:
+                bad.append(f"duplicate restart {files[key]} and {path}")
+            files[key] = path
+    for label, keys in (("missing", expected - files.keys()), ("unexpected", files.keys() - expected)):
+        bad += [f"{os.path.basename(out)} {label} {dom}/{name}" for dom, name in sorted(keys)]
+    return files, bad
+
+
+def layout_restart_halos(ds):
+    """Required HALO_ variables of a native restart, including the real fields carried by this run."""
+    # DomainRunner::save_restart_file always saves the dycore fields. PhysicsSuite::carried_int
+    # serializes integers as reals in the native payload without saving their halos.
+    required = {"u_1", "u_2", "v_1", "v_2", "w_1", "w_2", "t_1", "t_2", "ph_1", "ph_2", "mu_1", "mu_2",
+                "p", "al", "ww", "ww_m", "php", "alt"}
+    carried_ints = {"sfc_ivgtyp", "sfc_isltyp", "sfc_kpbl", "shadowmask", "noahmp_ranland", "sfc_lowlyr",
+                    "sfc_isnowxy", "sfc_cropcat", "sfc_pgsxy", "sfc_i_rainc", "sfc_i_rainnc",
+                    "sfc_k22_shallow", "sfc_kbcon_shallow", "sfc_ktop_shallow"}
+    required.update(name for name, var in ds.variables.items()
+                    if var.dimensions[:1] == ("Time",) and var.dtype.kind == "f" and name not in carried_ints
+                    and not name.startswith(("sfc_i_acsw", "sfc_i_aclw")))
+    halos = {"HALO_" + name for name in required}
+    bad = [f"missing {name}" for name in sorted(halos - ds.variables.keys())]
+    for name in sorted(halos & ds.variables.keys()):
+        v = ds[name]
+        if v.ndim != 1 or not v.size or v.dtype.name != "float64":
+            bad.append(f"{name}: expected a nonempty 1-D double array, got {v.shape} {v.dtype}")
+    return len(halos), bad
 
 
 def layout_restart(b, cfg, sets, refs, t, lay, iv, out):
@@ -930,44 +1047,59 @@ def layout_restart(b, cfg, sets, refs, t, lay, iv, out):
     namelist.input, when there) the case reads; not compared. (differences, summary)"""
     import netCDF4
     import exact
+    match = re.fullmatch(r"([1-9]\d*)(?:[xX]([1-9]\d*))?", lay)
+    if not match or (layout := (int(match[1]), int(match[2] or 1))) == (1, 1):
+        return [f"layout_restart needs a decomposed comparison layout, got {lay!r}"], ""
+    lay = f"{layout[0]}x{layout[1]}"
     nl = os.path.join(os.path.dirname(next(iter(refs.values()))), "namelist.input")
-    common = sets + ["output.format=wrfout", f"run.run_time={t:g}", f"restart.interval={iv:g}"] + \
+    common = sets + ["output.format=wrfout", f"run.run_time={t}", f"restart.interval={iv}"] + \
         ([f"output.wrf_namelist={nl}"] if os.path.exists(nl) else [])
+    try:
+        expected = layout_restart_schedule(configuration(cfg, common), refs)
+    except (AttributeError, KeyError, OSError, ValueError) as e:
+        return [f"layout_restart schedule: {e}"], ""
     one, tiled = os.path.join(out, "a_one"), os.path.join(out, "b_tiled")
-    for d, extra in ((one, []), (tiled, [f"run.tiles={lay}"])):
-        rc, log = run(b, cfg, common + extra, d)
+    for d, workers in ((one, (1, 1)), (tiled, layout)):
+        rc, log = run(b, cfg, common + [f"run.tiles={workers[0]}x{workers[1]}"], d, clear_env=_LAYOUT_ENV)
         if rc != 0:
             return [f"{os.path.basename(d)} run failed: {log[-200:]}"], ""
+        error = layout_restart_worker_error(log, workers)
+        if error:
+            return [f"{os.path.basename(d)}: {error}"], ""
 
-    def files(d):
-        return {os.path.relpath(f, d): f for pat in ("restart_*.nc", "wrfrst_d??_*", "d??/wrfrst_d??_*")
-                for f in glob.glob(os.path.join(d, pat))}
-    A, B = files(one), files(tiled)
-    bad = []
-    if sorted(A) != sorted(B):
-        bad.append(f"files: one patch {sorted(A)}, {lay} {sorted(B)}")
-    nat = [n for n in A if n.startswith("restart_")]
-    if not nat or not any(n not in nat for n in A):
-        bad.append(f"one patch wrote {len(nat)} restart_<step>.nc and {len(A) - len(nat)} wrfrst files (both expected)")
-    nhalo = 0
-    for name in sorted(set(A) & set(B)):
-        with _NC, netCDF4.Dataset(A[name]) as x, netCDF4.Dataset(B[name]) as y:
+    A, inventory_a = layout_restart_inventory(one, expected)
+    B, inventory_b = layout_restart_inventory(tiled, expected)
+    bad = inventory_a + inventory_b
+    for key in sorted(A.keys() & B.keys()):
+        path_a, path_b = os.path.relpath(A[key], one), os.path.relpath(B[key], tiled)
+        if path_a != path_b:
+            bad.append(f"restart location differs: a_one {path_a}, b_tiled {path_b}")
+    if bad:
+        return bad, ""
+    nat, nhalo = 0, 0
+    for key in sorted(expected):
+        dom, name = key
+        label = f"{dom}/{name}"
+        with _NC, netCDF4.Dataset(A[key]) as x, netCDF4.Dataset(B[key]) as y:
             exact.raw(x), exact.raw(y)
-            bad += [f"{name}: {m}" for m in exact.metadata(x, y, ignore=())]
+            if name.startswith("restart_"):
+                nat += 1
+                count, bad_x = layout_restart_halos(x)
+                _, bad_y = layout_restart_halos(y)
+                nhalo += count
+                bad += [f"{side} {label}: {msg}" for side, errors in (("a_one", bad_x), ("b_tiled", bad_y))
+                        for msg in errors]
+            bad += [f"{label}: {m}" for m in exact.metadata(x, y, ignore=())]
             for v in x.variables:
                 if v not in y.variables:
                     continue
-                if x[v].dtype.kind == "S":
-                    dif = None if exact.text(x[v]) == exact.text(y[v]) else "text differs"
-                else:
-                    dif = exact.describe(x[v][:], y[v][:])
+                dif = exact.describe(x[v][:], y[v][:])
                 if dif:
-                    bad.append(f"{name}.{v}: {dif}")
-            nhalo += sum(1 for v in x.variables if v.startswith("HALO_")) if name in nat else 0
-    if nat and not nhalo:
-        bad.append("the restart_<step>.nc files hold no HALO_<name> variables")
-    return bad, (f"{lay} = one patch: {len(nat)} restart_<step>.nc ({nhalo} HALO_ variables), "
-                 f"{len(A) - len(nat)} wrfrst files identical")
+                    bad.append(f"{label}.{v}: {dif}")
+    if bad:
+        return bad, ""
+    return [], (f"{lay} = one patch: {nat} restart_<step>.nc ({nhalo} HALO_ variables), "
+                f"{len(expected) - nat} wrfrst files identical")
 
 
 def chain_first_step(b, cfg, common, resumed, mid, out):
