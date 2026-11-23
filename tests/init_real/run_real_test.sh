@@ -16,7 +16,9 @@ fi
 BUILD_DIR=${1:-${REPO_ROOT}/build}; shift || true
 EXE=${BUILD_DIR}/src/init_real/cppwrf_real
 SCHEMA=${REPO_ROOT}/data/wrf_schema/wrf-4.8.0.tsv
-WORK=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}/real_test
+# a directory of its own per invocation: ctest runs real_vs_wrf and real_vs_wrf_runs at the same time
+BASE=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}
+mkdir -p "$BASE" && WORK=$(mktemp -d "$BASE/real_test.XXXXXX") || exit 1
 cases=("$@")
 [ ${#cases[@]} -eq 0 ] && for d in "${CPPWRF_WRF_RUNS}"/real/*/; do cases+=("$(basename "$d")"); done
 fail=0 skip=0
