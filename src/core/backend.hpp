@@ -485,6 +485,24 @@ void copy_to_host(void* dst, const void* src, std::size_t bytes);
 void copy_to_dev(void* dst, const void* src, std::size_t bytes);
 void copy_dev(void* dst, const void* src, std::size_t bytes);
 void dev_sync();
+// A host buffer of at least `bytes` to build an upload in (Field::fill_host): one per host thread, reused (grown as
+// needed, kept for the run) instead of a new allocation per field, pinned on the GPU (a faster copy). A nested use
+// while the thread's buffer is held gets a buffer of its own.
+class HostStaging {
+ public:
+  explicit HostStaging(std::size_t bytes);
+  ~HostStaging();
+  HostStaging(const HostStaging&) = delete;
+  HostStaging& operator=(const HostStaging&) = delete;
+  void* data() const { return p_; }
+
+ private:
+  void* p_ = nullptr;
+  bool held_ = false;  // the thread's buffer
+  std::vector<unsigned char> own_;
+};
+// frees the calling thread's staging buffer (a worker thread at its exit; the device must still be there)
+void release_host_staging();
 int current_device();  // the calling thread's CUDA device (0 on the CPU)
 const char* backend_name();
 // CPPWRF_MEMINFO=1: prints the device memory in use and the stack (local memory) reserved per GPU thread
@@ -506,9 +524,9 @@ int device_work_share();
 // device runs the same kernels in the same order with the same arguments as without graphs. An operation that
 // waits for the device (copy_to_host, copy_to_dev, dev_alloc, dev_free, dev_sync, Reducer) ends the current graph
 // segment, launches it, and the capture resumes after it. Inside the step fatal_check() only copies the device
-// flag asynchronously; the flags are read once, when the host next waits for the step (end() waits for the
-// previous step before it launches this one). CPPWRF_GRAPHS=0 (or CPPWRF_KTIME) launches without graphs;
-// CPPWRF_GRAPHS=stats prints the graph counts at exit. CPU build: no-op.
+// flag asynchronously; the flags are read once, when the host next waits for the step (end() launches this step,
+// then waits for the previous one: the device runs the steps back to back). CPPWRF_GRAPHS=0 (or CPPWRF_KTIME)
+// launches without graphs; CPPWRF_GRAPHS=stats prints the graph counts at exit. CPU build: no-op.
 class StepScope {
  public:
   explicit StepScope(const void* key);

@@ -1124,3 +1124,37 @@ suite cases with both builds, 15 PASS each (5 skipped in both: references or inp
 Not done, with the reason: nsys / ncu tables per kernel (with CUDA graphs nsys reports no kernel launches; the
 ncu session was lost), so the kernel times are KTIME's. Splitting kernels in stages and per-launch stack limits
 were not needed once the frames were gone. Level tiers below 48 would shrink the buffer, not the reserve.
+
+## Result-neutral GPU overheads: nests, graph launches, output, uploads, dycore columns (PERF13; not measured yet)
+
+Changes that keep every result (same operations in the same order per output value, same FMA contraction, same
+reduction order); the timing on Colab G4 is still to be done.
+
+- Two-way nests. `WrfHistory::feedback_from` (the history-only fields of Registry u= functions, set from host copies
+  of the nest's fields) ran at every parent step and waited for the device each time; it now runs when the parent
+  next reads those fields (an output, a nest's start: `queue_feedback_from`). A call sets the nest's interior from
+  the nest's values alone and keeps the rest, so the last call per nest, in the order of those last calls, sets what
+  every call in turn set; the nest does not step between its last call and the run. A decomposed run feeds back at
+  once. `smooth_option = 2` no longer copies the temporary back into the field after each pass: the i pass reads the
+  j pass's values and the box's edge columns of the field and writes the field (`KSmdsmI3DFrom`, the same
+  arithmetic). The four sides' boundary slabs of a field are one launch (`LaunchBatch`; the FP32 builds launch them
+  one by one as before). med_nest_force, the dycore feedback and `feedback_physics` run as CUDA graphs (`StepScope`).
+- Graph launches. `StepScope::end` launches the step's graph, then waits for the previous step and reads its fatal
+  flags (before: wait, then launch): the device has the next step queued and runs the steps back to back. A raised
+  flag stops the run as before (the same first code; the queued step's flags are never read).
+- NetCDF output: the precompressed chunks are found by their sample key in a hash map (before: a scan of every
+  chunk of the frame per chunk written).
+- Uploads: `fill_host` builds the field in one reusable host buffer per thread (pinned on the GPU) instead of a new
+  vector per field.
+- Dycore columns (`CPPWRF_LOCAL_ROUNDING`, core/precision.hpp: every build but the fast CUDA FP32 one, where ptxas's
+  contraction depends on the code around an operation): `calc_ww_cp` (KWW) computes each level's divergence once
+  and keeps it in `ww` for the sweep; on the GPU, the damp_opt = 3 damping and phi'' of `KWSolve` run as one thread
+  per level (`KWPost`) after the column sweeps.
+
+Not done, with the reason: dropping the per-frame `nc_sync` (HDF5 writes the chunk cache at the sync, which places
+the chunks in the file and uses the precompressed chunks before they are cleared: the file's bytes may change); an
+asynchronous writer thread and a GPU pack of the interior (NetCDF calls from a second thread, larger change; next
+step); no synchronisation in `dev_alloc` (tiles allocate and use fields on different streams; a few ms per run);
+selective `wrfinput` reads (the reader is shared with the nests and the initialisation; every reader of the skipped
+fields would need proof); `__constant__` tables for the device's glibc float math (the indices differ between the
+threads of a warp, which the constant cache serialises: likely slower).

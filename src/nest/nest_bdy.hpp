@@ -527,13 +527,14 @@ inline void force_nest_bdy_field3(
 
   // the nest field of a decomposed run is the worker's own (its patch and halo): only those entries
   const Layout& NL = nfld.layout();
+  LaunchBatch<KBdySlabView3D, 4> sides;  // the four sides' slabs (independent) in one launch
   for (int s = 0; s < 4; ++s) {
     const auto side = static_cast<dyn::LateralBC::Side>(s);
     const int npos = lbc.slab_npos(v, side);
     real* d_val = lbc.slab(v, side, false);
     real* d_tend = lbc.slab(v, side, true);
-    parallel_for(Range3D{0, npos, 0, nk, 0, sz},
-                 KBdySlabView3D{cfld.cview(), nfld.cview(), d_val, d_tend,
+    sides.add(Range3D{0, npos, 0, nk, 0, sz},
+                KBdySlabView3D{cfld.cview(), nfld.cview(), d_val, d_tend,
                                 n_nx, n_ny, ipos, jpos, nri, nrj, cdt,
                                 xstag, ystag, sz, s, npos, nk, NL.dom >= 0 ? NL.wi0 : INT32_MIN,
                                 NL.dom >= 0 ? NL.wi1 : INT32_MAX, NL.dom >= 0 ? NL.wj0 : INT32_MIN,
@@ -560,13 +561,14 @@ inline void force_nest_bdy_field2(
 
   // the nest field of a decomposed run is the worker's own (its patch and halo): only those entries
   const Layout& NL = nfld.layout();
+  LaunchBatch<KBdySlabView2D, 4> sides;  // the four sides' slabs (independent) in one launch
   for (int s = 0; s < 4; ++s) {
     const auto side = static_cast<dyn::LateralBC::Side>(s);
     const int npos = lbc.slab_npos(v, side);
     real* d_val = lbc.slab(v, side, false);
     real* d_tend = lbc.slab(v, side, true);
-    parallel_for(Range3D{0, npos, 0, 1, 0, sz},
-                 KBdySlabView2D{cfld.cview(), nfld.cview(), d_val, d_tend,
+    sides.add(Range3D{0, npos, 0, 1, 0, sz},
+                KBdySlabView2D{cfld.cview(), nfld.cview(), d_val, d_tend,
                                 n_nx, n_ny, ipos, jpos, nri, nrj, cdt,
                                 sz, s, npos, NL.dom >= 0 ? NL.wi0 : INT32_MIN, NL.dom >= 0 ? NL.wi1 : INT32_MAX,
                                 NL.dom >= 0 ? NL.wj0 : INT32_MIN, NL.dom >= 0 ? NL.wj1 : INT32_MAX});
@@ -592,13 +594,14 @@ inline void force_nest_bdy_scalar_field3(
 
   // the nest field of a decomposed run is the worker's own (its patch and halo): only those entries
   const Layout& NL = nfld.layout();
+  LaunchBatch<KBdySlabView3D, 4> sides;  // the four sides' slabs (independent) in one launch
   for (int s = 0; s < 4; ++s) {
     const auto side = static_cast<dyn::LateralBC::Side>(s);
     const int npos = (s < 2) ? n_ny : n_nx;
     real* d_val = lbc.scalar_slab(scalar_idx, side, false);
     real* d_tend = lbc.scalar_slab(scalar_idx, side, true);
-    parallel_for(Range3D{0, npos, 0, n_nz, 0, sz},
-                 KBdySlabView3D{cfld.cview(), nfld.cview(), d_val, d_tend,
+    sides.add(Range3D{0, npos, 0, n_nz, 0, sz},
+                KBdySlabView3D{cfld.cview(), nfld.cview(), d_val, d_tend,
                                 n_nx, n_ny, ipos, jpos, nri, nrj, cdt,
                                 false, false, sz, s, npos, n_nz, NL.dom >= 0 ? NL.wi0 : INT32_MIN,
                                 NL.dom >= 0 ? NL.wi1 : INT32_MAX, NL.dom >= 0 ? NL.wj0 : INT32_MIN,

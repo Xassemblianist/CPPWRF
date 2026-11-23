@@ -62,6 +62,12 @@ class WrfHistory {
   // feedback function (copy_fcn / copy_fcnm / copy_fcni) takes the child's values inside the nest
   void feedback_physics(WrfHistory& child, int ipos, int jpos, int ratio);
   void feedback_from(WrfHistory& child, int i_parent_start, int j_parent_start, int ratio);
+  // feedback_from of a parent step, run when the fields it sets are next read (an output, the nest's start): they
+  // are output fields only. The interior a call sets is the nest's values alone and the rest keeps its values, so
+  // the last call per nest, in the order of those last calls, sets what every call in turn sets; the nest does not
+  // step between its last call and the run (each parent step queues it after the nest's steps). Without a
+  // decomposition; a decomposed run feeds back at once.
+  void queue_feedback_from(WrfHistory& child, int i_parent_start, int j_parent_start, int ratio);
   // med_nest_initial: parent%ht_coarse = parent%ht when a nest starts or restarts, with or without feedback
   // (share/mediation_integrate.F:789, 908)
   void keep_ht_coarse();
@@ -113,6 +119,12 @@ class WrfHistory {
   struct FeedbackCache;
   FeedbackCache& feedback_cache();
   std::unique_ptr<FeedbackCache> fb_cache_;
+  struct QueuedFeedback {
+    WrfHistory* child;
+    int ipos, jpos, ratio;
+  };
+  std::vector<QueuedFeedback> queued_fb_;  // queue_feedback_from's calls not run yet, in order
+  void run_queued_feedback();  // runs them (before any read or change of fed_ / phy_init_)
 
   const Model& m_;
   std::string unverified_;  // io::tier_attribute of the configuration (empty: every option verified)

@@ -380,6 +380,7 @@ void WrfHistory::after_solve(long n) {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
   std::vector<double> t;
   const long saved = step_;
   step_ = -1;  // no snapshot lookup: the current state
@@ -459,6 +460,7 @@ bool WrfHistory::out_value(const wrf_io::OutVar& v, std::vector<double>& out) {
 
 bool WrfHistory::value(const std::string& name, const std::string& varname, const std::vector<std::size_t>& dims,
                        std::vector<double>& out) {
+  run_queued_feedback();
   const dyn::State& s = *m_.st;
   const dyn::BaseState& b = *m_.base;
   std::size_t n = 1;
@@ -1122,7 +1124,9 @@ void WrfHistory::landuse_phy_init(const std::vector<double>& lu, const std::vect
 void WrfHistory::phy_init_after_feedback() {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
-  if (svc.served() || lu_.tables.empty()) return;
+  if (svc.served()) return;
+  run_queued_feedback();
+  if (lu_.tables.empty()) return;
   const Grid& g = m_.g;
   const std::size_t n2 = std::size_t(g.nx) * g.ny;
   const std::vector<std::size_t> d2 = {std::size_t(g.ny), std::size_t(g.nx)};
@@ -1139,6 +1143,7 @@ void WrfHistory::phy_init_from_restart(const std::string& wrfrst_path) {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
   int id;
   if (nc_open(wrfrst_path.c_str(), NC_NOWRITE, &id) != NC_NOERR)
     throw std::runtime_error("cannot open the restart file " + wrfrst_path);
@@ -1175,6 +1180,7 @@ void WrfHistory::restart_slopes() {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
   start_em_slopes();
   for (const char* f : {"TOPOSLPX", "TOPOSLPY", "LAP_HGT", "SLOPE", "SLP_AZI"}) fed_.erase(f);
 }
@@ -1183,6 +1189,7 @@ void WrfHistory::start_domain_ctopo() {
   // a decomposed run: the writer's code (fed_ is the writer's)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
   for (const char* f : {"CTOPO", "CTOPO2"}) fed_.erase(f);  // phy_init_'s 1 (a resumed run: its restart file's)
 }
 
@@ -1190,6 +1197,7 @@ void WrfHistory::keep_ht_coarse() {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
   const Grid& g = m_.g;
   for (const wrf_io::OutVar& v : fb_schema_->restart_vars(*wc_, g.nx + 1, g.ny + 1, g.nz + 1, int(sizeof(real))))
     if (v.name == "HT_COARSE") {
@@ -1198,10 +1206,34 @@ void WrfHistory::keep_ht_coarse() {
     }
 }
 
+void WrfHistory::queue_feedback_from(WrfHistory& child, int ipos, int jpos, int ratio) {
+  if (tile::tiled()) {
+    feedback_from(child, ipos, jpos, ratio);
+    return;
+  }
+  for (auto it = queued_fb_.begin(); it != queued_fb_.end(); ++it)
+    if (it->child == &child) {
+      queued_fb_.erase(it);
+      break;
+    }
+  queued_fb_.push_back({&child, ipos, jpos, ratio});
+}
+
+void WrfHistory::run_queued_feedback() {
+  if (queued_fb_.empty()) return;
+  std::vector<QueuedFeedback> q;
+  q.swap(queued_fb_);  // feedback_from's own reads find the queue empty
+  for (const QueuedFeedback& e : q) feedback_from(*e.child, e.ipos, e.jpos, e.ratio);
+}
+
 void WrfHistory::feedback_from(WrfHistory& child, int ipos, int jpos, int ratio) {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
+  // the child's own queued feedback first (a nest of the child): its fields are read below, as when every
+  // feedback ran at once
+  child.run_queued_feedback();
   const Grid& cg = child.m_.g;
   // history and restart fields (the restart stream carries more of them)
   FeedbackCache& fc = feedback_cache();
@@ -1317,6 +1349,7 @@ void WrfHistory::write_restart(long step, double time_sec, double history_interv
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
   step_ = step;
   time_sec_ = time_sec;
   const std::string date = date_of(time_sec);
@@ -1404,6 +1437,7 @@ void WrfHistory::write(long step, double time_sec) {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
   step_ = step;
   time_sec_ = time_sec;
   const std::string date = date_of(time_sec);
@@ -1439,6 +1473,7 @@ void WrfHistory::write_auxhist3(long step, double time_sec) {
   // a decomposed run: the writer's code; the other workers answer its requests for the fields (tile::Service)
   const tile::Service svc;
   if (svc.served()) return;
+  run_queued_feedback();
   step_ = step;
   time_sec_ = time_sec;
   const std::string date = date_of(time_sec);

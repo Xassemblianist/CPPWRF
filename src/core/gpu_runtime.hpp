@@ -65,6 +65,7 @@
 #define gpuMemcpy hipMemcpy
 #define gpuMemcpyAsync hipMemcpyAsync
 #define gpuHostAlloc hipHostMalloc
+#define gpuFreeHost hipHostFree
 #define gpuMemGetInfo hipMemGetInfo
 #define gpuGetDevice hipGetDevice
 #define gpuSetDevice hipSetDevice
@@ -118,6 +119,7 @@
 #define gpuMemcpy cudaMemcpy
 #define gpuMemcpyAsync cudaMemcpyAsync
 #define gpuHostAlloc cudaHostAlloc
+#define gpuFreeHost cudaFreeHost
 #define gpuMemGetInfo cudaMemGetInfo
 #define gpuGetDevice cudaGetDevice
 #define gpuSetDevice cudaSetDevice

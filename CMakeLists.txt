@@ -91,16 +91,35 @@ if(CPPWRF_CUDA_FP32_IDENTITY AND CPPWRF_ENABLE_CUDA AND NOT CPPWRF_DOUBLE)
   string(APPEND CMAKE_CUDA_FLAGS " --fmad=false --ftz=false --prec-div=true --prec-sqrt=true")
   add_compile_definitions(CPPWRF_FP32_IDENTITY)
 endif()
-# flags that change results: reassociation, reciprocals, flush-to-zero, approximate division / sqrt
-string(TOUPPER "${CMAKE_BUILD_TYPE}" _cppwrf_bt)
-if("${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_cppwrf_bt}}" MATCHES
-   "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only)|-ffp-contract=(fast|on))")
-  message(FATAL_ERROR "CMAKE_CXX_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
+# flags that change results: reassociation, reciprocals, flush-to-zero, approximate division / sqrt, x87 excess
+# precision (WRF's arithmetic is defined for SSE2 x86-64 and aarch64: x87 / -m32 builds were never supported), and
+# in the strict CUDA builds (FP64, FP32 identity) FMA contraction. Checked on the flags of every configuration the
+# build can compile (a multi-configuration generator's types, else CMAKE_BUILD_TYPE): the flags of the configuration
+# follow CMAKE_<LANG>_FLAGS on the command line and win.
+set(_cppwrf_configs ${CMAKE_CONFIGURATION_TYPES})
+if(NOT _cppwrf_configs)
+  set(_cppwrf_configs "${CMAKE_BUILD_TYPE}")
 endif()
-if("${CMAKE_CUDA_FLAGS} ${CMAKE_CUDA_FLAGS_${_cppwrf_bt}}" MATCHES
-   "(use_fast_math|ftz=true|prec-div=false|prec-sqrt=false|-Xcompiler=?[^ ]*(-Ofast|-ffast-math))")
-  message(FATAL_ERROR "CMAKE_CUDA_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
+if(NOT _cppwrf_configs)
+  set(_cppwrf_configs NONE)  # no build type: CMAKE_<LANG>_FLAGS alone
 endif()
+set(_cppwrf_x87 "-mfpmath=[^ ]*387|-m32|-mno-sse2?( |$)|-mx32|-fexcess-precision=fast")
+if(CPPWRF_ENABLE_CUDA AND (CPPWRF_DOUBLE OR CPPWRF_CUDA_FP32_IDENTITY))
+  set(_cppwrf_cuda_fma "|fmad[= ]*true")
+else()
+  set(_cppwrf_cuda_fma "")
+endif()
+foreach(_cppwrf_cfg IN LISTS _cppwrf_configs)
+  string(TOUPPER "${_cppwrf_cfg}" _cppwrf_bt)
+  if("${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${_cppwrf_bt}}" MATCHES
+     "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only)|-ffp-contract=(fast|on)|${_cppwrf_x87})")
+    message(FATAL_ERROR "CMAKE_CXX_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
+  endif()
+  if("${CMAKE_CUDA_FLAGS} ${CMAKE_CUDA_FLAGS_${_cppwrf_bt}}" MATCHES
+     "(use_fast_math|ftz=true|prec-div=false|prec-sqrt=false|-Xcompiler=?[^ ]*(-Ofast|-ffast-math|${_cppwrf_x87})${_cppwrf_cuda_fma})")
+    message(FATAL_ERROR "CMAKE_CUDA_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
+  endif()
+endforeach()
 if(CPPWRF_ENABLE_HIP)
   set(CMAKE_HIP_FLAGS_RELEASE "-O3")
   # Strict IEEE on both host and device passes: no FMA contraction, IEEE subnormals (no flush-to-zero)
@@ -118,10 +137,13 @@ if(CPPWRF_ENABLE_HIP)
     endif()
     add_compile_definitions(CPPWRF_FP32_IDENTITY)
   endif()
-  if("${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_cppwrf_bt}}" MATCHES
-     "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only|gpu-flush-denormals-to-zero|gpu-approx-transcendentals)|-ffp-contract=(fast|on))")
-    message(FATAL_ERROR "CMAKE_HIP_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
-  endif()
+  foreach(_cppwrf_cfg IN LISTS _cppwrf_configs)
+    string(TOUPPER "${_cppwrf_cfg}" _cppwrf_bt)
+    if("${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_cppwrf_bt}}" MATCHES
+       "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only|gpu-flush-denormals-to-zero|gpu-approx-transcendentals)|-ffp-contract=(fast|on)|${_cppwrf_x87})")
+      message(FATAL_ERROR "CMAKE_HIP_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
+    endif()
+  endforeach()
 endif()
 
 enable_testing()

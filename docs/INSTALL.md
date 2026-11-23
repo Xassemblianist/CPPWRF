@@ -102,9 +102,11 @@ The FP32 builds do not call the host's libm for float functions: the executables
 equal on every input), so `cpu-fp32` gives WRF real*4's bits with other glibc versions too (proven with binaries built on Ubuntu 24.04,
 glibc 2.39).
 
-The CMake files also refuse flags that change results: `-ffast-math`, `-Ofast`, `-ffp-contract=fast`, and on the GPU
-`--use_fast_math`, `-ftz=true`, `-prec-div=false` and `-prec-sqrt=false`. They set `-ffp-contract=off` and nvcc's
-`--fmad=false` (FP64 and default FP32) themselves. docs/USER_GUIDE.md ("Required Flags and Determinism") explains each
+The CMake files also refuse flags that change results: `-ffast-math`, `-Ofast`, `-ffp-contract=fast`, x87 arithmetic
+(`-mfpmath=387`, `-m32`, `-fexcess-precision=fast`; the builds are SSE2 x86-64 or aarch64), and on the GPU
+`--use_fast_math`, `-ftz=true`, `-prec-div=false`, `-prec-sqrt=false` and, in the FP64 and FP32 identity builds,
+`--fmad=true`; in the flags of every configuration the build can compile (`CMAKE_<LANG>_FLAGS_<CONFIG>` included). They
+set `-ffp-contract=off` and nvcc's `--fmad=false` (FP64 and default FP32) themselves. docs/USER_GUIDE.md ("Required Flags and Determinism") explains each
 one.
 
 ## 4. Install

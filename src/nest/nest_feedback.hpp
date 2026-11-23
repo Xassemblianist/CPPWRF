@@ -336,6 +336,23 @@ struct KSmdsmI3D {
   }
 };
 
+// smdsm's i pass without the copy of the j pass into the field: the j pass's values (tv) inside the box
+// [ib0 + 1, ib1) and the field's own points ib0 and ib1 (which the smoother does not change), written into the
+// field (out). The same values and the same arithmetic as KSmdsmI3D on the field after the copy.
+struct KSmdsmI3DFrom {
+  View3<real> out;
+  View3<const real> tv;
+  View3<const real> ccv;
+  int ib0, ib1;
+  real nu;
+  CPPWRF_HD void operator()(int i, int j, int k) const {
+    real c0 = static_cast<real>(tv(i, j, k));
+    real cp = static_cast<real>(i + 1 == ib1 ? ccv(i + 1, j, k) : tv(i + 1, j, k));
+    real cm = static_cast<real>(i - 1 == ib0 ? ccv(i - 1, j, k) : tv(i - 1, j, k));
+    out(i, j, k) = static_cast<real>(c0 + nu * ((cp + cm) * real(0.5) - c0));
+  }
+};
+
 struct KCopy2D {
   View2<real> dst;
   View2<const real> src;
@@ -383,6 +400,21 @@ struct KSmdsmI2D {
     real cp = static_cast<real>(ccv(i + 1, j));
     real cm = static_cast<real>(ccv(i - 1, j));
     tv(i, j) = static_cast<real>(c0 + nu * ((cp + cm) * real(0.5) - c0));
+  }
+};
+
+// KSmdsmI3DFrom's 2-D twin
+struct KSmdsmI2DFrom {
+  View2<real> out;
+  View2<const real> tv;
+  View2<const real> ccv;
+  int ib0, ib1;
+  real nu;
+  CPPWRF_HD void operator()(int i, int j, int /*k*/) const {
+    real c0 = static_cast<real>(tv(i, j));
+    real cp = static_cast<real>(i + 1 == ib1 ? ccv(i + 1, j) : tv(i + 1, j));
+    real cm = static_cast<real>(i - 1 == ib0 ? ccv(i - 1, j) : tv(i - 1, j));
+    out(i, j) = static_cast<real>(c0 + nu * ((cp + cm) * real(0.5) - c0));
   }
 };
 
@@ -455,11 +487,10 @@ inline void feedback_field3(
         const real xnu[2] = {real(0.50), real(-0.52)};
         for (int pass = 0; pass < 2; ++pass) {
           const real nu = xnu[pass];
+          // the j pass into tmp; the i pass from tmp (and the box's edge columns of the field) into the field
           parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, nk}, KSmdsmJ3D{tv, ccv, nu});
-          parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, nk}, KCopy3D{cv, tcv});
-          exchange_field(cfld);
-          parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, nk}, KSmdsmI3D{tv, ccv, nu});
-          parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, nk}, KCopy3D{cv, tcv});
+          exchange_field(tmp);
+          parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, nk}, KSmdsmI3DFrom{cv, tcv, ccv, s_i0 - 1, s_i1, nu});
           exchange_field(cfld);
         }
       }
@@ -514,10 +545,8 @@ inline void feedback_field2(
         for (int pass = 0; pass < 2; ++pass) {
           const real nu = xnu[pass];
           parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, 1}, KSmdsmJ2D{tv, ccv, nu});
-          parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, 1}, KCopy2D{cv, tcv});
-          exchange_field(cfld);
-          parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, 1}, KSmdsmI2D{tv, ccv, nu});
-          parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, 1}, KCopy2D{cv, tcv});
+          exchange_field(tmp);
+          parallel_for(Range3D{s_i0, s_i1, s_j0, s_j1, 0, 1}, KSmdsmI2DFrom{cv, tcv, ccv, s_i0 - 1, s_i1, nu});
           exchange_field(cfld);
         }
       }

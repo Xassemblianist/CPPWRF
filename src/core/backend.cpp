@@ -122,13 +122,22 @@ struct Graphs {
 #endif
   int* slots = nullptr;  // pinned, 2 banks of kSlots
   int bank = 0;
+  // the end marker of a segment with checks: 1 copied from the device behind its work (a pinned word per bank).
+  // A device error raised after the checked work ended (the next segment runs before the flags are read) leaves
+  // the marker set: the checked segment's flags are then read and reported first, as when they were read before
+  // the next launch.
+  int* done = nullptr;           // pinned, 2 (after the slots)
+  const int* done_one = nullptr;  // device, 1
+  int pend_done = -1;             // the marker of the checks in pend (-1: none)
   std::vector<Poll> cur, pend;  // checks of the open segment; of the launched, unchecked ones
   gpuEvent_t ev = nullptr;
   bool ev_pending = false;
   long n_launch = 0, n_update = 0, n_inst = 0, n_seg_nodes = 0;
   void init() {
     if (slots) return;
-    ck(gpuHostAlloc(reinterpret_cast<void**>(&slots), 2 * kSlots * sizeof(int), gpuHostAllocDefault), "gpuHostAlloc");
+    ck(gpuHostAlloc(reinterpret_cast<void**>(&slots), (2 * kSlots + 2) * sizeof(int), gpuHostAllocDefault),
+       "gpuHostAlloc");
+    done = slots + 2 * kSlots;
     ck(gpuEventCreateWithFlags(&ev, gpuEventDisableTiming), "gpuEventCreate");
   }
   void begin_capture() {
@@ -162,45 +171,71 @@ struct Graphs {
     return e;
   }
 #endif
-  // ends the open segment: launches its graph (after the previous segment's flags were read) and records the
-  // event that its fatal checks wait for
+  // ends the open segment: launches its graph, then reads the previous segment's flags (waiting for it: the device
+  // has this one queued behind it and runs on without a pause), and records the event that this segment's fatal
+  // checks wait for. The launches run in the same order on the one stream as before. A raised flag stops the run
+  // with this segment queued: its own flags are never read (as when it was not launched), nothing waits for it.
   void segment_point() {
-    bool launched = false;
+    bool launched = false, ended = false;
 #if defined(CPPWRF_USE_CUDA)
     if (capturing) {
       cudaGraph_t g = nullptr;
       capturing = false;
+      ended = true;
       ck(cudaStreamEndCapture(stream(), &g), "cudaStreamEndCapture");
       std::size_t nn = 0;
       ck(cudaGraphGetNodes(g, nullptr, &nn), "cudaGraphGetNodes");
       cudaGraphExec_t e = nn ? exec_for(g) : nullptr;
       cudaGraphDestroy(g);
-      flush();  // the previous step or segment is done and its flags are clean before this one runs
       if (e) {
-        ck(cudaGraphLaunch(e, stream()), "cudaGraphLaunch");
+        if (const cudaError_t le = cudaGraphLaunch(e, stream()); le != cudaSuccess) {
+          (void)cudaGetLastError();
+          flush();  // the previous segment's raised flag is the stop reported, as when it was read before
+          ck(le, "cudaGraphLaunch");
+        }
         launched = true;
         ++n_launch;
         n_seg_nodes += long(nn);
       }
       ++seg;
-    } else
-#endif
-    if (!cur.empty()) {
-      flush();
     }
+#endif
     if (launched || !cur.empty()) {  // at most one step or segment in flight unchecked
-      pend.swap(cur);
-      cur.clear();
+      std::vector<Poll> next;  // this segment's checks (slots of this bank)
+      next.swap(cur);
       bank ^= 1;
+      flush();  // the previous step or segment: done, its flags read (the other bank)
+      pend.swap(next);
+      cur.swap(next);  // the read checks' vector (empty) keeps its storage
+      pend_done = -1;
+      if (!pend.empty()) {  // the bank of these checks (its previous marker was read: that segment was waited for)
+        if (!done_one) {  // a segment with checks: not in a decomposed run (its checks are read at once)
+          int* d = nullptr;
+          const int one = 1;
+          ck(gpuMalloc(reinterpret_cast<void**>(&d), sizeof(int)), "gpuMalloc");
+          ck(gpuMemcpy(d, &one, sizeof(int), gpuMemcpyHostToDevice), "gpuMemcpy");
+          done_one = d;
+        }
+        const int b = bank ^ 1;
+        done[b] = 0;
+        ck(gpuMemcpyAsync(done + b, done_one, sizeof(int), gpuMemcpyDeviceToHost, stream()), "gpuMemcpyAsync");
+        pend_done = b;
+      }
       ck(gpuEventRecord(ev, stream()), "gpuEventRecord");
       ev_pending = true;
+    } else if (ended) {
+      flush();
     }
   }
   // reads the flags of the launched checks in the order of the calls; the first raised code stops the run
   void flush() {
     if (!ev_pending) return;
-    ck(gpuEventSynchronize(ev), "gpuEventSynchronize");
+    const gpuError_t se = gpuEventSynchronize(ev);
     ev_pending = false;
+    if (se != gpuSuccess && !(pend_done >= 0 && done[pend_done] == 1)) {  // the checked work did not end
+      pend.clear();
+      ck(se, "gpuEventSynchronize");
+    }
     int code = 0;
     for (const Poll& p : pend)
       if (*p.slot != 0) {
@@ -209,6 +244,7 @@ struct Graphs {
       }
     pend.clear();
     if (code != 0) fatal_stop(code);
+    ck(se, "gpuEventSynchronize");  // an error of later work: after the checked segment's own stop
   }
   void abort() {  // an exception inside the step
 #if defined(CPPWRF_USE_CUDA)
@@ -494,6 +530,60 @@ ColumnBlock column_block() {
     return r;
   }();
   return b;
+}
+
+namespace {
+struct ThreadStaging {
+  void* p = nullptr;
+  std::size_t bytes = 0;
+  bool held = false;
+};
+ThreadStaging& thread_staging() {  // kept for the run; a worker thread frees it at its exit (release_host_staging)
+  thread_local ThreadStaging t;  // trivially destroyed: never freed at process exit (the device may be gone)
+  return t;
+}
+}  // namespace
+HostStaging::HostStaging(std::size_t bytes) {
+  ThreadStaging& t = thread_staging();
+  if (!t.held && t.bytes < bytes) {
+    void* p = nullptr;
+#if defined(CPPWRF_USE_GPU)
+    if (gpuHostAlloc(&p, bytes, gpuHostAllocDefault) != gpuSuccess) {
+      (void)gpuGetLastError();
+      p = nullptr;
+    } else if (t.p) {
+      gpuFreeHost(t.p);
+    }
+#else
+    p = std::malloc(bytes);
+    if (p && t.p) std::free(t.p);
+#endif
+    if (p) {
+      t.p = p;
+      t.bytes = bytes;
+    }
+  }
+  if (!t.held && t.bytes >= bytes) {
+    t.held = held_ = true;
+    p_ = t.p;
+    return;
+  }
+  own_.resize(bytes);  // nested, or the allocation failed
+  p_ = own_.data();
+}
+HostStaging::~HostStaging() {
+  if (held_) thread_staging().held = false;
+}
+void release_host_staging() {
+  ThreadStaging& t = thread_staging();
+  if (t.held || !t.p) return;
+#if defined(CPPWRF_USE_GPU)
+  if (gpuFreeHost(t.p) != gpuSuccess) (void)gpuGetLastError();
+#else
+  std::free(t.p);
+#endif
+  t.p = nullptr;
+  t.bytes = 0;
 }
 
 int fatal_code_host = 0;

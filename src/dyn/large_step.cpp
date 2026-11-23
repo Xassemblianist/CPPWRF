@@ -96,6 +96,21 @@ struct KWW {  // calc_ww_cp: mass-coupled eta velocity from the column-integrate
   }
   CPPWRF_HD void operator()(int i, int j) const {
     real dmdt = 0;
+#if defined(CPPWRF_LOCAL_ROUNDING)
+    // divv once per level: kept in ww one level up (ww(k + 1) = divv(k)) until the sweep, which reads ww(k) before it
+    // writes it
+    for (int k = 0; k < nz; ++k) {
+      const real d = divv(i, j, k);
+      dmdt += d;
+      ww(i, j, k + 1) = d;
+    }
+    real w = 0;
+    ww(i, j, 0) = 0;
+    for (int k = 1; k < nz; ++k) {
+      w = w - c.dnw(k - 1) * c.c1h(k - 1) * dmdt - ww(i, j, k);
+      ww(i, j, k) = w;
+    }
+#else
     for (int k = 0; k < nz; ++k) dmdt += divv(i, j, k);
     real w = 0;
     ww(i, j, 0) = 0;
@@ -103,6 +118,7 @@ struct KWW {  // calc_ww_cp: mass-coupled eta velocity from the column-integrate
       w = w - c.dnw(k - 1) * c.c1h(k - 1) * dmdt - divv(i, j, k - 1);
       ww(i, j, k) = w;
     }
+#endif
     ww(i, j, nz) = 0;
   }
 };
