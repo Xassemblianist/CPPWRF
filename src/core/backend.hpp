@@ -138,7 +138,11 @@ CPPWRF_HD inline double rexp(double a) {
 #endif
 }
 
-// Fortran MIN / MAX of two values (b on ties and when either is NaN)
+// Fortran MIN(a, b) / MAX(a, b) with the operands in the Fortran source's order. CPPWRF's explicit policy for ties
+// and NaN: b when a == b or when either is NaN, the source-order semantics of gfortran's MIN / MAX. This is not a
+// promise about every compiled WRF site on exceptional inputs: gfortran's code generation (SSE minsd / maxsd operand
+// order, two variables versus a variable and a constant) can pick the other operand for a NaN or a signed zero at a
+// given site, so a NaN reaching a clamp may differ from a particular WRF binary
 template <class T>
 CPPWRF_HD inline T c_min(T a, T b) { return (a < b) ? a : b; }
 template <class T>

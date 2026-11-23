@@ -38,7 +38,14 @@ resumes across versions from WRF's wrfrst files.
   graphs; a step segment's graph is launched before the wait for the previous one; host uploads through a reusable
   per-thread buffer.
 - sfclayrev / YSU: `phys.shalwater_z0`, `phys.scm_force_flux != 0` and a nonzero U_FRAME / V_FRAME in wrfinput are
-  refused (not ported; were ignored).
+  refused (not ported; were ignored). The two options are checked with the model's options whichever schemes the
+  run has, and the error names the value given; the translator names WRF's group (`&physics.shalwater_z0`,
+  `&scm.scm_force_flux`). A run resumed from a wrfrst file refuses a nonzero U_FRAME / V_FRAME in that file too
+  (WRF's Registry `ir`: the resumed wrf.exe takes the file's frame); the errors name the file and the value.
+- CPPWRF's native restart format version is 7 (`sfc_var2d` / VAR and `HALO_<name>` in decomposed runs' files): a
+  file of version 6 or older is refused with a pointer to the run's wrfrst file (native restart files belong to the
+  sources that wrote them). Every `HALO_<name>` of a field the file has is required on reading. The file is written
+  as `restart_<step>.nc.partial` and renamed once complete (fields and halo points).
 
 ### Fixed
 - sfclayrev with fractional_seaice = 1: USTM_SEA is 0 on entry to every open-water call (WRF's automatic array has
@@ -52,6 +59,15 @@ resumes across versions from WRF's wrfrst files.
 - GPU step segments: a failed graph launch or a later device error reports the fatal flag the previous segment raised
   first; tile workers free their upload staging buffer at exit.
 - ctest: real_vs_wrf and real_vs_wrf_runs each use a work directory of their own (they ran at once in one directory).
+- Input and restart readers: the `HALO_<name>` variables of CPPWRF's restart file and the wrfinput's UOCE, VOCE, VAR,
+  U_FRAME and V_FRAME are read only after their rank, dimension names and extents are checked (one record of a
+  Time variable, `nc_get_vara_double`; every NetCDF return code checked): a rank-2 `HALO_` variable, a staggered
+  UOCE or a frame value of several records was a buffer overrun and is now an error naming the file and the
+  variable. The other wrfinput fields of the column physics read one record of their expected size. Tests:
+  test_restart (the bounded read), ctest restart_guard (a rank-2 or missing `HALO_` variable and a version-6 file
+  refused, one patch and 2 x 2), restart_resume (U_FRAME in a wrfrst file, V_FRAME and a staggered UOCE in wrfinput).
+- backend.hpp: `c_min` / `c_max` are described as CPPWRF's explicit policy (the second operand on ties and NaN, the
+  Fortran source order), not as every compiled WRF site's behaviour on NaN or signed zero.
 
 ## 1.3.0 (2026-11-22)
 
