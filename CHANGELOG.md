@@ -8,6 +8,22 @@ resumes across versions from WRF's wrfrst files.
 ## Unreleased
 
 ### Changed
+- Halo exchanges of a decomposed run (tiles, MPI ranks; docs/MPI.md section 3.4): each exchange is planned once and
+  the plan kept (the boxes, their offsets in one send and one receive buffer, on the GPU a device table of them); the
+  boxes go out with one pack launch and come in with one unpack launch on the worker's stream (were one launch per
+  field and peer) and no device-wide wait (were two per exchange); MPI ranks post every receive before the sends and
+  wait once (`MPI_Irecv` / `MPI_Isend` / `MPI_Waitall` on a duplicate of `MPI_COMM_WORLD`; were a blocking
+  `MPI_Probe` / `MPI_Recv` per peer), from and into persistent buffers: device buffers handed to a GPU-aware MPI
+  (`run.gpu_aware_mpi = auto | on | off`, `CPPWRF_GPU_AWARE_MPI`; auto: when the library reports at run time that it
+  takes device memory) or pinned host buffers with one asynchronous copy per direction (were pageable buffers copied
+  per message). The maxima, fatal codes, per-row reductions and owner broadcasts of MPI ranks are one `MPI_Allgather`
+  each (were a message from every rank to every other), combined in worker order as before. An MPI rank of a GPU
+  build runs its time steps as CUDA graphs (segments between its exchanges and fatal checks) and prepares the next
+  step while the device runs the last, as one process does (`CPPWRF_GRAPHS=0`: without). The values are bytes copied
+  between the same points as before: every output is unchanged in every layout and build. `CPPWRF_HALO_STATS=1`
+  prints each worker's exchanges; `CPPWRF_TILE_DEVICE_BUFFERS=1` runs tiles over the device-buffer path (a check).
+  tools/kaggle/kaggle_mpi.sh: layouts `L@on` / `L@off` force the transport, env.txt names whether Open MPI was built
+  with CUDA.
 - CPPWRF's own restart file (`restart_<step>.nc`) no longer depends on the decomposition: a decomposed run (tiles,
   MPI ranks) writes the halo points of its fields beyond the domain's edges (`HALO_<name>`, gathered from the edge
   patches) as a run of one patch does, and a decomposed run resumed from the file sets them in every patch that holds

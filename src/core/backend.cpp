@@ -99,7 +99,10 @@ int graphs_mode() {  // 0 off, 1 on, 2 on with the counts at exit
     return 0;  // a device synchronisation after every launch cannot be captured
 #endif
     if (ktime::on()) return 0;
-    if (tile::hooks.multi) return 0;  // tiles: the halo exchanges synchronise the tiles' streams from the host
+    // tiles (several workers in one process): off. An MPI rank (one worker per process) captures the segments
+    // between its halo exchanges and fatal checks, which wait for its stream outside the capture
+    // (host_section_begin / host_section_end)
+    if (tile::hooks.multi) return 0;
     const char* e = std::getenv("CPPWRF_GRAPHS");
     if (!e || !*e) return 1;
     if (std::strcmp(e, "stats") == 0) return 2;
@@ -415,6 +418,17 @@ void copy_to_dev(void* d, const void* s, std::size_t n) {
   sync_end();
 }
 void copy_dev(void* d, const void* s, std::size_t n) { ck(gpuMemcpyAsync(d, s, n, gpuMemcpyDeviceToDevice, stream()), "D2D"); }
+void copy_to_host_async(void* d, const void* s, std::size_t n) {
+  ck(gpuMemcpyAsync(d, s, n, gpuMemcpyDeviceToHost, stream()), "D2H");
+}
+void copy_to_dev_async(void* d, const void* s, std::size_t n) {
+  ck(gpuMemcpyAsync(d, s, n, gpuMemcpyHostToDevice, stream()), "H2D");
+}
+void host_section_begin() {
+  sync_begin();
+  ck(gpuStreamSynchronize(stream()), "sync");
+}
+void host_section_end() { sync_end(); }
 void dev_sync() {
   sync_begin();
   ck(gpuDeviceSynchronize(), "sync");
@@ -502,6 +516,10 @@ void dev_free(void* p) { std::free(p); }
 void copy_to_host(void* d, const void* s, std::size_t n) { par_copy(d, s, n); }
 void copy_to_dev(void* d, const void* s, std::size_t n) { par_copy(d, s, n); }
 void copy_dev(void* d, const void* s, std::size_t n) { par_copy(d, s, n); }
+void copy_to_host_async(void* d, const void* s, std::size_t n) { std::memcpy(d, s, n); }
+void copy_to_dev_async(void* d, const void* s, std::size_t n) { std::memcpy(d, s, n); }
+void host_section_begin() {}
+void host_section_end() {}
 void dev_sync() {}
 int current_device() { return 0; }
 const char* backend_name() { return "cpu"; }

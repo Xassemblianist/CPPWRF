@@ -1195,3 +1195,32 @@ prep 2360 ms (KSwPrep) -> 1210 ms (KSwPrep 723, KSwLayer 410, KSwSetcoef 54, KSw
 another GPU, not the G4 measurement. The CPU suite cases of the radiation options against WRF: ci_submit --affected.
 To do on the G4: every cuda_dp case against WRF at tolerance 0, the FP32 (identity and fast) cases base against new
 byte-identical, KTIME and stepping times of V1 and P4.
+
+## Halo exchanges of decomposed runs: plans, one pack and one unpack launch, pinned or device buffers, graphs under MPI (HALO1; measured on the workstation only)
+
+docs/MPI.md section 3.4 has the design and the reason the bits cannot change. Counted with `CPPWRF_HALO_STATS=1` on
+P4 (KF, WSM6, YSU, Noah, RRTMG; n_sound 4) in 2 x 2 ranks: 74 exchanges per time step (2082 in 30 steps and the
+start, 81 in the start and the first 3 steps; the architecture review's count for a similar configuration was 69),
+34 distinct plans for the whole run, three messages per exchange and rank. Each exchange waited for the whole device
+twice before (`gpuDeviceSynchronize` before the pack and after the unpack: about 150 device-wide waits per step) and
+twice more for the stream (the pageable copies); it now waits once for its own stream (before the transfer) and never
+for the device. The pack and unpack were one launch per (field, peer) box (an exchange of 6 fields with 3 peers: 18
+launches each way); they are one launch each way.
+
+Workstation (RTX 2060 6 GB, 12 threads; MPICH 5.0.2 over shared memory, not GPU-aware: the pinned path), CUDA FP64,
+P4 30 steps (119 x 89 x 44), history off, stepping seconds of the log, two runs each, base = a63ed9f:
+
+| Layout | base | HALO1 | change |
+|---|---|---|---|
+| one process | 7.95 / 7.72 | 7.86 / 7.84 | none |
+| 2 MPI ranks on the GPU (1 x 2) | 11.01 / 10.78 | 9.67 / 9.70 | -11 % |
+| 4 MPI ranks on the GPU (2 x 2) | 13.87 / 13.82 | 11.74 / 11.62 | -15 % |
+| 4 tiles on the GPU (2 x 2) | 8.93 / ... | 7.81 / ... | -12 % |
+
+Every run's snapshots equal the one-process run's byte for byte. Graphs under MPI (now on by default) gained
+nothing here: 1 x 2 9.70 s with graphs, 9.73 / 9.48 s with `CPPWRF_GRAPHS=0`; 2 x 2 11.27 s without (3 % faster than
+with). The segments between exchanges and fatal checks hold about 10 launches (2245 graph launches in 30 steps of
+one rank) and the RTX 2060 runs this domain's kernels long enough for their launches to hide; graphs should matter
+on small patches of a fast GPU, which has not been measured. Several ranks on one GPU are not the target layout (two
+GPUs: Kaggle, docs/MPI.md section 6; the G4 proof): the timing of one rank per GPU, with and without a GPU-aware MPI,
+is still to be done.

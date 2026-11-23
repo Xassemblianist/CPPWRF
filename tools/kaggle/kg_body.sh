@@ -14,6 +14,10 @@
 #   PxQ     mpirun -np P*Q, run.ranks = PxQ (CPPWRF_RANKS); the ranks take the GPUs by their node-local rank
 #           (core/tiles.hpp rank_device: local mod device count), so 1x2 / 2x1 put one rank on each GPU
 #   tPxQ    one process, PxQ tiles (CPPWRF_TILES) over the GPUs (CPPWRF_TILE_DEVICES=0,1,...)
+#   L@on, L@off, L@auto   layout L with the halo transport forced (CPPWRF_GPU_AWARE_MPI; docs/MPI.md section 4):
+#           @on device buffers handed to MPI (only with an MPI that takes device memory: env.txt names Open MPI's
+#           mpi_built_with_cuda_support), @off pinned host buffers; plain PxQ is auto. tPxQ@on: the tiles take the
+#           device-buffer path (CPPWRF_TILE_DEVICE_BUFFERS=1)
 # DATA: tars of the public release Xassemblianist/cppwrf-data data-v1 (whole or .part* pieces, each checked against
 # its SHA256SUMS), unpacked into /root/kg/data (wrf_runs/, wrf_ref/).
 # OUT (in /kaggle/working, kept as the kernel's output): env.txt (GPUs, driver, nvcc, Open MPI, gcc, commit), build.log,
@@ -41,6 +45,8 @@ GH=https://github.com/Xassemblianist/cppwrf-data/releases/download/data-v1
   nvidia-smi --query-gpu=index,name,uuid,memory.total,driver_version,pci.bus_id --format=csv,noheader
   nvcc --version | tail -2
   echo "mpirun: $(mpirun --version 2>&1 | head -1)"
+  # whether this Open MPI takes device memory (a GPU-aware MPI: run.gpu_aware_mpi = auto uses it then)
+  echo "ompi_info: $(ompi_info --parsable --all 2>/dev/null | grep -E 'mpi_built_with_cuda_support:value|mca:mpi:base:param:mpi_built_with_cuda' | head -2 | tr '\n' ' ')"
   gcc --version | head -1
   cmake --version | head -1
   grep PRETTY_NAME /etc/os-release
@@ -129,12 +135,22 @@ FIRST=
 for L in ${LAYOUTS//,/ }; do
   [ $SECONDS -lt $END ] || { echo "TIMEOUT before layout $L" >> "$OUT/summary.txt"; break; }
   R=$W/run_$L ENVS= N=1
+  # L@on / L@off / L@auto: the halo transport of the layout forced
+  G=${L#*@}; [ "$G" != "$L" ] || G=
+  LL=${L%@*}
+  GENV=
+  case $G in
+    "") ;;
+    on | off | auto) GENV="CPPWRF_GPU_AWARE_MPI=$G" ;;
+    *) echo "layout $L: @on, @off or @auto" >> "$OUT/summary.txt"; continue ;;
+  esac
   # the suite's binary for the layout; its output also goes to run_<layout>.log (the device lines)
-  case $L in
+  case $LL in
     plain) P="$B" ;;
-    1) P="$MPIRUN $MCA -np 1 $B" ;;
-    t*) P="env CPPWRF_TILES=${L#t} CPPWRF_TILE_DEVICES=$DEVS $B" ;;
-    *) N=$(( ${L%x*} * ${L#*x} )); P="env CPPWRF_RANKS=$L $MPIRUN $MCA -np $N $B" ;;
+    1) P="env $GENV $MPIRUN $MCA -np 1 $B" ;;
+    t*) [ "$G" = on ] && GENV="CPPWRF_TILE_DEVICE_BUFFERS=1"
+        P="env $GENV CPPWRF_TILES=${LL#t} CPPWRF_TILE_DEVICES=$DEVS $B" ;;
+    *) N=$(( ${LL%x*} * ${LL#*x} )); P="env $GENV CPPWRF_RANKS=$LL $MPIRUN $MCA -np $N $B" ;;
   esac
   printf '#!/bin/bash\nset -o pipefail\n%s "$@" 2>&1 | tee -a %s\n' "$P" "$W/run_$L.log" > $R
   chmod +x $R
@@ -150,7 +166,7 @@ for L in ${LAYOUTS//,/ }; do
   kill $S1 $S2 2> /dev/null; wait $S1 $S2 2> /dev/null
   {
     echo "# rank -> device lines of the runs' logs"
-    grep -h "device of each rank\|MPI ranks as\|tiles,\|tiles and" $W/run_$L.log 2> /dev/null | sort | uniq -c
+    grep -h "device of each rank\|MPI ranks as\|tiles,\|tiles and\|halo exchanges" $W/run_$L.log 2> /dev/null | sort | uniq -c
     echo "# nvidia-smi: processes seen per GPU (uuid: distinct pids, peak MiB of one process)"
     awk -F', ' 'NF >= 4 && $3 ~ /GPU-/ { k = $3; p[k " " $2] = 1; m = $4 + 0; if (m > pk[k]) pk[k] = m }
       END { for (x in p) { split(x, a, " "); n[a[1]]++ } for (k in n) print k ": " n[k] " pids, peak " pk[k] " MiB" }' $W/apps_$L.csv

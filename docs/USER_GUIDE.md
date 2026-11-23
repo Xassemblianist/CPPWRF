@@ -350,6 +350,8 @@ does not know is an error at start-up (`unknown configuration key ...`), so a ty
 | `CPPWRF_TILES=PxQ` | run the domain as P x Q tiles (overrides `run.tiles`; section 7, "Tiles and MPI ranks") |
 | `CPPWRF_RANKS=PxQ` | an MPI run's layout: P patches along x times Q along y, P Q = the rank count (overrides `run.ranks`; default: the most square layout with P <= Q) |
 | `CPPWRF_RANK_DEVICES=d0,d1,...` | GPU builds under MPI: the device of rank r is `d[r % n]` (default: every rank on the current GPU) |
+| `CPPWRF_GPU_AWARE_MPI=auto\|on\|off` | GPU builds under MPI: the halo exchanges hand device buffers to MPI (`on`), stage through pinned host buffers (`off`), or `auto` (default): device buffers when the MPI library reports that it takes device memory (overrides `run.gpu_aware_mpi`; docs/MPI.md section 4) |
+| `CPPWRF_HALO_STATS=1` | decomposed runs: each worker's halo exchanges, plans, messages and bytes sent at its end |
 | `CPPWRF_TILE_DEVICES=d0,d1,...` | GPU builds: the device of tile t is `d[t % n]` (default: all tiles on the current GPU) |
 | `CPPWRF_TILE_CHECK=1` | CPU builds: compare every launch of every time step of the tiles with a run without tiles (slow; the first point that differs names the launch, the field and the stale fields) |
 | `CPPWRF_WRF_RUNS`, `CPPWRF_WRF_REF` | the WRF run and reference directories that `configs/real_*.ini` and the tests name |
@@ -558,7 +560,9 @@ CPPWRF_RANK_DEVICES=0,1 mpirun -np 2 build-cuda-mpi/cppwrf CONFIG.ini
   The layout is `run.ranks = PxQ` (or `CPPWRF_RANKS`), P patches along x times Q along y with P Q = the rank count;
   without it the most square layout with P <= Q, as WRF's. Each rank uses `OMP_NUM_THREADS` threads (CPU build), so
   ranks times threads should not exceed the cores. The same binary without `mpirun` (or with one rank) runs as one
-  process. `run.tiles` in an MPI run is an error. At the end the run prints the ranks' peak host memory.
+  process. `run.tiles` in an MPI run is an error. At the end the run prints the ranks' peak host memory. GPU
+  builds: `run.gpu_aware_mpi = auto | on | off` (default auto) chooses whether the halo exchanges hand device buffers
+  to a GPU-aware MPI or stage through pinned host buffers; rank 0 prints the choice. The results do not depend on it.
 
 Inside a time step a worker computes only the points it owns (the edge patches also own the last faces and the
 lateral halos). The workers meet in halo exchanges (every halo fill first receives, from the neighbouring workers,

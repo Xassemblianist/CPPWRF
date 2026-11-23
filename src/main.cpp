@@ -36,7 +36,9 @@ static int run_tile(const io::Config& cfg, const std::string& out_dir, int t) {
       tile::Step step;
       m.rk->step(*m.st, *m.tend, *m.base);
     }
-    dev_sync();
+    // CUDA graphs (an MPI rank: core/backend.cpp graphs_mode): the host prepares the next step while the device runs
+    // this one, as one process does; else (tiles) the step is waited for
+    if (!step_graphs_on() || n == m.nsteps) dev_sync();
     tile::Serial s;
     if (!r.after_step(n)) return 3;
   }
@@ -70,10 +72,12 @@ static int run(int argc, char** argv, bool mpi) {
 
   const tile::Options tiles = tile::options(cfg.get_string("run.tiles", "1"));
   const std::string ranks = cfg.get_string("run.ranks", "");  // the layout of an MPI run (a known key in every run)
+  // an MPI run's halo transport: device buffers to a GPU-aware MPI, or pinned host buffers (docs/MPI.md)
+  const std::string gpu_aware = cfg.get_string("run.gpu_aware_mpi", "auto");
   if (mpi) {  // several MPI ranks: each is the worker of one patch (docs/MPI.md)
     if (tiles.on()) throw std::runtime_error("run.tiles: an MPI run has one patch per rank (run.ranks)");
     const bool nests = cases::has_nests(cfg);  // every domain in the same P x Q patches
-    return tile::mpi_run(ranks,
+    return tile::mpi_run(ranks, gpu_aware,
                          [&](int t) { return nests ? cases::run_nested(cfg, out_dir) : run_tile(cfg, out_dir, t); });
   }
   if (tiles.on()) {

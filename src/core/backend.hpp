@@ -489,6 +489,16 @@ void copy_to_host(void* dst, const void* src, std::size_t bytes);
 void copy_to_dev(void* dst, const void* src, std::size_t bytes);
 void copy_dev(void* dst, const void* src, std::size_t bytes);
 void dev_sync();
+// The calling thread's stream, for the halo exchanges of a decomposed run (core/tiles.cpp): copies queued behind the
+// thread's launches without waiting (GPU: the host buffer must be pinned and stay untouched until the stream has been
+// waited for). host_section_begin waits for everything queued on the stream (inside a time step it ends the graph
+// segment first, as dev_sync does); host_section_end resumes the step's capture. Between the two the host may make
+// any device or MPI call. dev_sync = host_section_begin + host_section_end (and a device-wide wait). CPU build:
+// plain copies; no-ops.
+void copy_to_host_async(void* dst, const void* src, std::size_t bytes);
+void copy_to_dev_async(void* dst, const void* src, std::size_t bytes);
+void host_section_begin();
+void host_section_end();
 // A host buffer of at least `bytes` to build an upload in (Field::fill_host): one per host thread, reused (grown as
 // needed, kept for the run) instead of a new allocation per field, pinned on the GPU (a faster copy). A nested use
 // while the thread's buffer is held gets a buffer of its own.
@@ -925,6 +935,9 @@ static inline void fatal_check() {
   int code = tile::hooks.first_code ? __atomic_load_n(&fatal_code_host, __ATOMIC_RELAXED)
                                     : __atomic_exchange_n(&fatal_code_host, 0, __ATOMIC_RELAXED);
 #if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
+  // the flag is read now (a decomposed run inside a step: the graph segment so far is launched and waited for, the
+  // capture resumes after the collective)
+  host_section_begin();
   int dcode = 0;
   const int zero = 0;
   gpuStream_t s = gpu_launch_stream();
@@ -948,6 +961,9 @@ static inline void fatal_check() {
 #endif
     }
   }
+#if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
+  host_section_end();
+#endif
   if (code != 0) fatal_stop(code);
 }
 
