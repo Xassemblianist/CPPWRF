@@ -1,7 +1,8 @@
 # Domain decomposition: patches, tiles and MPI ranks
 
 Sections 1 to 3 are the design, written before the code (with the reasons and the rejected alternatives); section
-4 is how to build and run, section 5 what has been proved and how to repeat it, section 6 what has not.
+4 is how to build and run, section 5 what has been proved and how to repeat it, section 6 the runs on two GPUs of one
+node, section 7 what has not been proved.
 
 ## 1. Goal
 
@@ -79,8 +80,8 @@ maps `m` and signs `s` per direction (the wall face keeps its value). The exchan
 the window; each pass then applies one direction's map to rows/columns that already hold the serial values.
 
 GPU: pack and unpack are kernels. The bytes are staged through ordinary (pageable) host buffers, which works with
-any MPI. Pinned staging buffers and handing device buffers to a CUDA-aware MPI are not implemented yet; several GPUs
-have not been run (no second GPU is available to us).
+any MPI. Pinned staging buffers and handing device buffers to a CUDA-aware MPI are not implemented yet; two GPUs of
+one node have run (section 6).
 
 Rejected: one-sided pulls from the neighbours' arrays (P03's `cudaMemcpy3D` between tiles' copies): needs every
 worker's memory in one address space.
@@ -265,14 +266,65 @@ copies in place of box fetches the nest ran at 0.49x of WRF with 48 ranks (89.6 
 
 WRF's own results depend on its rank layout (docs/PERF.md); CPPWRF's do not, which the comparisons above check.
 
-## 6. What has not been proved
+## 6. Several GPUs: two T4 on one Kaggle node
 
-Several GPUs and several nodes were not available; every run above is on one machine. A CUDA build has run as
-several MPI ranks on one GPU only (section 5), with MPICH. Open MPI has not run.
-The design should hold there because (a) a rank's GPU is its own CUDA context and stream as a tile's is
+A Kaggle GPU runtime (2 x NVIDIA Tesla T4, 15 GB each, driver 580.178.04; 4 vCPUs, 31 GB; Ubuntu 24.04, CUDA 13.0,
+gcc 13.3, Open MPI 4.1.6 over shared memory) ran the CUDA FP64 build with `CPPWRF_MPI` (`tools/kaggle/kaggle_mpi.sh`,
+which runs `tools/kaggle/kg_body.sh` there) on source 9f9bb77. Seven cuda_dp suite checks ran in seven layouts:
+
+| Layout | What runs | GPUs used (nvidia-smi, sampled every 500 ms) |
+|---|---|---|
+| `plain` | one process, no `mpirun` | GPU 0 only |
+| `1` | `mpirun -np 1` | GPU 0 only |
+| `1x2`, `2x1` | two MPI ranks, one per GPU (node-local rank r on device r mod 2) | both, one process each |
+| `2x2` | four MPI ranks, two per GPU | both, two processes each |
+| `t1x2`, `t2x1` | one process, two tiles, one per GPU (`CPPWRF_TILE_DEVICES=0,1`) | both, from one process |
+
+The checks: `real_fdn_r8_fp64_cuda` (grid nudging on a two-way nest), `real_acm1_r8_fp64_cuda` and its 1 h version
+(ACM2 over Pleim-Xiu), `real_acmn_r8_fp64_cuda` and its 1 h version (ACM2 on the nest N3), and the restart checks
+`restart_t1_fp64_cuda` and `restart_acm7_fp64_cuda` (3 steps straight against a run resumed from the native restart
+file after step 1). **Every layout: `SUITE PASS 7 FAIL 0`**, so every wrfout frame of every case equals the WRF
+v4.8.0 real*8 reference at tolerance 0 in every variable (49 of 49 case-layout runs). Every output file of a layout
+(wrfout, wrfrst, native snapshots and restarts, without logs and files with wall times) was then compared byte for
+byte with the `plain` layout's: layout `1` had the same 50 files; the decomposed layouts had the same files except
+the native `restart_<step>.nc` of the two restart checks, which as one patch held the halo points (`HALO_<name>`)
+and decomposed did not; a second run (`1x2`, `t1x2`) compared those files variable by variable: every variable both
+files had was identical. Since then a decomposed run writes the halo points too (gathered from the edge patches,
+`DomainRunner::save_restart_file`) and a resumed decomposed run reads them back into the patches that hold them, so
+the native restart file no longer depends on the decomposition; the suite cases `real_p4_r8_fp64_cpu_rst_t2x2` and
+`ideal_quarter_ss_k2_fp64_cpu_rst_t2x2` (periodic; `wrf_suite.layout_restart`) compare every restart file of a 2 x 2
+CPU run with the one-patch run's, every variable and attribute, and `real_p4_r8_fp64_cpu_chain_t2x2` resumes a 2 x 2 run from both restart files. The Kaggle
+comparison has not been rerun after that change.
+
+To repeat (a Kaggle account with the CLI authenticated and phone verification, which enables GPUs with internet):
+
+```bash
+tools/kaggle/kaggle_mpi.sh --cases real_acm1_r8_fp64_cuda,real_acmn_r8_fp64_cuda,real_acm1_r8_fp64_cuda_1h,\
+real_acmn_r8_fp64_cuda_1h,real_fdn_r8_fp64_cuda,restart_acm7_fp64_cuda,restart_t1_fp64_cuda \
+  --layouts plain,1,1x2,2x1,2x2,t1x2,t2x1 --hours 4
+```
+
+The script uploads `git archive` of the revision as a private dataset, runs a private kernel on the `NvidiaTeslaT4`
+machine (building takes about 20 minutes), fetches the data tars from the public data release and writes, per
+layout, the suite's lines, the sha256 of the output files, the files that differ from the first layout's with their
+differing NetCDF variables, and the processes and memory seen on each GPU (`OUT/output/kg/summary.txt`, `same.txt`,
+`devices_<layout>.txt`, `diff_<layout>.txt`).
+
+Scope: two GPUs of one node, ranks talking over shared memory; this is a correctness proof, not a speed
+measurement. The suite's wall times there (the seven checks: 173 to 192 s for the one-process, one-rank-per-GPU and
+tile layouts, 248 s for four ranks on two GPUs) include the start-up and the comparisons, and the suite's domains
+are too small for two GPUs to gain.
+
+## 7. What has not been proved
+
+Several nodes were not available; every run above is on one machine. Several GPUs have run on one node only (two
+T4, section 6), with Open MPI 4.1.6; a CUDA build has run as several MPI ranks on one GPU on the workstation (section
+5, MPICH) and on that node (layout `2x2`, Open MPI).
+The design should hold across nodes because (a) a rank's GPU is its own CUDA context and stream as a tile's is
 (`CPPWRF_RANK_DEVICES` only changes which device the context is on), (b) the transport
 carries bytes and nothing in the numerical path depends on where a rank runs, (c) the result is independent of
 message timing: every exchange is a fixed sequence of blocking receives of fully determined boxes. Not run:
-`CPPWRF_RANK_DEVICES` with more than one device, an MPI run across nodes (a network transport, a file system
-shared by the ranks at the start), Open MPI (the tools take `--mpi openmpi`; every run here used MPICH 4.2),
-more than 48 ranks.
+`CPPWRF_RANK_DEVICES` with more than one device (the runs of section 6 used the node-local default), more than two
+GPUs, CUDA-aware MPI (the transport stages through host buffers), an MPI run across nodes (a network transport, a file
+system shared by the ranks at the start), Open MPI on CPU-only runs (the CPU runs of section 5 used MPICH 4.2), more
+than 48 ranks.
