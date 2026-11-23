@@ -4,7 +4,8 @@
 # (run_N3s_r8: the tables), matrix_real.tar (real.exe), wps_n3t_data.tar: base_N3T (the namelist.input of the three
 # domains, N3s's with a third column: d03 61 x 61 at (50, 35) of d02, ratio 3; links to run_N3s_r8's tables) and
 # real_N3T (WPS 4.6.0 geogrid.exe / metgrid.exe output for the three domains from the N3 nest's GFS intermediate
-# files; d01's and d02's geo_em and met_em files are byte for byte those of the N3 nest). run_N3T_r8: 1 h, history
+# files, WPS's low-resolution mandatory static data, namelist nest3_namelist.wps; d01's and d02's geo_em and met_em
+# files are byte for byte those of the N3 nest). run_N3T_r8: 1 h, history
 # every 10 min on every domain; run_N3T_r8/steps: 3 steps, history every 60 s on every domain; rst_N3T_r8, rsm_N3T_r8.
 #
 #   tools/colab/colab_wrfref.sh tests/verify/refs/nest3_refs.txt \
