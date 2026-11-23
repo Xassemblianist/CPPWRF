@@ -476,21 +476,36 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False, wrf=No
     dif = config_vs_namelist(cfg, sets, nlw) if os.path.exists(nlw) else [f"no {nlw}"]
     if dif:
         return bad + [f"configuration differs from {nlw}: {'; '.join(dif)}"], what
-    with _NC, netCDF4.Dataset(wrf) as ds:
-        xt = [float(x) * 60.0 for x in ds["XTIME"][:]]
-        start = ds.getncattr("SIMULATION_START_DATE")
-    tw = max(x for x in xt if x <= t + 1e-6)
-    wdom = {"": wrf}
-    b2, w2 = exact_case(wdom, straight, tw, common, common_only=True)
-    bad += [f"straight vs WRF: {x}" for x in b2]
-    what += f"; vs WRF {os.path.relpath(wrf, WR)} at tolerance 0: straight {w2}"
+    # every domain the chain writes, each against WRF's file of that domain next to d01's (wrfout_d02_... beside
+    # wrfout_d01_...) up to its last frame by t (a nest's history interval may be longer than d01's)
+    wdom = {d: wrf.replace("wrfout_d01_", f"wrfout_{d}_") for d in doms}
+    missing = [w for w in wdom.values() if not os.path.exists(w)]
+    if missing:
+        return bad + [f"no WRF reference {', '.join(missing)}"], what
+    tw = {}
+    for d, w in wdom.items():
+        with _NC, netCDF4.Dataset(w) as ds:
+            xt = [float(x) * 60.0 for x in ds["XTIME"][:]]
+            start = ds.getncattr("SIMULATION_START_DATE")
+        tw[d] = max(x for x in xt if x <= t + 1e-6)
+    tag = (lambda d: f"{d} ") if len(wdom) > 1 else (lambda d: "")
+    w2 = []
+    for d, w in wdom.items():
+        b2, s2 = exact_case({d: w}, straight, tw[d], common, common_only=True)
+        bad += [f"straight vs WRF: {x}" for x in b2]
+        w2.append(tag(d) + s2)
+    what += f"; vs WRF {os.path.relpath(wrf, WR)}{' (every domain)' if len(wdom) > 1 else ''} at tolerance 0: " \
+        f"straight {', '.join(w2)}"
     for w, d_out, _ in resumed:  # a wrfrst resume's START_DATE is the restart time (WRF's), a native one's the run's
-        b2, w2 = exact_case(wdom, d_out, tw, common, after=times_at(start, mid),
-                            ignore_atts=("START_DATE",) if w == "wrfrst" else (), common_only=True)
-        bad += [f"{w} vs WRF: {x}" for x in b2]
+        w2 = []
+        for d, wf in wdom.items():
+            b2, s2 = exact_case({d: wf}, d_out, tw[d], common, after=times_at(start, mid),
+                                ignore_atts=("START_DATE",) if w == "wrfrst" else (), common_only=True)
+            bad += [f"{w} vs WRF: {x}" for x in b2]
+            w2.append(tag(d) + s2)
         if w == "wrfrst":
-            bad += start_dates(glob.glob(os.path.join(d_out, "wrfout_d01_*")), times_at(start, mid))
-        what += f"; {w} resumed {w2}"
+            bad += start_dates(glob.glob(os.path.join(d_out, "**", "wrfout_d0?_*"), recursive=True), times_at(start, mid))
+        what += f"; {w} resumed {', '.join(w2)}"
     return bad, what
 
 
