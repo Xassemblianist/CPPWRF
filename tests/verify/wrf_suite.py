@@ -635,6 +635,35 @@ def restart_p1(binary, out, cfg="configs/real_p1_r8.ini", run_dir="run_P1_r8"):
     return same, "step 3 bit-identical" if same else "step 3 differs after restart"
 
 
+def namelist_restart_interval(nml):
+    """The restart interval [s] of a namelist.input (tools/wrf2cppwrf.py's restart.interval; a resumed run's
+    restart = .true. is the translation's only complaint and does not change it)."""
+    sys.path.insert(0, REPO)
+    from tools.wrf2cppwrf import parse_namelist, WrfTranslator
+    gen = WrfTranslator(parse_namelist(open(nml).read()), namelist_path=nml, output_format="wrfout").translate()
+    return float(gen["restart"]["interval"])
+
+
+def resumed_namelist(rsm, rst, out):
+    """The namelist.input of WRF's resumed run rsm_<C> in the run directory WRF had ((None, why) if a file is
+    missing): make_resumed_refs.sh links every input of rst_<C> into rsm_<C> and the data tars keep rst_<C>'s copy
+    only, so an iofields_filename the namelist names but rsm_<C> lacks is rst_<C>'s (a staged copy of the namelist
+    next to it); one in neither directory is an error (WRF's history has the fields it adds: without them CPPWRF's
+    would lack them)."""
+    nml = os.path.join(rsm, "namelist.input")
+    m = re.search(r"^\s*iofields_filename\s*=\s*['\"]?([^'\",\s]+)", open(nml).read(), re.M | re.I)
+    if not m or m.group(1) == "NONE_SPECIFIED" or os.path.isfile(os.path.join(rsm, m.group(1))):
+        return nml, ""
+    src = os.path.join(rst, m.group(1))
+    if not os.path.isfile(src):
+        return None, f"{nml} names iofields_filename {m.group(1)}: in neither {rsm} nor {rst}"
+    d = os.path.join(out, "rsm_namelist")
+    os.makedirs(d, exist_ok=True)
+    shutil.copyfile(nml, os.path.join(d, "namelist.input"))
+    shutil.copyfile(src, os.path.join(d, m.group(1)))
+    return os.path.join(d, "namelist.input"), ""
+
+
 def restart_check(binary, out, tag, cfg, run_dir):
     """restart_<tag>_fp64[_cuda] (cases/restarts.py, RESTART_WRF): the configuration of the suite case named there,
     (1) straight vs restarted after step 1 from CPPWRF's restart_000001.nc (the step-3 snapshots bit for bit), (2)
@@ -697,7 +726,14 @@ def restart_check(binary, out, tag, cfg, run_dir):
     # (3) resumed from WRF's own wrfrst file at minute 1 against WRF's resumed run
     if rsm:
         r = os.path.join(out, "resumed_from_wrf")
-        rsets = sets + ["output.format=wrfout", f"output.wrf_namelist={rsm}/namelist.input", f"restart.interval={dt:g}",
+        rnl, why = resumed_namelist(rsm, f"{WR}/{rst_ref}", out)
+        if rnl is None:
+            return False, why
+        # WRF's resumed run as configured: its namelist's restart_interval (1000 min); the restart alarm rings at
+        # minute 2 by the WRF_ALARM_SECS_TIL_NEXT_RING_51 of rst_<C>'s file (input_wrf), and the wrfrst file
+        # written there carries that interval
+        rsets = sets + ["output.format=wrfout", f"output.wrf_namelist={rnl}",
+                        f"restart.interval={namelist_restart_interval(rnl):g}",
                         f"run.restart_file={WR}/{rst_ref}/wrfrst_d01_{times_at(start, 60)}"]
         rc, log = run(binary, cfg, rsets, r)
         if rc != 0:

@@ -79,7 +79,7 @@ STATUS = [
 ]
 
 DATA = {
-    'real_d0_r8_fp64_cpu_chain': 'suite_data.tar,v05_suite_refs.tar',
+    'real_d0_r8_fp64_cpu_chain': 'v05_files_data.tar,v05_files_links.tar',
     'real_p4_r8_fp64_cpu_chain': 'suite_data.tar,v05_suite_refs.tar',
     'real_g2_r8_fp64_cpu_chain': 'suite_data.tar,v05_suite_refs.tar',
     'real_p8_r8_fp64_cpu_chain': 'suite_data.tar,v05_suite_refs.tar',
