@@ -11,16 +11,20 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** For v1.3.0 all 423 CUDA FP64 checks matched WRF at tolerance 0 on the Colab G4 (422 run for v1.2.3, 356 for v1.2.2, 338 for v1.2.0 and v1.2.1), and the CUDA FP32 identity build matched WRF real*4 in all 44 cases. For v1.1.0 all 338 CUDA FP64 checks of the
-  suite (319 cases, 18 restart checks and the Straka check) matched WRF at tolerance 0 on the Colab G4 (RTX PRO 6000
-  Blackwell, sm_120, CUDA 13.0); earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
+- **GPU, FP64: bit-identical to WRF too.** The v1.3.0 CUDA FP64 suite reported 423 passes on the Colab G4 (RTX PRO
+  6000 Blackwell, sm_120, CUDA 13.0), with the WRF real*8 comparisons at tolerance 0. The CUDA FP32 identity build
+  matched WRF real*4 in all 44 cases. Earlier G4 runs covered 422 checks for v1.2.3, 356 for v1.2.2 and 338 for
+  v1.2.0 and v1.2.1. The v1.1.0 G4 total of 338 included 319 cases, 18 restart checks and the legacy
+  `straka_wrf_cuda` RMS check against WRF real*4 at 1e-4 K. The WRF real*8 comparisons passed at tolerance 0.
+  Earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
 - **CPU and GPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations,
   among them P1-P4, Thompson, MYNN, WDM6, Morrison, Noah-MP and the nests N1 / N3. The CUDA FP32 build defaults to
   this identity mode (`CPPWRF_CUDA_FP32_IDENTITY=ON`), and the result does not depend on the host's libm. See
   [docs/FP32_IDENTITY.md](docs/FP32_IDENTITY.md).
-- **GPU, FP32 (fast mode):** opt-in (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, FMA contraction and CUDA's math library; 2 to
-  17 % faster than the identity build in the paper benchmark), compared with WRF by relative L2 error; its 44 suite
-  runs are within their measured tolerances ([docs/FP32_ACCURACY.md](docs/FP32_ACCURACY.md)).
+- **GPU, FP32 (fast mode):** opt-in (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, FMA contraction and CUDA's math library).
+  In the [v1.3.0 paper benchmark](#performance), the identity build takes 2.1 to 18.0 % longer in steady stepping
+  than the fast build (identity time / fast time - 1). The fast build is compared with WRF by relative L2 error.
+  Its 44 suite runs are within their measured tolerances ([docs/FP32_ACCURACY.md](docs/FP32_ACCURACY.md)).
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
 
@@ -66,10 +70,12 @@ without a port is reported as an error and never silently ignored. Still missing
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
-- **Model runs against WRF** (`tests/verify/wrf_suite.py`): on every push 483 CPU FP64 checks against WRF real*8
-  (464 cases, 18 restart checks and the Straka check; 154 more cases run with `--slow`) and 44 CPU FP32 cases
-  against WRF real*4, all passing at tolerance 0 at 318159a (version 1.3.0), and the CUDA FP64 checks and the CUDA FP32 identity
-  cases once per release on a GPU. They cover
+- **Model runs and restart checks** (`tests/verify/wrf_suite.py`): CPU CI runs these checks on every push. At
+  318159a (version 1.3.0), CPU CI reported 483 FP64 passes (464 cases, 18 restart checks and the legacy
+  `straka_wrf` RMS check) and 44 FP32 passes. The WRF real*8 and
+  CPU FP32 real*4 comparisons passed at tolerance 0. The `ideal_grav2d_x` cases verify the Straka density current
+  against WRF real*8 at tolerance 0 on CPU and CUDA. Another 154 cases run with `--slow`. The CUDA FP64 checks and the
+  CUDA FP32 identity cases run once per release on a GPU. The cases cover
   real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
   at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are
   compared with WRF's in every variable and output time.
@@ -84,33 +90,42 @@ float functions in the executable, so their result does not depend on the host's
 
 ## Performance
 
-WRF v4.8.0 and CPPWRF ran on one Google Colab G4 runtime: an AMD EPYC 9B45 (24 cores, 48 hardware threads) and an
-NVIDIA RTX PRO 6000 Blackwell (96 GB). WRF was built there from the release source with its own GNU `configure`
-(MPI, and MPI + OpenMP), in real*4 and real*8; its fastest of five process layouts counts. Each run is 1 simulated
-hour with the same namelist and inputs (CPPWRF main c9c95c5, 2026-11-16, fast GPU FP32 build
-`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, before RRTMG computed in single precision in CUDA FP32 builds; no new benchmark was
-run for 1.1 or 1.2). The table gives the stepping time in seconds per simulated hour, without start-up and history
-output ([docs/PERF.md](docs/PERF.md) has the wall times, other layouts and memory):
+The v1.3.0 paper benchmark (CPPWRF commit `9f9bb77`) ran WRF v4.8.0 and CPPWRF on a Google Colab G4 with an AMD
+EPYC 9B45 (24 cores, 48 hardware threads) and an NVIDIA RTX PRO 6000 Blackwell (97887 MiB). WRF used its stock GNU
+real*4 and real*8 builds, with the fastest of eight screened MPI or MPI + OpenMP layouts for each case and precision.
+The table gives steady stepping seconds per simulated hour for the 6 to 24 h runs with history off. Times and
+speed-ups use the unrounded `step_s` medians in the benchmark's `runs.csv` and `summary.json`.
 
-| Case | WRF real*4, best layout | WRF real*8, best layout | CPPWRF GPU FP32 | CPPWRF GPU FP64 |
+| Case | WRF real*4, best layout | WRF real*8, best layout | CPPWRF GPU FP32 (fast) | CPPWRF GPU FP64 |
+|---|---|---|---|---|
+| C1: P4, 119 x 89 x 44 at 15 km, radt 15 min | 2.90 | 4.36 | 0.46 (6.33x) | 1.54 (2.83x) |
+| C2: L, 359 x 269 x 44 at 15 km, radt 15 min | 28.60 | 50.38 | 2.78 (10.28x) | 9.16 (5.50x) |
+| C3: MORR, P4 with Morrison microphysics and radt 1 min | 11.77 | 14.43 | 1.61 (7.31x) | 5.00 (2.89x) |
+| C4: N3, P4 with a two-way 5 km nest | 30.00 | 39.63 | 3.32 (9.05x) | 9.78 (4.05x) |
+
+The speed-ups in brackets are against WRF real*4 for FP32 and against WRF real*8 for FP64. Across the four cases,
+steady stepping speed-ups are 6.33x to 10.28x for fast GPU FP32, 5.36x to 10.07x for identity GPU FP32 and 2.83x
+to 5.50x for GPU FP64. The speed-up is larger on the bigger P4 domain (C2 vs C1). With history off, the median
+`wall` times give speed-ups over WRF real*4 of 5.92x to 8.73x for fast GPU FP32 and 5.06x to 8.32x for identity GPU FP32.
+
+The earlier 1 h benchmark at `c9c95c5` ([docs/PERF.md](docs/PERF.md)) measured the following case, before RRTMG
+computed in single precision in CUDA FP32 builds.
+
+| Case | WRF real*4, best layout | WRF real*8, best layout | CPPWRF GPU FP32 (fast) | CPPWRF GPU FP64 |
 |---|---|---|---|---|
 | P4: 119 x 89 x 44, 15 km, full physics, radt 1 min | 7.46 | 10.71 | 1.47 (5.1x) | 2.35 (4.6x) |
-| P4 with radt 15 min | 2.43 | 4.22 | 0.47 (5.2x) | 1.36 (3.1x) |
-| N3: P4 with a two-way 5 km nest | 24.1 | 34.1 | 4.46 (5.4x) | 8.26 (4.1x) |
-| L: 359 x 269 x 44 (9x P4), radt 15 min | 25.7 | 45.2 | 2.50 (10.3x) | 7.52 (6.0x) |
 
-The speed-ups in brackets are against WRF real*4 for FP32 and against WRF real*8 for FP64. The GPU's advantage grows
-with the domain size. Whole runs gain less: start-up and NetCDF output are serial in both models. Without history
-output GPU FP32 runs 1.8x to 3.5x faster than WRF real*4 in wall time. CPPWRF compresses the NetCDF-4 chunks of
-its history and restart files on host threads, and the files keep every byte: with a frame every
-10 minutes and a restart file, L's hour takes 13 s in GPU FP32 (58 s with serial compression) and 33 s in FP64
-(123 s).
+In the 1 h pre-1.1 benchmark of docs/PERF.md, GPU FP32 was 1.5x to 3.5x faster than WRF real*4 in wall time with history off.
+CPPWRF compresses the NetCDF-4 chunks of its history and restart files on host threads, and the files keep every byte:
+with a frame every 10 minutes and a restart file, L's hour takes 13 s in GPU FP32 (58 s with serial compression) and
+33 s in FP64 (123 s).
 
-In these runs, the GPU FP64 results are bit-identical to the CPU FP64 results. The CPU FP64 results are
+In the earlier `c9c95c5` runs, the GPU FP64 results are bit-identical to the CPU FP64 results. The CPU FP64 results are
 bit-identical to WRF real*8 run in one process, which is how the references are made: WRF's own result changes
 with its MPI layout. In these runs, the fast GPU FP32 build differed from WRF real*4 by about as much as WRF real*4
 differs from WRF real*8 (the default GPU FP32 identity build matches WRF real*4 on the configurations of
-docs/FP32_IDENTITY.md and was 2 to 17 % slower than the fast build in the paper benchmark).
+docs/FP32_IDENTITY.md). In the v1.3.0 paper benchmark, the identity build takes 2.1 to 18.0 % longer in steady stepping
+than the fast build (identity time / fast time - 1).
 
 ## Build
 
@@ -131,7 +146,8 @@ cmake --build build-gpu-dp -j "$(nproc)"
 cmake -S . -B build-cpu-sp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF
 cmake --build build-cpu-sp -j "$(nproc)"
 
-# GPU build, FP32 fast mode (opt-in: FMA contraction, CUDA's math; 2 to 17 % faster, docs/FP32_ACCURACY.md)
+# GPU build, FP32 fast mode (opt-in, with FMA contraction and CUDA math)
+# In the v1.3.0 paper benchmark, identity takes 2.1 to 18.0 % longer in steady stepping (identity time / fast time - 1).
 cmake -S . -B build-gpu-sp-fast -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF \
   -DCPPWRF_CUDA_FP32_IDENTITY=OFF
 cmake --build build-gpu-sp-fast -j "$(nproc)"
@@ -172,7 +188,7 @@ with WRF's `input_sounding`) and the suite's real-data cases, which read the WRF
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): building, the way from WPS to wrfout, the translator, every supported
   and rejected option, nests, GPU runs, restarts, output streams, configuration keys
 - [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md): versions and the verified scope of
-  v1.2.0 (and of the earlier releases)
+  v1.3.0 (and of the earlier releases)
 - [docs/STATUS.md](docs/STATUS.md): what is ported, how it is verified, every case and result
 - [docs/PERF.md](docs/PERF.md): the benchmark against WRF, the GPU profile and the performance roadmap
 - [docs/FP32_IDENTITY.md](docs/FP32_IDENTITY.md): the FP32 builds that are bit-identical to WRF real*4

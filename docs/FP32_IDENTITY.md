@@ -158,9 +158,12 @@ fast, 1.00 s identity (+3 %); the stepping time without KTIME 0.98-1.06 s agains
 spread. By kernel group (fast -> identity, ms over the 10 steps): RRTMG LW 626 -> 634 (its batch kernels have
 `--fmad=false` in the fast build already), dynamics 178 -> 185, WSM6 45 -> 50, Kain-Fritsch 23 -> 27, YSU 26.6 ->
 27.1, Noah and the surface layer 2.8 -> 4.5. GPUs with a larger share of time in FMA-heavy kernels, or with slow
-FP64 (the glibc ports compute in double), pay more: in the paper benchmark (steady stepping, history off) the fast
-build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) was 2 to 17 % faster than the identity build (C1 0.46 vs 0.54 s per
-simulated hour, C2 2.79 vs 2.84, C3 1.62 vs 1.72, C4 3.32 vs 3.81). The identity build is the default from 1.3.0.
+FP64 (the glibc ports compute in double), pay more.
+
+In the v1.3.0 paper benchmark (`9f9bb77`, Colab G4), the identity build takes 2.1 to 18.0 % longer in steady stepping
+than the fast build (identity time / fast time - 1). The history-off `step_s` medians in `runs.csv` and `summary.json`
+give these steady stepping times in seconds per simulated hour (fast / identity): C1 0.46 / 0.54, C2 2.78 / 2.84,
+C3 1.61 / 1.71, C4 3.32 / 3.80. The identity build is the default from 1.3.0.
 
 ## How it is proven
 
