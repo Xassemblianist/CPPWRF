@@ -1,46 +1,106 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
-# cppwrf_real against WRF real.exe: every reference case in ${CPPWRF_WRF_RUNS}/real
-# (tools/init_real/make_real_refs.sh) must give identical wrfinput_d0N, wrfbdy_d01 and (sst_update = 1)
-# wrflowinp_d0N and (grid_fdda >= 1) wrffdda_d0N files.
+# cppwrf_real against WRF real.exe: compare every wrfinput, wrfbdy, wrflowinp and wrffdda output.
 #   usage: run_real_test.sh [BUILD_DIR] [case ...]
-# A case with a '/' is a directory of its own (a WRF reference run made with real.exe: namelist.input, the met_em
-# files and real.exe's outputs; precision double without a precision file); runs:NAME is the directory
-# ${CPPWRF_WRF_RUNS}/NAME (a wrfref run made with run.real; a missing one is a SKIP, exit 77 when every case is).
+# With no case arguments, require the 43 runs of real_exe_data.tar under ${CPPWRF_WRF_RUNS}/real.
+# A case with a '/' is its own directory. runs:NAME selects ${CPPWRF_WRF_RUNS}/NAME.
+# Exit 77 if the selected dataset is absent, or fail if it is incomplete.
 set -uo pipefail
+shopt -s nullglob
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
-if [ -z "${CPPWRF_WRF_RUNS:-}" ] || { [ ! -d "${CPPWRF_WRF_RUNS}/real" ] && [[ "${2:-}" != */* ]] && [[ "${2:-}" != runs:* ]]; }; then
-  echo "SKIP: \${CPPWRF_WRF_RUNS}/real not found"; exit 77
-fi
 BUILD_DIR=${1:-${REPO_ROOT}/build}; shift || true
 EXE=${BUILD_DIR}/src/init_real/cppwrf_real
 SCHEMA=${REPO_ROOT}/data/wrf_schema/wrf-4.8.0.tsv
-# a directory of its own per invocation: ctest runs real_vs_wrf and real_vs_wrf_runs at the same time
+ROOT=${CPPWRF_WRF_RUNS:-}
+packaged=0
+cases=("$@")
+if [ ${#cases[@]} -eq 0 ]; then
+  if [ -z "$ROOT" ] || [ ! -d "$ROOT/real" ]; then
+    echo 'SKIP: ${CPPWRF_WRF_RUNS}/real not found'
+    exit 77
+  fi
+  packaged=1
+  cases=(run_A5_r8 run_HY1_r8 run_N{1,2}{,_r8} run_P{1,2,3,4,6,7,8,9}{,_r8}
+         run_P4_12h run_P5_r8{,_1h} run_R{0,1,4,5}{,_r8} run_R{2,3} run_SU1_r8
+         run_T1_r8 run_W1{,_r8,_r8_damp0} run_bdy12 run_mp6{,_r8})
+fi
+refs=()
+missing=0
+for c in "${cases[@]}"; do
+  ref=
+  case "$c" in
+    runs:*) [ -z "$ROOT" ] || ref=$ROOT/${c#runs:} ;;
+    */*) ref=$c ;;
+    *) [ -z "$ROOT" ] || ref=$ROOT/real/$c ;;
+  esac
+  refs+=("$ref")
+  if [ ! -d "$ref" ]; then
+    echo "Missing reference case $c${ref:+: $ref}"
+    ((missing += 1))
+  fi
+done
+if ((missing)); then
+  if (( !packaged && missing == ${#cases[@]} )); then exit 77; fi
+  exit 1
+fi
+
 BASE=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}
 mkdir -p "$BASE" && WORK=$(mktemp -d "$BASE/real_test.XXXXXX") || exit 1
-cases=("$@")
-[ ${#cases[@]} -eq 0 ] && for d in "${CPPWRF_WRF_RUNS}"/real/*/; do cases+=("$(basename "$d")"); done
-fail=0 skip=0
-for c in "${cases[@]}"; do
-  ref=${CPPWRF_WRF_RUNS}/real/$c
-  [[ "$c" == */* ]] && ref=$c
-  [[ "$c" == runs:* ]] && ref=${CPPWRF_WRF_RUNS}/${c#runs:}
-  [ -d "$ref" ] || { echo "SKIP $c: $ref not found"; skip=$((skip + 1)); continue; }
-  prec=double; [ -f "$ref/precision" ] && prec=$(cat "$ref/precision")
-  rm -rf "$WORK"; mkdir -p "$WORK"
-  if ! "$EXE" --namelist "$ref/namelist.input" --met-dir "$ref" --out-dir "$WORK" \
-       --precision "$prec" --schema "$SCHEMA" > "$WORK/run.log" 2>&1; then
-    echo "FAIL $c: cppwrf_real failed"; tail -3 "$WORK/run.log"; fail=1; continue
+trap 'rm -rf "$WORK"' EXIT
+fail=0
+for i in "${!cases[@]}"; do
+  c=${cases[$i]} ref=${refs[$i]}
+  out=$WORK/$i
+  mkdir "$out" || exit 1
+  if ! ndom=$(PYTHONPATH="$REPO_ROOT/tools${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
+import sys
+from wrf2cppwrf import parse_namelist
+with open(sys.argv[1]) as f:
+    print(parse_namelist(f.read()).get("domains", {}).get("max_dom", [1])[0])
+' "$ref/namelist.input") || [[ ! "$ndom" =~ ^[1-9][0-9]*$ ]]; then
+    echo "FAIL $c: cannot read max_dom from $ref/namelist.input"
+    fail=1; continue
+  fi
+  required=()
+  for ((dom = 1; dom <= ndom; dom++)); do
+    printf -v name 'wrfinput_d%02d' "$dom"
+    required+=("$name")
+  done
+  if ((packaged)); then
+    required+=(wrfbdy_d01)
+    if [[ $c == run_SU1_r8 ]]; then required+=(wrflowinp_d01); fi
   fi
   ok=1
-  for f in "$ref"/wrfinput_d0? "$ref"/wrfbdy_d01 "$ref"/wrflowinp_d0? "$ref"/wrffdda_d0?; do
-    [ -f "$f" ] || continue
-    python3 "${SCRIPT_DIR}/compare_real.py" "$WORK/$(basename "$f")" "$f" > "$WORK/cmp.log" 2>&1 \
-      || { ok=0; cat "$WORK/cmp.log"; }
+  for name in "${required[@]}"; do
+    if [ ! -f "$ref/$name" ]; then
+      echo "FAIL $c: missing WRF reference $name"
+      ok=0
+    fi
   done
-  if [ $ok = 1 ]; then echo "PASS $c"; else echo "FAIL $c"; fail=1; fi
+  if (( !ok )); then fail=1; continue; fi
+
+  prec=double; [ ! -f "$ref/precision" ] || prec=$(cat "$ref/precision")
+  if ! "$EXE" --namelist "$ref/namelist.input" --met-dir "$ref" --out-dir "$out" \
+       --precision "$prec" --schema "$SCHEMA" > "$out/run.log" 2>&1; then
+    echo "FAIL $c: cppwrf_real failed"; tail -3 "$out/run.log"; fail=1; continue
+  fi
+  for f in "$out"/{wrfinput,wrfbdy,wrflowinp,wrffdda}_d[0-9][0-9]; do
+    if [ ! -f "$ref/${f##*/}" ]; then
+      echo "FAIL $c: missing WRF reference ${f##*/}"
+      ok=0
+    fi
+  done
+  compared=0
+  for f in "$ref"/{wrfinput,wrfbdy,wrflowinp,wrffdda}_d[0-9][0-9]; do
+    python3 "${SCRIPT_DIR}/compare_real.py" "$out/${f##*/}" "$f" > "$out/cmp.log" 2>&1 \
+      && ((compared += 1)) || { ok=0; cat "$out/cmp.log"; }
+  done
+  if ((ok && compared)); then
+    echo "PASS $c ($compared files compared)"
+  else
+    echo "FAIL $c ($compared files compared)"
+    fail=1
+  fi
 done
-rm -rf "$WORK"
-[ "$fail" = 0 ] && [ "$skip" -gt 0 ] && [ "$skip" = "${#cases[@]}" ] && exit 77
-exit $fail
+exit "$fail"

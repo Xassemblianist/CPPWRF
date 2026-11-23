@@ -32,8 +32,8 @@ def values(a, b, skip=(), numbers=True):
                 print('%-14s text differs' % n)
                 bad += 1
             continue
-        x = np.array(v[:], dtype=np.float64)
-        y = np.array(w[:], dtype=np.float64)
+        x = np.asarray(v[:])
+        y = np.asarray(w[:])
         if x.shape != y.shape:
             print('%-14s shape %s vs %s' % (n, x.shape, y.shape))
             bad += 1

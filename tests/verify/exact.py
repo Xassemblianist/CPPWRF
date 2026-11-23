@@ -8,6 +8,9 @@ from +0 (WRF writes -0, e.g. in W, C1H, C1F), infinities equal themselves. netCD
 import numpy as np
 
 
+CLOCK_VARS = {"Times", "XTIME"}
+
+
 def raw(ds):
     """The netCDF4 dataset `ds` with masking and scaling off (values as stored)."""
     ds.set_auto_maskandscale(False)
@@ -118,9 +121,8 @@ def uncached(ds):
     return ds
 
 
-def frames(files, opened=None):
-    """{Times string: (dataset, frame index)} over the files of one stream (raw datasets without chunk caches);
-    `opened`: a list that gets the datasets, for the caller to close."""
+def frames(files, opened=None, duplicates=None):
+    """Index a stream by Times. Record repeated timestamps when the caller requests a coverage check."""
     import netCDF4
     m = {}
     for f in sorted(files):
@@ -128,32 +130,59 @@ def frames(files, opened=None):
         if opened is not None:
             opened.append(ds)
         for t in range(len(ds["Times"])):
-            m[text(ds["Times"], t).decode()] = (ds, t)
+            stamp = text(ds["Times"], t).decode()
+            if duplicates is not None and stamp in m:
+                duplicates.append(f"{stamp}: {m[stamp][0].filepath()} and {f}")
+            m[stamp] = (ds, t)
     return m
 
 
 def compare_stream(cfiles, wfiles, subset=False, until=None, global_atts=True, after=None, ignore_atts=(),
-                   stats=None, common_only=False):
-    """Differences of CPPWRF's files of one stream and domain (wrfout_d0N or wrfrst_d0N, any frames per file) from
-    WRF's: ({label: difference}, number of common frames). Every variable of every common frame (by Times) at
-    tolerance 0 (integers in their own types), the variables without a Time dimension of every pair of files that
-    hold a common frame, types, and the metadata of every such pair of files; times or variables only one model
-    wrote are differences ('(times)', '(wrf-only-vars)', '(cppwrf-only-vars)', '(metadata)').
-    subset=True: WRF's files hold a part of the output (tools/colab/stage_data.py keeps some frames and variables):
-    CPPWRF's other variables and frames are no difference, WRF's frames up to `until` (Times string) must all be
-    there and the metadata covers WRF's variables. after (Times string): only WRF's frames later than it count (a
-    resumed run's files against an uninterrupted run's). global_atts=False: the global attributes are not compared;
-    ignore_atts: global attributes not compared besides TITLE (START_DATE of a resumed run against an uninterrupted
-    run). stats: a dict that gets the counts of what was compared (summary() prints them). common_only: WRF's
-    frames that CPPWRF did not write are no difference either (CPPWRF's history less frequent than the
-    reference's; the counts say how many of WRF's frames were compared).
-    One frame of one variable of each model is in memory at a time; the files are closed at the end."""
-    opened = []
+                   stats=None, common_only=False, *, continuation=(), required_times=(), wrf_reference=False):
+    """Compare values and metadata for one stream and domain, matching by Times.
+
+    The coverage window includes `until` and excludes `after`. Shared frames after `until`
+    must also match, although they are outside the coverage counts. With subset=True, CPPWRF may have
+    additional variables or frames. With common_only=True, reference frames outside the candidate's cadence
+    are optional. Every
+    required_times timestamp must exist on both sides. Duplicate Times within either stream fail, including
+    duplicates across input files. A continuation is a separate CPPWRF run whose frames take precedence where
+    it overlaps the first leg at a restart. A WRF reference may not identify itself as CPPWRF in TITLE.
+    """
+    opened, dup_c, dup_w = [], [], []
     try:
-        B = frames(wfiles, opened)
+        A = frames(cfiles, opened, dup_c)
+        A.update(frames(continuation, opened, dup_c))
+        B = frames(wfiles, opened, dup_w)
         if after is not None:
+            A = {k: v for k, v in A.items() if k > after}
             B = {k: v for k, v in B.items() if k > after}
-        return _compare_stream(frames(cfiles, opened), B, subset, until, global_atts, ignore_atts, stats, common_only)
+        bad, n = _compare_stream(A, B, subset, until, global_atts, ignore_atts, stats, common_only)
+        if until is not None:
+            extra = {k for k in A.keys() & B.keys() if k > until}
+            if extra:
+                extra_bad, _ = _compare_stream({k: A[k] for k in extra}, {k: B[k] for k in extra},
+                                               subset, None, global_atts, ignore_atts)
+                for key, detail in extra_bad.items():
+                    bad.setdefault(key, detail)
+        if dup_c or dup_w:
+            bad["(records)"] = [f"duplicate Times in {side}: {d}"
+                                for side, duplicates in (("CPPWRF", dup_c), ("reference", dup_w))
+                                for d in duplicates]
+        expected = set(required_times)
+        missing = []
+        for side, records in (("CPPWRF", A), ("WRF", B)):
+            absent = expected - {k for k in records if until is None or k <= until}
+            if absent:
+                missing.append(f"{side} missing {sorted(absent)}")
+        if missing:
+            bad["(scheduled frames)"] = "; ".join(missing)
+        if wrf_reference:
+            wrong = [ds.filepath() for ds in {ds for ds, _ in B.values()}
+                     if "CPPWRF" in str(getattr(ds, "TITLE", "")).upper()]
+            if wrong:
+                bad["(reference)"] = f"CPPWRF TITLE in WRF reference: {', '.join(sorted(wrong))}"
+        return bad, n
     finally:
         for ds in opened:
             ds.close()
@@ -161,18 +190,20 @@ def compare_stream(cfiles, wfiles, subset=False, until=None, global_atts=True, a
 
 def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None, common_only=False):
     bad, nframes = {}, {}
+    extra_c = sorted(A.keys() - B.keys()) if not subset else []
+    if until is not None:
+        A = {k: v for k, v in A.items() if k <= until}
+        B = {k: v for k, v in B.items() if k <= until}
     common = sorted(set(A) & set(B))
     only_c = sorted(set(A) - set(B))
-    want_w = sorted(t for t in B if until is None or t <= until)
-    only_w = [] if common_only else sorted(t for t in set(B) - set(A) if until is None or t <= until)
-    if (only_c and not subset) or only_w:  # times written by one model only
-        bad["(times)"] = f"only-cppwrf {[] if subset else only_c} only-wrf {only_w}"
+    only_w = [] if common_only else sorted(set(B) - set(A))
+    if extra_c or only_w:
+        bad["(times)"] = f"only-cppwrf {extra_c} only-wrf {only_w}"
     wrf_only, cppwrf_only, compared, static, nan = set(), set(), set(), set(), {}
-    pairs = []  # the pairs of files (CPPWRF's, WRF's) holding a common frame, in the order of the frames
+    pairs = {}  # file pairs in frame order
     for k in common:
         (a, ta), (b, tb) = A[k], B[k]
-        if not any(a is p and b is q for p, q in pairs):
-            pairs.append((a, b))
+        pairs.setdefault((a, b), None)
         cppwrf_only |= {v for v in a.variables if v not in b.variables}
         wrf_only |= {v for v in b.variables if v not in a.variables}
         for v in b.variables:
@@ -228,19 +259,24 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
     for v in nframes:
         if nframes[v] > 1:
             bad[v] += f" [{nframes[v]} frames]"
-    meta = []  # dimensions, types, variable and global attributes of every pair of files holding a common frame
+    meta = []
     for a, b in pairs:
         ignore = ("TITLE",) + tuple(ignore_atts) if global_atts else set(a.ncattrs()) | set(b.ncattrs())
         m = metadata(a, b, ignore, only=list(b.variables) if subset else None)
         meta += [x for x in m if x not in meta]
     if meta:
         bad["(metadata)"] = meta
+    nvars = len((compared | static) - {"Times"})
     if not common:
         bad["(frames)"] = "no common frame"
+    else:
+        for b in {b for _, b in pairs}:
+            if not any(v not in CLOCK_VARS and b[v].dtype.kind in "fiub" for v in b.variables):
+                bad.setdefault("(variables)", []).append(f"{b.filepath()}: no model fields (Times and XTIME are clocks)")
     if stats is not None:
-        ref_vars = set().union(*(set(B[k][0].variables) for k in want_w)) if want_w else set()
-        add(stats, frames=len(common), ref_frames=len(want_w), ref_vars=len(ref_vars - {"Times"}),
-            vars=len((compared | static) - {"Times"}), static=len(static), cppwrf_only_vars=len(cppwrf_only),
+        ref_vars = set().union(*(set(ds.variables) for ds, _ in B.values()))
+        add(stats, frames=len(common), ref_frames=len(B), ref_vars=len(ref_vars - {"Times"}),
+            vars=nvars, static=len(static), cppwrf_only_vars=len(cppwrf_only),
             cppwrf_only_frames=len(only_c), files=len(pairs), nan=sum(nan.values()), nan_vars=len(nan),
             global_atts=int(bool(global_atts)), streams=1)
         stats.setdefault("nan_by_var", {})

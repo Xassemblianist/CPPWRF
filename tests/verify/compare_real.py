@@ -6,7 +6,7 @@
 
 Per output time: max abs / relative L2 difference of U, V, W, PH (full), MU (full), P (full),
 THM (theta_m), QVAPOR (and the hydrometeors, RAINNC, REFL_10CM when present), over the whole domain and over the interior (N points away from the
-lateral boundaries, default 6). Exit 0 always (a report, the tolerances are set by the caller).
+lateral boundaries, default 6). The caller sets the tolerances. Invalid comparisons exit nonzero.
 """
 import os
 import sys
@@ -23,16 +23,30 @@ def main(wrfout, d, inner):
     steps = V.list_steps(d)
     xt = np.array(ds.variables["XTIME"][:], dtype=float) * 60.0
     snaps = {V.read_snap(d, s)["_time"]: s for s in steps}
-    print(f"{'t':>6} {'var':>6} {'max|d|':>11} {'relL2':>10} {'relL2_in':>10} {'max|wrf|':>10}")
+    print(f"{'t':>6} {'var':>6} {'max|d|':>11} {'relL2':>24} {'relL2_in':>10} {'max|wrf|':>10}")
     for it, t in enumerate(xt):
         if t not in snaps:
             continue
         sn = V.read_snap(d, snaps[t])
-        g = lambda n: np.array(ds.variables[n][it], dtype=float)  # noqa: E731
+        def g(n):
+            return np.array(ds.variables[n][it], dtype=float)
+
+        def plane(n):
+            a = sn[n]
+            if a.ndim != 3 or a.shape[0] != 1:
+                sys.exit(f"t={t:g} {n}: expected one CPPWRF level, got shape {a.shape}")
+            return a[0]
+
+        def full(pert, base):
+            a, b = g(pert), g(base)
+            if a.shape != b.shape:
+                sys.exit(f"t={t:g} {pert}/{base}: WRF shapes {a.shape} and {b.shape} differ")
+            return a + b
+
         pairs = {
             "U": (g("U"), sn["u"]), "V": (g("V"), sn["v"]), "W": (g("W"), sn["w"]),
-            "PH": (g("PH") + g("PHB"), sn["ph"]), "MU": (g("MU") + g("MUB"), sn["mu"][0]),
-            "P": (g("P") + g("PB"), sn["p"]),
+            "PH": (full("PH", "PHB"), sn["ph"]), "MU": (full("MU", "MUB"), plane("mu")),
+            "P": (full("P", "PB"), sn["p"]),
         }
         if "qv" in sn:  # dry ideal cases carry no vapour
             pairs["QV"] = (g("QVAPOR"), sn["qv"])
@@ -43,15 +57,17 @@ def main(wrfout, d, inner):
         if "REFL_10CM" in ds.variables and "refl_10cm" in sn:  # do_radar_ref = 1
             pairs["REFL_10CM"] = (g("REFL_10CM"), sn["refl_10cm"])
         if "RAINNC" in ds.variables and "rainnc" in sn:
-            pairs["RAINNC"] = (g("RAINNC"), sn["rainnc"][0])
+            pairs["RAINNC"] = (g("RAINNC"), plane("rainnc"))
         if "THM" in ds.variables and "theta_m" in sn:
             pairs["THM"] = (g("THM") + 300.0, sn["theta_m"])
         for k, (a, b) in pairs.items():
+            if a.shape != b.shape:
+                sys.exit(f"t={t:g} {k}: WRF shape {a.shape} differs from CPPWRF shape {b.shape}")
             e = b - a
             sl = (Ellipsis, slice(inner, -inner), slice(inner, -inner))
             rl = np.sqrt(np.sum(e * e) / max(np.sum(a * a), 1e-300))
             ri = np.sqrt(np.sum(e[sl] ** 2) / max(np.sum(a[sl] ** 2), 1e-300))
-            print(f"{t:6.0f} {k:>6} {np.abs(e).max():11.3e} {rl:10.2e} {ri:10.2e} {np.abs(a).max():10.3e}")
+            print(f"{t:6.17g} {k:>6} {np.abs(e).max():11.3e} {rl:24.17g} {ri:10.2e} {np.abs(a).max():10.3e}")
 
 
 if __name__ == "__main__":

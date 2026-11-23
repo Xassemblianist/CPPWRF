@@ -20,7 +20,8 @@ writes nothing locally); --refs-only: only the reference files (and the ideal na
 --no-refs: only the run directories, no reference file (timing runs: tools/colab/colab_run.sh --bench without
 --cases); --no-steps: no reference in a steps/ directory (tools/gcp/stage_files_data.py packs those whole). A case
 restarted in the middle (suite.restart_at) also takes WRF's wrfrst files at the restart, a tolerance-0 case the
-auxhist3 files (output_diagnostics) next to its reference wrfout, whole.
+auxhist3 files (output_diagnostics) next to its reference wrfout, whole. Restart checks and chains keep the
+full history they compare, even when an ordinary case shares the reference.
 --files: the cases of tests/verify/run_wrf_files_test.sh run with CPPWRF_FILES_NO_VALUES=1 (a GPU build): their input
 directories, and their wrfout / wrfrst references (run, restart and resumed directories) as skeletons, with every
 variable, dimension, attribute and time but zero numbers; whole only the wrfrst files one minute after each case's
@@ -43,6 +44,7 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "tests", "verify"))
 from exact import text  # noqa: E402
 import wrf_suite  # noqa: E402
+from case_data import needs  # noqa: E402
 
 WR = os.environ["CPPWRF_WRF_RUNS"]
 WREF = os.environ.get("CPPWRF_WRF_REF", os.path.expanduser("~/wrf_ref480"))
@@ -88,7 +90,8 @@ def skeleton(src, dst):
 
 def files_cases():
     """{name: (config, wrfout reference dir, restart dir or None, extra --set)} of run_wrf_files_test.sh's CASES."""
-    text = open(os.path.join(REPO, "tests", "verify", "run_wrf_files_test.sh")).read()
+    with open(os.path.join(REPO, "tests", "verify", "run_wrf_files_test.sh")) as f:
+        text = f.read()
     out = {}
     for line in text.split('CASES="', 1)[1].split('\n"', 1)[0].strip().splitlines():
         name, cfg, ref, rst, extra = line.split("|")
@@ -97,15 +100,7 @@ def files_cases():
 
 
 def config_value(cfg, section, key):
-    sec = None
-    for line in open(os.path.join(REPO, cfg)):
-        line = line.split("#")[0].strip()
-        m = re.match(r"\[(.+)\]", line)
-        if m:
-            sec = m.group(1)
-        elif sec == section and "=" in line and line.split("=", 1)[0].strip() == key:
-            return line.split("=", 1)[1].strip()
-    return None
+    return wrf_suite.configuration(cfg, []).get(section, {}).get(key)
 
 
 def first_restart_stamp(d):
@@ -143,16 +138,18 @@ def main():
     unknown = sorted(want - known)
     if unknown:
         sys.exit(f"no case named {', '.join(unknown)}")
-    dirs = {}  # run directory -> history files to keep, Thompson tables needed
+    dirs = {}  # run directory -> whether Thompson tables are needed
     p3dirs = set()  # run directories of P3 cases (its lookup table)
     ref_times = {}  # reference wrfout -> compared times
+    full_refs = set()  # chains need every scheduled history frame
     exact = set()  # reference wrfout files of tolerance-0 cases
     restarts = set()  # WRF's wrfrst files at the restart of restarted cases
     ideal = set()  # files under CPPWRF_WRF_REF: ideal-case soundings and reference wrfout files
-    for name, key, cfg, sets, wo, t, tol in wrf_suite.CASES:
+    for name, _, cfg, sets, wo, t, tol in wrf_suite.CASES:
         if name not in want:
             continue
-        snd = config_value(cfg, "case", "sounding_file")
+        dropin = cfg.startswith("dropin:")
+        snd = None if dropin else config_value(cfg, "case", "sounding_file")
         refs = list(wo.values()) if isinstance(wo, dict) else [wo]
         if snd and "${CPPWRF_WRF_REF}" in snd or any(r.startswith(WREF) for r in refs):
             if snd:
@@ -161,43 +158,61 @@ def main():
             ideal.update(os.path.join(os.path.dirname(r), "namelist.input") for r in refs if r.startswith(WREF))
             log(f"{name}: ideal ({len(refs)} reference files)")
             continue
-        rd = next((s.split("=", 1)[1] for s in sets if s.startswith("real.dir=")), None)
-        rd = rd or config_value(cfg, "real", "dir")
-        if not rd or "${CPPWRF_WRF_RUNS}" not in rd and not rd.startswith(WR):
-            log(f"{name}: skipped (not a real-data case of CPPWRF_WRF_RUNS)")
-            continue
-        rd = rd.replace("${CPPWRF_WRF_RUNS}", WR)
-        mp = next((s.split("=", 1)[1] for s in sets if s.startswith("phys.mp_physics=")), None)
-        mp = mp or config_value(cfg, "phys", "mp_physics") or "0"
-        refs = [r for r in (wo.values() if isinstance(wo, dict) else [wo])
-                if not (a.no_steps and "/steps/" in r) and not a.no_refs]
-        for r in refs:
-            d = dirs.setdefault(os.path.dirname(r), [set(), False])
-            d[0].add(os.path.basename(r))
+        if dropin:
+            rd, nl_dir, links = wrf_suite.dropin_spec(cfg, sets)
+            if not a.refs_only:
+                dirs.setdefault(nl_dir, False)
+            if not a.no_refs:
+                restarts.update(links)
+            mp = "0"
+        else:
+            conf = wrf_suite.configuration(cfg, sets)
+            rd = conf.get("real", {}).get("dir")
+            if not rd or "${CPPWRF_WRF_RUNS}" not in rd and not rd.startswith(WR):
+                log(f"{name}: skipped (not a real-data case of CPPWRF_WRF_RUNS)")
+                continue
+            rd = rd.replace("${CPPWRF_WRF_RUNS}", WR)
+            mp = conf.get("phys", {}).get("mp_physics", "0")
+        chain = wrf_suite.chain_at(sets)
+        if chain and chain[3]:
+            doms = wo if isinstance(wo, dict) else ("d01",)
+            refs.extend(chain[3].replace("wrfout_d01_", f"wrfout_{d}_") for d in doms)
+        refs = {r for r in refs if not a.no_refs and not (a.no_steps and "/steps/" in r)}
+        mid = wrf_suite.restart_at(sets)
+        for r in sorted(refs):
+            dirs.setdefault(os.path.dirname(r), False)
             ref_times.setdefault(r, set()).add(float(t))
-            if all(x == 0.0 for x in tol.values()):
-                exact.add(r)
-            mid = wrf_suite.restart_at(sets)
+            if chain:
+                full_refs.add(r)
+            dom = re.search(r"wrfout_(d\d\d)_", os.path.basename(r)).group(1)
             if mid:
                 with nc.Dataset(r) as ds:
                     xt = np.array(ds["XTIME"][:], dtype=float) * 60.0
                     at = [text(ds["Times"], i).decode() for i, x in enumerate(xt) if abs(x - mid) < 1e-6]
-                dom = re.search(r"wrfout_(d\d\d)_", os.path.basename(r)).group(1)
                 restarts.update(os.path.join(os.path.dirname(r), f"wrfrst_{dom}_{x}") for x in at)
-            if all(x == 0.0 for x in tol.values()):  # wrf_suite.py compares them as the wrfout files
-                dom = re.search(r"wrfout_(d\d\d)_", os.path.basename(r)).group(1)
-                restarts.update(glob.glob(os.path.join(os.path.dirname(r), f"auxhist3_{dom}_*")))
-        d = dirs.setdefault(rd, [set(), False]) if not a.refs_only else [set(), False]
-        d[1] = d[1] or (mp.strip() in ("8", "28") and not a.no_thompson_tables)
+            if all(x == 0.0 for x in tol.values()):
+                exact.add(r)
+                streams = [("auxhist3", wrf_suite.auxhist3_check(sets, cfg)),
+                           ("wrfrst", wrf_suite.wrfrst_check(sets))]
+                for kind, required in streams:
+                    if kind == "wrfrst" and not required:
+                        continue
+                    pattern = os.path.join(os.path.dirname(r), f"{kind}_{dom}_*")
+                    paths = glob.glob(pattern)
+                    if required and not paths:
+                        sys.exit(f"{name}: missing reference stream {pattern}")
+                    restarts.update(paths)
+        if not a.refs_only:
+            dirs[rd] = dirs.get(rd, False) or (mp.strip() in ("8", "28") and not a.no_thompson_tables)
         if mp.strip() in ("50", "51") and not a.refs_only:
             p3dirs.add(rd)
         log(f"{name}: {os.path.relpath(rd, WR)}")
     for tag, cfg, _ in wrf_suite.RESTARTS:  # restart_<tag>_*: the input directory of the configuration
         if not a.refs_only and any(n in want for n in wrf_suite.SPECIAL if n.startswith(f"restart_{tag}_")):
             rd = config_value(cfg, "real", "dir").replace("${CPPWRF_WRF_RUNS}", WR)
-            d = dirs.setdefault(rd, [set(), False])
-            d[1] = d[1] or ((config_value(cfg, "phys", "mp_physics") or "0").strip() in ("8", "28") and not a.no_thompson_tables)
-            if (config_value(cfg, "phys", "mp_physics") or "0").strip() in ("50", "51"):
+            mp = (config_value(cfg, "phys", "mp_physics") or "0").strip()
+            dirs[rd] = dirs.get(rd, False) or (mp in ("8", "28") and not a.no_thompson_tables)
+            if mp in ("50", "51"):
                 p3dirs.add(rd)
             log(f"restart_{tag}: {os.path.relpath(rd, WR)}")
     rwhole = {}  # the restart checks' WRF references (wrf_suite.restart_check): whole files
@@ -208,8 +223,19 @@ def main():
         case = next(c for c in wrf_suite.CASES if c[0] == case_name)
         rd = next((s.split("=", 1)[1] for s in case[3] if s.startswith("real.dir=")), None)
         if rd:  # the case's own input directory (restart_t1: run_T1_r8)
-            dirs.setdefault(rd.replace("${CPPWRF_WRF_RUNS}", WR), [set(), False])
+            dirs.setdefault(rd.replace("${CPPWRF_WRF_RUNS}", WR), False)
         ref = os.path.join(WR, rst_ref, os.path.basename(case[4])) if rst_ref else case[4]
+        if not os.path.isfile(ref):
+            sys.exit(f"missing restart history reference: {ref}")
+        if rsm_ref:
+            selected = next(n for n in sorted(want) if n.startswith(f"restart_{tag}_fp64"))
+            required, _ = needs(selected)
+            for pattern, must_exist in required.items():
+                if not must_exist:
+                    continue
+                path = os.path.join(WR, os.path.relpath(pattern, "wrf_runs"))
+                if not any(os.path.isfile(f) for f in glob.glob(path)):
+                    sys.exit(f"{selected}: missing restart reference {path}")
         for x in [ref, os.path.join(os.path.dirname(ref), "namelist.input"),
                   os.path.join(os.path.dirname(ref), "myoutfields.txt")]:
             if os.path.isfile(x):
@@ -225,9 +251,9 @@ def main():
         cfg, ref, rst, extra = fcases[name]
         m = re.search(r"real\.dir=(\S+)", extra)
         rd = m.group(1) if m else config_value(cfg, "real", "dir").replace("${CPPWRF_WRF_RUNS}", WR)
-        d = dirs.setdefault(rd, [set(), False])
-        d[1] = d[1] or ((config_value(cfg, "phys", "mp_physics") or "0").strip() in ("8", "28") and not a.no_thompson_tables)
-        if (config_value(cfg, "phys", "mp_physics") or "0").strip() in ("50", "51"):
+        mp = (config_value(cfg, "phys", "mp_physics") or "0").strip()
+        dirs[rd] = dirs.get(rd, False) or (mp in ("8", "28") and not a.no_thompson_tables)
+        if mp in ("50", "51"):
             p3dirs.add(rd)
         rsm = rst.replace("/rst_", "/rsm_") if rst else None
         rst_at = None
@@ -260,7 +286,7 @@ def main():
         tarfile.open(a.out, "w", dereference=True)
     added = set()
     with tf:
-        for d, (keep, thompson) in sorted(dirs.items()):
+        for d, thompson in sorted(dirs.items()):
             for f in sorted(os.listdir(d)):
                 p = os.path.join(d, f)
                 if os.path.isdir(p) or (f in THOMPSON and not thompson) or \
@@ -269,7 +295,7 @@ def main():
                     continue
                 arc = os.path.join("wrf_runs", os.path.relpath(p, WR))
                 added.add(arc)
-                if p in ref_times and a.whole:
+                if arc in whole or (p in ref_times and (a.whole or p in full_refs)):
                     tf.add(p, arcname=arc, recursive=False)
                 elif p in ref_times:
                     with tempfile.TemporaryDirectory() as tmp:

@@ -13,7 +13,7 @@ RESTARTS = (("p1", "configs/real_p1_r8.ini", "run_P1_r8"), ("a01", "configs/real
             ("nmp1", "configs/real_nmp1_r8.ini", "run_NMP1_r8"), ("mynn", "configs/real_mynn_r8.ini", "run_MYNN_r8"),
             ("mynnsf1", "configs/real_mynnsf1_r8.ini", "run_P6_r8"), ("mynnsf2", "configs/real_mynnsf2_r8.ini", "run_P6_r8"),
             ("mynnx1", "configs/real_mynnx1_r8.ini", "run_P6_r8"), ("mynnx2", "configs/real_mynnx2_r8.ini", "run_P6_r8"),
-            ("t1", "configs/real_t1.ini", "run_R1_r8"),
+            ("t1", "configs/real_t1.ini", "run_T1_r8"),
             ("a05", "configs/real_a05_r8.ini", "run_A05_r8"), ("a05g", "configs/real_a05g_r8.ini", "run_A05G_r8"),
             ("slab1", "configs/real_slab1_r8.ini", "run_SLAB1_r8"), ("acm7", "configs/real_acm7_r8.ini", "run_ACM7_r8"),
             ("morr", "configs/real_morr_r8.ini", "run_MORR_r8"), ("p3mp", "configs/real_p3mp_r8.ini", "run_P3MP_r8"))
