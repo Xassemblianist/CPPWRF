@@ -5,6 +5,21 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
+## Unreleased
+
+### Changed
+- CPPWRF's own restart file (`restart_<step>.nc`) no longer depends on the decomposition: a decomposed run (tiles,
+  MPI ranks) writes the halo points of its fields beyond the domain's edges (`HALO_<name>`, gathered from the edge
+  patches) as a run of one patch does, and a decomposed run resumed from the file sets them in every patch that holds
+  them. Before, a decomposed run's file had no `HALO_<name>` and a decomposed resume refilled those points from the
+  domain's values. WRF-format wrfrst files and every model output are unchanged. Suite: `real_p4_r8_fp64_cpu_rst_t2x2` and
+  `ideal_quarter_ss_k2_fp64_cpu_rst_t2x2` (every restart file of a 2 x 2 run identical to the one-patch run's, all
+  variables and attributes; quarter_ss periodic) and
+  `real_p4_r8_fp64_cpu_chain_t2x2` (P4's restart chain in 2 x 2 tiles).
+- docs/MPI.md section 6: the CUDA FP64 build with MPI on two T4 GPUs of one Kaggle node (`tools/kaggle/kaggle_mpi.sh`):
+  seven cuda_dp checks in seven layouts (one process, one rank, one rank per GPU, two ranks per GPU, tiles over the
+  GPUs) equal the WRF references at tolerance 0.
+
 ## 1.3.0 (2026-11-22)
 
 ### Changed
