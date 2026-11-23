@@ -7,3 +7,7 @@ port_gem10_data.tar
 port_gem13_data.tar
 # real_vs_wrf_runs: run_V111TAV_r8 ... run_V111NSH_r8 (wrfref v111-refs: TAVGSFC, surface pressure from PMSL)
 port_v111_data.tar
+# real_vs_wrf (CMakeLists.txt, tests/init_real/run_real_test.sh): WRF real.exe's runs wrf_runs/real/run_* (43 run
+# directories: namelist.input, met_em files, precision, real.exe's wrfinput / wrfbdy; 1.7 GB, the met_em files as
+# files, not links)
+real_exe_data.tar

@@ -21,6 +21,7 @@ import exact  # noqa: E402
 
 def values(a, b, skip=(), numbers=True):
     bad = 0
+    payload = False
     for n, v in a.variables.items():
         if n not in b.variables or n in skip:
             continue
@@ -32,18 +33,22 @@ def values(a, b, skip=(), numbers=True):
                 print('%-14s text differs' % n)
                 bad += 1
             continue
-        x = np.array(v[:], dtype=np.float64)
-        y = np.array(w[:], dtype=np.float64)
+        x = np.asarray(v[:])
+        y = np.asarray(w[:])
         if x.shape != y.shape:
             print('%-14s shape %s vs %s' % (n, x.shape, y.shape))
             bad += 1
             continue
+        payload |= n not in exact.CLOCK_VARS and x.dtype.kind in "fiub" and x.size > 0
         if not numbers:
             continue
         dif = exact.describe(x, y)
         if dif:
             bad += 1
             print('%-14s %s' % (n, dif))
+    if not payload:
+        print("no model fields with compared values or shapes")
+        bad += 1
     return bad
 
 
@@ -92,9 +97,12 @@ def main():
         args = args[2:]
     if len(args) != 2:
         sys.exit('usage: compare_real.py [--ignore VAR,...] [--no-values] cppwrf_file wrf_file')
-    a, b = exact.raw(Dataset(args[0])), exact.raw(Dataset(args[1]))
-    nv = values(a, b, skip, numbers)
-    nm = metadata(a, b, {'TITLE'})
+    with Dataset(args[0]) as a, Dataset(args[1]) as b:
+        for ds in (a, b):
+            if "Time" not in ds.dimensions or not len(ds.dimensions["Time"]):
+                sys.exit(f"{ds.filepath()}: zero Time records")
+        nv = values(exact.raw(a), exact.raw(b), skip, numbers)
+        nm = metadata(a, b, {'TITLE'})
     print('%s: %d variables differ, %d metadata differences' % (args[1], nv, nm))
     sys.exit(1 if nv or nm else 0)
 

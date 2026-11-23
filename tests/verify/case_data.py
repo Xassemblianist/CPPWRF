@@ -13,8 +13,8 @@ configuration and --set list name under ${CPPWRF_WRF_RUNS} or ${CPPWRF_WRF_REF} 
 case.sounding_file). The tars are unpacked in vm_data.txt's order, a later tar's file replacing an earlier one's,
 so a file is the last tar's version; an earlier tar that holds the same file (same size and time) serves as well.
 The case needs the fewest tars (by size) that give each of its files as the full suite has it. A reference wrfout
-file in no tar is an error. Prints each case whose recorded DATA differs from this and exits 1 if one does;
---write records the derived tars in the group files instead (DATA = {...} at the end of each file).
+file or required stream in no tar is an error, as is a missing listing of a recorded tar. By default, a
+difference from recorded DATA also exits 1. --write records the derived tars only after coverage validation.
 """
 import datetime
 import os
@@ -39,13 +39,14 @@ def order():
 def listing(path):
     """{path in the tar: (size, date time)} of a `tar tvf` list (links: their target's entry is the file)."""
     out = {}
-    for line in open(path):
-        f = line.rstrip("\n").split(None, 5)
-        if len(f) < 6 or not re.match(r"[-hl]", f[0]):
-            continue
-        p = f[5].split(" -> ")[0].split(" link to ")[0]
-        p = p[2:] if p.startswith("./") else p
-        out[p] = (int(f[2]), f[3] + " " + f[4])
+    with open(path) as f:
+        for line in f:
+            fields = line.rstrip("\n").split(None, 5)
+            if len(fields) < 6 or not re.match(r"[-hl]", fields[0]):
+                continue
+            p = fields[5].split(" -> ")[0].split(" link to ")[0]
+            p = p[2:] if p.startswith("./") else p
+            out[p] = (int(fields[2]), fields[3] + " " + fields[4])
     return out
 
 
@@ -60,17 +61,8 @@ def rel(path):
 
 def config_paths(cfg, sets):
     """The data paths a configuration and its --set list name (section.key -> path; --set replaces the file's)."""
-    conf, sec = {}, None
-    for line in open(os.path.join(REPO, cfg)):
-        line = line.split("#")[0].strip()
-        if re.fullmatch(r"\[.+\]", line):
-            sec = line[1:-1]
-        elif sec and "=" in line:
-            conf[f"{sec}.{line.split('=', 1)[0].strip()}"] = line.split("=", 1)[1].strip()
-    for x in sets:
-        if "=" in x:
-            conf[x.split("=", 1)[0]] = x.split("=", 1)[1]
-    return [r for r in (rel(v) for v in conf.values()) if r]
+    conf = wrf_suite.configuration(os.path.join(REPO, cfg), sets)
+    return [r for opts in conf.values() for v in opts.values() if (r := rel(v))]
 
 
 def needs(name):
@@ -79,32 +71,67 @@ def needs(name):
     case = next((c for c in wrf_suite.CASES if c[0] == name), None)
     if case:
         _, _, cfg, sets, wo, t, tol = case
-        if cfg.startswith("dropin:"):  # the run directory it copies, its namelist's directory, the linked files
+        dropin = cfg.startswith("dropin:")
+        if dropin:  # the run directory it copies, its namelist's directory, the linked files
             src, nl_dir, links = wrf_suite.dropin_spec(cfg, sets)
             dirs += [r for r in (rel(src), rel(nl_dir)) if r]
             files.update({rel(f): True for f in links})
+            if directory := rel(nl_dir):
+                files[os.path.join(directory, "namelist.input")] = True
         else:
             dirs += config_paths(cfg, [s for s in sets if not s.startswith("suite.")])
         mid = wrf_suite.restart_at(sets)
-        for w in (wo.values() if isinstance(wo, dict) else [wo]):
+        aux = wrf_suite.auxhist3_check(sets, cfg)
+        chain = wrf_suite.chain_at(sets)
+        refs = list(wo.values()) if isinstance(wo, dict) else [wo]
+        if chain and chain[3]:
+            for path in wrf_suite.chain_references(cfg, sets, chain[3]).values():
+                files[os.path.join(os.path.dirname(rel(path)), "namelist.input")] = True
+                refs.append(path)
+        for w in dict.fromkeys(refs):
             r = rel(w)
             files[r] = True
             d, dom = os.path.dirname(r), re.search(r"wrfout_(d\d\d)_", r).group(1)
             for f in ("namelist.input", "myoutfields.txt"):
                 files.setdefault(os.path.join(d, f), False)
             if all(x == 0.0 for x in tol.values()):
-                files.setdefault(os.path.join(d, f"auxhist3_{dom}_*"), False)
-                if mid:  # the reference's start (its file name) + mid
-                    t0 = datetime.datetime.strptime(r[-19:], "%Y-%m-%d_%H:%M:%S")
-                    at = (t0 + datetime.timedelta(seconds=mid)).strftime("%Y-%m-%d_%H:%M:%S")
+                files[os.path.join(d, f"auxhist3_{dom}_*")] = aux
+                if wrf_suite.wrfrst_check(sets):
+                    files[os.path.join(d, f"wrfrst_{dom}_*")] = True
+                    if not dropin:
+                        conf = wrf_suite.configuration(cfg, sets)
+                        for stamp in wrf_suite.configured_restart_times(conf, r[-19:]):
+                            files[os.path.join(d, f"wrfrst_{dom}_{stamp}")] = True
+                if mid is not None and "suite.native_restart" not in sets:  # the reference's start + mid
+                    at = wrf_suite.times_at(r[-19:], mid)
                     files[os.path.join(d, f"wrfrst_{dom}_{at}")] = True
         return files, dirs
-    if name.startswith("straka_wrf"):
-        files[rel(f"{wrf_suite.WREF}/run_straka_d1/wrfout_d01_0001-01-01_00:00:00")] = True
-        return files, config_paths("configs/straka_wrf.ini", [])
     m = re.fullmatch(r"restart_(.+?)_(fp64|fp64_cuda|fp32_cuda)", name)
     tag, cfg, rd = next(r for r in wrf_suite.RESTARTS if r[0] == m.group(1))
-    return files, config_paths(cfg, [])
+    if m.group(2) == "fp32_cuda":  # restart_p1 (self-consistency of the fast FP32 build)
+        return files, config_paths(cfg, [])
+    # restart_check: the suite case's configuration and reference, or WRF's rst_ / rsm_ runs (cases/restarts.py)
+    case_name, rst_ref, rsm_ref, _ = wrf_suite.RESTART_WRF[tag]
+    case = next(c for c in wrf_suite.CASES if c[0] == case_name)
+    sets = [s for s in case[3] if not s.startswith("suite.")]
+    ref = rel(case[4])
+    if rst_ref:
+        ref = os.path.join("wrf_runs", rst_ref, os.path.basename(ref))
+    files[ref] = True
+    files.setdefault(os.path.join(os.path.dirname(ref), "namelist.input"), True)
+    files.setdefault(os.path.join(os.path.dirname(ref), "myoutfields.txt"), False)
+    if rsm_ref:
+        t0 = datetime.datetime.strptime(ref[-19:], "%Y-%m-%d_%H:%M:%S")
+        at = (t0 + datetime.timedelta(seconds=60)).strftime("%Y-%m-%d_%H:%M:%S")
+        files[os.path.join("wrf_runs", rst_ref, f"wrfrst_d01_{at}")] = True
+        files[os.path.join("wrf_runs", rsm_ref, "namelist.input")] = True
+        files.setdefault(os.path.join("wrf_runs", rsm_ref, "myoutfields.txt"), False)
+        resume = os.path.join("wrf_runs", rsm_ref)
+        files[os.path.join(resume, "wrfout_d01_*")] = True
+        files[os.path.join(resume, "wrfrst_d01_*")] = True
+        first = (t0 + datetime.timedelta(seconds=120)).strftime("%Y-%m-%d_%H:%M:%S")
+        files[os.path.join(resume, f"wrfrst_d01_{first}")] = True
+    return files, config_paths(cfg, sets)
 
 
 def derive(name, lists, tars):
@@ -112,11 +139,13 @@ def derive(name, lists, tars):
     files, dirs = needs(name)
     want, problems = {}, []  # path -> required
     for p, req in files.items():
-        if "*" in p:  # the auxhist3 files
-            for t in tars:
-                for q in lists[t]:
-                    if re.fullmatch(re.escape(p).replace(r"\*", ".*"), q):
-                        want.setdefault(q, False)
+        if "*" in p:
+            pattern = re.compile(re.escape(p).replace(r"\*", ".*"))
+            matches = {q for t in tars for q in lists[t] if pattern.fullmatch(q)}
+            if req and not matches:
+                problems.append(f"{p}: in no tar")
+            for q in sorted(matches):
+                want.setdefault(q, False)
         else:
             want[p] = want.get(p, False) or req
     for d in dirs:
@@ -157,26 +186,28 @@ def main():
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     if len(args) != 1:
         sys.exit(__doc__)
-    tars = order() + [t for v in DATA.values() for t in v.split(",") if t and t not in order()]
+    tars = order() + [t for v in DATA.values() for t in v.split(",") if t]
     tars = list(dict.fromkeys(tars))
     lists = {t: listing(os.path.join(args[0], t + ".txt")) for t in tars if os.path.exists(os.path.join(args[0], t + ".txt"))}
     unlisted = [t for t in tars if t not in lists]
     names = [c[0] for c in wrf_suite.CASES] + wrf_suite.SPECIAL
-    derived, bad = {}, 0
+    derived, bad, incomplete = {}, 0, 0
     for n in names:
         rec = DATA.get(n)
         if rec and any(t in unlisted for t in rec.split(",")):
-            print(f"unchecked {n}: {rec} (no list of {', '.join(t for t in rec.split(',') if t in unlisted)})")
-            derived[n] = rec
+            print(f"PROBLEM {n}: no list of {', '.join(t for t in rec.split(',') if t in unlisted)}")
+            incomplete += 1
             continue
         got, problems = derive(n, lists, [t for t in tars if t in lists])
         derived[n] = ",".join(got)
+        if problems:
+            incomplete += 1
         for x in problems:
             print(f"PROBLEM {n}: {x}")
         if rec != derived[n]:
             bad += 1
             print(f"{'DIFFERS' if rec else 'MISSING'} {n}: recorded {rec} derived {derived[n]}")
-    if "--write" in sys.argv:
+    if "--write" in sys.argv and not incomplete:
         for g in GROUPS + [restarts]:
             mine = [c[0] for c in getattr(g, "CASES", [])] if g is not restarts else wrf_suite.SPECIAL
             path = g.__file__
@@ -190,8 +221,9 @@ def main():
             open(path, "w").write(s)
         print(f"DATA written for {len(names)} checks")
         return
-    print(f"{len(names)} checks, {bad} differ from the tars' lists; unlisted tars: {', '.join(unlisted) or 'none'}")
-    sys.exit(1 if bad else 0)
+    print(f"{len(names)} checks, {bad} differ from the tars' lists, {incomplete} with coverage problems; "
+          f"unlisted tars: {', '.join(unlisted) or 'none'}")
+    sys.exit(1 if bad or incomplete else 0)
 
 
 if __name__ == "__main__":

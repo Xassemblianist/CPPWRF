@@ -1,0 +1,26 @@
+# WRF v4.8.0 reference runs of the restart chains (tests/verify/cases/66_restart_chain.py, data chain_wrf_data.tar):
+# WRF's uninterrupted run of each chain's very configuration (the physics intervals radt, bldt, cudt of the chain,
+# 15 or 20 min, history every 3 min; N3: d01 every 5 min, d02 every 15 min), which the chain's straight and resumed
+# runs equal at tolerance 0. For tools/colab/colab_wrfref.sh (REFS format of tools/gcp/gcp_wrfref.sh: NAME BASE_RUN
+# WRF_EXE section.key=value ...; tools/gcp/wrf_ref_run.py; run.steps=0: no 3-step, restart or resumed runs).
+# Data: matrix_data.tar (the WRF executables), and the suite's directories of the chains' 1 h WRF runs (inputs,
+# tables, namelist.input), which unpack beside the runtime's base runs (BASE_RUN ../wrf_runs/run_<C>_r8):
+# suite_data.tar, v05_suite_refs.tar (run_P4_r8, run_G2_r8, run_P8_r8, run_NMP1_r8, run_N3h_r8), n3_data.tar,
+# port_c22_data.tar (run_SLAB1_r8). WRF build: r8 (stock -r8), r8d8 (-r8 -double-8) for Grell-Freitas-Li (P8).
+#
+#   tools/colab/colab_wrfref.sh tests/verify/refs/chain_refs.txt \
+#     --data matrix_data.tar,suite_data.tar,v05_suite_refs.tar,n3_data.tar,port_c22_data.tar \
+#     --stage chain_wrf_data.tar:real_p4_r8_fp64_cpu_chain,...,real_n3_r8_fp64_cpu_chain --cases <the same>
+#
+# P4 with radiation every 10 min, PBL and cumulus every 5 min
+CHP4_r8 ../wrf_runs/run_P4_r8 wrf_r8.exe physics.radt=10 physics.bldt=5 physics.cudt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+# G2 (P2 with GWDO) with PBL and cumulus every 5 min
+CHG2_r8 ../wrf_runs/run_G2_r8 wrf_r8.exe physics.bldt=5 physics.cudt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+# P8 (Grell-Freitas-Li, ishallow 1) with PBL and cumulus every 5 min
+CHP8_r8 ../wrf_runs/run_P8_r8 wrf_r8d8.exe physics.bldt=5 physics.cudt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+# NMP1 (Noah-MP) with PBL every 5 min
+CHNMP1_r8 ../wrf_runs/run_NMP1_r8 wrf_r8.exe physics.bldt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+# SLAB1 (the slab LSM) with PBL every 5 min
+CHSLAB1_r8 ../wrf_runs/run_SLAB1_r8 wrf_r8.exe physics.bldt=5 time_control.run_seconds=900 time_control.history_interval_s=180 run.steps=0
+# N3 (two-way nest) with radiation every 4 min on d01, every 2 min on d02
+CHN3_r8 ../wrf_runs/run_N3h_r8 wrf_r8.exe physics.radt=4,2 time_control.run_seconds=1200 time_control.history_interval_s=300,900 run.steps=0

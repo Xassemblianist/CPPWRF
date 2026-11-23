@@ -20,21 +20,30 @@ build (-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF; cases cuda, compared
 FP64 build, --cuda-sp-id the default CUDA FP32 identity build (-DCPPWRF_DOUBLE=OFF, CPPWRF_CUDA_FP32_IDENTITY=ON by
 default; cases cuda_sp_id: the cpu_sp cases on the GPU, against the same WRF real*4 references at tolerance 0).
 Cases with tolerance 0 (CPU FP64, CPU FP32) run with WRF history output and their wrfout files are compared with WRF's at
-tolerance 0 (exact.py: NaN equals only NaN, -0 differs from +0): every variable of the reference file, every
-reference frame up to the case's time (the final one must be there), types and variable attributes, and the
-global attributes when the reference's namelist.input is there (CPPWRF's history then reads it). The other
-cases compare the model state with the reference's by relative L2 at the case's time (compare_real.py).
+tolerance 0 (exact.py: NaN equals only NaN, -0 differs from +0, integers in their own types): every variable of
+the reference file (those without a Time dimension too), every reference frame up to the case's time (the final one
+must be there), types and variable attributes of every file, and the global attributes when the reference's
+namelist.input is there (CPPWRF's history then reads it; the PASS line says when it is not). The PASS line counts
+what was compared (WRF's frames and variables, CPPWRF-only variables and frames, NaN at the same points in both,
+variables whose differences are not counted). The other cases compare the model state with the reference's by
+relative L2 at the case's time (compare_real.py). The restart checks (cases/restarts.py) compare their resumed runs
+with WRF at tolerance 0 too; the restart chains (cases/66_restart_chain.py) do where WRF has a run of their
+configuration (suite.chain_wrf), else they are CPPWRF against CPPWRF only. Each PASS / FAIL line ends with what it
+compared with ([vs WRF tol 0], [vs WRF rel L2], [self only]) before its wall time, and the SPLIT line before the
+SUITE line counts the PASSes by it (tools/gcp/suite_status.sh counts a merged suite.log the same way).
 With the reference's namelist.input a tolerance-0 case FAILs when its configuration (config file and --set) sets
 an option otherwise than tools/wrf2cppwrf.py's translation of that namelist.
 Only the cases of the given binaries are selected; a given binary that does not exist is an error (exit 2).
-Exit status 0 = every selected case PASSed; a case whose reference is missing is a SKIP and fails the suite unless
---allow-skip. The last line counts the results.
+Exit status 0 requires at least one result and a result for each name matched by --only. Missing reference data
+produces a SKIP. --allow-skip permits reported SKIPs, including a selection with every case reported as SKIP.
 Slow cases (suite.slow in their --set list: the 24 h and 72 h runs) are left out unless --slow is given or --only --exact
 names them.
 """
 import argparse
 import filecmp
 import glob
+import json
+import math
 import os
 import re
 import shutil
@@ -48,10 +57,14 @@ REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 # the cases, one file per group (tests/verify/cases/NN_<group>.py), and the restart checks (cases/restarts.py);
 # WRF reference runs under ${CPPWRF_WRF_RUNS}, ideal-case references under ${CPPWRF_WRF_REF} (cases/common.py)
 from cases import CASES, DATA, RESTARTS, STATUS  # noqa: E402
+from cases.restarts import RESTART_WRF  # noqa: E402
 from cases.common import WR, WREF  # noqa: E402,F401
 
-# the checks that are not in CASES: the Straka density current against WRF and the restart checks
-SPECIAL = (["straka_wrf", "straka_wrf_cuda", "restart_p1_fp32_cuda"] + [f"restart_{t}_fp64" for t, _, _ in RESTARTS]
+# the checks that are not in CASES: the restart checks. (The Straka density current of configs/straka_wrf.ini, an
+# analytic initial state with WRF's eta levels and p_top as rounded decimals, is no suite check: WRF's em_grav2d_x
+# run_straka_d1 is the case ideal_grav2d_x_fp64_cpu / _cuda, the ideal.exe port against WRF's real*8 run at
+# tolerance 0; tests/verify/verify.py wrf compares the analytic run with it by RMS.)
+SPECIAL = (["restart_p1_fp32_cuda"] + [f"restart_{t}_fp64" for t, _, _ in RESTARTS]
            + [f"restart_{t}_fp64_cuda" for t, _, _ in RESTARTS])
 
 
@@ -108,28 +121,39 @@ def dropin_run(binary, cfg, sets, out):
     return r.returncode, log
 
 
+def configuration(cfg, sets):
+    """Effective INI options, including the last --set assignment of each key."""
+    conf, sec = {}, None
+    with open(os.path.join(REPO, cfg)) as f:
+        for line in f:
+            line = re.split(r"[#;]", line, maxsplit=1)[0].strip()
+            if re.fullmatch(r"\[.+\]", line):
+                sec = line[1:-1]
+            elif sec and "=" in line:
+                key, value = line.split("=", 1)
+                conf.setdefault(sec, {})[key.strip()] = value.strip()
+    for x in sets:
+        if "=" not in x:
+            continue
+        qualified, value = x.split("=", 1)
+        section, key = qualified.split(".", 1)
+        conf.setdefault(section, {})[key] = value.strip()
+
+    return conf
+
+
 def config_vs_namelist(cfg, sets, nml):
     """Options of the case's configuration (cfg and its --set) that differ from tools/wrf2cppwrf.py's translation of
     the namelist.input of the WRF run that made the reference (options both set; paths by their real path; the run
     length, output and restart settings aside), or the translation's errors. A case with output.auxhist3=true (the
     translation of io_form_auxhist3 = 2, which needs WRF history output) is translated with --format wrfout."""
-    sys.path.insert(0, REPO)
-    from tools.wrf2cppwrf import parse_namelist, WrfTranslator
-    tr = WrfTranslator(parse_namelist(open(nml).read()), namelist_path=nml,
-                       output_format="wrfout" if "output.auxhist3=true" in sets else "native")
+    nl = read_namelist(nml)
+    from tools.wrf2cppwrf import WrfTranslator
+    tr = WrfTranslator(nl, namelist_path=nml, output_format="wrfout" if auxhist3_check(sets, cfg) else "native")
     gen = tr.translate()
     if tr.errors:
         return [f"{nml} does not translate: {tr.errors}"]
-    conf, sec = {}, None
-    for line in open(os.path.join(REPO, cfg)):
-        line = line.split("#")[0].strip()
-        if re.fullmatch(r"\[.+\]", line):
-            sec = line[1:-1]
-        elif sec and "=" in line:
-            conf.setdefault(sec, {})[line.split("=", 1)[0].strip()] = line.split("=", 1)[1].strip()
-    for x in sets:
-        k, v = x.split("=", 1)
-        conf.setdefault(k.split(".", 1)[0], {})[k.split(".", 1)[1]] = v
+    conf = configuration(cfg, sets)
 
     def norm(v):
         v = os.path.expandvars(str(v)).strip().strip("'\"").replace(" ", "")
@@ -180,48 +204,125 @@ def uninitialised(ds):
     return out
 
 
-def exact_case(refs, out, t, sets):
+def stream_files(out, kind, dom):
+    pattern = f"{kind}_{dom}_*"
+    return sorted(glob.glob(os.path.join(out, pattern)) + glob.glob(os.path.join(out, dom, pattern)))
+
+
+def auxhist3_settings(sets, cfg=None, dom="d01"):
+    """The opt-in and seconds between auxhist3 records from the effective inputs."""
+    value, minutes = "false", None
+    if cfg and os.fspath(cfg).startswith("dropin:"):
+        _, directory, _ = dropin_spec(cfg, sets)
+        path = os.path.join(directory, "namelist.input")
+        if os.path.isfile(path):
+            tc = read_namelist(path).get("time_control", {})
+            if tc.get("output_diagnostics", [0])[0] == 1 and tc.get("io_form_auxhist3", [0])[0] == 2:
+                value = "true"
+                intervals = tc.get("auxhist3_interval", [])
+                idx = int(dom[1:]) - 1
+                minutes = intervals[idx] if idx < len(intervals) else 0
+    elif cfg:
+        conf = configuration(cfg, sets)
+        value = conf.get("output", {}).get("auxhist3", value)
+        minutes = conf.get("phys", {}).get("auxhist3_interval")
+        opts = domain_options(conf, dom)
+        minutes = opts.get("phys.auxhist3_interval", opts.get("phys_auxhist3_interval", minutes))
+    for entry in sets:
+        if entry.startswith("output.auxhist3="):
+            value = entry.split("=", 1)[1]
+        elif (not cfg or os.fspath(cfg).startswith("dropin:")) and entry.startswith("phys.auxhist3_interval="):
+            minutes = entry.split("=", 1)[1]
+    return str(value).strip().lower() in ("true", "1", "yes"), 60 * int(minutes) if minutes is not None else None
+
+
+def auxhist3_check(sets, cfg=None):
+    return auxhist3_settings(sets, cfg)[0]
+
+
+def exact_case(refs, out, t, sets, after=None, ignore_atts=(), *, cfg=None, required_times=None, split=None,
+               aux_schedules=None, reference_schedules=None):
+    """Compare history and auxhist3 with WRF up to t, optionally requiring a specific history cadence.
+
+    A list of two output directories gives the first and resumed legs of a restarted case. The first leg owns
+    records through the split, and the resumed leg owns later records.
+    """
     with _NC:
-        return _exact_case(refs, out, t, sets)
+        return _exact_case(refs, out, t, sets, after, ignore_atts, cfg, required_times, split, aux_schedules,
+                           reference_schedules)
 
 
-def _exact_case(refs, out, t, sets):
-    """Tolerance-0 comparison of the wrfout files in `out` (out/<domain> for nests; a list of directories: their
-    files together, a later directory's frame replacing an earlier one's) with the references {domain: wrfout}:
-    (differences, summary)."""
+def _exact_case(refs, out, t, sets, after, ignore_atts, cfg, required_times, split, aux_schedules, reference_schedules):
     import netCDF4
     import exact
-    bad, frames, nvars = [], 0, 0
+    bad, stats, noise, no_nl = [], {}, set(), []
+    first, *resumed = out if isinstance(out, list) else [out]
     for dom, w in refs.items():
         d = dom or re.search(r"wrfout_(d\d\d)_", os.path.basename(w)).group(1)
         with netCDF4.Dataset(w) as ds:
             xt = [float(x) * 60.0 for x in ds["XTIME"][:]]
             final = [exact.text(ds["Times"], i).decode() for i, x in enumerate(xt) if abs(x - t) < 1e-6]
-            nvars += sum(1 for v in ds.variables.values() if v.dimensions[:1] == ("Time",) and v.dtype.kind != "S")
+            origin = getattr(ds, "SIMULATION_START_DATE", None)
         if not final:
             bad.append(f"{d}: the reference has no frame at t={t:g}s")
             continue
-        mine = [f for o in (out if isinstance(out, list) else [out])
-                for f in glob.glob(os.path.join(o, f"wrfout_{d}_*")) + glob.glob(os.path.join(o, d, f"wrfout_{d}_*"))]
-        dif, n = exact.compare_stream(mine, [w], subset=True, until=final[0],
-                                      global_atts=os.path.exists(os.path.join(os.path.dirname(w), "namelist.input")))
-        with netCDF4.Dataset(w) as ds:  # the variables WRF leaves uninitialised
-            for v in uninitialised(ds):
-                dif.pop(v, None)
-        frames += n
+        has_nl = os.path.exists(os.path.join(os.path.dirname(w), "namelist.input"))
+        if not has_nl:
+            no_nl.append(d)
+        mine = stream_files(first, "wrfout", d)
+        continuation = stream_files(resumed[0], "wrfout", d) if resumed else ()
+        scheduled = (required_times[d] if split is not None else required_times) or ()
+        reference_times = reference_schedules[d] if reference_schedules else set()
+        optional_times = reference_times - set(scheduled) if split is not None else ()
+        dif, _ = exact.compare_stream(mine, [w], subset=True, until=final[0], global_atts=has_nl, after=after,
+                                      ignore_atts=ignore_atts, stats=stats,
+                                      common_only=required_times is not None and split is None,
+                                      continuation=continuation, split=split, required_times=scheduled, wrf_reference=True,
+                                      required_reference_times=reference_times, optional_reference_times=optional_times,
+                                      waive=uninitialised, noise=noise)
         bad += [f"{d}.{k}: {v}" for k, v in dif.items()]
         # output_diagnostics: the auxhist3 files next to the reference wrfout, compared as the wrfout files
+        require_aux, interval = auxhist3_settings(sets, cfg, d)
+        if require_aux and cfg and (interval is None or interval <= 0):
+            bad.append(f"{d}.auxhist3: missing positive auxhist3 interval")
+        if require_aux and origin is None:
+            bad.append(f"{d}.auxhist3: WRF reference missing SIMULATION_START_DATE")
         aux = sorted(glob.glob(os.path.join(os.path.dirname(w), f"auxhist3_{d}_*")))
+        if not aux and require_aux:
+            bad.append(f"{d}.auxhist3: no WRF reference files")
         if aux:
-            mine = [f for o in (out if isinstance(out, list) else [out])
-                    for f in glob.glob(os.path.join(o, f"auxhist3_{d}_*")) + glob.glob(os.path.join(o, d, f"auxhist3_{d}_*"))]
-            dif, n = exact.compare_stream(mine, aux, subset=True, until=final[0],
-                                          global_atts=os.path.exists(os.path.join(os.path.dirname(w), "namelist.input")))
+            mine = stream_files(first, "auxhist3", d)
+            continuation = stream_files(resumed[0], "auxhist3", d) if resumed else ()
+            aux_end = final[0]
+            if aux_schedules is not None:
+                aux_end, aux_required, aux_ref = aux_schedules[d]
+            else:
+                aux_ref = set()
+                if require_aux and interval and origin:
+                    clock, lower = (origin, interval), after
+                    if cfg and os.fspath(cfg).startswith("dropin:"):
+                        _, _, links = dropin_spec(cfg, sets)
+                        seed = next((f for f in links if os.path.basename(f).startswith(f"wrfrst_{d}_")), None)
+                        if seed:
+                            split_stamp = os.path.basename(seed)[-19:]
+                            clock = resumed_history_clock(seed, interval, origin, split_stamp, alarm=AUX_ALARM)
+                            lower = max(split_stamp, lower) if lower else split_stamp
+                    aux_ref = {s for s in history_schedule(*clock, aux_end) if lower is None or s > lower}
+                aux_required = aux_ref
+            aux_optional = aux_ref - aux_required if split is not None else ()
+            dif, n = exact.compare_stream(mine, aux, subset=True, until=aux_end, global_atts=has_nl, after=after,
+                                          ignore_atts=ignore_atts, stats=stats,
+                                          common_only=aux_schedules is not None and split is None,
+                                          continuation=continuation, split=split, required_times=aux_required,
+                                          required_reference_times=aux_ref, optional_reference_times=aux_optional,
+                                          wrf_reference=True)
             if not n:
                 dif.setdefault("(times)", "no auxhist3 frame in common")
-            frames += n
             bad += [f"{d}.auxhist3.{k}: {v}" for k, v in dif.items()]
-    return bad, f"{frames} frames, {nvars} variables"
+    what = exact.summary(stats, [(noise, "WRF leaves them uninitialised")])
+    if no_nl:
+        what += f" (no namelist.input next to the {', '.join(no_nl)} reference: global attributes not compared)"
+    return bad, what
 
 
 def wrfrst_check(sets):
@@ -229,114 +330,428 @@ def wrfrst_check(sets):
     return "suite.wrfrst" in sets
 
 
-def wrfrst_case(refs, out, skip=()):
+RESTART_ALARM = "WRF_ALARM_SECS_TIL_NEXT_RING_51"
+
+
+def restart_calendar(dt, interval, end, *, begin=0, pending=None):
+    """Fixed-step restart alarm, including the seed's pending RingTime on WRF-format resume."""
+    previous = begin
+    rings = {}
+    for step in range(round(begin / dt) + 1, round(end / dt) + 1):
+        now = step * dt
+        if pending is not None and now + 1e-6 * dt >= pending:
+            previous, pending = now, None
+        elif interval > 0 and now + 1e-6 * dt >= previous + interval:
+            previous += interval
+        else:
+            continue
+        elapsed = now - previous
+        seconds = round(elapsed) if abs(elapsed - round(elapsed)) <= 1e-6 else math.trunc(elapsed)
+        rings[now] = math.trunc(interval) - seconds if interval > 0 else 1700000000
+    return rings
+
+
+def restart_schedule(dt, interval, end, *, begin=0, pending=None):
+    return restart_calendar(dt, interval, end, begin=begin, pending=pending).keys()
+
+
+def configured_restart_times(conf, origin, *, begin=0, pending=None):
+    dt = float(conf["time"]["dt"])
+    rst = conf.get("restart", {})
+    interval = float(rst.get("interval", conf.get("output", {}).get("restart_interval", 0)))
+    end = float(conf["run"]["run_time"])
+    cutoff = float(rst.get("end", 0))
+    if cutoff > 0:
+        end = min(end, round(cutoff / dt) * dt)
+    return {times_at(origin, s) for s in restart_schedule(dt, interval, end, begin=begin, pending=pending)}
+
+
+def simulation_start(path):
+    import netCDF4
+    with _NC, netCDF4.Dataset(path) as ds:
+        return ds.getncattr("SIMULATION_START_DATE")
+
+
+def xtime_matches(minutes, seconds):
+    return math.isclose(float(minutes) * 60, seconds, rel_tol=1e-7, abs_tol=1e-6)
+
+
+def restart_inventory(files, dom, origin, expected, *, side, seed=None):
+    """Each scheduled time has one file with one matching Times/XTIME record."""
+    import netCDF4
+    import exact
+    records, bad = {}, []
+    prefix = f"wrfrst_{dom}_"
+    with _NC:
+        for f in files:
+            stamp = os.path.basename(f)[len(prefix):]
+            if stamp in records:
+                bad.append(f"duplicate {side} restart {os.path.basename(f)}: {records[stamp]} and {f}")
+            records[stamp] = f
+            with netCDF4.Dataset(f) as ds:
+                if len(ds["Times"]) != 1 or len(ds["XTIME"]) != 1:
+                    bad.append(f"{f}: expected one restart record")
+                    continue
+                actual = exact.text(ds["Times"], 0).decode()
+                elapsed = seconds_between(origin, stamp)
+                if actual != stamp or not xtime_matches(ds["XTIME"][0], elapsed):
+                    bad.append(f"{f}: restart clock disagrees with filename: Times {actual}, XTIME {ds['XTIME'][0]}")
+    records.pop(seed, None)  # a WRF-format input may be linked in the output directory
+    missing, extra = expected - records.keys(), records.keys() - expected
+    if missing:
+        bad.append(f"missing {side} restart {' '.join(prefix + s for s in sorted(missing))}")
+    if extra:
+        bad.append(f"unexpected {side} restart {' '.join(prefix + s for s in sorted(extra))}")
+    return records, bad
+
+
+def wrfrst_case(refs, out, cfg, sets):
     """The wrfrst files of a run against WRF's: the reference run's directory (next to its wrfout) and `out` (or
     out/<domain>) must hold the same set of wrfrst_<domain>_<date> files (the restart alarm's times), each identical at
     tolerance 0 (every variable and attribute, WRF_ALARM_SECS_TIL_NEXT_RING_* among them; RQCBLTEN / RQIBLTEN not when
-    WRF's file has no QCLOUD / QICE). `skip`: file names that are inputs (a resumed run's linked restart file):
+    WRF's file has no QCLOUD / QICE). Check each side against the effective restart schedule:
     (differences, summary)."""
-    import netCDF4
     import exact
-    bad, n = [], 0
+    import netCDF4
+    bad, n, stats, noise = [], 0, {}, set()
+    origin = simulation_start(next(iter(refs.values())))
+    seeds, begin, pending = {}, 0, None
+    if os.fspath(cfg).startswith("dropin:"):
+        _, nl_dir, links = dropin_spec(cfg, sets)
+        nml = os.path.join(nl_dir, "namelist.input")
+        nl = read_namelist(nml)
+        from tools.wrf2cppwrf import WrfTranslator
+        conf = WrfTranslator(nl, namelist_path=nml, output_format="wrfout").translate()
+        for f in links:
+            if match := re.fullmatch(r"wrfrst_(d\d\d)_(.+)", os.path.basename(f)):
+                seeds[match[1]] = match[2]
+                _, errors = restart_inventory([f], match[1], origin, {match[2]}, side="seed")
+                bad += errors
+                if match[1] == "d01" and not errors:
+                    begin = seconds_between(origin, match[2])
+                    with _NC, netCDF4.Dataset(f) as ds:
+                        left = int(ds.getncattr(RESTART_ALARM))
+                    if 0 <= left < 1700000000:
+                        pending = begin + left
+        conf["run"]["run_time"] += begin
+        for entry in sets:
+            if "=" in entry:
+                key, value = entry.split("=", 1)
+                section, key = key.split(".", 1)
+                conf.setdefault(section, {})[key] = value
+    else:
+        conf = configuration(cfg, sets)
+    required = configured_restart_times(conf, origin, begin=begin, pending=pending)
+    if not required:
+        bad.append("configured restart schedule has no files")
     for dom, w in refs.items():
         d = dom or re.search(r"wrfout_(d\d\d)_", os.path.basename(w)).group(1)
-        ref = {os.path.basename(f): f for f in glob.glob(os.path.join(os.path.dirname(w), f"wrfrst_{d}_*"))
-               if os.path.basename(f) not in skip}
-        mine = {os.path.basename(f): f for f in glob.glob(os.path.join(out, f"wrfrst_{d}_*"))
-                + glob.glob(os.path.join(out, d, f"wrfrst_{d}_*")) if os.path.basename(f) not in skip}
-        if sorted(ref) != sorted(mine):
-            bad.append(f"{d}: wrfrst files {sorted(x[-8:] for x in mine)}, WRF's {sorted(x[-8:] for x in ref)}")
-        for name in sorted(set(ref) & set(mine)):
-            with _NC:
-                with netCDF4.Dataset(ref[name]) as ds:
-                    noise = uninitialised(ds)
-                dif, _ = exact.compare_stream([mine[name]], [ref[name]])
-            bad += [f"{name}.{k}: {v}" for k, v in dif.items() if k not in noise]
+        ref, errors = restart_inventory(stream_files(os.path.dirname(w), "wrfrst", d), d, origin, required,
+                                        side="WRF reference", seed=seeds.get(d))
+        mine, errors_c = restart_inventory(stream_files(out, "wrfrst", d), d, origin, required,
+                                           side="CPPWRF", seed=seeds.get(d))
+        bad += errors + errors_c
+        for name in sorted(required & ref.keys() & mine.keys()):
+            b2, _ = wrfrst_pair(mine[name], ref[name], stats, noise)
+            bad += [f"{name}.{x}" for x in b2]
             n += 1
-    return bad, f"{n} wrfrst files identical" if not bad else f"{n} wrfrst files"
+    return bad, f"{n} wrfrst files" + (" identical" if not bad else "") + f" ({exact.summary(stats, [(noise, 'WRF leaves them uninitialised')])})"
+
+
+def wrfrst_pair(mine, ref, stats, noise):
+    """One wrfrst file of CPPWRF's against WRF's at tolerance 0 (every variable, attribute and global attribute;
+    the variables WRF leaves uninitialised, wrf_suite.uninitialised, not counted: added to `noise` when they
+    differ): ([differences], number of frames); `stats`: exact.compare_stream's counts."""
+    import exact
+    with _NC:
+        dif, n = exact.compare_stream([mine], [ref], stats=stats, wrf_reference=True,
+                                      waive=uninitialised, noise=noise)
+    return [f"{k}: {v}" for k, v in dif.items()], n
+
+
+HISTORY_ALARM = "WRF_ALARM_SECS_TIL_NEXT_RING_01"
+HISTORY_RINGING = "WRF_ALARM_ISRINGING_01"
+AUX_ALARM = "WRF_ALARM_SECS_TIL_NEXT_RING_04"
+AUX_RINGING = "WRF_ALARM_ISRINGING_04"
+RUN_START_ALARM = "WRF_ALARM_SECS_TIL_NEXT_RING_55"
+
+
+def start_dates(files, want, *, restart_times=None, history_clock=None, aux_clock=None, end=None):
+    """Report incorrect START_DATE and, for a restart stream, its run-start alarm."""
+    import netCDF4
+    import exact
+    out = []
+    with _NC:
+        for f in files:
+            with netCDF4.Dataset(f) as ds:
+                v = getattr(ds, "START_DATE", None)
+                if v != want:
+                    out.append(f"{os.path.basename(f)} START_DATE {v!r}, the expected start time {want}")
+                if restart_times is not None:
+                    stamp = exact.text(ds["Times"], 0).decode()
+                    elapsed = seconds_between(want, stamp)
+                    actual = getattr(ds, RUN_START_ALARM, None)
+                    if actual != -elapsed:
+                        out.append(f"{os.path.basename(f)} {RUN_START_ALARM} {actual}, expected {-elapsed:g}")
+                    expected_rst = restart_times.get(stamp)
+                    if expected_rst is not None and getattr(ds, RESTART_ALARM, None) != expected_rst:
+                        actual = getattr(ds, RESTART_ALARM, None)
+                        out.append(f"{os.path.basename(f)} {RESTART_ALARM} {actual}, expected {expected_rst}")
+                    for clock, secs_key, ring_key in ((history_clock, HISTORY_ALARM, HISTORY_RINGING),
+                                                       (aux_clock, AUX_ALARM, AUX_RINGING)):
+                        if clock is None:
+                            continue
+                        origin, interval = clock
+                        since = round(seconds_between(origin, stamp))
+                        due = interval > 0 and since % interval == 0
+                        left = interval - since % interval if interval > 0 else 1700000000
+                        ringing = int(due and (stamp == end or "wrfrst_d01_" not in os.path.basename(f)))
+                        for key, expected in ((secs_key, left), (ring_key, ringing)):
+                            actual = getattr(ds, key, None)
+                            if actual != expected:
+                                out.append(f"{os.path.basename(f)} {key} {actual}, expected {expected}")
+    return out
+
+
+def case_domains(refs):
+    return {dom or re.search(r"wrfout_(d\d\d)_", os.path.basename(w)).group(1): w for dom, w in refs.items()}
+
+
+def configured_domains(conf):
+    return {f"d{i:02d}" for i in range(1, int(conf.get("domains", {}).get("max_dom", 1)) + 1)}
+
+
+def chain_references(cfg, sets, wrf):
+    return {d: wrf.replace("wrfout_d01_", f"wrfout_{d}_") for d in sorted(configured_domains(configuration(cfg, sets)))}
+
+
+def reference_domain_errors(cfg, sets, refs):
+    if os.fspath(cfg).startswith("dropin:"):
+        _, directory, _ = dropin_spec(cfg, sets)
+        nl = read_namelist(os.path.join(directory, "namelist.input"))
+        count = int(nl.get("domains", {}).get("max_dom", [1])[0])
+    else:
+        count = int(configuration(cfg, sets).get("domains", {}).get("max_dom", 1))
+    expected = {f"d{i:02d}" for i in range(1, count + 1)}
+    scoped = next((s.split("=", 1)[1] for s in sets if s.startswith("suite.history_domains=")), None)
+    if scoped is not None:
+        declared = set(scoped.split(","))
+        if not declared <= expected:
+            return [f"suite.history_domains has unknown domains {sorted(declared - expected)}"]
+        expected = declared
+    actual = set(case_domains(refs))
+    if actual != expected:
+        return [f"history reference domains {sorted(actual)}, expected {sorted(expected)}"]
+    return [f"{d} history reference filename disagrees with its domain: {w}" for d, w in case_domains(refs).items()
+            if not os.path.basename(w).startswith(f"wrfout_{d}_")]
 
 
 def restarted_case(b, cfg, sets, refs, t, mid, out, native=False):
     """A run to `t` s restarted at `mid` s from its own wrfrst files: the first run (to one step past mid, wrfrst files
     at mid only: written within the run, as WRF's, not at its last step, where WRF's history alarm is still ringing)
-    and the resumed one (mid to t) together against WRF's uninterrupted run at tolerance 0 (every reference frame),
+    and the resumed one (mid to t) together against WRF's uninterrupted run at tolerance 0 (every reference frame;
+    START_DATE, which a run resumed from a wrfrst file sets to the restart time as WRF's resumed runs do, is checked
+    to be that; a run resumed from CPPWRF's own file continues the run that wrote it: every attribute compared),
     and the wrfrst files at mid against WRF's (the reference run's restart_interval writes them there):
     (differences, summary). As run_wrf_files_test.sh, RQCBLTEN / RQIBLTEN are not compared when WRF's restart file
     has no QCLOUD / QICE (WRF leaves them uninitialised)."""
-    import netCDF4
     import exact
-    first, resumed = os.path.join(out, "a_first"), os.path.join(out, "b_resumed")  # sorted: resumed frames win
+    first, resumed = os.path.join(out, "a_first"), os.path.join(out, "b_resumed")
     w0 = next(iter(refs.values()))
-    if native:  # suite.native_restart: resumed from CPPWRF's own restart_<step>.nc (mid need not be a frame time)
-        nl = os.path.join(os.path.dirname(w0), "namelist.input")
-        dt = float(re.search(r"^\s*time_step\s*=\s*(\d+)", open(nl).read(), re.M).group(1))
-        rc, log = run(b, cfg, sets + [f"run.run_time={mid + dt:g}", f"restart.interval={mid:g}", f"restart.end={mid:g}"],
-                      first)
-        if rc != 0:
-            return [f"run to the restart failed: {log[-200:]}"], ""
-        rf = os.path.join(first, f"restart_{round(mid / dt):06d}.nc")
-        if not os.path.exists(rf):
-            return [f"no {rf}"], ""
-        rc, log = run(b, cfg, sets + [f"run.restart_file={rf}"], resumed)
-        if rc != 0:
-            return [f"resumed run failed: {log[-200:]}"], ""
-        bad, what = exact_case(refs, [first, resumed], t, sets)
-        return bad, f"{what}, restarted at {mid:g}s from restart_{round(mid / dt):06d}.nc" if not bad else what
-    with _NC, netCDF4.Dataset(w0) as ds:
-        at = [exact.text(ds["Times"], i).decode() for i, x in enumerate(ds["XTIME"][:]) if abs(float(x) * 60.0 - mid) < 1e-6]
-    if not at:
-        return [f"{w0} has no frame at the restart time {mid:g}s"], ""
-    nl = os.path.join(os.path.dirname(w0), "namelist.input")
-    dt = float(re.search(r"^\s*time_step\s*=\s*(\d+)", open(nl).read(), re.M).group(1))
+    origin = simulation_start(w0)
+    split, end = times_at(origin, mid), times_at(origin, t)
+    conf = configuration(cfg, sets)
+    dt = float(conf["time"]["dt"])
+    doms = case_domains(refs)
     rc, log = run(b, cfg, sets + [f"run.run_time={mid + dt:g}", f"restart.interval={mid:g}", f"restart.end={mid:g}"],
                   first)
     if rc != 0:
         return [f"run to the restart failed: {log[-200:]}"], ""
-    # a nested run writes each domain's files in first/<domain>; the resumed run reads every domain's wrfrst file
-    # from the directory of d01's (as WRF's run directory)
-    rst = os.path.join(out, "rst")
-    os.makedirs(rst, exist_ok=True)
-    for pat in (f"wrfrst_d??_{at[0]}", f"d??/wrfrst_d??_{at[0]}"):
-        for f in glob.glob(os.path.join(first, pat)):
-            os.symlink(f, os.path.join(rst, os.path.basename(f)))
-    rc, log = run(b, cfg, sets + [f"run.restart_file={rst}/wrfrst_d01_{at[0]}"], resumed)
+    stats, noise, bad, seeds = {}, set(), [], {}
+    if native:
+        seed = os.path.join(first, f"restart_{round(mid / dt):06d}.nc")
+        if not os.path.isfile(seed):
+            return [f"missing native restart seed {seed}"], ""
+    else:
+        rst = os.path.join(out, "rst")
+        os.makedirs(rst, exist_ok=True)
+        for d, w in doms.items():
+            name = f"wrfrst_{d}_{split}"
+            # The WRF directory can hold other scheduled restarts as well.
+            ref = [f for f in stream_files(os.path.dirname(w), "wrfrst", d) if os.path.basename(f) == name]
+            _, errors = restart_inventory(ref, d, origin, {split}, side="WRF reference")
+            mine, errors_c = restart_inventory(stream_files(first, "wrfrst", d), d, origin, {split}, side="first leg")
+            bad += errors + errors_c
+            if errors or errors_c:
+                continue
+            b2, _ = wrfrst_pair(mine[split], ref[0], stats, noise)
+            bad += [f"{d}.wrfrst.{x}" for x in b2]
+            seeds[d] = mine[split]
+            os.symlink(seeds[d], os.path.join(rst, name))
+        if bad:
+            return bad, ""
+        seed = os.path.join(rst, f"wrfrst_d01_{split}")
+    rc, log = run(b, cfg, sets + [f"run.restart_file={seed}"], resumed)
     if rc != 0:
         return [f"resumed run failed: {log[-200:]}"], ""
-    bad, what = exact_case(refs, [first, resumed], t, sets)
-    for dom, w in refs.items():
-        d = dom or re.search(r"wrfout_(d\d\d)_", os.path.basename(w)).group(1)
-        wr = os.path.join(os.path.dirname(w), f"wrfrst_{d}_{at[0]}")
-        mine = glob.glob(os.path.join(first, f"wrfrst_{d}_{at[0]}")) + glob.glob(os.path.join(first, d, f"wrfrst_{d}_{at[0]}"))
-        if not os.path.exists(wr) or not mine:
-            bad.append(f"{d}: no wrfrst_{d}_{at[0]} from {'WRF' if not os.path.exists(wr) else 'CPPWRF'}")
-            continue
-        with _NC:
-            with netCDF4.Dataset(wr) as ds:
-                noise = uninitialised(ds)
-            dif, _ = exact.compare_stream(mine, [wr])
-        bad += [f"{d}.wrfrst.{k}: {v}" for k, v in dif.items() if k not in noise]
-    return bad, f"{what}, restarted at {mid:g}s (wrfrst identical)" if not bad else what
+    cadence = chain_history(conf, sorted(doms), t)
+    first_cadence = chain_history(conf, sorted(doms), mid + dt)
+    shared, reference_schedules, aux_schedules = {}, {}, {}
+    for d in doms:
+        history_first = history_schedule(origin, first_cadence[d], times_at(origin, mid + dt), initial=True)
+        clock = (origin, cadence[d]) if native else resumed_history_clock(seeds[d], cadence[d], origin, split)
+        history_resumed = {s for s in history_schedule(*clock, end) if s > split}
+        if not history_resumed:
+            bad.append(f"{d}: resumed history schedule has no post-split frame")
+        for path, due, label in ((first, history_first, "first leg"), (resumed, history_resumed, "resumed leg")):
+            bad += [f"{d} {label}: {error}" for error in history_inventory(stream_files(path, "wrfout", d), due, origin)]
+        if not native:
+            bad += start_dates(stream_files(resumed, "wrfout", d), split)
+        straight = history_schedule(origin, cadence[d], end, initial=True)
+        shared[d] = straight & ({s for s in history_first if s <= split} | history_resumed)
+        reference_schedules[d] = straight
+        aux_enabled, aux_iv = auxhist3_settings(sets, cfg, d)
+        aux_ref, aux_shared = set(), set()
+        if aux_enabled and aux_iv:
+            aux_ref = history_schedule(origin, aux_iv, end)
+            aux_clock = ((origin, aux_iv) if native else
+                         resumed_history_clock(seeds[d], aux_iv, origin, split, alarm=AUX_ALARM))
+            aux_resumed = {s for s in history_schedule(*aux_clock, end) if s > split}
+            aux_shared = aux_ref & ({s for s in aux_ref if s <= split} | aux_resumed)
+            for path, due in ((first, history_schedule(origin, aux_iv, times_at(origin, mid + dt), initial=True)),
+                              (resumed, aux_resumed)):
+                bad += [f"{d} {path} auxhist3: {x}" for x in
+                        history_inventory(stream_files(path, "auxhist3", d), due, origin, require_xtime=False)]
+        aux_schedules[d] = end, aux_shared, aux_ref
+    b2, what = exact_case(refs, [first, resumed], t, sets, cfg=cfg, split=split, required_times=shared,
+                          ignore_atts=() if native else ("START_DATE",), aux_schedules=aux_schedules,
+                          reference_schedules=reference_schedules)
+    detail = (f"wrfrst at {mid:g}s vs WRF's: {exact.summary(stats, [(noise, 'WRF leaves them uninitialised')])}"
+              if seeds else f"native seed {os.path.basename(seed)}")
+    return bad + b2, f"{what}, restarted at {mid:g}s; {detail}"
+
+
+def times_at(start, secs):
+    """The Times string `secs` seconds after `start` (a Times string)."""
+    import datetime
+    t0 = datetime.datetime.strptime(start, "%Y-%m-%d_%H:%M:%S")
+    return (t0 + datetime.timedelta(seconds=secs)).isoformat(sep="_", timespec="seconds")
+
+
+def seconds_between(origin, stamp):
+    from datetime import datetime
+    return (datetime.fromisoformat(stamp) - datetime.fromisoformat(origin)).total_seconds()
 
 
 def chain_at(sets):
-    """A restart-chain case (suite.chain=MID,INTERVAL in its --set list: restart_chain), (MID, INTERVAL) [s], or
-    None."""
+    """A restart-chain case (suite.chain=MID,INTERVAL[,native] in its --set list: restart_chain), (MID, INTERVAL
+    [s], native only, the WRF reference of the same configuration (suite.chain_wrf=WRFOUT) or None), or None."""
     v = next((x.split("=", 1)[1] for x in sets if x.startswith("suite.chain=")), None)
     if not v:
         return None
     f = v.split(",")
-    return float(f[0]), float(f[1]), f[2:] == ["native"]
+    return float(f[0]), float(f[1]), f[2:] == ["native"], \
+        next((x.split("=", 1)[1] for x in sets if x.startswith("suite.chain_wrf=")), None)
 
 
-def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False):
+def domain_options(conf, dom):
+    opts = {k.removeprefix(dom + "_"): v for k, v in conf.get("domains", {}).items() if k.startswith(dom + "_")}
+    opts.update(conf.get(dom, {}))
+    return opts
+
+
+def chain_history(conf, doms, t):
+    """History cadence in seconds on each configured chain domain."""
+    dt = {"d01": float(conf["time"]["dt"])}
+    cadence = {"d01": dt["d01"] * int(conf.get("output", {}).get("out_interval", round(t / dt["d01"])))}
+    for d in doms[1:]:
+        opts = domain_options(conf, d)
+        parent = f"d{int(opts.get('parent_id', int(d[1:]) - 1)):02d}"
+        ratio = opts.get("parent_time_step_ratio", conf.get("domains", {}).get("parent_time_step_ratio", 1) if d == "d02" else 1)
+        dt[d] = float(opts.get("dt", dt[parent] / int(ratio)))
+        cadence[d] = dt[d] * int(opts["out_interval"]) if "out_interval" in opts else cadence[parent]
+    return cadence
+
+
+def history_schedule(start, interval, end, *, initial=False):
+    """A fixed-step history alarm with its phase at start."""
+    if interval <= 0:
+        return {start} if initial else set()
+    count = int((seconds_between(start, end) + 1e-6) / interval)
+    return {times_at(start, i * interval) for i in range(0 if initial else 1, count + 1)}
+
+
+def history_inventory(files, expected, origin, *, require_xtime=True):
+    """Check one leg's Times against its schedule. The default auxhist3 field list omits XTIME."""
+    import netCDF4
+    import exact
+    seen, errors = set(), []
+    with _NC:
+        for f in files:
+            with netCDF4.Dataset(f) as ds:
+                times = ds["Times"]
+                xtime = ds.variables.get("XTIME")
+                if not len(times):
+                    errors.append(f"{f}: zero records")
+                if xtime is not None and xtime.dimensions == ("Time",) and xtime.shape == (len(times),):
+                    minutes = xtime[:]
+                else:
+                    minutes = None
+                    if require_xtime or xtime is not None:
+                        errors.append(f"{f}: expected one XTIME per history record")
+                for i in range(len(times)):
+                    stamp = exact.text(times, i).decode()
+                    if stamp in seen:
+                        errors.append(f"duplicate Times in CPPWRF: {stamp} in {f}")
+                    seen.add(stamp)
+                    if minutes is not None and not xtime_matches(minutes[i], seconds_between(origin, stamp)):
+                        errors.append(f"{f}: XTIME {minutes[i]} disagrees with history Times {stamp}")
+    if expected - seen:
+        errors.append(f"CPPWRF missing {sorted(expected - seen)}")
+    if seen - expected:
+        errors.append(f"only-cppwrf {sorted(seen - expected)} outside its scheduled frames")
+    return errors
+
+
+def resumed_history_clock(seed, interval, original_start, split, *, alarm=HISTORY_ALARM):
+    """WRF-format resume takes the interval and phase from the seed's history alarm."""
+    import netCDF4
+    with _NC, netCDF4.Dataset(seed) as ds:
+        left = int(ds.getncattr(alarm))
+    if left >= 1700000000:
+        return split, 0
+    if left < 0:
+        return original_start, interval
+    if left == 0:
+        raise ValueError(f"{seed}: {alarm} must be positive")
+    return split, left
+
+
+def chain_self_stream(straight, resumed, mid, *, restart, wrfrst_resume, noise, aux=False):
+    """Compare shared history states and all post-split restart states."""
+    import exact
+    ignore = ("START_DATE", RUN_START_ALARM, HISTORY_ALARM, HISTORY_RINGING, RESTART_ALARM) if wrfrst_resume else ()
+    if wrfrst_resume and aux:
+        ignore += (AUX_ALARM, AUX_RINGING)
+    with _NC:
+        # NOAHMP_INIT reinitialises this output on restart (PhysicsSuite::restarted).
+        return exact.compare_stream(resumed, straight, after=mid, global_atts=restart,
+                                    ignore_atts=ignore, common_only=True, waive=lambda _: ("CROPCAT",), noise=noise)
+
+
+def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False, wrf=None):
     """The restart contract without a WRF restarted run: CPPWRF's run to `t` s with restart files every `iv` s
     (wrfrst and, for one domain, CPPWRF's own restart_<step>.nc) and the runs resumed at `mid` s from them (each
-    domain's wrfrst file; the native file) must write the same files after `mid`: every wrfout frame and every
-    wrfrst file later than `mid`, each variable at tolerance 0 (restart-stream state a resumed run lost shows in
+    domain's wrfrst file; the native file) must write their scheduled records. Compare shared history frames and
+    post-split wrfrst files at tolerance 0 (restart-stream state a resumed run lost shows in
     its next wrfrst file even when the history does not use it). `refs`: the WRF run whose inputs (and
-    namelist.input, when there) the case reads; not compared. native_only (suite.chain=MID,INTERVAL,native): the
-    native resume alone, where WRF's own resumed run is not the straight one. (differences, summary)."""
-    import configparser
+    namelist.input, when there) the case reads. native_only (suite.chain=MID,INTERVAL,native): the native resume
+    alone, where WRF's own resumed run is not the straight one. wrf (suite.chain_wrf=WRFOUT): WRF's run of the same
+    configuration (the case FAILs when its namelist.input translates otherwise): the straight run's frames and each
+    resumed run's frames after `mid` against its frames up to `t` at tolerance 0 too (the wrfrst resume's START_DATE
+    is the restart time, as in WRF's resumed runs, checked; the native resume continues the straight run: every
+    attribute compared); without it the chain is CPPWRF against CPPWRF only and its
+    PASS line says so. (differences, summary)."""
     import netCDF4
     import exact
     nl = os.path.join(os.path.dirname(next(iter(refs.values()))), "namelist.input")
@@ -347,21 +762,43 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False):
     if rc != 0:
         return [f"straight run failed: {log[-200:]}"], ""
 
-    def files(d, kind, dom):
-        return sorted(glob.glob(os.path.join(d, f"{kind}_{dom}_*")) + glob.glob(os.path.join(d, dom, f"{kind}_{dom}_*")))
-
-    def secs(ds, i):  # a frame's time [s]
-        return float(ds["XTIME"][i]) * 60.0
-    doms = sorted({re.search(r"wrfrst_(d\d\d)_", f).group(1)
-                   for f in glob.glob(os.path.join(straight, "**", "wrfrst_d??_*"), recursive=True)})
-    at = {}
+    conf = configuration(cfg, sets)
+    doms = sorted(configured_domains(conf))
+    if set(case_domains(refs)) != set(doms):
+        return [f"chain input reference domains {sorted(case_domains(refs))}, expected {doms}"], ""
+    if native_only and len(doms) > 1:
+        return ["native-only chain requires a single domain and a native resumed leg"], ""
+    emitted = {os.path.basename(f).split("_")[1]
+               for f in glob.glob(os.path.join(straight, "**", "wrfrst_d??_*"), recursive=True)}
+    unexpected = emitted - set(doms)
+    if unexpected:
+        return [f"straight run wrote wrfrst files for unexpected domains {', '.join(sorted(unexpected))}"], ""
+    origin = simulation_start(next(iter(refs.values())))
+    start, end = times_at(origin, mid), times_at(origin, t)
+    dt = float(conf["time"]["dt"])
+    restart_times = {times_at(origin, sec): left for sec, left in restart_calendar(dt, iv, t).items()}
+    if start not in restart_times:
+        return [f"split at {mid:g}s is outside the restart schedule"], ""
+    cadence = chain_history(conf, doms, t)
+    straight_schedule = {d: history_schedule(origin, cadence[d], end, initial=True) for d in doms}
+    aux_intervals = {d: iv3 for d in doms for enabled, iv3 in [auxhist3_settings(sets, cfg, d)] if enabled and iv3}
+    straight_aux = {d: history_schedule(origin, iv3, end, initial=True) for d, iv3 in aux_intervals.items()}
+    bad, seed_errors, at, nfr, nrst, cropcat = [], [], {}, 0, 0, set()
     for d in doms:
-        for f in files(straight, "wrfrst", d):
-            with _NC, netCDF4.Dataset(f) as ds:
-                if abs(secs(ds, 0) - mid) < 1e-6:
-                    at[d] = f
-    if not doms or sorted(at) != doms:
-        return [f"the straight run wrote no wrfrst files at {mid:g}s"], ""
+        files = stream_files(straight, "wrfrst", d)
+        records, errors = restart_inventory(files, d, origin, set(restart_times), side="straight")
+        seed_errors += errors
+        if not errors:
+            at[d] = records[start]
+            seed_errors += start_dates(files, origin, restart_times=restart_times, history_clock=(origin, cadence[d]),
+                                       aux_clock=(origin, aux_intervals[d]) if d in aux_intervals else None, end=end)
+        bad += [f"straight: {d}.wrfout: {x}" for x in
+                history_inventory(stream_files(straight, "wrfout", d), straight_schedule[d], origin)]
+        if d in straight_aux:
+            bad += [f"straight: {d}.auxhist3: {x}" for x in
+                    history_inventory(stream_files(straight, "auxhist3", d), straight_aux[d], origin, require_xtime=False)]
+    if seed_errors:
+        return seed_errors + bad, ""
     rst = os.path.join(out, "rst")
     os.makedirs(rst, exist_ok=True)
     for d in doms:
@@ -369,41 +806,110 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False):
     resumed = [] if native_only else [("wrfrst", os.path.join(out, "b_resumed"),
                                        os.path.join(rst, os.path.basename(at["d01"])))]
     if doms == ["d01"]:  # CPPWRF's own restart file of the same step (nests resume from wrfrst files only)
-        ini = configparser.ConfigParser(interpolation=None)
-        ini.read(os.path.join(REPO, cfg))
-        dt = float(next((x.split("=", 1)[1] for x in sets if x.startswith("time.dt=")), ini.get("time", "dt")))
         resumed.append(("native", os.path.join(out, "c_native"),
                         os.path.join(straight, f"restart_{round(mid / dt):06d}.nc")))
-    bad, nfr, nrst = [], 0, 0
+    schedules, resumed_aux = {}, {}
     for what, d_out, f in resumed:
+        schedules[what] = {}
+        resumed_aux[what] = {}
+        if not os.path.isfile(f):
+            bad.append(f"{what}: missing restart seed {f}")
+            continue
         rc, log = run(b, cfg, common + [f"run.restart_file={f}"], d_out)
         if rc != 0:
             bad.append(f"{what}: resumed run failed: {log[-200:]}")
             continue
+        wrfrst_resume = what == "wrfrst"
+        resumed_restarts = {s: left for s, left in restart_times.items() if s > start}
+        if wrfrst_resume:
+            pending = mid + restart_times[start]
+            resumed_restarts = {times_at(origin, sec): left for sec, left in
+                                restart_calendar(dt, iv, t, begin=mid, pending=pending).items()}
         for dom in doms:
-            for kind in ("wrfout", "wrfrst"):
-                opened = []
-                try:
-                    with _NC:
-                        A = exact.frames(files(straight, kind, dom), opened)
-                        B = exact.frames(files(d_out, kind, dom), opened)
-                        after = sorted(k for k, (ds, i) in A.items() if secs(ds, i) > mid + 1e-6)
-                        dif, n = exact._compare_stream({k: B[k] for k in after if k in B}, {k: A[k] for k in after},
-                                                       False, None, False) if after else ({}, 0)
-                finally:
-                    for ds in opened:
-                        ds.close()
-                if not after:
-                    bad.append(f"{what}: {dom}: the straight run has no {kind} after {mid:g}s")
-                nfr, nrst = (nfr + n, nrst) if kind == "wrfout" else (nfr, nrst + n)
-                # NOAHMP_INIT on a restart: CROPCAT (an output) restarts at undefined_int (PhysicsSuite::restarted)
-                bad += [f"{what}: {dom}.{kind}.{k}: {v}" for k, v in dif.items() if k != "CROPCAT"]
+            clock = resumed_history_clock(at[dom], cadence[dom], origin, start) if wrfrst_resume else (origin, cadence[dom])
+            scheduled = {stamp for stamp in history_schedule(*clock, end) if stamp > start}
+            schedules[what][dom] = scheduled
+            bad += [f"{what}: {dom}.wrfout: {x}" for x in
+                    history_inventory(stream_files(d_out, "wrfout", dom), scheduled, origin)]
+            if wrfrst_resume:
+                bad += start_dates(stream_files(d_out, "wrfout", dom), start)
+            restart_files = stream_files(d_out, "wrfrst", dom)
+            _, errors = restart_inventory(restart_files, dom, origin, set(resumed_restarts), side=what)
+            bad += errors
+            aux_clock = None
+            streams = ["wrfout", "wrfrst"]
+            if dom in aux_intervals:
+                iv3 = aux_intervals[dom]
+                aux_clock = resumed_history_clock(at[dom], iv3, origin, start, alarm=AUX_ALARM) if wrfrst_resume else (origin, iv3)
+                due = {s for s in history_schedule(*aux_clock, end) if s > start}
+                resumed_aux[what][dom] = due
+                bad += [f"{what}: {dom}.auxhist3: {x}" for x in
+                        history_inventory(stream_files(d_out, "auxhist3", dom), due, origin, require_xtime=False)]
+                streams.append("auxhist3")
+            bad += start_dates(restart_files, start if wrfrst_resume else origin, restart_times=resumed_restarts,
+                               history_clock=clock, aux_clock=aux_clock, end=end)
+            for kind in streams:
+                dif, n = chain_self_stream(stream_files(straight, kind, dom), stream_files(d_out, kind, dom),
+                                           start, restart=kind == "wrfrst", wrfrst_resume=wrfrst_resume,
+                                           noise=cropcat, aux=aux_clock is not None)
+                nfr += n if kind == "wrfout" else 0
+                nrst += n if kind == "wrfrst" else 0
+                bad += [f"{what}: {dom}.{kind}.{k}: {v}" for k, v in dif.items()]
     if bad:  # where it starts: CPPWRF's own restart files one step after mid, straight and resumed (every variable)
         diag = chain_first_step(b, cfg, common, resumed, mid, out)
         print("\n".join(f"  [{cfg}] {x}" for x in diag), flush=True)
         bad = diag + bad
-    return bad, (f"resumed at {mid:g}s ({', '.join(w for w, _, _ in resumed)}) = straight: {nfr} wrfout frames, "
-                 f"{nrst} wrfrst files")
+    what = (f"self: resumed at {mid:g}s ({', '.join(w for w, _, _ in resumed)}) = CPPWRF straight: {nfr} wrfout frames, "
+            f"{nrst} wrfrst files" + ("; CROPCAT differences not counted (NOAHMP_INIT on a restart)" if cropcat else ""))
+    if not wrf:
+        return bad, what + "; vs WRF: none (no WRF run of this configuration: self-consistency only)"
+    # against WRF's run of the same configuration: the straight run, and each resumed run after mid
+    nlw = os.path.join(os.path.dirname(wrf), "namelist.input")
+    dif = config_vs_namelist(cfg, sets, nlw) if os.path.exists(nlw) else [f"no {nlw}"]
+    if dif:
+        return bad + [f"configuration differs from {nlw}: {'; '.join(dif)}"], what
+    # Every configured domain, each against WRF's file of that domain next to d01's (wrfout_d02_... beside
+    # wrfout_d01_...) up to its last frame by t (a nest's history interval may be longer than d01's)
+    wdom = chain_references(cfg, sets, wrf)
+    missing = [w for w in wdom.values() if not os.path.exists(w)]
+    if missing:
+        return bad + [f"no WRF reference {', '.join(missing)}"], what
+    tw, scheduled, split = {}, {}, {}
+    for d, w in wdom.items():
+        with _NC, netCDF4.Dataset(w) as ds:
+            xt = [float(x) * 60.0 for x in ds["XTIME"][:]]
+            reference_start = ds.getncattr("SIMULATION_START_DATE")
+        within = [x for x in xt if x <= t + 1e-6]
+        if not within:
+            return bad + [f"{d}: no WRF history through {t:g}s"], what
+        tw[d] = max(within)
+        scheduled[d] = history_schedule(reference_start, cadence[d], times_at(reference_start, t), initial=True)
+        split[d] = times_at(reference_start, mid)
+    tag = (lambda d: f"{d} ") if len(wdom) > 1 else (lambda d: "")
+    w2 = []
+    for d, w in wdom.items():
+        aux_ref = straight_aux.get(d, set()) - {origin}
+        b2, s2 = exact_case({d: w}, straight, tw[d], common, cfg=cfg, required_times=scheduled[d],
+                            aux_schedules={d: (end, aux_ref, aux_ref)})
+        bad += [f"straight vs WRF: {x}" for x in b2]
+        w2.append(tag(d) + s2)
+    what += f"; vs WRF {os.path.relpath(wrf, WR)}{' (every domain)' if len(wdom) > 1 else ''} at tolerance 0: " \
+        f"straight {', '.join(w2)}"
+    for w, d_out, _ in resumed:  # a wrfrst resume's START_DATE is the restart time (WRF's), a native one's the run's
+        if set(schedules[w]) != set(doms):
+            continue
+        w2 = []
+        for d, wf in wdom.items():
+            aux_ref = {s for s in straight_aux.get(d, ()) if s > start}
+            aux_shared = aux_ref & resumed_aux[w].get(d, set())
+            b2, s2 = exact_case({d: wf}, d_out, tw[d], common, after=split[d], cfg=cfg,
+                                ignore_atts=("START_DATE",) if w == "wrfrst" else (),
+                                required_times=scheduled[d] & schedules[w][d],
+                                aux_schedules={d: (end, aux_shared, aux_ref)})
+            bad += [f"{w} vs WRF: {x}" for x in b2]
+            w2.append(tag(d) + s2)
+        what += f"; {w} resumed {', '.join(w2)}"
+    return bad, what
 
 
 def layout_restart_at(sets):
@@ -581,24 +1087,22 @@ def compare_dumps(a, b):
 def compare(wrfout, out, t):
     r = subprocess.run([sys.executable, os.path.join(REPO, "tests/verify/compare_real.py"), wrfout, out],
                        capture_output=True, text=True)
+    if r.returncode:
+        raise RuntimeError(f"L2 comparator exited {r.returncode}: {r.stderr.strip() or r.stdout.strip()}")
     res = {}
     for line in r.stdout.splitlines():
         f = line.split()
-        if len(f) >= 5 and f[0].replace(".", "").isdigit() and abs(float(f[0]) - t) < 1e-6:
+        if len(f) < 5:
+            continue
+        try:
+            row_time = float(f[0])
+        except ValueError:  # the header
+            continue
+        if abs(row_time - t) < 1e-6:
+            if f[1] in res:
+                raise RuntimeError(f"duplicate L2 metric for {f[1]} at t={t:g}s")
             res[f[1]] = float(f[3])
     return res
-
-
-def straka(binary, out):
-    wo = f"{WREF}/run_straka_d1/wrfout_d01_0001-01-01_00:00:00"
-    if not os.path.exists(wo):
-        return None, "reference missing"
-    rc, log = run(binary, "configs/straka_wrf.ini", [], out)
-    if rc != 0:
-        return False, log[-300:]
-    r = subprocess.run([sys.executable, os.path.join(REPO, "tests/verify/verify.py"), "wrf", wo, out],
-                       capture_output=True, text=True)
-    return ("FAIL" not in r.stdout and r.returncode == 0), r.stdout.strip().splitlines()[-1] if r.stdout else r.stderr
 
 
 def restart_p1(binary, out, cfg="configs/real_p1_r8.ini", run_dir="run_P1_r8"):
@@ -610,11 +1114,259 @@ def restart_p1(binary, out, cfg="configs/real_p1_r8.ini", run_dir="run_P1_r8"):
     rc, log = run(binary, cfg, ["restart.interval=60"], a)
     if rc != 0:
         return False, log[-300:]
-    rc, log = run(binary, cfg, [f"run.restart_file={a}/restart_000001.nc"], b)
+    seed = os.path.join(a, "restart_000001.nc")
+    if not os.path.isfile(seed):
+        return False, f"missing native restart seed {seed}"
+    rc, log = run(binary, cfg, [f"run.restart_file={seed}"], b)
     if rc != 0:
         return False, log[-300:]
-    same = open(f"{a}/snap_000003.bin", "rb").read() == open(f"{b}/snap_000003.bin", "rb").read()
-    return same, "step 3 bit-identical" if same else "step 3 differs after restart"
+    error = compare_snapshots(a, b, 3, 3 * float(configuration(cfg, [])["time"]["dt"]))
+    return not error, error or "step 3 bit-identical"
+
+
+def compare_snapshots(first, second, step, time_sec):
+    """Validate the snapshot headers and payload extent before comparing their bytes."""
+    headers, binaries = [], []
+    for path in (first, second):
+        base = os.path.join(path, f"snap_{step:06d}")
+        try:
+            with open(base + ".json") as f:
+                header = json.load(f)
+            size = os.path.getsize(base + ".bin")
+            if size < 4 or header["step"] != step or not math.isclose(header["time"], time_sec, abs_tol=1e-6):
+                return f"{base}: invalid snapshot size, step or time"
+            offset, names = 0, set()
+            for v in header["variables"]:
+                width = {"float32": 4, "float64": 8}[v["dtype"]]
+                shape = v["shape"]
+                if len(shape) != 3 or any(type(n) is not int or n < 1 for n in shape):
+                    return f"{base}: invalid snapshot shape for {v['name']}"
+                nbytes = math.prod(shape) * width
+                if v["offset"] != offset or v["nbytes"] != nbytes or v["name"] in names or not v["name"]:
+                    return f"{base}: invalid snapshot descriptor for {v['name']}"
+                names.add(v["name"])
+                offset += nbytes
+            if offset != size:
+                return f"{base}: snapshot descriptors cover {offset} of {size} bytes"
+        except (OSError, KeyError, ValueError, TypeError) as exc:
+            return f"{base}: invalid snapshot: {exc}"
+        headers.append(header)
+        binaries.append(base + ".bin")
+    if headers[0] != headers[1]:
+        return f"step {step} differs after restart"
+    with open(binaries[0], "rb") as a, open(binaries[1], "rb") as b:
+        for chunk in iter(lambda: a.read(1024 * 1024), b""):
+            if b.read(len(chunk)) != chunk:
+                return f"step {step} differs after restart"
+    return ""
+
+
+def read_namelist(path):
+    sys.path.insert(0, REPO)
+    from tools.wrf2cppwrf import parse_namelist
+    with open(path) as f:
+        return parse_namelist(f.read())
+
+
+def namelist_restart_interval(nml):
+    """Return the translated restart interval in seconds or fail on unsupported settings."""
+    nl = read_namelist(nml)
+    from tools.wrf2cppwrf import WrfTranslator
+    tr = WrfTranslator(nl, namelist_path=nml, output_format="wrfout")
+    gen = tr.translate()
+    errors = [err for err in tr.errors if not err.startswith("WRF restart = .true. is not translated:")]
+    if errors:
+        raise ValueError(f"{nml}: {'; '.join(errors)}")
+    return float(gen.get("restart", {}).get("interval", 0))
+
+
+def resumed_namelist(rsm, rst, out):
+    """Stage the resumed namelist beside its effective iofields files when some come from rst."""
+    nml = os.path.join(rsm, "namelist.input")
+    names = read_namelist(nml).get("time_control", {}).get("iofields_filename", [])
+    sources = {}
+    for name in names:
+        if not name or name.upper() == "NONE_SPECIFIED":
+            continue
+        src = os.path.join(rsm, name)
+        if not os.path.isfile(src):
+            src = os.path.join(rst, name)
+            if not os.path.isfile(src):
+                return None, f"{nml} names iofields_filename {name}: in neither {rsm} nor {rst}"
+        if not os.path.isabs(name):
+            sources[name] = src
+    if all(src == os.path.join(rsm, name) for name, src in sources.items()):
+        return nml, ""
+    d = os.path.join(out, "rsm_namelist")
+    os.makedirs(d, exist_ok=True)
+    shutil.copyfile(nml, os.path.join(d, "namelist.input"))
+    for name, src in sources.items():
+        dst = os.path.join(d, name)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        shutil.copyfile(src, dst)
+    return os.path.join(d, "namelist.input"), ""
+
+
+def compare_seeded_restart(resumed, rsm, start, t, *, interval=60000, pending=120, dt=60):
+    """Compare the minute-1 WRF-seeded leg with the references made by make_resumed_refs.sh."""
+    import exact
+    # These runs write history every minute. The seed's restart alarm first rings at minute 2.
+    end = times_at(start, t)
+    seed = times_at(start, 60)
+    expected = [times_at(start, sec) for sec in range(120, int(t) + 1, 60)]
+    history = stream_files(rsm, "wrfout", "d01")
+    stats, noise = {}, set()
+    with _NC:
+        dif, _ = exact.compare_stream(stream_files(resumed, "wrfout", "d01"), history, subset=True,
+                                      until=end, stats=stats, required_times=expected, wrf_reference=True,
+                                      waive=uninitialised, noise=noise)
+    bad = [f"wrfout {k}: {v}" for k, v in dif.items()]
+    required = {times_at(start, s) for s in restart_schedule(dt, interval, t, begin=60, pending=pending)}
+    ref, errors = restart_inventory(stream_files(rsm, "wrfrst", "d01"), "d01", start, required,
+                                    side="WRF restart reference", seed=seed)
+    mine, errors_c = restart_inventory(stream_files(resumed, "wrfrst", "d01"), "d01", start, required,
+                                       side="CPPWRF", seed=seed)
+    bad += errors + errors_c
+    if not required:
+        bad.append("seeded restart schedule has no restart records")
+    shared = sorted(required & ref.keys() & mine.keys())
+    for name in shared:
+        dif, _ = wrfrst_pair(mine[name], ref[name], stats, noise)
+        bad += [f"{name}.{x}" for x in dif]
+    return bad, (f"{len(history)} wrfout, {len(shared)} wrfrst files: "
+                 f"{exact.summary(stats, [(noise, 'WRF leaves them uninitialised')])}")
+
+
+def restart_check(binary, out, tag, cfg, run_dir):
+    """restart_<tag>_fp64[_cuda] (cases/restarts.py, RESTART_WRF): the configuration of the suite case named there,
+    (1) straight vs restarted after step 1 from CPPWRF's restart_000001.nc (the step-3 snapshots bit for bit), (2)
+    the run resumed from CPPWRF's restart file at the comparison's restart time in WRF history output against WRF's
+    uninterrupted run at tolerance 0 (every reference frame after the restart up to the run's end), (3) where WRF's
+    resumed run exists: CPPWRF resumed from WRF's own wrfrst file at minute 1 against it (wrfout frames and the
+    wrfrst files WRF wrote). (good or None when an input is missing, summary)."""
+    import configparser
+    import netCDF4
+    case_name, rst_ref, rsm_ref, mid = RESTART_WRF[tag]
+    case = next(c for c in CASES if c[0] == case_name)
+    if case[2] != cfg:
+        return False, f"{case_name} has configuration {case[2]}, not {cfg}"
+    ini = configparser.ConfigParser(interpolation=None)
+    ini.read(os.path.join(REPO, cfg))
+    t, dt = (float(case[5]) if tag == "p8" else float(ini.get("run", "run_time"))), float(ini.get("time", "dt"))
+    sets = [x for x in case[3] if not x.startswith("suite.")] + [f"run.run_time={t:g}"]
+    ref = f"{WR}/{rst_ref}/wrfout_d01_{os.path.basename(case[4]).split('_', 2)[2]}" if rst_ref else case[4]
+    rsm = f"{WR}/{rsm_ref}" if rsm_ref else None
+    need = [ref] + ([rsm, f"{WR}/{rst_ref}"] if rsm else [])
+    if not os.path.exists(f"{WR}/{run_dir}/steps/wrfinput_d01") and not os.path.exists(f"{WR}/{run_dir}/wrfinput_d01"):
+        return None, "input missing"
+    if [x for x in need if not os.path.exists(x)]:
+        return None, f"WRF reference missing: {', '.join(x for x in need if not os.path.exists(x))}"
+    nl = os.path.join(os.path.dirname(ref), "namelist.input")
+    dif = config_vs_namelist(cfg, sets, nl) if os.path.exists(nl) else [f"no {nl}"]
+    if dif:
+        return False, f"configuration differs from {nl}: {'; '.join(dif)}"
+    # (1) CPPWRF straight vs CPPWRF restarted after step 1 (the native snapshots)
+    a, b = os.path.join(out, "straight"), os.path.join(out, "restarted")
+    rc, log = run(binary, cfg, sets + [f"restart.interval={dt:g}"], a)
+    if rc != 0:
+        return False, f"straight run failed: {log[-300:]}"
+    seed = os.path.join(a, "restart_000001.nc")
+    if not os.path.isfile(seed):
+        return False, f"missing native restart seed {seed}"
+    rc, log = run(binary, cfg, sets + [f"run.restart_file={seed}"], b)
+    if rc != 0:
+        return False, f"restarted run failed: {log[-300:]}"
+    error = compare_snapshots(a, b, 3, 3 * dt)
+    if error:
+        return False, f"self: {error}"
+    bad = []
+    wrf = sets + ["output.format=wrfout", f"output.wrf_namelist={nl}"]
+    # (2) resumed from CPPWRF's restart file at mid against WRF's uninterrupted run
+    first = a
+    if mid != dt:  # a run of its own whose restart alarm rings at mid only
+        first = os.path.join(out, "first")
+        rc, log = run(binary, cfg, sets + [f"restart.interval={mid:g}"], first)
+        if rc != 0:
+            return False, f"run to the restart at {mid:g}s failed: {log[-300:]}"
+    c = os.path.join(out, "resumed_wrfout")
+    seed = os.path.join(first, f"restart_{round(mid / dt):06d}.nc")
+    if not os.path.isfile(seed):
+        return False, f"missing native restart seed {seed}"
+    rc, log = run(binary, cfg, wrf + [f"run.restart_file={seed}"], c)
+    if rc != 0:
+        return False, f"resumed run (WRF history output) failed: {log[-300:]}"
+    with _NC, netCDF4.Dataset(ref) as ds:
+        start = ds.getncattr("SIMULATION_START_DATE")
+    # (a run resumed from CPPWRF's own file continues the run that wrote it: START_DATE is that run's, WRF's
+    # uninterrupted run's; every global attribute is compared)
+    split = times_at(start, mid)
+    cadence = chain_history(configuration(cfg, sets), ["d01"], t)["d01"]
+    required = {s for s in history_schedule(start, cadence, times_at(start, t)) if s > split}
+    bad += history_inventory(stream_files(c, "wrfout", "d01"), required, start)
+    b2, w2 = exact_case({"": ref}, c, t, wrf, after=split, cfg=cfg, reference_schedules={"d01": required})
+    bad += [f"vs WRF {os.path.basename(os.path.dirname(ref))}: {x}" for x in b2]
+    what = (f"step 3 bit-identical after the restart at {dt:g}s; resumed at {mid:g}s vs WRF "
+            f"{os.path.relpath(ref, WR)} at tolerance 0: {w2}")
+    # (3) resumed from WRF's own wrfrst file at minute 1 against WRF's resumed run
+    if rsm:
+        r = os.path.join(out, "resumed_from_wrf")
+        rnl, why = resumed_namelist(rsm, f"{WR}/{rst_ref}", out)
+        if rnl is None:
+            return False, why
+        # WRF's resumed run as configured: its namelist's restart_interval (1000 min); the restart alarm rings at
+        # minute 2 by the WRF_ALARM_SECS_TIL_NEXT_RING_51 of rst_<C>'s file (input_wrf), and the wrfrst file
+        # written there carries that interval
+        try:
+            interval = namelist_restart_interval(rnl)
+        except ValueError as e:
+            return False, str(e)
+        stamp = times_at(start, 60)
+        seed = f"{WR}/{rst_ref}/wrfrst_d01_{stamp}"
+        _, errors = restart_inventory([seed] if os.path.isfile(seed) else [], "d01", start, {stamp}, side="WRF seed")
+        if errors:
+            return False, "; ".join(errors)
+        with _NC, netCDF4.Dataset(seed) as ds:
+            left = int(ds.getncattr(RESTART_ALARM))
+        if left != 60:
+            return False, f"{seed}: {RESTART_ALARM} {left}, expected 60"
+        rsets = sets + ["output.format=wrfout", f"output.wrf_namelist={rnl}",
+                        f"restart.interval={interval:g}",
+                        f"run.restart_file={seed}"]
+        rc, log = run(binary, cfg, rsets, r)
+        if rc != 0:
+            return False, f"run resumed from WRF's wrfrst file failed: {log[-300:]}"
+        b3, w3 = compare_seeded_restart(r, rsm, start, t, interval=interval, pending=60 + left, dt=dt)
+        bad += [f"vs WRF {rsm_ref}: {x}" for x in b3]
+        what += (f"; resumed from WRF's {rst_ref}/wrfrst_d01 at 60s vs WRF's resumed run {rsm_ref} at tolerance 0 "
+                 f"({w3})")
+    else:
+        what += "; WRF's resumed run of this configuration: none (rsm_<C>_r8 not made)"
+    return not bad, what if not bad else f"{'; '.join(x[:300] for x in bad[:6])}{' ...' if len(bad) > 6 else ''}"
+
+
+# what a check compares with, the tag its PASS / FAIL line carries before the wall time (tools/gcp/suite_status.sh
+# counts the PASS lines by it: the SPLIT line)
+KINDS = {"wrf0": "[vs WRF tol 0]", "wrfl2": "[vs WRF rel L2]", "self": "[self only]"}
+
+
+def kind(name):
+    """What the check `name` compares with: 'wrf0' (WRF's output at tolerance 0: the tolerance-0 cases, the
+    restart checks (cases/restarts.py: their resumed runs too), the restart chains with suite.chain_wrf), 'wrfl2'
+    (WRF's by relative L2: the cuda cases of the fast FP32 build) or 'self' (CPPWRF against CPPWRF only: the
+    restart chains without a WRF run of their configuration, restart_p1_fp32_cuda)."""
+    case = next((c for c in CASES if c[0] == name), None)
+    if case is None:
+        return "self" if name == "restart_p1_fp32_cuda" else "wrf0"
+    sets = case[3]
+    if chain_at(sets):
+        return "wrf0" if chain_at(sets)[3] else "self"
+    return "wrf0" if all(x == 0.0 for x in case[6].values()) else "wrfl2"
+
+
+def split_line(split):
+    """The SPLIT line: the PASSes by what they compared with (KINDS)."""
+    return (f"SPLIT PASS vs WRF at tolerance 0: {split['wrf0']}; vs WRF by relative L2: {split['wrfl2']}; "
+            f"CPPWRF self-consistency only: {split['self']}")
 
 
 STATUS_MARK = "<!-- generated: tests/verify/wrf_suite.py --status-table docs/STATUS.md (rows: STATUS in tests/verify/cases) -->"
@@ -647,7 +1399,7 @@ def main():
     ap.add_argument("--exact", action="store_true", help="--only names are exact case names")
     ap.add_argument("--jobs", type=int, default=1, help="CPU cases run at the same time (GPU cases: one at a time)")
     ap.add_argument("--keep", action="store_true", help="keep the outputs of passing cases (default: deleted)")
-    ap.add_argument("--allow-skip", action="store_true", help="cases without their reference do not fail the suite")
+    ap.add_argument("--allow-skip", action="store_true", help="permit reported SKIPs for missing data, even if all checks skip")
     ap.add_argument("--slow", action="store_true", help="also the slow cases (suite.slow: the 24 h and 72 h runs)")
     ap.add_argument("--list", action="store_true", help="print every case (all its fields) and the restart and special "
                     "checks, and exit")
@@ -680,12 +1432,15 @@ def main():
         for r in RESTARTS:
             print(" | ".join(repr(x) for x in r))
         return
-    only = a.only.split(",") if a.only else None
+    only = a.only.split(",") if a.only is not None else None
+    if only is not None and any(not o.strip() for o in only):
+        ap.error("--only contains an empty selector")
 
     def wanted(name):
         return not only or (name in only if a.exact else any(o in name for o in only))
 
-    unknown = [o for o in only or [] if not any(o == n if a.exact else o in n for n in [c[0] for c in CASES] + SPECIAL)]
+    known = [c[0] for c in CASES] + SPECIAL
+    unknown = [o for o in only or [] if not any(o == n if a.exact else o in n for n in known)]
     if unknown:  # a misspelt case would otherwise make an empty suite that passes
         print(f"ERROR no case named {', '.join(unknown)}", flush=True)
         sys.exit(2)
@@ -696,13 +1451,17 @@ def main():
 
     def case(name, b, cfg, sets, refs, t, tol):
         out = os.path.join(a.out, name)
+        if all(x == 0.0 for x in tol.values()) and not chain_at(sets):
+            errors = reference_domain_errors(cfg, sets, refs)
+            if errors:
+                return False, f"FAIL  {name:22s} {'; '.join(errors)}"
         if cfg.startswith("dropin:"):  # cppwrf-wrf in a WRF run directory, its files against WRF's at tolerance 0
             rc, log = dropin_run(b, cfg, sets, out)
             if rc != 0:
                 return False, f"FAIL  {name:22s} drop-in run failed: {log[-200:]}"
-            bad, what = exact_case(refs, out, t, sets)
+            bad, what = exact_case(refs, out, t, sets, cfg=cfg)
             if wrfrst_check(sets):
-                b2, w2 = wrfrst_case(refs, out, [os.path.basename(f) for f in dropin_spec(cfg, sets)[2]])
+                b2, w2 = wrfrst_case(refs, out, cfg, sets)
                 bad, what = bad + b2, f"{what}, {w2}"
             done(out, not bad)
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact (cppwrf-wrf): {what}"
@@ -719,7 +1478,7 @@ def main():
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
                              + (f"  [{'; '.join(x[:300] for x in bad[:8])}{' ...' if len(bad) > 8 else ''}]" if bad else ""))
         if chain:  # CPPWRF resumed against CPPWRF straight (restart_chain)
-            bad, what = restart_chain(b, cfg, sets, refs, t, chain[0], chain[1], out, chain[2])
+            bad, what = restart_chain(b, cfg, sets, refs, t, chain[0], chain[1], out, chain[2], chain[3])
             done(out, not bad)
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
                              + (f"  [{'; '.join(x[:300] for x in bad[:8])}{' ...' if len(bad) > 8 else ''}]" if bad else ""))
@@ -740,9 +1499,9 @@ def main():
         if rc != 0:
             return False, f"FAIL  {name:22s} run failed: {log[-200:]}"
         if exact:
-            bad, what = exact_case(refs, out, t, sets)
+            bad, what = exact_case(refs, out, t, sets, cfg=cfg)
             if rst_check:
-                b2, w2 = wrfrst_case(refs, out)
+                b2, w2 = wrfrst_case(refs, out, cfg, sets)
                 bad, what = bad + b2, f"{what}, {w2}"
             done(out, not bad)
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
@@ -751,7 +1510,7 @@ def main():
         for dom, w in refs.items():  # nested: out/<domain>, tolerance keys "<domain>.<var>"
             for v, x in compare(w, os.path.join(out, dom) if dom else out, t).items():
                 res[f"{dom}.{v}" if dom else v] = x
-        bad = [f"{v} {res.get(v, float('nan')):.2e}>{tl:.0e}" for v, tl in tol.items()
+        bad = [f"{v} {res.get(v, float('nan'))!r}>{tl!r}" for v, tl in tol.items()
                if not (res.get(v, float("inf")) <= tl)]
         txt = " ".join(f"{v}={res.get(v, float('nan')):.1e}" for v in tol)
         done(out, not bad)
@@ -770,11 +1529,13 @@ def main():
             print(f"ERROR --{k.replace('_', '-')} {b}: no such file (build failed?)", flush=True)
             sys.exit(2)
     cpu, gpu = [], []
+    reported = set()
     count = {"PASS": 0, "FAIL": 0, "SKIP": 0}
+    split = {k: 0 for k in KINDS}
     for name, key, cfg, sets, wo, t, tol in CASES:
         if not wanted(name) or not bins.get(key):  # cases of binaries not given are not selected
             continue
-        if slow(sets) and not a.slow and not (a.exact and name in only):  # slow cases only on request
+        if slow(sets) and not a.slow and not (a.exact and only and name in only):  # slow cases only on request
             continue
         b = bins[key]
         refs = wo if isinstance(wo, dict) else {"": wo}  # nested runs: {domain: wrfout}
@@ -782,50 +1543,54 @@ def main():
         if missing:
             print(f"SKIP  {name:22s} (reference missing: {', '.join(missing)})", flush=True)
             count["SKIP"] += 1
+            reported.add(name)
             continue
         (cpu if key in ("cpu_dp", "cpu_sp") else gpu).append((t, name, lambda n=name, b=b, c=cfg, s=sets, r=refs, t=t, tl=tol: case(n, b, c, s, r, t, tl)))
     if a.cpu_dp and os.path.exists(a.cpu_dp):
-        if not only or wanted("straka_wrf"):
-            p = os.path.join(a.out, "straka")
-            cpu.append((0, "straka_wrf", lambda p=p: special("straka_wrf", lambda: straka(a.cpu_dp, p), p)))
         for tag, cfg, rd in RESTARTS:
             rname = f"restart_{tag}_fp64"
             if not wanted(rname):
                 continue
             p = os.path.join(a.out, f"restart_{tag}")
-            cpu.append((0, rname, lambda r=rname, c=cfg, d=rd, p=p: special(r, lambda: restart_p1(a.cpu_dp, p, c, d), p)))
+            cpu.append((0, rname, lambda r=rname, g=tag, c=cfg, d=rd, p=p: special(r, lambda: restart_check(a.cpu_dp, p, g, c, d), p)))
     if a.cuda and os.path.exists(a.cuda) and wanted("restart_p1_fp32_cuda"):  # single precision, GPU
         p = os.path.join(a.out, "restart_p1_fp32_cuda")
         gpu.append((0, "restart_p1_fp32_cuda", lambda p=p: special("restart_p1_fp32_cuda", lambda: restart_p1(a.cuda, p), p)))
     if a.cuda_dp and os.path.exists(a.cuda_dp):
-        if wanted("straka_wrf_cuda"):
-            p = os.path.join(a.out, "straka_cuda")
-            gpu.append((0, "straka_wrf_cuda", lambda p=p: special("straka_wrf_cuda", lambda: straka(a.cuda_dp, p), p)))
         for tag, cfg, rd in RESTARTS:
             rname = f"restart_{tag}_fp64_cuda"
             if not wanted(rname):
                 continue
             p = os.path.join(a.out, f"restart_{tag}_cuda")
-            gpu.append((0, rname, lambda r=rname, c=cfg, d=rd, p=p: special(r, lambda: restart_p1(a.cuda_dp, p, c, d), p)))
+            gpu.append((0, rname, lambda r=rname, g=tag, c=cfg, d=rd, p=p: special(r, lambda: restart_check(a.cuda_dp, p, g, c, d), p)))
+    if not (cpu or gpu or reported):
+        ap.error("selected no checks for the supplied binaries and options")
     # longest simulated time first; each task prints its line as soon as it ends; GPU cases share the one GPU
     cpu = sorted(cpu, key=lambda x: -x[0])
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    def timed(fn):  # the case's line ends with its wall time
+    def timed(fn, name):  # the case's line ends with what it compared with (KINDS) and its wall time
         t0 = time.monotonic()
         good, line = fn()
-        return good, f"{line}  ({time.monotonic() - t0:.0f} s)"
+        return good, f"{line}  {KINDS[kind(name)]}  ({time.monotonic() - t0:.0f} s)"
     with ThreadPoolExecutor(max(1, a.jobs)) as pc, ThreadPoolExecutor(1) as pg:
-        futs = {pc.submit(timed, f): n for _, n, f in cpu} | {pg.submit(timed, f): n for _, n, f in gpu}
+        futs = {pc.submit(timed, f, n): n for _, n, f in cpu} | {pg.submit(timed, f, n): n for _, n, f in gpu}
         for f in as_completed(futs):
             try:
                 good, line = f.result()
             except Exception as e:  # noqa: BLE001 - a case the harness cannot finish fails, the others go on
                 good, line = False, f"FAIL  {futs[f]:22s} harness error: {type(e).__name__}: {e}"
             print(line, flush=True)
+            reported.add(futs[f])
             count["SKIP" if good is None else "PASS" if good else "FAIL"] += 1
+            if good:
+                split[kind(futs[f])] += 1
+    missing = sorted({n for n in known if wanted(n)} - reported) if only is not None else []
+    if missing:
+        print(f"ERROR no result for requested checks: {', '.join(missing)}", flush=True)
+    print(split_line(split), flush=True)
     print(f"SUITE PASS {count['PASS']} FAIL {count['FAIL']} SKIP {count['SKIP']}", flush=True)
-    sys.exit(0 if not count["FAIL"] and (a.allow_skip or not count["SKIP"]) else 1)
+    sys.exit(0 if not missing and not count["FAIL"] and (a.allow_skip or not count["SKIP"]) else 1)
 
 
 if __name__ == "__main__":

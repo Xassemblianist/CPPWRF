@@ -162,9 +162,11 @@ def main():
 
 
 def write_wrfout(path, times, fault=None, drop=None):
-    """A small wrfout-like file (Times, U, W with WRF's -0, T, QVAPOR; global and variable attributes);
-    fault(name, array, frame) edits a value array before it is written, fault('(file)', dataset, None) the file;
-    drop: a variable left out."""
+    """A small wrfout-like file (Times, U, W with WRF's -0, T, QVAPOR, the integer ISLTYP; ZS and the 64-bit integer
+    BIGI without a Time dimension; global and variable attributes); each frame's values depend on its time only (a
+    stream split into several files has the same frames). fault(name, array, frame) edits a value array before it
+    is written (frame None: a variable without Time), fault('(file)', dataset, None) the file; drop: a variable
+    left out."""
     import netCDF4
     ds = netCDF4.Dataset(path, "w")
     ds.createDimension("Time", None)
@@ -172,14 +174,22 @@ def write_wrfout(path, times, fault=None, drop=None):
     for n, k in (("bottom_top", 4), ("bottom_top_stag", 5), ("south_north", 3), ("west_east", 5), ("west_east_stag", 6)):
         ds.createDimension(n, k)
     ds.setncatts({"TITLE": "test", "DX": np.float32(1000.0), "MP_PHYSICS": np.int32(6)})
-    rng = np.random.default_rng(1)
     vs = {"U": ("bottom_top", "south_north", "west_east_stag"), "W": ("bottom_top_stag", "south_north", "west_east"),
           "T": ("bottom_top", "south_north", "west_east"), "QVAPOR": ("bottom_top", "south_north", "west_east")}
     ts = ds.createVariable("Times", "S1", ("Time", "DateStrLen"))
     for n, dims in vs.items():
         if n != drop:
             ds.createVariable(n, "f8", ("Time",) + dims).setncatts({"MemoryOrder": "XYZ", "units": "m s-1"})
+    ds.createVariable("ISLTYP", "i4", ("Time", "south_north", "west_east")).setncatts({"MemoryOrder": "XY "})
+    zs = np.linspace(0.0, 3.0, 4)
+    big = np.array([2 ** 53, 2 ** 53 + 2, 7], dtype=np.int64)
+    if fault:
+        fault("ZS", zs, None)
+        fault("BIGI", big, None)
+    ds.createVariable("ZS", "f8", ("bottom_top",))[:] = zs
+    ds.createVariable("BIGI", "i8", ("south_north",))[:] = big
     for it, t in enumerate(times):
+        rng = np.random.default_rng(int(t[-5:-3]) + 1)  # the frame's minute
         ts[it] = np.frombuffer(t.encode(), "S1")
         for n, dims in vs.items():
             a = rng.standard_normal([len(ds.dimensions[x]) for x in dims])
@@ -189,6 +199,10 @@ def write_wrfout(path, times, fault=None, drop=None):
                 fault(n, a, it)
             if n != drop:
                 ds[n][it] = a
+        a = rng.integers(1, 20, (3, 5)).astype(np.int32)
+        if fault:
+            fault("ISLTYP", a, it)
+        ds["ISLTYP"][it] = a
     if fault:
         fault("(file)", ds, None)
     ds.close()
@@ -249,6 +263,72 @@ def exact_faults(tmp, failures):
               f" (expected {'a difference' if should_differ else 'identical'})")
         if not ok:
             failures.append("exact " + name)
+    def static(name, f):
+        return lambda n, a, i: f(a) if (n, i) == (name, None) else None
+
+    def plus_one(a, idx=(0,)):
+        a[idx] += 1
+
+    def big_plus_one(a):  # 2**53 + 1: the same number as 2**53 in float64
+        a[0] += 1
+
+    def isltyp(n, a, i):
+        if (n, i) == ("ISLTYP", 2):
+            a[1, 1] += 1
+
+    for name, fault in (("a variable without Time", static("ZS", lambda a: plus_one(a, (2,)))),
+                        ("a 64-bit integer beyond 2**53", static("BIGI", big_plus_one)),
+                        ("an integer variable", isltyp)):
+        d = os.path.join(tmp, "exact_" + "".join(c if c.isalnum() else "_" for c in name))
+        os.makedirs(d, exist_ok=True)
+        write_wrfout(os.path.join(d, "wrf"), T)
+        write_wrfout(os.path.join(d, "cpp"), T, fault)
+        bad, n = exact.compare_stream([os.path.join(d, "cpp")], [os.path.join(d, "wrf")])
+        print(f"[{'ok' if bad else 'WRONG'}] exact {name}: {str(bad)[:160] if bad else 'identical'} (expected a difference)")
+        if not bad:
+            failures.append("exact " + name)
+    # a stream in two files: the global attributes of the second file differ
+    d = os.path.join(tmp, "exact_second_file_metadata")
+    os.makedirs(d, exist_ok=True)
+    write_wrfout(os.path.join(d, "wrf"), T)
+    write_wrfout(os.path.join(d, "cpp_a"), T[:2])
+    write_wrfout(os.path.join(d, "cpp_b"), T[2:], gatt)
+    bad, n = exact.compare_stream([os.path.join(d, "cpp_a"), os.path.join(d, "cpp_b")], [os.path.join(d, "wrf")])
+    ok = "(metadata)" in bad and n == 3
+    print(f"[{'ok' if ok else 'WRONG'}] exact metadata of a stream's second file: {str(bad)[:160] if bad else 'identical'}")
+    if not ok:
+        failures.append("exact second file metadata")
+    write_wrfout(os.path.join(d, "cpp_b"), T[2:])
+    bad, n = exact.compare_stream([os.path.join(d, "cpp_a"), os.path.join(d, "cpp_b")], [os.path.join(d, "wrf")])
+    print(f"[{'ok' if not bad and n == 3 else 'WRONG'}] exact a stream in two files: {str(bad)[:160] if bad else 'identical'}")
+    if bad or n != 3:
+        failures.append("exact stream in two files")
+    # NaN at the same point in both: identical, and counted; a resumed run's files (after, START_DATE)
+    d = os.path.join(tmp, "exact_nan_both")
+    os.makedirs(d, exist_ok=True)
+    write_wrfout(os.path.join(d, "wrf"), T, at("T", nan, 1))
+    write_wrfout(os.path.join(d, "cpp"), T, at("T", nan, 1))
+    stats = {}
+    bad, n = exact.compare_stream([os.path.join(d, "cpp")], [os.path.join(d, "wrf")], stats=stats)
+    line = exact.summary(stats)
+    ok = not bad and stats.get("nan") == 1 and "NaN at the same 1 points" in line and stats.get("static") == 2
+    print(f"[{'ok' if ok else 'WRONG'}] exact NaN in both, counted: {bad or line}")
+    if not ok:
+        failures.append("exact nan counted")
+
+    def start(n, ds, i):
+        if n == "(file)":
+            ds.START_DATE = T[1]
+    write_wrfout(os.path.join(d, "res"), T[2:], start)
+    write_wrfout(os.path.join(d, "wrf2"), T, lambda n, ds, i: setattr(ds, "START_DATE", T[0]) if n == "(file)" else None)
+    bad, n = exact.compare_stream([os.path.join(d, "res")], [os.path.join(d, "wrf2")], after=T[1])
+    ok = "(metadata)" in bad and n == 1
+    bad2, n2 = exact.compare_stream([os.path.join(d, "res")], [os.path.join(d, "wrf2")], after=T[1],
+                                    ignore_atts=("START_DATE",))
+    ok = ok and not bad2 and n2 == 1
+    print(f"[{'ok' if ok else 'WRONG'}] exact resumed files after the restart (START_DATE differs, then ignored): {bad} / {bad2}")
+    if not ok:
+        failures.append("exact resumed after")
     d = os.path.join(tmp, "exact_wrf_variable_missing")  # a variable WRF writes and CPPWRF does not, reversed
     os.makedirs(d, exist_ok=True)
     write_wrfout(os.path.join(d, "wrf"), T, drop="QVAPOR")
