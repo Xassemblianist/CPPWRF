@@ -1,0 +1,14 @@
+# WRF v4.8.0 reference run of the three-domain nest N3T (tests/verify/cases/61_nest3.py, configs/real_n3t_r8.ini, data
+# nest3_data.tar), for tools/colab/colab_wrfref.sh (REFS format of tools/gcp/gcp_wrfref.sh: NAME BASE_RUN WRF_EXE
+# section.key=value ...; tools/gcp/wrf_ref_run.py). Data: matrix_data.tar (the WRF executables), matrix_nest.tar
+# (run_N3s_r8: the tables), matrix_real.tar (real.exe), wps_n3t_data.tar: base_N3T (the namelist.input of the three
+# domains, N3s's with a third column: d03 61 x 61 at (50, 35) of d02, ratio 3; links to run_N3s_r8's tables) and
+# real_N3T (WPS 4.6.0 geogrid.exe / metgrid.exe output for the three domains from the N3 nest's GFS intermediate
+# files; d01's and d02's geo_em and met_em files are byte for byte those of the N3 nest). run_N3T_r8: 1 h, history
+# every 10 min on every domain; run_N3T_r8/steps: 3 steps, history every 60 s on every domain; rst_N3T_r8, rsm_N3T_r8.
+#
+#   tools/colab/colab_wrfref.sh tests/verify/refs/nest3_refs.txt \
+#     --data matrix_data.tar,matrix_nest.tar,matrix_real.tar,wps_n3t_data.tar \
+#     --stage nest3_data.tar:real_n3t_r8_fp64_cpu,real_n3t_r8_fp64_cpu_1h,real_n3t_r8_fp64_cuda_1h \
+#     --cases real_n3t_r8_fp64_cpu,real_n3t_r8_fp64_cpu_1h
+N3T_r8 base_N3T wrf_r8.exe time_control.run_seconds=3600 time_control.history_interval_s=600,600,600 run.real=real_r8.exe:real_N3T

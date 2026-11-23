@@ -165,6 +165,9 @@ port_cov5_data.tar
 # WRF's runs of the restart chains' configurations (CHP4, CHG2, CHP8, CHNMP1, CHSLAB1, CHN3; tests/verify/refs/chain_refs.txt,
 # tests/verify/cases/66_restart_chain.py) with their inputs
 chain_wrf_data.tar
+# WRF's run of the three-domain nest N3T (tests/verify/refs/nest3_refs.txt, tests/verify/cases/61_nest3.py) and its
+# inputs
+nest3_data.tar
 # the WRF v4.8.0 objects (-r8, -r8 -fdefault-double-8 builds) and input subsets of the differential tests
 # (ctest -L diff; tools/gcp/stage_diff_data.sh, tools/gcp/run_diff_tests.sh)
 diff_data.tar
