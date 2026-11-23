@@ -17,7 +17,8 @@ import numpy as np
 
 
 # Load the sibling by path because -I excludes the script directory from sys.path.
-compare_stream = runpy.run_path(str(Path(__file__).with_name("exact.py")))["compare_stream"]
+EXACT = runpy.run_path(str(Path(__file__).with_name("exact.py")))
+compare_stream = EXACT["compare_stream"]
 SCRATCH = Path(os.environ.get("CPPWRF_MUTATION_SCRATCH", Path.home() / "cppwrf_scratch" / "cdx9_tmp"))
 FILL = -9999.0
 
@@ -148,6 +149,26 @@ class ExactMutations(unittest.TestCase):
         self.set_value("Times", 1, timestamp(3))
         self.assert_differs("(times)", "only-cppwrf ['2026-01-01_00:03:00']", frames=2)
 
+    def test_nul_position_in_encoded_character_variables(self):
+        for name, dims in (("STATIC_MARKER", ("DateStrLen",)), ("TIME_MARKER", ("Time", "DateStrLen"))):
+            with self.subTest(dims=dims):
+                with Dataset(self.wrf[1], "r+") as ds:
+                    v = ds.createVariable(name, "S1", dims)
+                    v._Encoding = "ascii"
+                    v.set_auto_chartostring(False)
+                    v[:] = np.broadcast_to(np.frombuffer(b"\x00A" + b"x" * 17, dtype="S1"), v.shape)
+                shutil.copyfile(self.wrf[1], self.second)
+                self.assertFalse(compare_stream(self.cpp, self.wrf)[0])
+                with Dataset(self.second, "r+") as ds:
+                    v = ds[name]
+                    v.set_auto_chartostring(False)
+                    v[..., :2] = np.broadcast_to(np.frombuffer(b"A\x00", dtype="S1"), (*v.shape[:-1], 2))
+                self.assert_differs(name, "character bytes differ")
+
+    def test_character_shape(self):
+        ref = np.array(b"A", dtype="S1")
+        self.assertEqual(EXACT["describe"](ref, ref.reshape(1)), "shape () vs (1,)")
+
     def test_global_attribute_changed_in_second_file(self):
         with Dataset(self.second, "r+") as ds:
             ds.setncattr("RUN_ID", "mutated")
@@ -158,9 +179,68 @@ class ExactMutations(unittest.TestCase):
             ds["F32"].units = "degC"
         self.assert_differs("(metadata)", "F32: attributes")
 
+    def test_middle_element_of_long_global_and_variable_attributes(self):
+        values = np.arange(1200, dtype=np.int32)
+        with Dataset(self.wrf[1], "r+") as ds:
+            ds.setncattr("LONG", values)
+            ds["F32"].setncattr("LONG", values)
+        for variable, diagnostic in ((False, "global attributes {'LONG'"), (True, "F32: attributes {'LONG'")):
+            with self.subTest(variable=variable):
+                shutil.copyfile(self.wrf[1], self.second)
+                self.assertFalse(compare_stream(self.cpp, self.wrf)[0])
+                changed = values.copy()
+                changed[600] = -1
+                with Dataset(self.second, "r+") as ds:
+                    target = ds["F32"] if variable else ds
+                    target.setncattr("LONG", changed)
+                self.assert_differs("(metadata)", diagnostic)
+                self.assert_differs("(metadata)", "at 600")
+
+    def test_attribute_dtype_changed(self):
+        with Dataset(self.wrf[1], "r+") as ds:
+            ds["F32"].setncattr("COEFFICIENTS", np.array([1, 2], dtype=np.int32))
+        shutil.copyfile(self.wrf[1], self.second)
+        with Dataset(self.second, "r+") as ds:
+            ds["F32"].setncattr("COEFFICIENTS", np.array([1, 2], dtype=np.int64))
+        self.assert_differs("(metadata)", "type int64 vs int32")
+
+    def test_floating_attribute_keeps_numeric_policy(self):
+        with Dataset(self.wrf[1], "r+") as ds:
+            ds.setncattr("NUMBERS", np.array([np.nan, 0.0]))
+        shutil.copyfile(self.wrf[1], self.second)
+        self.assertFalse(compare_stream(self.cpp, self.wrf)[0])
+        with Dataset(self.second, "r+") as ds:
+            ds.setncattr("NUMBERS", np.array([np.nan, -0.0]))
+        self.assert_differs("(metadata)", "signed-zero 1")
+
     def test_dimension_length_changed(self):
         write_output(self.second, (1, 2), spare_length=2)
         self.assert_differs("(metadata)", "('unused', 2)")
+
+    def test_unlimited_dimension_length_changed(self):
+        with Dataset(self.wrf[1], "r+") as ds:
+            ds.createDimension("spare_records", None)
+            ds.createVariable("SPARE", "i4", ("spare_records",))[0] = 1
+        shutil.copyfile(self.wrf[1], self.second)
+        self.assertFalse(compare_stream(self.cpp, self.wrf)[0])
+        with Dataset(self.second, "r+") as ds:
+            ds["SPARE"][1] = 2
+        self.assert_differs("(metadata)", "('spare_records', 2, 'unlimited')")
+
+    def test_unlimited_dimension_status_changed_at_equal_length(self):
+        for path, spare_length in ((self.wrf[1], None), (self.second, 1)):
+            with Dataset(path, "r+") as ds:
+                ds.createDimension("spare_records", spare_length)
+                ds.createVariable("SPARE", "i4", ("spare_records",))[0] = 1
+        self.assert_differs("(metadata)", "('spare_records', 1, 'unlimited')")
+
+    def test_whole_file_metadata_compares_unlimited_time_length(self):
+        write_output(self.second, (1,))
+        with Dataset(self.second) as candidate, Dataset(self.wrf[1]) as reference:
+            differences = EXACT["metadata"](candidate, reference)
+        self.assertEqual(len(differences), 1)
+        self.assertIn("('Time', 1, 'unlimited')", differences[0])
+        self.assertIn("('Time', 2, 'unlimited')", differences[0])
 
     def test_fill_value_changed(self):
         write_output(self.second, (1, 2), fill_value=-8888.0)

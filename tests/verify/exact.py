@@ -4,7 +4,7 @@ tests/init_real/compare_real.py, tools/gcp/matrix_variant.py).
 
 Two values are identical when they are the same number: NaN equals NaN, NaN differs from any number, -0 differs
 from +0 (WRF writes -0, e.g. in W, C1H, C1F), infinities equal themselves. netCDF variables are read as stored
-(no masking of fill values, no scaling)."""
+(no masking of fill values, scaling or character-to-string conversion)."""
 import numpy as np
 
 
@@ -12,8 +12,9 @@ CLOCK_VARS = {"Times", "XTIME"}
 
 
 def raw(ds):
-    """The netCDF4 dataset `ds` with masking and scaling off (values as stored)."""
+    """The netCDF4 dataset `ds` with automatic conversions off."""
     ds.set_auto_maskandscale(False)
+    ds.set_auto_chartostring(False)
     return ds
 
 
@@ -42,11 +43,17 @@ def nan_matched(x, y):
 
 
 def describe(x, y):
-    """None when x and y are identical, else 'n/size max|d| (first: a vs b at index)' with the NaN-vs-number and
-    signed-zero point counts. Integer arrays are compared in their own types."""
-    x, y = np.atleast_1d(np.asarray(x)), np.atleast_1d(np.asarray(y))
+    """Report shape or value differences, or return None for identical arrays.
+
+    Character arrays compare as stored bytes. Numeric diagnostics include the first differing point and report
+    NaN-vs-number and signed-zero counts for floating-point arrays."""
+    x, y = np.asarray(x), np.asarray(y)
     if x.shape != y.shape:
         return f"shape {x.shape} vs {y.shape}"
+    if x.dtype.kind == "S" or y.dtype.kind == "S":
+        return None if x.dtype == y.dtype and x.tobytes() == y.tobytes() else "character bytes differ"
+    if x.dtype.kind in "UO" or y.dtype.kind in "UO":
+        return None if np.array_equal(x, y) else "values differ"
     if _ints(x, y):
         d = x != y
         n = int(d.sum())
@@ -69,15 +76,31 @@ def describe(x, y):
 
 
 def text(v, t=None):
-    """Bytes of a character variable (all of it, or frame t)."""
-    a = np.asarray(v[:] if t is None else v[t])
-    return b"".join(a.ravel().tolist()) if a.dtype.kind == "S" else a.tobytes()
+    """Read the stored bytes of a timestamp."""
+    v.set_auto_chartostring(False)
+    return np.asarray(v[:] if t is None else v[t]).tobytes()
 
 
-def metadata(a, b, ignore=("TITLE",), only=None):
+def _attribute_differences(a, b, ignore=()):
+    ax = [k for k in a.ncattrs() if k not in ignore]
+    bx = [k for k in b.ncattrs() if k not in ignore]
+    diffs = {}
+    for k in dict.fromkeys(ax + bx):
+        if k not in ax or k not in bx:
+            diffs[k] = f"missing on {'left' if k not in ax else 'right'}"
+            continue
+        x, y = np.asarray(a.getncattr(k)), np.asarray(b.getncattr(k))
+        diff = f"type {x.dtype} vs {y.dtype}" if x.dtype != y.dtype else describe(x, y)
+        if diff:
+            diffs[k] = diff
+    return diffs, ax != bx
+
+
+def metadata(a, b, ignore=("TITLE",), only=None, *, grouped_records=False):
     """Differences of two netCDF datasets other than values: variable list and order, dimensions, each variable's
     dimensions, type and attributes, the global attributes (names in `ignore` aside) and their order.
-    only=[variables of b]: b holds these variables of a full file (in any order; the dimensions they use)."""
+    only=[variables of b]: b holds these variables of a full file (in any order; the dimensions they use).
+    With grouped_records, the stream's timestamp inventory accounts for the length of unlimited Time."""
     out = []
     va, vb = list(a.variables), list(b.variables)
     if only is not None:  # b's variable order is its writer's (stage_data.py), not WRF's
@@ -85,7 +108,16 @@ def metadata(a, b, ignore=("TITLE",), only=None):
     if va != vb:
         out.append(f"variables: missing {[x for x in vb if x not in va]} extra {[x for x in va if x not in vb]}"
                    + ("" if set(va) != set(vb) else " (order)"))
-    dims = lambda f: [(d, "U" if f.dimensions[d].isunlimited() else len(f.dimensions[d])) for d in f.dimensions]  # noqa: E731
+
+    def dims(f):
+        result = []
+        for name, dim in f.dimensions.items():
+            unlimited = dim.isunlimited()
+            length = () if unlimited and grouped_records and name == "Time" else (len(dim),)
+            status = ("unlimited",) if unlimited else ()
+            result.append((name, *length, *status))
+        return result
+
     da, db = dims(a), dims(b)
     if only is not None:
         used = {d for n in vb for d in b.variables[n].dimensions}
@@ -98,16 +130,16 @@ def metadata(a, b, ignore=("TITLE",), only=None):
         x, y = a.variables[n], b.variables[n]
         if x.dimensions != y.dimensions or x.dtype != y.dtype:
             out.append(f"{n}: dims/type {x.dimensions} {x.dtype} vs {y.dimensions} {y.dtype}")
-        ax = [(k, repr(x.getncattr(k))) for k in x.ncattrs()]
-        ay = [(k, repr(y.getncattr(k))) for k in y.ncattrs()]
-        if ax != ay:
-            out.append(f"{n}: attributes {ax} vs {ay}")
-    ga = [(k, repr(a.getncattr(k)), type(a.getncattr(k)).__name__) for k in a.ncattrs() if k not in ignore]
-    gb = [(k, repr(b.getncattr(k)), type(b.getncattr(k)).__name__) for k in b.ncattrs() if k not in ignore]
-    if ga != gb:
-        ma, mb = {k: v for k, *v in ga}, {k: v for k, *v in gb}
-        dif = {k: f"{ma.get(k)} vs {mb.get(k)}" for k in sorted(set(ma) | set(mb)) if ma.get(k) != mb.get(k)}
-        out.append(f"global attributes {dif}" if dif else "global attribute order differs")
+        diffs, order = _attribute_differences(x, y)
+        if diffs:
+            out.append(f"{n}: attributes {diffs}")
+        elif order:
+            out.append(f"{n}: attributes order differs")
+    diffs, order = _attribute_differences(a, b, ignore)
+    if diffs:
+        out.append(f"global attributes {diffs}")
+    elif order:
+        out.append("global attribute order differs")
     return out
 
 
@@ -238,10 +270,6 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
                 continue
             if v not in waived.get(b, ()):
                 compared.add(v)
-            if b[v].dtype.kind == "S":
-                if v != "Times" and text(a[v], ta) != text(b[v], tb):
-                    value_diff(v, b, f"{k} text differs")
-                continue
             if a[v].dimensions[:1] != ("Time",):  # a variable with a Time dimension in WRF's file only
                 bad.setdefault(v, f"dimensions cppwrf {a[v].dimensions} wrf {b[v].dimensions}")
                 continue
@@ -249,7 +277,7 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
             if x.shape != y.shape:
                 if v not in bad:
                     detail = f"shape cppwrf {x.shape} wrf {y.shape}"
-                    if y.size:  # WRF's values per leading index (e.g. soil layers)
+                    if y.size and y.dtype.kind in "fiub":  # WRF's values per leading index (e.g. soil layers)
                         levels = y.reshape(y.shape[0], -1) if y.ndim > 1 else y.reshape(-1, 1)
                         detail += " wrf min/max per level " + " ".join(f"{r.min():.4g}/{r.max():.4g}" for r in levels)
                     bad[v] = detail
@@ -274,10 +302,6 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
             if v not in waived.get(b, ()):
                 static.add(v)
             x, y = np.asarray(a[v][:]), np.asarray(b[v][:])
-            if b[v].dtype.kind == "S" or a[v].dtype.kind == "S":
-                if text(a[v]) != text(b[v]):
-                    value_diff(v, b, "text differs")
-                continue
             if x.shape != y.shape or a[v].dtype != b[v].dtype:
                 bad.setdefault(v, f"shape/type cppwrf {x.shape} {a[v].dtype} wrf {y.shape} {b[v].dtype}")
                 continue
@@ -299,7 +323,7 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
     meta = []
     for a, b in pairs:
         ignore = ("TITLE",) + tuple(ignore_atts) if global_atts else set(a.ncattrs()) | set(b.ncattrs())
-        m = metadata(a, b, ignore, only=list(b.variables) if subset else None)
+        m = metadata(a, b, ignore, only=list(b.variables) if subset else None, grouped_records=True)
         meta += [x for x in m if x not in meta]
     if meta:
         bad["(metadata)"] = meta
