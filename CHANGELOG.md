@@ -102,6 +102,13 @@ resumes across versions from WRF's wrfrst files.
 - Fatal checks: every flag copy, reset and wait is checked (a failed transfer stops the run instead of reading 0);
   a pinned slot is cleared before its copy; the flag of Noah's land preprocessing (urban LAI) is checked right after
   it, before land SFLX and the dumps use its columns.
+- Output writer thread (output.write_queue_mb): a file whose path is still open on the writer thread (a fixed
+  history_outname with frames_per_outfile = 1) waits for the queued records before it is created (HDF5 refused it);
+  the queue is configured once per process (a nest or member with another value is refused; a synchronous record
+  waits for the queued ones); a writer error that surfaces only at the end of a run stopped by non-finite values
+  gives exit status 2; no new stream or restart file after a known writer error; the NetCDF lock's ownership is one
+  state per thread; the end of the process joins the writer whatever it threw; an oversized write_queue_mb is
+  refused instead of wrapping.
 - NetCDF-4 output: the staged bytes of a variable belong to the record before their chunks are queued, and a chunk
   that cannot be queued or compressed is no longer counted, so an error between staging and writing waits for the
   queued compression and then frees the bytes.

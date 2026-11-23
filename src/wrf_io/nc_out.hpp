@@ -75,6 +75,7 @@ class NcOut {
                    const std::function<void(unsigned char*)>& fill_in);
   int nc_ = -1;
   bool nc4_ = true;
+  std::string key_;  // the path, absolute and normalised (the open files' set)
   std::map<std::string, std::size_t> dimlen_;
   std::map<std::string, int> dims_;
   std::map<std::string, VarInfo> vars_;

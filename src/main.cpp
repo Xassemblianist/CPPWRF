@@ -134,13 +134,14 @@ int main(int argc, char** argv) {
   } catch (const std::exception& e) {
     std::fprintf(stderr, "cppwrf: error: %s\n", e.what());
 #ifdef CPPWRF_HAVE_NETCDF
-    wrf_io::output_queue::finish();  // the records queued before the error are written, as the synchronous writer had
+    (void)wrf_io::output_queue::finish();  // the records queued before the error are written, as the synchronous writer had
 #endif
     tile::mpi_abort(2);
     rc = 2;
   }
 #ifdef CPPWRF_HAVE_NETCDF
-  wrf_io::output_queue::finish();
+  // a writer error that surfaces only now (after a non-finite stop, exit 3, that skipped the drain): an error, 2
+  if (!wrf_io::output_queue::finish()) rc = 2;
 #endif
   tile::mpi_finish();
   return rc;

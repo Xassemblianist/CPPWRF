@@ -194,6 +194,26 @@ def main():
         run("wrfroot", ens, BASE + [f"output.dir={d}", f"output.wrf_dir={d}_wrf", "ensemble.mode=sequential"])
         ok = all(any(f.startswith("wrfout_d01") for f in files_of(f"{d}_wrf/member{i}")) for i in range(1, 4))
         note(ok, "output.wrf_dir: each member's WRF files in <output.wrf_dir>/memberI")
+        # the output writer thread with one file name for every frame (history_outname without <date>,
+        # frames_per_outfile = 1): each new file waits for the queued record of the previous one, which closes it
+        # (else nc_create clobbered a file still open on the writer thread); the same bytes as without the queue.
+        # In the threads ensemble as well (the members' files have their own directories)
+        nl = os.path.join(work, "namelist_same.input")
+        with open(nl, "w") as f:
+            f.write("&time_control\n history_outname = 'wrfout_same'\n frames_per_outfile = 1\n/\n")
+        same = BASE + ["output.format=wrfout", f"output.wrf_namelist={nl}"]
+        for q in ("1024", "0"):
+            run(f"same_path_q{q}", "configs/squall2d.ini", same + [f"output.dir={work}/same_path_q{q}",
+                                                                   f"output.write_queue_mb={q}"])
+            run(f"same_path_ens_q{q}", ens, same + [f"output.dir={work}/same_path_ens_q{q}",
+                                                    f"output.write_queue_mb={q}"])
+        a, b = (os.path.join(work, f"same_path_q{q}", "wrfout_same") for q in ("1024", "0"))
+        note(os.path.exists(a) and filecmp.cmp(a, b, shallow=False),
+             "one history file name for every frame: the writer thread's file equals the synchronous one")
+        ok = all(filecmp.cmp(os.path.join(work, f"same_path_ens_q{q}", f"member{i}", "wrfout_same"),
+                             a if i == 1 else os.path.join(work, "same_path_ens_q0", f"member{i}", "wrfout_same"),
+                             shallow=False) for q in ("1024", "0") for i in range(1, 4))
+        note(ok, "one history file name for every frame in the ensemble: as without the queue")
     print(f"ensemble: {fails} failures")
     return 1 if fails else 0
 

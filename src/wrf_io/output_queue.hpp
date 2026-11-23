@@ -28,9 +28,6 @@ class NcCall {
   ~NcCall();
   NcCall(const NcCall&) = delete;
   NcCall& operator=(const NcCall&) = delete;
-
- private:
-  bool locked_ = false;
 };
 
 // the calling thread keeps the NetCDF lock (its own NetCDF calls then need no lock each); nc_unhold lets it go
@@ -53,11 +50,14 @@ class NcReleased {
 
 namespace output_queue {
 
-// cap: bytes of the queued records (0: synchronous, the default of the library: cppwrf_real writes synchronously)
+// cap: bytes of the queued records (0: synchronous, the default of the library: cppwrf_real writes synchronously).
+// The first call sets it for the process; a later call with another cap throws (every domain and ensemble member of
+// a run has the same output.write_queue_mb); no effect after forbid()
 void configure(std::size_t cap_bytes);
 void forbid();  // synchronous for the rest of the process, whatever configure says (decomposed runs: tiles, MPI)
 bool on();
-// job runs on the writer thread after the jobs submitted before it (off: here, now; its exception propagates).
+// job runs on the writer thread after the jobs submitted before it (off: here, now, after the jobs still queued;
+// its exception propagates).
 // Waits (without the NetCDF lock) while the queue holds other records and bytes would exceed the cap. Rethrows the
 // error of an earlier job first (check).
 void submit(std::size_t bytes, std::function<void()> job);
@@ -66,8 +66,13 @@ void submit(std::size_t bytes, std::function<void()> job);
 void check();
 // waits for every queued job (without the NetCDF lock), then check(); the calling thread then lets go of the lock
 void drain();
-// at the end of the process, also after an error: drain(), an error of a job printed instead of thrown
-void finish() noexcept;
+// at the end of the process, also after an error: drain(), an error of a job printed instead of thrown; false when
+// one was (the run's exit status is then that of an error, not of a non-finite stop)
+bool finish() noexcept;
+// before a new file is created (NcOut): an error of an earlier job rethrown (no new file after a known error); a
+// file of the same path still open in queued jobs (path_open): those jobs done first, so that it is closed before
+// nc_create clobbers it
+void before_create(bool path_open);
 
 }  // namespace output_queue
 }  // namespace cppwrf::wrf_io

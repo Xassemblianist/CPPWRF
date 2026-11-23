@@ -7,6 +7,8 @@
 #include <deque>
 #include <exception>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 
@@ -20,34 +22,49 @@ constinit std::mutex g_nc;
 std::mutex& nc_mutex() { return g_nc; }
 constinit thread_local bool held = false;  // nc_hold
 constinit thread_local int depth = 0;      // NcCall scopes of the thread (a nested one takes no lock)
+// the thread has the mutex locked; always owns == (held || depth > 0)
+constinit thread_local bool owns = false;
+
+void take() {
+  if (!owns) {
+    nc_mutex().lock();
+    owns = true;
+  }
+}
+void give_back() {
+  if (owns && !held && depth == 0) {
+    owns = false;
+    nc_mutex().unlock();
+  }
+}
 
 }  // namespace
 
 NcCall::NcCall() {
-  if (!held && depth == 0) {
-    nc_mutex().lock();
-    locked_ = true;
-  }
+  take();
   ++depth;
 }
 NcCall::~NcCall() {
   --depth;
-  if (locked_) nc_mutex().unlock();
+  give_back();
 }
 
 void nc_hold() {
-  if (held) return;
-  if (depth == 0) nc_mutex().lock();  // inside an NcCall scope the thread has it already
+  take();
   held = true;
 }
 void nc_unhold() {
-  if (!held) return;
   held = false;
-  if (depth == 0) nc_mutex().unlock();
+  give_back();
 }
 bool nc_held() { return held; }
 
-NcReleased::NcReleased() : was_held_(held && depth == 0) {
+NcReleased::NcReleased() : was_held_(held) {
+  // (a wait for the writer inside an NcCall scope would keep the lock the writer needs: never done)
+  if (depth > 0) {
+    std::fprintf(stderr, "cppwrf: error: NcReleased inside an NcCall scope\n");
+    std::abort();
+  }
   if (was_held_) nc_unhold();
 }
 NcReleased::~NcReleased() {
@@ -75,6 +92,8 @@ struct Queue {
   std::deque<Job> jobs;
   std::size_t cap = 0;
   bool forbidden = false;
+  bool configured = false;  // the cap the run asked for first (configure)
+  std::size_t asked = 0;
   std::size_t bytes = 0;  // of the jobs not finished (queued or running)
   long inflight = 0;      // jobs not finished
   bool stop = false;
@@ -124,7 +143,17 @@ Queue& queue() {
 void configure(std::size_t cap_bytes) {
   Queue& q = queue();
   std::lock_guard<std::mutex> lk(q.m);
-  q.cap = q.forbidden ? 0 : cap_bytes;
+  if (q.forbidden) return;
+  if (q.configured) {  // one value for the process: a change while records are queued would reorder their writes
+    if (cap_bytes != q.asked)
+      throw std::runtime_error("output.write_queue_mb: " + std::to_string(cap_bytes >> 20) + " MiB here, " +
+                               std::to_string(q.asked >> 20) +
+                               " MiB set first (one value for the whole run: every domain and ensemble member)");
+    return;
+  }
+  q.configured = true;
+  q.asked = cap_bytes;
+  q.cap = cap_bytes;
 }
 
 void forbid() {
@@ -153,8 +182,29 @@ void check() {
   if (e) std::rethrow_exception(e);
 }
 
+namespace {
+// waits until no job is queued or running, the NetCDF lock let go meanwhile (a holding thread keeps holding it after)
+void wait_idle() {
+  Queue& q = queue();
+  {
+    std::lock_guard<std::mutex> lk(q.m);
+    if (q.inflight == 0) return;
+  }
+  const NcReleased r;
+  std::unique_lock<std::mutex> lk(q.m);
+  q.space.wait(lk, [&] { return q.inflight == 0; });
+}
+}  // namespace
+
+void before_create(bool path_open) {
+  check();
+  if (path_open) wait_idle();
+}
+
 void submit(std::size_t bytes, std::function<void()> job) {
-  if (!on()) {
+  if (!on()) {  // synchronous: after any job still queued (the record order of every file)
+    wait_idle();
+    check();
     job();
     return;
   }
@@ -162,7 +212,7 @@ void submit(std::size_t bytes, std::function<void()> job) {
   nc_hold();  // from now on this thread's NetCDF calls exclude the writer's (NcCall)
   Queue& q = queue();
   std::unique_lock<std::mutex> lk(q.m);
-  auto full = [&] { return !q.err && q.inflight > 0 && q.bytes + bytes > q.cap; };
+  auto full = [&] { return !q.err && q.inflight > 0 && (bytes > q.cap || q.bytes > q.cap - bytes); };
   if (full()) {  // back-pressure: wait for the writer without the NetCDF lock
     lk.unlock();
     {
@@ -199,12 +249,17 @@ void drain() {
   check();
 }
 
-void finish() noexcept {
+bool finish() noexcept {
+  bool clean = true;
   try {
     try {
       drain();
     } catch (const std::exception& e) {
       std::fprintf(stderr, "cppwrf: error: %s\n", e.what());
+      clean = false;
+    } catch (...) {
+      std::fprintf(stderr, "cppwrf: error: the output writer failed\n");
+      clean = false;
     }
     Queue& q = queue();
     {
@@ -215,7 +270,9 @@ void finish() noexcept {
     if (q.th.joinable()) q.th.join();
   } catch (...) {
     std::fprintf(stderr, "cppwrf: error: the output writer failed\n");
+    clean = false;
   }
+  return clean;
 }
 
 }  // namespace output_queue

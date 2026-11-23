@@ -972,16 +972,25 @@ domain_runner.cpp):
   `m.rk->step` (+ `dev_sync`; main.cpp, and each domain's step in nest_driver.cpp: `NcReleased`), which makes no NetCDF
   call, and while it waits for the writer. The writer takes the lock per call (one put at a time), so a long frame
   does not hold the model at the end of its step for more than one put. This follows port/ENS1's design (the host
-  work between the steps under one lock) for a single run. ENS1 is not on this base: its member threads would hold
-  the NetCDF lock the same way (the flag is per thread), each member's step inside `NcReleased`, and the ensemble's
-  lock always taken after the NetCDF lock; until that is checked, an ensemble should run with
-  `output.write_queue_mb = 0`.
+  work between the steps under one lock) for a single run. An ensemble's members take this lock as their host-work
+  lock (docs/ENSEMBLE.md section 2: one lock, no second one to order), so ensembles run with the queue on. The lock's
+  owner state is one per thread (`owns == held || depth > 0`): `nc_hold`, `nc_unhold` and `NcCall` nest in any order,
+  and a wait for the writer inside an `NcCall` scope (`NcReleased` there) stops the process at once instead of
+  deadlocking.
 - `output.write_queue_mb` (default 1024): the queued records' memory (twice the staged values: the values and the
   copies in the precompressed chunks). A record waits for room without the lock; one record always goes. `0` writes
   in the model's thread as before. A writer error is kept and rethrown in the model's thread at the next step
   (`DomainRunner::before_step`), at the next record or at the end (`DomainRunner::finish`, main.cpp), with the same
   message (`cppwrf: error: netcdf: put T: ...`); the records queued after it are not written, as the synchronous
-  writer would have stopped there. At the process's end (also after an error) the queue is drained.
+  writer would have stopped there. No new file (a stream file, a restart file) is created once an error is known. At
+  the process's end (also after an error) the queue is drained; an error that surfaces only there (a run that stopped
+  on non-finite values, exit 3, before its end) makes the exit status 2. The first domain configures the queue for the
+  process: a domain or ensemble member with another `write_queue_mb` is refused (a change with records queued would
+  reorder their writes); a synchronous record (queue off) waits for the records still queued.
+- A file whose name repeats (a `history_outname` without `<date>` and `frames_per_outfile = 1`, a whole-second date
+  that repeats with a sub-second step): `NcOut` keeps the set of open paths, and a new file of a path still open on
+  the writer thread waits for the queued records first, so that the previous file is closed before `nc_create`
+  clobbers it (it failed before with `create ...: Permission denied` from HDF5; ctest `ensemble`, same-path check).
 - Decomposed runs (`run.tiles`, MPI ranks) write in the model's thread (`output_queue::forbid`): their host work holds
   `tile::Serial`, and their gathers are collectives of the writing patch.
 - The precomputed chunks are kept per record (`deflate::Group`, waited for and dropped together; before: one pool

@@ -7,6 +7,8 @@
 #include <netcdf.h>
 
 #include <cctype>
+#include <filesystem>
+#include <set>
 #include <cstring>
 #include <functional>
 #include <stdexcept>
@@ -26,16 +28,44 @@ NcOut::Batch::~Batch() {
   }
 }
 
-NcOut::NcOut(const std::string& path, bool netcdf4) : nc4_(netcdf4) {
+namespace {
+// the paths of the open NcOut files (a file whose last record is still queued is open on the writer thread)
+std::mutex open_m;
+std::multiset<std::string>& open_paths() {
+  static auto* s = new std::multiset<std::string>;  // never destroyed (an NcOut may close at exit)
+  return *s;
+}
+std::string path_key(const std::string& p) {
+  std::error_code ec;
+  const std::filesystem::path a = std::filesystem::absolute(p, ec);
+  return (ec ? std::filesystem::path(p) : a).lexically_normal().string();
+}
+}  // namespace
+
+NcOut::NcOut(const std::string& path, bool netcdf4) : nc4_(netcdf4), key_(path_key(path)) {
+  bool open;
+  {
+    std::lock_guard<std::mutex> lk(open_m);
+    open = open_paths().count(key_) > 0;
+  }
+  // no new file after a writer error; the previous file of this path (a fixed outname, frames_per_outfile, a date
+  // of whole seconds that repeats) closed first, as the synchronous writer closed it before creating this one
+  output_queue::before_create(open);
   const NcCall lk;
   if (netcdf4) deflate::install();
   ck(nc_create(path.c_str(), netcdf4 ? (NC_CLOBBER | NC_NETCDF4) : (NC_CLOBBER | NC_64BIT_OFFSET), &nc_), "create " + path);
+  std::lock_guard<std::mutex> g(open_m);
+  open_paths().insert(key_);
 }
 
 NcOut::~NcOut() {
   {
     const NcCall lk;
-    if (nc_ >= 0) nc_close(nc_);  // may compress chunks still in HDF5's cache: the precomputed ones stay till here
+    if (nc_ >= 0) {
+      nc_close(nc_);  // may compress chunks still in HDF5's cache: the precomputed ones stay till here
+      std::lock_guard<std::mutex> g(open_m);
+      if (auto it = open_paths().find(key_); it != open_paths().end()) open_paths().erase(it);
+    }
   }
   flushed_.clear();
   batch_.reset();

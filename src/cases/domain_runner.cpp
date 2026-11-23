@@ -1055,9 +1055,18 @@ bool DomainRunner::start() {
   {  // output.write_queue_mb: the WRF-format files written by a writer thread while the model steps on (0: here)
     const long mb = cfg_.get_int("output.write_queue_mb", 1024);
     if (mb < 0) throw std::runtime_error("output.write_queue_mb must be >= 0 (got " + std::to_string(mb) + ")");
-    // a decomposed run (tiles, MPI ranks) writes in the model's thread: its host work holds tile::Serial, not the
-    // NetCDF lock (wrf_io/output_queue.hpp)
-    wrf_io::output_queue::configure(tile::tiled() ? 0 : std::size_t(mb) << 20);
+    if (std::size_t(mb) > (std::size_t(-1) >> 21))
+      throw std::runtime_error("output.write_queue_mb: " + std::to_string(mb) + " is too large");
+    // a decomposed run (tiles, MPI ranks, the tile check's reference run) writes in the model's thread: its host
+    // work holds tile::Serial, not the NetCDF lock (wrf_io/output_queue.hpp). The first domain configures the
+    // queue for the run; another domain or member with another value is refused (output_queue::configure)
+    if (!tile::tiled() && tile::id() >= 0) {
+      try {
+        wrf_io::output_queue::configure(std::size_t(mb) << 20);
+      } catch (const std::exception& e) {
+        throw std::runtime_error(domain_tag_ + ": " + e.what());
+      }
+    }
   }
 #endif
   // the non-finite check of every step (else on the diagnostic steps only, output.diag_interval)
@@ -1552,6 +1561,9 @@ bool DomainRunner::rst_one_shot(long n) const {
 }
 
 void DomainRunner::do_restart(long n, bool ring) {
+#ifdef CPPWRF_HAVE_NETCDF
+  wrf_io::output_queue::check();  // no restart file after a writer error already known
+#endif
   char rst_name[64];
   std::snprintf(rst_name, sizeof(rst_name), "restart_%06ld.nc", n);
   std::string rst_path = out_dir_ + "/" + rst_name;
