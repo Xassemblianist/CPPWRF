@@ -10,8 +10,59 @@
 
 namespace cppwrf::phys {
 
-// inputs from setcoef_sw in the same kernel (rrtmg_sw_core_prep): coherent loads (RSD / RSI), not __ldg
-CPPWRF_FORCEINLINE void taumol_sw(
+// taumol_sw's solar source: WRF zeroes sfluxzen first (module_ra_rrtmg_sw.F taumol_sw): with laytrop = nlayers
+// (model top at more than ~191 hPa) bands 16, 17, 27, 28 and 29 never reach their laysolfr and keep 0. Band 26's
+// sfluxzen is constant. The other bands write it at the layer where lay == laysolfr inside their layer loops, with
+// laysolfr updated in the same loop from jp; taumol_sw_solfr runs those integer loops alone, in WRF's order, and
+// stores per band the last layer that writes (WRF's later writes replace the earlier ones) or -1 in solfr[band - 16];
+// taumol_sw_layers writes sfluxzen at that layer with the layer's own values, the same writes WRF's last one makes.
+// laysolfr: WRF reads jp(nlayers+1) (laytrop = nlayers; never set, and either outcome gives laytrop) and jp(0)
+// (laytrop = 0, every layer above 95.6 hPa), outside the layers; here neither is read (lay > 0, lay + 1 < nlayers)
+template <class JP>
+CPPWRF_FORCEINLINE void taumol_sw_solfr(int nlayers, int laytrop, JP jp, SD sfluxzen, SI solfr,
+                                        const RrtmgSwTables& CPPWRF_RESTRICT tables) {
+  for (int ig = 0; ig < 112; ++ig) sfluxzen[ig] = rb(0.0);
+  for (int ig = 1; ig <= 6; ++ig) sfluxzen[80 + ig - 1] = tables.b26.sfluxref[ig - 1];
+  // bands 16, 17, 27, 28, 29: laysolfr from the upper-atmosphere loop
+  auto upper = [&](int layreffr) {
+    int laysolfr = nlayers - 1, w = -1;
+    for (int lay = laytrop; lay < nlayers; ++lay) {
+      if (lay > 0 && jp[lay - 1] < layreffr && jp[lay] >= layreffr) laysolfr = lay;
+      if (lay == laysolfr) w = lay;
+    }
+    return w;
+  };
+  // bands 18 - 25: laysolfr from the lower-atmosphere loop
+  auto lower = [&](int layreffr) {
+    int laysolfr = laytrop - 1, w = -1;
+    for (int lay = 0; lay < laytrop; ++lay) {
+      if (lay + 1 < nlayers && jp[lay] < layreffr && jp[lay + 1] >= layreffr)
+        laysolfr = std::min(lay + 1, laytrop - 1);
+      if (lay == laysolfr) w = lay;
+    }
+    return w;
+  };
+  solfr[0] = upper(tables.b16.layreffr);
+  solfr[1] = upper(tables.b17.layreffr);
+  solfr[2] = lower(tables.b18.layreffr);
+  solfr[3] = lower(tables.b19.layreffr);
+  solfr[4] = lower(tables.b20.layreffr);
+  solfr[5] = lower(tables.b21.layreffr);
+  solfr[6] = lower(tables.b22.layreffr);
+  solfr[7] = lower(tables.b23.layreffr);
+  solfr[8] = lower(tables.b24.layreffr);
+  solfr[9] = lower(tables.b25.layreffr);
+  solfr[10] = -1;  // band 26: constant, above
+  solfr[11] = upper(tables.b27.layreffr);
+  solfr[12] = upper(tables.b28.layreffr);
+  solfr[13] = upper(tables.b29.layreffr);
+}
+
+// taumol_sw for the layers [lay0, lay1) of a column: taug, taur of those layers and sfluxzen where one of them is the
+// band's solfr layer (taumol_sw_solfr first). Each value has WRF's operations in WRF's order; only the layer loops
+// are cut to [lay0, lay1). The column driver runs [0, nlayers); the GPU batch one layer per thread (KSwLayer).
+// Inputs from setcoef_sw: coherent loads (RSD / RSI; the column driver writes them in the same kernel)
+CPPWRF_FORCEINLINE void taumol_sw_layers(
     int nlayers,
     int laytrop,
     RSI jp,
@@ -36,20 +87,16 @@ CPPWRF_FORCEINLINE void taumol_sw(
     SD2 taug,                 // (nlayers, 112)
     SD2 taur,                 // (nlayers, 112)
     SD sfluxzen,         // (112)
-    const RrtmgSwTables& CPPWRF_RESTRICT tables
+    RSI solfr,           // (14) taumol_sw_solfr
+    const RrtmgSwTables& CPPWRF_RESTRICT tables,
+    int lay0, int lay1
 ) {
   constexpr rb oneminus = rb(1.0) - rb(1.0e-6);
-
-  // WRF zeroes sfluxzen first (module_ra_rrtmg_sw.F taumol_sw): with laytrop = nlayers (model top at more
-  // than ~191 hPa) bands 16, 17, 27, 28 and 29 never reach their laysolfr and keep 0
-  for (int ig = 0; ig < 112; ++ig) sfluxzen[ig] = rb(0.0);
-  // laysolfr: WRF reads jp(nlayers+1) (laytrop = nlayers; never set, and either outcome gives laytrop) and jp(0)
-  // (laytrop = 0, every layer above 95.6 hPa), outside the layers; here neither is read (lay > 0, lay + 1 < nlayers)
 
   // Band 16 (2600-3250 cm-1): ng16 = 6, offset = 0
   {
     const auto& b = tables.b16;
-    for (int lay = 0; lay < laytrop; ++lay) {
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       rb speccomb = colh2o[lay] + b.strrat1 * colch4[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -91,9 +138,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    int laysolfr = nlayers - 1;
-    for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+    const int laysolfr = solfr[0];
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
       rb tauray = colmol[lay] * b.rayl;
@@ -114,7 +160,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b17;
     int offset = 6;
-    for (int lay = 0; lay < laytrop; ++lay) {
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       rb speccomb = colh2o[lay] + b.strrat * colco2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -156,9 +202,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    int laysolfr = nlayers - 1;
-    for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+    const int laysolfr = solfr[1];
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       rb speccomb = colh2o[lay] + b.strrat * colco2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -205,10 +250,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b18;
     int offset = 18;
-    int laysolfr = laytrop - 1;
-    for (int lay = 0; lay < laytrop; ++lay) {
-      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
-        laysolfr = std::min(lay + 1, laytrop - 1);
+    const int laysolfr = solfr[2];
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       rb speccomb = colh2o[lay] + b.strrat * colch4[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -254,7 +297,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    for (int lay = laytrop; lay < nlayers; ++lay) {
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
       rb tauray = colmol[lay] * b.rayl;
@@ -274,10 +317,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b19;
     int offset = 26;
-    int laysolfr = laytrop - 1;
-    for (int lay = 0; lay < laytrop; ++lay) {
-      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
-        laysolfr = std::min(lay + 1, laytrop - 1);
+    const int laysolfr = solfr[3];
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       rb speccomb = colh2o[lay] + b.strrat * colco2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -323,7 +364,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    for (int lay = laytrop; lay < nlayers; ++lay) {
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
       rb tauray = colmol[lay] * b.rayl;
@@ -343,10 +384,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b20;
     int offset = 34;
-    int laysolfr = laytrop - 1;
-    for (int lay = 0; lay < laytrop; ++lay) {
-      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
-        laysolfr = std::min(lay + 1, laytrop - 1);
+    const int laysolfr = solfr[4];
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       int ind0 = ((jp[lay] - 1) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = (jp[lay] * 5 + (jt1[lay] - 1)) * 1 + 1;
       int inds = indself[lay];
@@ -369,7 +408,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    for (int lay = laytrop; lay < nlayers; ++lay) {
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
       int indf = indfor[lay];
@@ -393,10 +432,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b21;
     int offset = 44;
-    int laysolfr = laytrop - 1;
-    for (int lay = 0; lay < laytrop; ++lay) {
-      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
-        laysolfr = std::min(lay + 1, laytrop - 1);
+    const int laysolfr = solfr[5];
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       rb speccomb = colh2o[lay] + b.strrat * colco2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -442,7 +479,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    for (int lay = laytrop; lay < nlayers; ++lay) {
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       rb speccomb = colh2o[lay] + b.strrat * colco2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -485,11 +522,9 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b22;
     int offset = 54;
-    int laysolfr = laytrop - 1;
+    const int laysolfr = solfr[6];
     constexpr rb o2adj = rb(1.6);
-    for (int lay = 0; lay < laytrop; ++lay) {
-      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
-        laysolfr = std::min(lay + 1, laytrop - 1);
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       rb o2cont = rb(4.35e-4) * colo2[lay] / (rb(350.0) * rb(2.0));
       rb speccomb = colh2o[lay] + o2adj * b.strrat * colo2[lay];
       rb specparm = colh2o[lay] / speccomb;
@@ -537,7 +572,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    for (int lay = laytrop; lay < nlayers; ++lay) {
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       rb o2cont = rb(4.35e-4) * colo2[lay] / (rb(350.0) * rb(2.0));
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
@@ -559,10 +594,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b23;
     int offset = 56;
-    int laysolfr = laytrop - 1;
-    for (int lay = 0; lay < laytrop; ++lay) {
-      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
-        laysolfr = std::min(lay + 1, laytrop - 1);
+    const int laysolfr = solfr[7];
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       int ind0 = ((jp[lay] - 1) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = (jp[lay] * 5 + (jt1[lay] - 1)) * 1 + 1;
       int inds = indself[lay];
@@ -585,7 +618,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    for (int lay = laytrop; lay < nlayers; ++lay) {
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       for (int ig = 1; ig <= 10; ++ig) {
         taug[lay][offset + ig - 1] = rb(0.0);
         taur[lay][offset + ig - 1] = colmol[lay] * b.rayl[ig - 1];
@@ -597,10 +630,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b24;
     int offset = 66;
-    int laysolfr = laytrop - 1;
-    for (int lay = 0; lay < laytrop; ++lay) {
-      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
-        laysolfr = std::min(lay + 1, laytrop - 1);
+    const int laysolfr = solfr[8];
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       rb speccomb = colh2o[lay] + b.strrat * colo2[lay];
       rb specparm = colh2o[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -648,7 +679,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    for (int lay = laytrop; lay < nlayers; ++lay) {
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
 
@@ -669,10 +700,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b25;
     int offset = 74;
-    int laysolfr = laytrop - 1;
-    for (int lay = 0; lay < laytrop; ++lay) {
-      if (lay + 1 < nlayers && jp[lay] < b.layreffr && jp[lay + 1] >= b.layreffr)
-        laysolfr = std::min(lay + 1, laytrop - 1);
+    const int laysolfr = solfr[9];
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       int ind0 = ((jp[lay] - 1) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = (jp[lay] * 5 + (jt1[lay] - 1)) * 1 + 1;
 
@@ -689,7 +718,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    for (int lay = laytrop; lay < nlayers; ++lay) {
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       for (int ig = 1; ig <= 6; ++ig) {
         rb tauray = colmol[lay] * b.rayl[ig - 1];
         taug[lay][offset + ig - 1] = colo3[lay] * b.abso3b[ig - 1];
@@ -702,22 +731,20 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b26;
     int offset = 80;
-    for (int lay = 0; lay < nlayers; ++lay) {
+    for (int lay = lay0; lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       for (int ig = 1; ig <= 6; ++ig) {
         taug[lay][offset + ig - 1] = rb(0.0);
         taur[lay][offset + ig - 1] = colmol[lay] * b.rayl[ig - 1];
       }
     }
-    for (int ig = 1; ig <= 6; ++ig) {
-      sfluxzen[offset + ig - 1] = b.sfluxref[ig - 1];
-    }
+    // sfluxzen: taumol_sw_solfr
   }
 
   // Band 27 (29000-38000 cm-1): ng27 = 8, offset = 86
   {
     const auto& b = tables.b27;
     int offset = 86;
-    for (int lay = 0; lay < laytrop; ++lay) {
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       int ind0 = ((jp[lay] - 1) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = (jp[lay] * 5 + (jt1[lay] - 1)) * 1 + 1;
 
@@ -732,9 +759,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    int laysolfr = nlayers - 1;
-    for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+    const int laysolfr = solfr[11];
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
 
@@ -755,7 +781,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b28;
     int offset = 94;
-    for (int lay = 0; lay < laytrop; ++lay) {
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       rb speccomb = colo3[lay] + b.strrat * colo2[lay];
       rb specparm = colo3[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -790,9 +816,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    int laysolfr = nlayers - 1;
-    for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+    const int laysolfr = solfr[12];
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       rb speccomb = colo3[lay] + b.strrat * colo2[lay];
       rb specparm = colo3[lay] / speccomb;
       if (specparm >= oneminus) specparm = oneminus;
@@ -836,7 +861,7 @@ CPPWRF_FORCEINLINE void taumol_sw(
   {
     const auto& b = tables.b29;
     int offset = 100;
-    for (int lay = 0; lay < laytrop; ++lay) {
+    for (int lay = lay0; lay < (laytrop < lay1 ? laytrop : lay1); ++lay) {
       int ind0 = ((jp[lay] - 1) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = (jp[lay] * 5 + (jt1[lay] - 1)) * 1 + 1;
       int inds = indself[lay];
@@ -858,9 +883,8 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
 
-    int laysolfr = nlayers - 1;
-    for (int lay = laytrop; lay < nlayers; ++lay) {
-      if (lay > 0 && jp[lay - 1] < b.layreffr && jp[lay] >= b.layreffr) laysolfr = lay;
+    const int laysolfr = solfr[13];
+    for (int lay = (laytrop > lay0 ? laytrop : lay0); lay < (nlayers < lay1 ? nlayers : lay1); ++lay) {
       int ind0 = ((jp[lay] - 13) * 5 + (jt[lay] - 1)) * 1 + 1;
       int ind1 = ((jp[lay] - 12) * 5 + (jt1[lay] - 1)) * 1 + 1;
       rb tauray = colmol[lay] * b.rayl;
@@ -877,6 +901,17 @@ CPPWRF_FORCEINLINE void taumol_sw(
       }
     }
   }
+}
+
+// taumol_sw for a whole column (the column driver); solfr: 14 ints of work space
+CPPWRF_FORCEINLINE void taumol_sw(int nlayers, int laytrop, SI jp, SI jt, SI jt1, SD colh2o, SD colco2, SD colch4,
+                                  SD colo2, SD colo3, SD colmol, SD fac00, SD fac01, SD fac10, SD fac11, SD selffac,
+                                  SD selffrac, SI indself, SD forfac, SD forfrac, SI indfor, SD2 taug, SD2 taur,
+                                  SD sfluxzen, SI solfr, const RrtmgSwTables& CPPWRF_RESTRICT tables) {
+  taumol_sw_solfr(nlayers, laytrop, RSI(jp), sfluxzen, solfr, tables);
+  taumol_sw_layers(nlayers, laytrop, jp, jt, jt1, colh2o, colco2, colch4, colo2, colo3, colmol, fac00, fac01, fac10,
+                   fac11, selffac, selffrac, indself, forfac, forfrac, indfor, taug, taur, sfluxzen, solfr, tables, 0,
+                   nlayers);
 }
 
 }  // namespace cppwrf::phys
