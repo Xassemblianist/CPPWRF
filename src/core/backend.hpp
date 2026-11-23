@@ -493,12 +493,17 @@ void dev_sync();
 // thread's launches without waiting (GPU: the host buffer must be pinned and stay untouched until the stream has been
 // waited for). host_section_begin waits for everything queued on the stream (inside a time step it ends the graph
 // segment first, as dev_sync does); host_section_end resumes the step's capture. Between the two the host may make
-// any device or MPI call. dev_sync = host_section_begin + host_section_end (and a device-wide wait). CPU build:
+// any device or MPI call. dev_sync = host_section_begin + host_section_end (and a device-wide wait unless
+// set_thread_stream_sync). CPU build:
 // plain copies; no-ops.
 void copy_to_host_async(void* dst, const void* src, std::size_t bytes);
 void copy_to_dev_async(void* dst, const void* src, std::size_t bytes);
 void host_section_begin();
 void host_section_end();
+// Ensemble members (cases/ensemble.hpp; one host thread each, all on one device): dev_sync of the calling thread
+// waits for the thread's own stream only, so the other members' work runs on. Off (the default): the whole device.
+// CPU build: no effect.
+void set_thread_stream_sync(bool on);
 // A host buffer of at least `bytes` to build an upload in (Field::fill_host): one per host thread, reused (grown as
 // needed, kept for the run) instead of a new allocation per field, pinned on the GPU (a faster copy). A nested use
 // while the thread's buffer is held gets a buffer of its own.

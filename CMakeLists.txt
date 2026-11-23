@@ -467,6 +467,11 @@ if(TARGET cppwrf)
            $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/restart_resume WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(restart_resume PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                        ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
+  # an ensemble of 3 members (one host thread each, and one after the other): every member's files byte-identical to
+  # its single run (tests/verify/ensemble_test.py; a tiny squall2d, no data)
+  add_test(NAME ensemble COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/ensemble_test.py
+           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/ensemble WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ensemble PROPERTIES LABELS unit ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 endif()
 
 # Differential tests against WRF v4.8.0's own compiled code (gfortran; slow): physics schemes, the

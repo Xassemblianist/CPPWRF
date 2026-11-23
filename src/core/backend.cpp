@@ -216,7 +216,10 @@ struct Graphs {
           int* d = nullptr;
           const int one = 1;
           ck(gpuMalloc(reinterpret_cast<void**>(&d), sizeof(int)), "gpuMalloc");
-          ck(gpuMemcpy(d, &one, sizeof(int), gpuMemcpyHostToDevice), "gpuMemcpy");
+          // on the thread's stream, not the legacy stream 0: another host thread (an ensemble member) may be
+          // capturing its blocking stream, which a legacy-stream copy would join
+          ck(gpuMemcpyAsync(d, &one, sizeof(int), gpuMemcpyHostToDevice, stream()), "gpuMemcpyAsync");
+          ck(gpuStreamSynchronize(stream()), "gpuStreamSynchronize");
           done_one = d;
         }
         const int b = bank ^ 1;
@@ -429,9 +432,14 @@ void host_section_begin() {
   ck(gpuStreamSynchronize(stream()), "sync");
 }
 void host_section_end() { sync_end(); }
+namespace {
+thread_local bool stream_sync_only = false;  // set_thread_stream_sync
+}  // namespace
+void set_thread_stream_sync(bool on) { stream_sync_only = on; }
 void dev_sync() {
   sync_begin();
-  ck(gpuDeviceSynchronize(), "sync");
+  if (stream_sync_only) ck(gpuStreamSynchronize(stream()), "sync");
+  else ck(gpuDeviceSynchronize(), "sync");
   sync_end();
 }
 int current_device() {
@@ -521,6 +529,7 @@ void copy_to_dev_async(void* d, const void* s, std::size_t n) { std::memcpy(d, s
 void host_section_begin() {}
 void host_section_end() {}
 void dev_sync() {}
+void set_thread_stream_sync(bool) {}
 int current_device() { return 0; }
 const char* backend_name() { return "cpu"; }
 void device_memory_report(const char*) {}

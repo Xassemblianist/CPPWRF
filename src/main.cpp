@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "cases/domain_runner.hpp"
+#include "cases/ensemble.hpp"
 #include "cases/model.hpp"
 #include "cases/nest_driver.hpp"
 #include "core/backend.hpp"
@@ -65,6 +66,12 @@ static int run(int argc, char** argv, bool mpi) {
     else throw std::runtime_error("unknown argument: " + s);
   }
   io::Config cfg = io::Config::load(argv[1], ov);
+  // an [ensemble] section (cases/ensemble.hpp): every member in this process, or member ensemble.member alone
+  if (cases::is_ensemble(cfg)) {
+    if (mpi) throw std::runtime_error("ensemble: not in an MPI run (run the members in one process)");
+    if (!cfg.has("ensemble.member")) return cases::run_ensemble(argv[1], ov, cfg);
+    cfg = cases::ensemble_member_config(argv[1], ov, cfg, int(cfg.get_int("ensemble.member")));
+  }
   const std::string cname = cfg.get_string("run.case");
   const std::string out_dir = cfg.get_string("output.dir", "out/" + cname);
   // options below the verified tier stop here without cppwrf.allow_unverified (a nested run: per domain, run_nested)
