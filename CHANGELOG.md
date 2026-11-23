@@ -37,6 +37,8 @@ resumes across versions from WRF's wrfrst files.
   smooth_option 2 without the field copies, the boundary slabs of a field in one launch, force and feedback as CUDA
   graphs; a step segment's graph is launched before the wait for the previous one; host uploads through a reusable
   per-thread buffer.
+- GPU RRTMG SW (results unchanged): the SW prep's inatm_sw / setcoef_sw and taumol_sw run per (column, layer)
+  (`KSwSetcoef`, `KSwLayer`), the layer of each band's solar source per column (`KSwSolfr`); docs/PERF.md PERF14.
 - sfclayrev / YSU: `phys.shalwater_z0`, `phys.scm_force_flux != 0` and a nonzero U_FRAME / V_FRAME in wrfinput are
   refused (not ported; were ignored). The two options are checked with the model's options whichever schemes the
   run has, and the error names the value given; the translator names WRF's group (`&physics.shalwater_z0`,

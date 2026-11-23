@@ -1158,3 +1158,40 @@ step); no synchronisation in `dev_alloc` (tiles allocate and use fields on diffe
 selective `wrfinput` reads (the reader is shared with the nests and the initialisation; every reader of the skipped
 fields would need proof); `__constant__` tables for the device's glibc float math (the indices differ between the
 threads of a warp, which the constant cache serialises: likely slower).
+
+## RRTMG SW prep per layer (PERF14; not measured yet)
+
+The SW prep (`KSwPrep`, one thread per column) ran inatm_sw, setcoef_sw and taumol_sw as serial layer loops in each
+column (8.3 ms per daytime step in V1, F05 above). They now run as the LW prep does (`KLwSetcoef`, `KLwLayer`):
+
+- `KSwPrep` (per column): the profiles, ozone, cloud properties and McICA subcolumns as before, then the zenith
+  cosine and albedos (`rrtmg_sw_prep(..., false)`); laytrop starts at 0.
+- `KSwSetcoef` (per (column, layer)): inatm_sw and setcoef_sw of the layer (`rrtmg_sw_inatm_layer`,
+  `setcoef_sw_layer`: the bodies of the two layer loops, each layer reads only its own values); laytrop is counted
+  with an integer atomic add (a count: any order gives the same number).
+- `KSwSolfr` (per column): `taumol_sw_solfr` zeroes sfluxzen, sets band 26's constant values and runs each band's
+  laysolfr loop alone (integers from jp and laytrop, in WRF's order), storing per band the last layer whose
+  iteration has lay == laysolfr (or -1). WRF writes sfluxzen of a band at each such layer from that layer's own
+  values, so the last one decides; it is the only write left.
+- `KSwLayer` (per (column, layer)): `taumol_sw_layers` for the one layer: taug and taur of the layer's 112 g-points
+  and, where the layer is a band's solfr layer, that band's sfluxzen. The expressions are WRF's, unchanged; only the
+  bounds of the lower / upper layer loops became [lay0, lay1).
+
+The CPU column driver (`rrtmg_sw_core_prep`) calls the same functions over the layers in order (inatm_sw for every
+layer, then setcoef_sw, then taumol_sw_solfr and taumol_sw_layers over [0, nlayers)). Every value has the same
+operations in the same order as before; rrtmg_sw_batch.cpp builds with `--fmad=false` in every build (FP64, FP32
+identity and the fast FP32 build), so the new code shape cannot change contraction and no build keeps the old path.
+
+Memory: 14 ints per column more in the SW int work buffer (the solfr layers): +0.6 MB for P4 and D0 (10 591 columns).
+
+Not done: MYNN Stage 4's coefficient loops per level (mym_predict and mynn_tendencies: eleven tridiagonal systems,
+each one's coefficients from the previous solves and the column's scalars; a per-level split needs each system's
+a, b, c, d in the work buffer and a launch per system, not a cheap change).
+
+Proof so far: the CUDA FP64 build on an RTX 2060 (sm_75, six chunks of columns), P4 4 h with radt 1 (no daytime
+column until 03:00 UTC; at 3.5 h 2301 and at 4 h 6022 of the 10 591 columns have coszen > 0), base 837afae and new:
+the snapshots every 30 minutes byte-identical (the 9 .bin / .json files). `CPPWRF_KTIME=1` there, 240 steps: the SW
+prep 2360 ms (KSwPrep) -> 1210 ms (KSwPrep 723, KSwLayer 410, KSwSetcoef 54, KSwSolfr 23); a mostly nighttime run on
+another GPU, not the G4 measurement. The CPU suite cases of the radiation options against WRF: ci_submit --affected.
+To do on the G4: every cuda_dp case against WRF at tolerance 0, the FP32 (identity and fast) cases base against new
+byte-identical, KTIME and stepping times of V1 and P4.

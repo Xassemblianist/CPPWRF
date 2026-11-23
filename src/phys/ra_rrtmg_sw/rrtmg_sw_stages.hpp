@@ -4,6 +4,10 @@
 // (src/phys/ra_rrtmg_common/strided.hpp), as rrtmg_lw_stages.hpp for the longwave:
 //   rrtmg_sw_prep     per column : RRTMG_SWRAD profiles, cloud properties, McICA subcolumns
 //                                  (changeSeed = 1, maximum-random), inatm_sw, setcoef_sw, taumol_sw
+//                                  (GPU batch: inatm_sw, setcoef_sw and taumol_sw left to the three stages below)
+//   rrtmg_sw_setcoef_stage per layer: inatm_sw and setcoef_sw of one layer, laytrop counted
+//   rrtmg_sw_solfr_stage   per column: taumol_sw_solfr (sfluxzen's zeros and band 26, the layer per band that writes)
+//   rrtmg_sw_layer         per layer : taumol_sw of one layer
 //   rrtmg_sw_gpoint   per g-point: spcvmc_sw for the g-point (cldprmc_sw of its subcolumn, delta
 //                                  scaling, reftra_sw, vrtqdr_sw), its contributions to every level
 //   rrtmg_sw_level    per level  : spcvmc_sw's flux sums over the g-points in WRF's order
@@ -53,7 +57,8 @@ struct SwViews {
   SD2 cfu, cfd, ccu, ccd, cfdd, ccdd;  // [nl + 1][112] g-point contributions (bottom-to-top levels)
   SD fu, fd, cu, cd, fddir, cddir, uvfd, uvfddir, nifd, nifddir;  // [nl + 1] fluxes
   SD swhr, swhrc;      // [nl]
-  SI iscal;  // [0] day (coszen > 0), [1] laytrop, [2] inflag, [3] iceflag, [4] liqflag
+  SI iscal;  // [0] day (coszen > 0), [1] laytrop, [2] inflag, [3] iceflag, [4] liqflag, [5] a cloudy subcolumn
+  SI solfr;  // [14] taumol_sw_solfr: the layer that writes sfluxzen per band (-1: none)
   SD dscal;  // [0] prmu0, [1..4] asdir, asdif, aldir, aldif
 };
 
@@ -92,7 +97,7 @@ struct SwLayout {
     v.uvfd = v1(L1); v.uvfddir = v1(L1); v.nifd = v1(L1); v.nifddir = v1(L1);
     v.swhr = v1(L1); v.swhrc = v1(L1);
     v.dscal = v1(5);
-    v.jp = i1(L); v.jt = i1(L); v.jt1 = i1(L); v.indself = i1(L); v.indfor = i1(L); v.iscal = i1(6);
+    v.jp = i1(L); v.jt = i1(L); v.jt1 = i1(L); v.indself = i1(L); v.indfor = i1(L); v.iscal = i1(6); v.solfr = i1(14);
     if (nd_out) *nd_out = od;
     if (ni_out) *ni_out = oi;
     return v;
@@ -124,33 +129,20 @@ CPPWRF_HD inline rb rrtmg_sw_relcalc(rb t_lay, rb xland, rb snow, rb xice) {
   return r;
 }
 
-// rrtmg_sw core preparation: inatm_sw (wkl: vmr -> column amounts), setcoef_sw, taumol_sw, the
-// cosine of the zenith angle and the band albedos (RRTMG_SWRAD: all four are the albedo).
-CPPWRF_HD inline void rrtmg_sw_core_prep(int nlayers, const SwViews& v, const RrtmgSwTables& tables, rb coszen,
-                                         rb asdir, rb asdif, rb aldir, rb aldif) {
-  v.iscal[0] = 1;
-  // 6. inatm_sw
-  {
-    constexpr rb amd = rb(28.9660);
-    constexpr rb amw = rb(18.0160);
-    constexpr rb avogad = rb(6.02214199e23);
-    constexpr rb grav = rb(9.8066);
-    for (int l = 0; l < nlayers; ++l) {
-      v.pdp[l] = v.pz[l] - v.pz[l + 1];
-      rb amm = (rb(1.0) - v.wkl[0][l]) * amd + v.wkl[0][l] * amw;
-      v.coldry[l] = (v.pz[l] - v.pz[l + 1]) * rb(1.0e3) * avogad / (rb(1.0e2) * grav * amm * (rb(1.0) + v.wkl[0][l]));
-      for (int imol = 0; imol < 7; ++imol) v.wkl[imol][l] *= v.coldry[l];
-    }
-  }
-  // 7. setcoef_sw, taumol_sw
-  int laytrop, layswtch, laylow;
-  setcoef_sw(nlayers, v.pavel, v.tavel, v.coldry, v.wkl, laytrop, layswtch, laylow, v.jp, v.jt, v.jt1, v.colh2o,
-             v.colco2, v.colo3, v.coln2o, v.colch4, v.colo2, v.colmol, v.co2mult, v.indself, v.indfor, v.selffac,
-             v.selffrac, v.forfac, v.forfrac, v.fac00, v.fac01, v.fac10, v.fac11, tables);
-  v.iscal[1] = laytrop;
-  taumol_sw(nlayers, laytrop, v.jp, v.jt, v.jt1, v.colh2o, v.colco2, v.colch4, v.colo2, v.colo3, v.colmol, v.fac00,
-            v.fac01, v.fac10, v.fac11, v.selffac, v.selffrac, v.indself, v.forfac, v.forfrac, v.indfor, v.taug,
-            v.taur, v.sfluxzen, tables);
+// inatm_sw for layer l (wkl: vmr -> column amounts)
+CPPWRF_HD inline void rrtmg_sw_inatm_layer(int l, const SwViews& v) {
+  constexpr rb amd = rb(28.9660);
+  constexpr rb amw = rb(18.0160);
+  constexpr rb avogad = rb(6.02214199e23);
+  constexpr rb grav = rb(9.8066);
+  v.pdp[l] = v.pz[l] - v.pz[l + 1];
+  rb amm = (rb(1.0) - v.wkl[0][l]) * amd + v.wkl[0][l] * amw;
+  v.coldry[l] = (v.pz[l] - v.pz[l + 1]) * rb(1.0e3) * avogad / (rb(1.0e2) * grav * amm * (rb(1.0) + v.wkl[0][l]));
+  for (int imol = 0; imol < 7; ++imol) v.wkl[imol][l] *= v.coldry[l];
+}
+
+// the cosine of the zenith angle and the band albedos (RRTMG_SWRAD: all four are the albedo)
+CPPWRF_HD inline void rrtmg_sw_core_scalars(const SwViews& v, rb coszen, rb asdir, rb asdif, rb aldir, rb aldif) {
   rb prmu0 = coszen;
   if (prmu0 <= rb(1.e-10)) prmu0 = rb(1.e-10);  // zepzen
   v.dscal[0] = prmu0;
@@ -160,10 +152,30 @@ CPPWRF_HD inline void rrtmg_sw_core_prep(int nlayers, const SwViews& v, const Rr
   v.dscal[4] = aldif;
 }
 
+// rrtmg_sw core preparation: inatm_sw, setcoef_sw, taumol_sw, rrtmg_sw_core_scalars
+CPPWRF_HD inline void rrtmg_sw_core_prep(int nlayers, const SwViews& v, const RrtmgSwTables& tables, rb coszen,
+                                         rb asdir, rb asdif, rb aldir, rb aldif) {
+  v.iscal[0] = 1;
+  // 6. inatm_sw
+  for (int l = 0; l < nlayers; ++l) rrtmg_sw_inatm_layer(l, v);
+  // 7. setcoef_sw, taumol_sw
+  int laytrop, layswtch, laylow;
+  setcoef_sw(nlayers, v.pavel, v.tavel, v.coldry, v.wkl, laytrop, layswtch, laylow, v.jp, v.jt, v.jt1, v.colh2o,
+             v.colco2, v.colo3, v.coln2o, v.colch4, v.colo2, v.colmol, v.co2mult, v.indself, v.indfor, v.selffac,
+             v.selffrac, v.forfac, v.forfrac, v.fac00, v.fac01, v.fac10, v.fac11, tables);
+  v.iscal[1] = laytrop;
+  taumol_sw(nlayers, laytrop, v.jp, v.jt, v.jt1, v.colh2o, v.colco2, v.colch4, v.colo2, v.colo3, v.colmol, v.fac00,
+            v.fac01, v.fac10, v.fac11, v.selffac, v.selffrac, v.indself, v.forfac, v.forfrac, v.indfor, v.taug,
+            v.taur, v.sfluxzen, v.solfr, tables);
+  rrtmg_sw_core_scalars(v, coszen, asdir, asdif, aldir, aldif);
+}
+
 
 // ---- stage 1: per column ------------------------------------------------------------------------
+// core = false (GPU batch): inatm_sw, setcoef_sw and taumol_sw are left to rrtmg_sw_setcoef_stage (laytrop counted
+// from 0 into iscal[1]), rrtmg_sw_solfr_stage and rrtmg_sw_layer
 CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn& in, const SwViews& v,
-                                    const RrtmgSwTables& tables, const RrtmgLwConsts& kc) {
+                                    const RrtmgSwTables& tables, const RrtmgLwConsts& kc, bool core = true) {
   v.iscal[0] = in.coszen > rb(0.0) ? 1 : 0;
   if (in.coszen <= rb(0.0)) return;  // the sun below the horizon
   const int num_levels = c.num_levels, nlayers = c.nlayers;
@@ -350,7 +362,45 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
   }
   v.iscal[5] = any_cld_subcol;
 
+  if (!core) {
+    v.iscal[1] = 0;
+    rrtmg_sw_core_scalars(v, in.coszen, in.albedo, in.albedo, in.albedo, in.albedo);
+    return;
+  }
   rrtmg_sw_core_prep(nlayers, v, tables, in.coszen, in.albedo, in.albedo, in.albedo, in.albedo);
+}
+
+// ---- stage 1b (GPU batch): inatm_sw and setcoef_sw of layer lay after rrtmg_sw_prep(..., false) -----------------
+CPPWRF_FORCEINLINE void rrtmg_sw_setcoef_stage(int lay, const SwViews& v, const RrtmgSwTables& CPPWRF_RESTRICT tables) {
+  if (CSI(v.iscal)[0] == 0) return;
+  rrtmg_sw_inatm_layer(lay, v);
+  const bool lower = setcoef_sw_layer(lay, v.pavel, v.tavel, v.coldry, v.wkl, v.jp, v.jt, v.jt1, v.colh2o, v.colco2,
+                                      v.colo3, v.coln2o, v.colch4, v.colo2, v.colmol, v.co2mult, v.indself, v.indfor,
+                                      v.selffac, v.selffrac, v.forfac, v.forfrac, v.fac00, v.fac01, v.fac10, v.fac11,
+                                      tables);
+  if (lower) {
+#if defined(CPPWRF_DEVICE_CODE)
+    atomicAdd(&v.iscal[1], 1);
+#else
+#pragma omp atomic
+    v.iscal[1] += 1;
+#endif
+  }
+}
+
+// ---- stage 1c (GPU batch): per column, after every layer's setcoef ------------------------------------------------
+CPPWRF_FORCEINLINE void rrtmg_sw_solfr_stage(int nlayers, const SwViews& v, const RrtmgSwTables& CPPWRF_RESTRICT tables) {
+  if (CSI(v.iscal)[0] == 0) return;
+  taumol_sw_solfr(nlayers, CSI(v.iscal)[1], CSI(v.jp), v.sfluxzen, v.solfr, tables);
+}
+
+// ---- stage 1d (GPU batch): taumol_sw of layer lay -----------------------------------------------------------------
+CPPWRF_FORCEINLINE void rrtmg_sw_layer(int nlayers, int lay, const SwViews& v,
+                                       const RrtmgSwTables& CPPWRF_RESTRICT tables) {
+  if (CSI(v.iscal)[0] == 0) return;
+  taumol_sw_layers(nlayers, CSI(v.iscal)[1], v.jp, v.jt, v.jt1, v.colh2o, v.colco2, v.colch4, v.colo2, v.colo3,
+                   v.colmol, v.fac00, v.fac01, v.fac10, v.fac11, v.selffac, v.selffrac, v.indself, v.forfac, v.forfrac,
+                   v.indfor, v.taug, v.taur, v.sfluxzen, v.solfr, tables, lay, lay + 1);
 }
 
 // ---- stage 2: per g-point (spcvmc_sw with icpr = 1, no aerosols) --------------------------------

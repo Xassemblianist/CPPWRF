@@ -56,7 +56,31 @@ struct KSwPrep {
     x.re_cloud = in.re_cloud ? col_view(in.re_cloud, col, nc) : SD{nullptr, 0};
     x.re_ice = in.re_ice ? col_view(in.re_ice, col, nc) : SD{nullptr, 0};
     x.re_snow = in.re_snow ? col_view(in.re_snow, col, nc) : SD{nullptr, 0};
-    rrtmg_sw_prep(c, x, ch.views(ci), *t, *k);
+    rrtmg_sw_prep(c, x, ch.views(ci), *t, *k, false);
+  }
+};
+
+// inatm_sw and setcoef_sw per (column, layer), taumol_sw's solar-source layers per column, taumol_sw per (column,
+// layer): the column prep's serial layer loops (KSwPrep was latency-bound) in parallel, the same operations per value
+struct KSwSetcoef {
+  SwChunk ch;
+  const RrtmgSwTables* t;
+  CPPWRF_HD void operator()(int a, int b, int cc) const { rrtmg_sw_setcoef_stage(SW_X(b, cc), ch.views(SW_CI(a, cc)), *t); }
+};
+
+struct KSwSolfr {
+  SwChunk ch;
+  int nlayers;
+  const RrtmgSwTables* t;
+  CPPWRF_HD void operator()(int a, int, int cc) const { rrtmg_sw_solfr_stage(nlayers, ch.views(SW_CI(a, cc)), *t); }
+};
+
+struct KSwLayer {
+  SwChunk ch;
+  int nlayers;
+  const RrtmgSwTables* t;
+  CPPWRF_HD void operator()(int a, int b, int cc) const {
+    rrtmg_sw_layer(nlayers, SW_X(b, cc), ch.views(SW_CI(a, cc)), *t);
   }
 };
 
@@ -125,6 +149,9 @@ void RrtmgSwBatch::run(const RrtmgSwCallConfig& c, const SwBatchInput& in, const
     const int n = std::min(chunk_, col_end - col0);
     const SwChunk ch{lay_, d, ip, n, col0};
     parallel_for(sw_range(n, 1), KSwPrep{ch, c, in, d_tables_, d_consts_});
+    parallel_for(sw_range(n, c.nlayers), KSwSetcoef{ch, d_tables_});
+    parallel_for(sw_range(n, 1), KSwSolfr{ch, c.nlayers, d_tables_});
+    parallel_for(sw_range(n, c.nlayers), KSwLayer{ch, c.nlayers, d_tables_});
     if (c.nlayers <= 48)
       parallel_for(sw_range(n, 112), KSwGpoint<48>{ch, c, d_tables_});
     else
