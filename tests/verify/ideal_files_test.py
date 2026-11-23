@@ -39,7 +39,10 @@ def config_value(cfg, section, key):
 def main():
     exe = os.path.join(sys.argv[1], "cppwrf")
     want = sys.argv[2:]
-    candidates = [c for c in wrf_suite.CASES if c[0].startswith("ideal_") and c[1] == "cpu_dp"]
+    # suite.* harness modes (e.g. suite.layout_restart: restart files of two layouts against each other) are
+    # comparisons of wrf_suite.py, not plain runs with one wrfout file
+    candidates = [c for c in wrf_suite.CASES if c[0].startswith("ideal_") and c[1] == "cpu_dp"
+                  and not any(s.startswith("suite.") for s in c[3])]
     unknown = sorted(set(want) - {c[0] for c in candidates})
     if unknown:
         sys.exit(f"FAIL unknown ideal file cases: {', '.join(unknown)}")
