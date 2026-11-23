@@ -33,7 +33,7 @@
 #   MAX_UPLOAD_MIN (environment, default 20): stop when the upload would take longer (slow regions)
 #
 # The source is the committed HEAD (git archive); the data come from ${CPPWRF_WRF_RUNS} through
-# tools/colab/stage_data.py (cached per case list). Results: summary.txt (GPU, build times, the device math proof
+# tools/colab/stage_data.py (cached per revision and case list). Results: summary.txt (GPU, build times, the device math proof
 # (tools/glibc_math_proof_cuda.cu, 10^7 inputs per function; --env CPPWRF_JOB_GLIBC_PROOF=N), PASS/FAIL lines
 # with the relative L2 differences, ns/cell/step, device memory, the nsys / ncu lines), the logs, profile/ (per
 # bench case the nsys tables per step and the ncu kernel table) and nsys/ (nsys stats as CSV).
@@ -80,11 +80,19 @@ fi
 STAGE=$(echo "$CASES,$BENCH" | sed 's/@cuda[a-z_]*//g')
 # no --cases and no --files: the bench cases need no reference files
 NOREFS=; [ -n "$CASES$FILES" ] || NOREFS=--no-refs
-key=$( (echo "$STAGE" | tr ',' '\n' | sort -u; echo "files:$FILES$NOREFS$WT") | tr '\n' ',' | md5sum | cut -c1-12)
+key=$( (echo "$STAGE" | tr ',' '\n' | sort -u; echo "files:$FILES$NOREFS$WT";
+         git -C "$REPO" rev-parse HEAD; sha256sum "$REPO/tools/colab/stage_data.py") | tr '\n' ',' | sha256sum | cut -c1-16)
 DATA=$SCRATCH/colab/cache/data_$key.tar
 # GPU runs only: CPPWRF computes the Thompson tables on the VM instead of uploading WRF's 370 MB (--wrf-tables: WRF's)
-[ -f "$DATA" ] || python3 "$REPO/tools/colab/stage_data.py" --only "$STAGE" --files "$FILES" $TABLES $NOREFS \
-  "$DATA"
+if [ ! -f "$DATA" ]; then
+  staging=$(mktemp "$DATA.XXXXXX")
+  if python3 "$REPO/tools/colab/stage_data.py" --only "$STAGE" --files "$FILES" $TABLES $NOREFS "$staging"; then
+    mv -f "$staging" "$DATA"
+  else
+    rm -f "$staging"
+    exit 1
+  fi
+fi
 
 # ---- remote
 timeout 120 colab usage | tail -3 || true

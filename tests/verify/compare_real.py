@@ -8,6 +8,7 @@ Per output time: max abs / relative L2 difference of U, V, W, PH (full), MU (ful
 THM (theta_m), QVAPOR (and the hydrometeors, RAINNC, REFL_10CM when present), over the whole domain and over the interior (N points away from the
 lateral boundaries, default 6). The caller sets the tolerances. Invalid comparisons exit nonzero.
 """
+import math
 import os
 import sys
 
@@ -22,7 +23,20 @@ def main(wrfout, d, inner):
     ds = nc.Dataset(wrfout)
     steps = V.list_steps(d)
     xt = np.array(ds.variables["XTIME"][:], dtype=float) * 60.0
-    snaps = {V.read_snap(d, s)["_time"]: s for s in steps}
+    if not np.isfinite(xt).all() or len(np.unique(xt)) != len(xt):
+        sys.exit(f"{wrfout}: invalid or duplicate WRF XTIME")
+    snaps = {}
+    for step in steps:
+        path = os.path.join(d, f"snap_{step:06d}.json")
+        snap = V.read_snap(d, step)
+        stamp = snap["_time"]
+        if not math.isfinite(stamp) or snap["_step"] != step:
+            sys.exit(f"{path}: invalid snapshot time or step")
+        if stamp in snaps:
+            sys.exit(f"{path}: duplicate snapshot time {stamp:g}s (also step {snaps[stamp]})")
+        snaps[stamp] = step
+    if not set(xt) & snaps.keys():
+        sys.exit("no matched WRF and CPPWRF snapshot times")
     print(f"{'t':>6} {'var':>6} {'max|d|':>11} {'relL2':>24} {'relL2_in':>10} {'max|wrf|':>10}")
     for it, t in enumerate(xt):
         if t not in snaps:

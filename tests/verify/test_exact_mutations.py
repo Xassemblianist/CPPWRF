@@ -2,7 +2,7 @@
 """Exercise exact.compare_stream with single edits to synthetic WRF output.
 
 Run with python3 -I tests/verify/test_exact_mutations.py -v.
-NetCDF fixtures are temporary and live under ~/cppwrf_scratch/cdx6_tmp.
+NetCDF fixtures are temporary and live under ~/cppwrf_scratch/cdx9_tmp.
 """
 
 from pathlib import Path
@@ -17,7 +17,7 @@ import numpy as np
 
 # Load the sibling by path because -I excludes the script directory from sys.path.
 compare_stream = runpy.run_path(str(Path(__file__).with_name("exact.py")))["compare_stream"]
-SCRATCH = Path.home() / "cppwrf_scratch" / "cdx6_tmp"
+SCRATCH = Path.home() / "cppwrf_scratch" / "cdx9_tmp"
 FILL = -9999.0
 
 
@@ -230,7 +230,8 @@ class ExactMutations(unittest.TestCase):
     def test_continuation_can_overlap_first_leg(self):
         continuation = self.second.with_name("continuation.nc")
         write_output(continuation, (2,))
-        differences, _ = compare_stream(self.cpp, self.wrf, continuation=[continuation])
+        differences, _ = compare_stream(self.cpp, self.wrf, continuation=[continuation],
+                                         split=timestamp(1).tobytes().decode())
         self.assertFalse(differences)
 
     def test_extra_frame_with_duplicate_time(self):

@@ -448,7 +448,7 @@ def job(note):
     env = dict(os.environ, CPPWRF_WRF_RUNS=WR, CPPWRF_WRF_REF="/content/data/wrf_ref", OMP_NUM_THREADS="4")
     if cases and bins:
         args = " ".join(f"--{k.replace('_', '-')} {v}" for k, v in bins.items())
-        sh(f"python3 tests/verify/wrf_suite.py {args} --only {cases} --out /content/suite", "suite.log", cwd=SRC,
+        sh(f"python3 tests/verify/wrf_suite.py {args} --only {cases} --exact --out /content/suite", "suite.log", cwd=SRC,
            env=env)
         for line in open(os.path.join(JOB, "suite.log")):
             if re.match(r"(PASS|FAIL|SKIP|ERROR|SUITE)\s", line):

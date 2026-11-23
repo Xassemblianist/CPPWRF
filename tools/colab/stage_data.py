@@ -20,8 +20,8 @@ writes nothing locally); --refs-only: only the reference files (and the ideal na
 --no-refs: only the run directories, no reference file (timing runs: tools/colab/colab_run.sh --bench without
 --cases); --no-steps: no reference in a steps/ directory (tools/gcp/stage_files_data.py packs those whole). A case
 restarted in the middle (suite.restart_at) also takes WRF's wrfrst files at the restart, a tolerance-0 case the
-auxhist3 files (output_diagnostics) next to its reference wrfout, whole. Restart checks and chains keep the
-full history they compare, even when an ordinary case shares the reference.
+auxhist3 files (output_diagnostics) next to its reference wrfout, whole. Split runs, restart checks and chains keep
+the full history they compare, even when an ordinary case shares the reference.
 --files: the cases of tests/verify/run_wrf_files_test.sh run with CPPWRF_FILES_NO_VALUES=1 (a GPU build): their input
 directories, and their wrfout / wrfrst references (run, restart and resumed directories) as skeletons, with every
 variable, dimension, attribute and time but zero numbers; whole only the wrfrst files one minute after each case's
@@ -42,7 +42,6 @@ import numpy as np
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(REPO, "tests", "verify"))
-from exact import text  # noqa: E402
 import wrf_suite  # noqa: E402
 from case_data import needs  # noqa: E402
 
@@ -64,6 +63,9 @@ def trimmed(src, times, dst, every_variable):
     with nc.Dataset(src) as a, nc.Dataset(dst, "w", format="NETCDF4") as b:
         xt = np.array(a["XTIME"][:], dtype=float) * 60.0
         frames = [i for i, t in enumerate(xt) if any(abs(t - u) < 1e-6 for u in times)]
+        missing = sorted(t for t in times if not any(abs(xt[i] - t) < 1e-6 for i in frames))
+        if missing:
+            raise ValueError(f"{src}: no staging reference frames at {missing}")
         for n, d in a.dimensions.items():
             b.createDimension(n, None if d.isunlimited() else len(d))
         b.setncatts({k: a.getncattr(k) for k in a.ncattrs()})
@@ -108,7 +110,8 @@ def first_restart_stamp(d):
     nml = os.path.join(d, "namelist.input")
     if not os.path.isfile(nml):
         return None
-    nl = open(nml).read()
+    with open(nml) as f:
+        nl = f.read()
     vals = []
     for k in ("year", "month", "day", "hour", "minute", "second"):
         m = re.search(rf"^\s*start_{k}\s*=\s*(\d+)", nl, re.M | re.I)
@@ -141,7 +144,7 @@ def main():
     dirs = {}  # run directory -> whether Thompson tables are needed
     p3dirs = set()  # run directories of P3 cases (its lookup table)
     ref_times = {}  # reference wrfout -> compared times
-    full_refs = set()  # chains need every scheduled history frame
+    full_refs = set()  # chains and split runs need every scheduled history frame
     exact = set()  # reference wrfout files of tolerance-0 cases
     restarts = set()  # WRF's wrfrst files at the restart of restarted cases
     ideal = set()  # files under CPPWRF_WRF_REF: ideal-case soundings and reference wrfout files
@@ -154,16 +157,18 @@ def main():
         if snd and "${CPPWRF_WRF_REF}" in snd or any(r.startswith(WREF) for r in refs):
             if snd:
                 ideal.add(snd.replace("${CPPWRF_WRF_REF}", WREF))
-            ideal.update(r for r in refs if r.startswith(WREF))
-            ideal.update(os.path.join(os.path.dirname(r), "namelist.input") for r in refs if r.startswith(WREF))
+            if not a.no_refs:
+                ideal.update(r for r in refs if r.startswith(WREF))
+                ideal.update(os.path.join(os.path.dirname(r), "namelist.input") for r in refs if r.startswith(WREF))
             log(f"{name}: ideal ({len(refs)} reference files)")
             continue
         if dropin:
             rd, nl_dir, links = wrf_suite.dropin_spec(cfg, sets)
-            if not a.refs_only:
-                dirs.setdefault(nl_dir, False)
-            if not a.no_refs:
-                restarts.update(links)
+            dirs.setdefault(nl_dir, False)
+            nml = os.path.join(nl_dir, "namelist.input")
+            if not os.path.isfile(nml):
+                sys.exit(f"{name}: missing drop-in namelist {nml}")
+            restarts.update(links)  # seeds are inputs, including for --no-refs and --refs-only
             mp = "0"
         else:
             conf = wrf_suite.configuration(cfg, sets)
@@ -175,21 +180,23 @@ def main():
             mp = conf.get("phys", {}).get("mp_physics", "0")
         chain = wrf_suite.chain_at(sets)
         if chain and chain[3]:
-            doms = wo if isinstance(wo, dict) else ("d01",)
-            refs.extend(chain[3].replace("wrfout_d01_", f"wrfout_{d}_") for d in doms)
+            chain_refs = wrf_suite.chain_references(cfg, sets, chain[3])
+            refs.extend(chain_refs.values())
+            for path in chain_refs.values():
+                if not a.no_refs and not (a.no_steps and "/steps/" in path) and not os.path.isfile(
+                        os.path.join(os.path.dirname(path), "namelist.input")):
+                    sys.exit(f"{name}: missing chain namelist beside {path}")
         refs = {r for r in refs if not a.no_refs and not (a.no_steps and "/steps/" in r)}
         mid = wrf_suite.restart_at(sets)
         for r in sorted(refs):
             dirs.setdefault(os.path.dirname(r), False)
             ref_times.setdefault(r, set()).add(float(t))
-            if chain:
+            if chain or mid is not None:
                 full_refs.add(r)
             dom = re.search(r"wrfout_(d\d\d)_", os.path.basename(r)).group(1)
-            if mid:
-                with nc.Dataset(r) as ds:
-                    xt = np.array(ds["XTIME"][:], dtype=float) * 60.0
-                    at = [text(ds["Times"], i).decode() for i, x in enumerate(xt) if abs(x - mid) < 1e-6]
-                restarts.update(os.path.join(os.path.dirname(r), f"wrfrst_{dom}_{x}") for x in at)
+            if mid is not None and "suite.native_restart" not in sets:
+                at = wrf_suite.times_at(wrf_suite.simulation_start(r), mid)
+                restarts.add(os.path.join(os.path.dirname(r), f"wrfrst_{dom}_{at}"))
             if all(x == 0.0 for x in tol.values()):
                 exact.add(r)
                 streams = [("auxhist3", wrf_suite.auxhist3_check(sets, cfg)),
@@ -256,11 +263,16 @@ def main():
         if mp in ("50", "51"):
             p3dirs.add(rd)
         rsm = rst.replace("/rst_", "/rsm_") if rst else None
+        for directory, pattern in ((ref, "wrfout_d??_*"), (rst, "wrfrst_d??_*"), (rsm, "wrfout_d??_*")):
+            if directory and not any(os.path.isfile(p) for p in glob.glob(os.path.join(directory, pattern))):
+                sys.exit(f"files {name}: missing {pattern} in {directory}")
         rst_at = None
         if rst and os.path.isdir(rst):
             rst_at = first_restart_stamp(rst) or (first_restart_stamp(ref) if os.path.isdir(ref) else None)
             if not rst_at:
                 sys.exit(f"{rst}: cannot derive minute-1 restart time (no namelist.input)")
+            if not os.path.isfile(os.path.join(rst, f"wrfrst_d01_{rst_at}")):
+                sys.exit(f"{rst}: missing minute-1 restart seed at {rst_at}")
         for x in (ref, rst, rsm):
             if not x or not os.path.isdir(x):
                 continue
@@ -279,7 +291,7 @@ def main():
     missing_dirs = [d for d in sorted(dirs) if not os.path.isdir(d)]
     if missing_dirs:
         sys.exit("missing run directory: " + ", ".join(missing_dirs))
-    missing_refs = [p for p in sorted(set(ref_times) | restarts) if not os.path.isfile(p)]
+    missing_refs = [p for p in sorted(set(ref_times) | restarts | ideal) if not os.path.isfile(p)]
     if missing_refs:
         sys.exit("missing reference file: " + ", ".join(missing_refs))
     tf = tarfile.open(fileobj=sys.stdout.buffer, mode="w|", dereference=True) if a.out == "-" else \
@@ -310,18 +322,21 @@ def main():
         for arc, p in sorted(whole.items()):
             if arc not in added:
                 tf.add(p, arcname=arc, recursive=False)
+                added.add(arc)
+        for p in sorted(restarts):
+            arc = os.path.join("wrf_runs", os.path.relpath(p, WR))
+            if arc not in added:
+                tf.add(p, arcname=arc, recursive=False)
+                added.add(arc)
         for arc, p in sorted(skel.items()):
-            if arc in whole:
+            if arc in added:
                 continue
             with tempfile.TemporaryDirectory() as tmp:
                 q = os.path.join(tmp, os.path.basename(p))
                 skeleton(p, q)
                 tf.add(q, arcname=arc)
         for p in sorted(ideal):
-            if os.path.exists(p):
-                tf.add(p, arcname=os.path.join("wrf_ref", os.path.relpath(p, WREF)), recursive=False)
-            else:
-                log(f"missing: {p}")
+            tf.add(p, arcname=os.path.join("wrf_ref", os.path.relpath(p, WREF)), recursive=False)
     if a.out != "-":
         print(f"{a.out}: {os.path.getsize(a.out) / 2**20:.0f} MiB, {len(dirs)} directories")
 

@@ -121,7 +121,7 @@ def uncached(ds):
     return ds
 
 
-def frames(files, opened=None, duplicates=None):
+def frames(files, opened=None, duplicates=None, empty=None):
     """Index a stream by Times. Record repeated timestamps when the caller requests a coverage check."""
     import netCDF4
     m = {}
@@ -129,6 +129,8 @@ def frames(files, opened=None, duplicates=None):
         ds = uncached(raw(netCDF4.Dataset(f)))
         if opened is not None:
             opened.append(ds)
+        if empty is not None and not len(ds["Times"]):
+            empty.append(f)
         for t in range(len(ds["Times"])):
             stamp = text(ds["Times"], t).decode()
             if duplicates is not None and stamp in m:
@@ -138,41 +140,55 @@ def frames(files, opened=None, duplicates=None):
 
 
 def compare_stream(cfiles, wfiles, subset=False, until=None, global_atts=True, after=None, ignore_atts=(),
-                   stats=None, common_only=False, *, continuation=(), required_times=(), wrf_reference=False):
+                   stats=None, common_only=False, *, continuation=(), split=None, required_times=(), wrf_reference=False,
+                   required_reference_times=(), optional_reference_times=(), waive=None, noise=None):
     """Compare values and metadata for one stream and domain, matching by Times.
 
     The coverage window includes `until` and excludes `after`. Shared frames after `until`
     must also match, although they are outside the coverage counts. With subset=True, CPPWRF may have
     additional variables or frames. With common_only=True, reference frames outside the candidate's cadence
-    are optional. Every
+    are optional, and vice versa. Every
     required_times timestamp must exist on both sides. Duplicate Times within either stream fail, including
-    duplicates across input files. A continuation is a separate CPPWRF run whose frames take precedence where
-    it overlaps the first leg at a restart. A WRF reference may not identify itself as CPPWRF in TITLE.
+    duplicates across input files. A continuation supplies frames strictly after the split. A WRF reference may
+    not identify itself as CPPWRF in TITLE.
     """
-    opened, dup_c, dup_w = [], [], []
+    opened, dup_c, dup_w, empty = [], [], [], []
     try:
-        A = frames(cfiles, opened, dup_c)
-        A.update(frames(continuation, opened, dup_c))
-        B = frames(wfiles, opened, dup_w)
+        A = frames(cfiles, opened, dup_c, empty)
+        C = frames(continuation, opened, dup_c, empty)
+        misplaced = []
+        if split is not None:
+            misplaced = sorted(k for k in C if k <= split)
+            A = {k: v for k, v in A.items() if k <= split}
+            A.update((k, v) for k, v in C.items() if k > split)
+        elif continuation:
+            raise ValueError("continuation requires its split time")
+        B = frames(wfiles, opened, dup_w, empty)
         if after is not None:
             A = {k: v for k, v in A.items() if k > after}
             B = {k: v for k, v in B.items() if k > after}
-        bad, n = _compare_stream(A, B, subset, until, global_atts, ignore_atts, stats, common_only)
+        bad, n = _compare_stream(A, B, subset, until, global_atts, ignore_atts, stats, common_only,
+                                 optional_reference_times=optional_reference_times, waive=waive, noise=noise)
         if until is not None:
             extra = {k for k in A.keys() & B.keys() if k > until}
             if extra:
                 extra_bad, _ = _compare_stream({k: A[k] for k in extra}, {k: B[k] for k in extra},
-                                               subset, None, global_atts, ignore_atts)
+                                               subset, None, global_atts, ignore_atts, waive=waive, noise=noise)
                 for key, detail in extra_bad.items():
                     bad.setdefault(key, detail)
         if dup_c or dup_w:
             bad["(records)"] = [f"duplicate Times in {side}: {d}"
                                 for side, duplicates in (("CPPWRF", dup_c), ("reference", dup_w))
                                 for d in duplicates]
+        if empty:
+            bad.setdefault("(records)", []).extend(f"zero records in {f}" for f in empty)
+        if misplaced:
+            bad["(continuation)"] = f"resumed records at or before the split: {misplaced}"
         expected = set(required_times)
         missing = []
         for side, records in (("CPPWRF", A), ("WRF", B)):
-            absent = expected - {k for k in records if until is None or k <= until}
+            needed = expected | set(required_reference_times) if side == "WRF" else expected
+            absent = needed - {k for k in records if until is None or k <= until}
             if absent:
                 missing.append(f"{side} missing {sorted(absent)}")
         if missing:
@@ -188,19 +204,30 @@ def compare_stream(cfiles, wfiles, subset=False, until=None, global_atts=True, a
             ds.close()
 
 
-def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None, common_only=False):
+def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None, common_only=False, *,
+                    optional_reference_times=(), waive=None, noise=None):
     bad, nframes = {}, {}
-    extra_c = sorted(A.keys() - B.keys()) if not subset else []
+    extra_c = sorted(A.keys() - B.keys()) if not (subset or common_only) else []
     if until is not None:
         A = {k: v for k, v in A.items() if k <= until}
         B = {k: v for k, v in B.items() if k <= until}
     common = sorted(set(A) & set(B))
     only_c = sorted(set(A) - set(B))
-    only_w = [] if common_only else sorted(set(B) - set(A))
+    only_w = [] if common_only else sorted(set(B) - A.keys() - set(optional_reference_times))
     if extra_c or only_w:
         bad["(times)"] = f"only-cppwrf {extra_c} only-wrf {only_w}"
     wrf_only, cppwrf_only, compared, static, nan = set(), set(), set(), set(), {}
     pairs = {}  # file pairs in frame order
+    waived = {ds: set(waive(ds)) for ds in {ds for ds, _ in B.values()}} if waive else {}
+    payload = set()
+
+    def value_diff(v, b, detail):
+        if v in waived.get(b, ()):
+            if noise is not None:
+                noise.add(v)
+        else:
+            bad.setdefault(v, detail)
+
     for k in common:
         (a, ta), (b, tb) = A[k], B[k]
         pairs.setdefault((a, b), None)
@@ -209,46 +236,56 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
         for v in b.variables:
             if v not in a.variables or "Time" not in b[v].dimensions:
                 continue
-            compared.add(v)
+            if v not in waived.get(b, ()):
+                compared.add(v)
             if b[v].dtype.kind == "S":
                 if v != "Times" and text(a[v], ta) != text(b[v], tb):
-                    bad.setdefault(v, f"{k} text differs")
+                    value_diff(v, b, f"{k} text differs")
                 continue
             if a[v].dimensions[:1] != ("Time",):  # a variable with a Time dimension in WRF's file only
                 bad.setdefault(v, f"dimensions cppwrf {a[v].dimensions} wrf {b[v].dimensions}")
                 continue
             x, y = np.asarray(a[v][ta]), np.asarray(b[v][tb])  # one frame of one variable
             if x.shape != y.shape:
-                if v not in bad:  # WRF's values per leading index (e.g. soil layers)
-                    yl = y.reshape(y.shape[0], -1) if y.ndim > 1 else y.reshape(-1, 1)
-                    bad[v] = (f"shape cppwrf {x.shape} wrf {y.shape} wrf min/max per level "
-                              + " ".join(f"{r.min():.4g}/{r.max():.4g}" for r in yl))
+                if v not in bad:
+                    detail = f"shape cppwrf {x.shape} wrf {y.shape}"
+                    if y.size:  # WRF's values per leading index (e.g. soil layers)
+                        levels = y.reshape(y.shape[0], -1) if y.ndim > 1 else y.reshape(-1, 1)
+                        detail += " wrf min/max per level " + " ".join(f"{r.min():.4g}/{r.max():.4g}" for r in levels)
+                    bad[v] = detail
                 continue
             if a[v].dtype != b[v].dtype:
                 bad.setdefault(v, f"type cppwrf {a[v].dtype} wrf {b[v].dtype}")
+            if v not in CLOCK_VARS and v not in waived.get(b, ()) and y.dtype.kind in "fiub" and y.size:
+                payload.add((a, b, k))
             dif = describe(x, y)
             if dif:
-                nframes[v] = nframes.get(v, 0) + 1
-                bad.setdefault(v, f"{k} {dif}")
+                if v not in waived.get(b, ()):
+                    nframes[v] = nframes.get(v, 0) + 1
+                value_diff(v, b, f"{k} {dif}")
             m = nan_matched(x, y)
             if m:
                 nan[v] = nan.get(v, 0) + m
+    static_payload = set()
     for a, b in pairs:  # the variables without a Time dimension, of every pair of files
         for v in b.variables:
             if v not in a.variables or "Time" in b[v].dimensions:
                 continue
-            static.add(v)
+            if v not in waived.get(b, ()):
+                static.add(v)
             x, y = np.asarray(a[v][:]), np.asarray(b[v][:])
             if b[v].dtype.kind == "S" or a[v].dtype.kind == "S":
                 if text(a[v]) != text(b[v]):
-                    bad.setdefault(v, "text differs")
+                    value_diff(v, b, "text differs")
                 continue
             if x.shape != y.shape or a[v].dtype != b[v].dtype:
                 bad.setdefault(v, f"shape/type cppwrf {x.shape} {a[v].dtype} wrf {y.shape} {b[v].dtype}")
                 continue
+            if v not in CLOCK_VARS and v not in waived.get(b, ()) and y.dtype.kind in "fiub" and y.size:
+                static_payload.add((a, b))
             dif = describe(x, y)
             if dif:
-                bad.setdefault(v, f"(no Time dimension) {dif}")
+                value_diff(v, b, f"(no Time dimension) {dif}")
             m = nan_matched(x, y)
             if m:
                 nan[v] = nan.get(v, 0) + m
@@ -270,9 +307,10 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
     if not common:
         bad["(frames)"] = "no common frame"
     else:
-        for b in {b for _, b in pairs}:
-            if not any(v not in CLOCK_VARS and b[v].dtype.kind in "fiub" for v in b.variables):
-                bad.setdefault("(variables)", []).append(f"{b.filepath()}: no model fields (Times and XTIME are clocks)")
+        for k in common:
+            a, b = A[k][0], B[k][0]
+            if (a, b, k) not in payload and (a, b) not in static_payload:
+                bad.setdefault("(variables)", []).append(f"{b.filepath()} at {k}: no model fields with compared values")
     if stats is not None:
         ref_vars = set().union(*(set(ds.variables) for ds, _ in B.values()))
         add(stats, frames=len(common), ref_frames=len(B), ref_vars=len(ref_vars - {"Times"}),

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""restart_<tag>_fp64: the configuration of a tolerance-0 suite case, 3 steps (t1: 5) straight vs restarted after
+"""restart_<tag>_fp64: the configuration of a tolerance-0 suite case, 3 steps (t1: 5, p8: 10) straight vs restarted after
 step 1 from CPPWRF's own restart_000001.nc (the snapshots of step 3 bit for bit), and against WRF at tolerance 0
 (wrf_suite.restart_check): the run resumed from that file in WRF history output against WRF's uninterrupted run
 (every frame after the restart, every variable and global attribute: a run resumed from CPPWRF's own file

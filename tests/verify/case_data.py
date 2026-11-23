@@ -71,15 +71,24 @@ def needs(name):
     case = next((c for c in wrf_suite.CASES if c[0] == name), None)
     if case:
         _, _, cfg, sets, wo, t, tol = case
-        if cfg.startswith("dropin:"):  # the run directory it copies, its namelist's directory, the linked files
+        dropin = cfg.startswith("dropin:")
+        if dropin:  # the run directory it copies, its namelist's directory, the linked files
             src, nl_dir, links = wrf_suite.dropin_spec(cfg, sets)
             dirs += [r for r in (rel(src), rel(nl_dir)) if r]
             files.update({rel(f): True for f in links})
+            if directory := rel(nl_dir):
+                files[os.path.join(directory, "namelist.input")] = True
         else:
             dirs += config_paths(cfg, [s for s in sets if not s.startswith("suite.")])
         mid = wrf_suite.restart_at(sets)
         aux = wrf_suite.auxhist3_check(sets, cfg)
-        for w in (wo.values() if isinstance(wo, dict) else [wo]):
+        chain = wrf_suite.chain_at(sets)
+        refs = list(wo.values()) if isinstance(wo, dict) else [wo]
+        if chain and chain[3]:
+            for path in wrf_suite.chain_references(cfg, sets, chain[3]).values():
+                files[os.path.join(os.path.dirname(rel(path)), "namelist.input")] = True
+                refs.append(path)
+        for w in dict.fromkeys(refs):
             r = rel(w)
             files[r] = True
             d, dom = os.path.dirname(r), re.search(r"wrfout_(d\d\d)_", r).group(1)
@@ -89,9 +98,12 @@ def needs(name):
                 files[os.path.join(d, f"auxhist3_{dom}_*")] = aux
                 if wrf_suite.wrfrst_check(sets):
                     files[os.path.join(d, f"wrfrst_{dom}_*")] = True
-                if mid:  # the reference's start (its file name) + mid
-                    t0 = datetime.datetime.strptime(r[-19:], "%Y-%m-%d_%H:%M:%S")
-                    at = (t0 + datetime.timedelta(seconds=mid)).strftime("%Y-%m-%d_%H:%M:%S")
+                    if not dropin:
+                        conf = wrf_suite.configuration(cfg, sets)
+                        for stamp in wrf_suite.configured_restart_times(conf, r[-19:]):
+                            files[os.path.join(d, f"wrfrst_{dom}_{stamp}")] = True
+                if mid is not None and "suite.native_restart" not in sets:  # the reference's start + mid
+                    at = wrf_suite.times_at(r[-19:], mid)
                     files[os.path.join(d, f"wrfrst_{dom}_{at}")] = True
         return files, dirs
     m = re.fullmatch(r"restart_(.+?)_(fp64|fp64_cuda|fp32_cuda)", name)

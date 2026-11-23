@@ -53,20 +53,39 @@ for i in "${!cases[@]}"; do
   c=${cases[$i]} ref=${refs[$i]}
   out=$WORK/$i
   mkdir "$out" || exit 1
-  if ! ndom=$(PYTHONPATH="$REPO_ROOT/tools${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
+  if ! inventory=$(PYTHONPATH="$REPO_ROOT/tools${PYTHONPATH:+:$PYTHONPATH}" python3 -c '
 import sys
-from wrf2cppwrf import parse_namelist
+from wrf2cppwrf import WrfTranslator, parse_namelist
 with open(sys.argv[1]) as f:
-    print(parse_namelist(f.read()).get("domains", {}).get("max_dom", [1])[0])
-' "$ref/namelist.input") || [[ ! "$ndom" =~ ^[1-9][0-9]*$ ]]; then
-    echo "FAIL $c: cannot read max_dom from $ref/namelist.input"
+    nl = parse_namelist(f.read())
+tr = WrfTranslator(nl)
+ndom = int(tr.get_opt("domains", "max_dom", 1))
+if ndom < 1:
+    sys.exit("max_dom must be positive")
+for d in range(ndom):
+    tag = f"d{d + 1:02d}"
+    print(f"wrfinput_{tag}")
+    if sys.argv[2] == "1":
+        continue
+    elapsed = (tr.domain_date("end", d) - tr.domain_date("start", d)).total_seconds()
+    if elapsed <= 0:
+        continue
+    interval = int(tr.get_opt("time_control", "interval_seconds", 0))
+    if interval <= 0 or elapsed < interval:
+        sys.exit(f"{tag}: the time range needs a positive interval_seconds and at least two analysis times")
+    sst = tr.get_opt("physics", "sst_update", 0)
+    fdda = tr.get_dom_opt("fdda", "grid_fdda", d, 0, fallback_d0=False)
+    if d == 0:
+        print("wrfbdy_d01")
+    if sst == 1:
+        print(f"wrflowinp_{tag}")
+    if fdda >= 1:
+        print(f"wrffdda_{tag}")
+' "$ref/namelist.input" "$packaged"); then
+    echo "FAIL $c: cannot derive required streams from $ref/namelist.input"
     fail=1; continue
   fi
-  required=()
-  for ((dom = 1; dom <= ndom; dom++)); do
-    printf -v name 'wrfinput_d%02d' "$dom"
-    required+=("$name")
-  done
+  mapfile -t required <<< "$inventory"
   if ((packaged)); then
     required+=(wrfbdy_d01)
     if [[ $c == run_SU1_r8 ]]; then required+=(wrflowinp_d01); fi

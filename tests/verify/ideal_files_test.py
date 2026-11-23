@@ -11,7 +11,7 @@ run's namelist.input (sounding: the input_sounding next to it), so the translato
 
 References: ${CPPWRF_WRF_REF} (as wrf_suite.py). Outputs in ${CPPWRF_SCRATCH:-~/cppwrf_scratch}/ideal_files_test,
 deleted for passing cases. Exit status 0 = all PASS; a missing reference is a SKIP that fails unless
-CPPWRF_ALLOW_SKIP=1.
+CPPWRF_ALLOW_SKIP=1. At least one file must be compared.
 """
 import os
 import re
@@ -39,10 +39,14 @@ def config_value(cfg, section, key):
 def main():
     exe = os.path.join(sys.argv[1], "cppwrf")
     want = sys.argv[2:]
+    candidates = [c for c in wrf_suite.CASES if c[0].startswith("ideal_") and c[1] == "cpu_dp"]
+    unknown = sorted(set(want) - {c[0] for c in candidates})
+    if unknown:
+        sys.exit(f"FAIL unknown ideal file cases: {', '.join(unknown)}")
     work = os.path.join(os.environ.get("CPPWRF_SCRATCH", os.path.expanduser("~/cppwrf_scratch")), "ideal_files_test")
     ok, n, skip = True, 0, 0
-    for name, key, cfg, sets, wo, t, tol in wrf_suite.CASES:
-        if not name.startswith("ideal_") or key != "cpu_dp" or (want and name not in want):
+    for name, key, cfg, sets, wo, t, tol in candidates:
+        if want and name not in want:
             continue
         ref = os.path.dirname(wo)
         if not os.path.exists(wo):
@@ -93,7 +97,7 @@ def main():
             print("\n".join((c.stdout + c.stderr).strip().splitlines()[:20]))
             ok = False
     print(f"compared {n} files, {skip} cases skipped")
-    sys.exit(0 if ok and (not skip or os.environ.get("CPPWRF_ALLOW_SKIP") == "1") else 1)
+    sys.exit(0 if n and ok and (not skip or os.environ.get("CPPWRF_ALLOW_SKIP") == "1") else 1)
 
 
 if __name__ == "__main__":

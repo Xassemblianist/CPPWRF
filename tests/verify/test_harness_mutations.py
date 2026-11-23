@@ -2,7 +2,7 @@
 """Harness regression tests using tiny fixtures and stub model runs.
 
 Run with python3 -B tests/verify/test_harness_mutations.py -v. Fixtures live under
-~/cppwrf_scratch/cdx6_tmp.
+~/cppwrf_scratch/cdx9_tmp.
 """
 from contextlib import redirect_stdout, redirect_stderr
 from datetime import datetime
@@ -61,6 +61,14 @@ def fixture(directory, seconds, *, kind="wrfout", domain="d01", start=START, ala
     return path
 
 
+def snapshot(directory, *, step=3, time=180):
+    meta = {"step": step, "time": time, "variables": [
+        {"name": "u", "stagger": "M", "shape": [1, 1, 1], "offset": 0, "nbytes": 4, "dtype": "float32"}
+    ]}
+    (directory / "snap_000003.json").write_text(json.dumps(meta))
+    (directory / "snap_000003.bin").write_bytes(np.float32(1).tobytes())
+
+
 class ScratchMutationCase(unittest.TestCase):
     def setUp(self):
         SCRATCH.mkdir(parents=True, exist_ok=True)
@@ -79,6 +87,7 @@ class HarnessMutations(ScratchMutationCase):
         (inputs / "wrfinput_d01").touch()
         ref = fixture(self.root / "rst_P1_r8", (0, 60, 120, 180))
         ref.with_name("namelist.input").write_text(RESUME_NAMELIST)
+        fixture(ref.parent, (60,), kind="wrfrst", alarm=60)
         rsm = self.root / "rsm_P1_r8"
         ref_history = fixture(rsm, (120, 180), start=wrf_suite.times_at(START, 60))
         ref_restart = fixture(rsm, (120,), kind="wrfrst", start=wrf_suite.times_at(START, 60))
@@ -88,7 +97,8 @@ class HarnessMutations(ScratchMutationCase):
             out = Path(out)
             out.mkdir(parents=True, exist_ok=True)
             if out.name in ("straight", "restarted"):
-                (out / "snap_000003.bin").write_bytes(b"identical")
+                snapshot(out)
+                (out / "restart_000001.nc").touch()
             elif out.name == "resumed_wrfout":
                 fixture(out, (120, 180))
             else:
@@ -128,7 +138,7 @@ class HarnessMutations(ScratchMutationCase):
         domains = {"d01": 300, "d02": 900} if nested else {"d01": 180 if "d0" in name else 1800}
         cadence = {d: tuple(range(0, end + 1, step)) for d, step in domains.items()}
         wrf_times = tuple(range(0, end + 1, 60)) if "d0" in name else cadence["d01"]
-        if native:  # Leave a shared post-restart frame to exercise common_only, even with the last cadence tick gone.
+        if native:  # The WRF reference can contain extra frames between CPPWRF outputs.
             wrf_times = (*wrf_times[:-1], int(mid) + 60, wrf_times[-1])
         refdir = self.root / name / "ref"
         ref = fixture(refdir, wrf_times[:-1] if omit_wrf_final else wrf_times)
@@ -145,19 +155,28 @@ class HarnessMutations(ScratchMutationCase):
             for d, times in cadence.items():
                 if omit_domain and d == "d02":
                     continue
-                history = times[:-1] if omit_final else times
-                if native:
-                    history = tuple(sorted((*history, int(mid) + 60)))
+                origin = int(mid) if out.name == "b_resumed" else 0
+                hist_iv = domains[d] - origin % domains[d] if origin else domains[d]
+                history = tuple(range(origin + hist_iv if origin else 0, end + 1, hist_iv))
+                if omit_final:
+                    history = history[:-1]
                 if not straight:
                     history = tuple(t for t in history if t > mid)
                     if extra_resumed:
                         history += (int(mid) + 60,)
-                fixture(out, history, domain=d, start=run_start)
-                if straight:
-                    fixture(out, (int(mid),), kind="wrfrst", domain=d)
-                fixture(out, (int(mid + interval),), kind="wrfrst", domain=d, start=run_start,
-                        alarm=179 if bad_alarm and not straight else 180,
-                        clock_delta=1 if bad_alarm and not straight else 0)
+                if history:
+                    fixture(out, history, domain=d, start=run_start)
+                for sec in range(int(interval if straight else mid + interval), end + 1, int(interval)):
+                    path = fixture(out, (sec,), kind="wrfrst", domain=d, start=run_start,
+                                   alarm=int(interval) - int(bad_alarm and not straight),
+                                   clock_delta=int(bad_alarm and not straight))
+                    with Dataset(path, "a") as ds:
+                        since = (sec - origin) % hist_iv
+                        ds.setncattr(wrf_suite.HISTORY_ALARM, hist_iv - since)
+                        ds.setncattr(wrf_suite.HISTORY_RINGING, int(since == 0 and (d != "d01" or sec == end)))
+            if straight and not nested:
+                dt = float(wrf_suite.configuration(cfg, sets)["time"]["dt"])
+                (out / f"restart_{round(mid / dt):06d}.nc").touch()
             return 0, ""
 
         with patch.object(wrf_suite, "run", run_stub), patch.object(wrf_suite, "config_vs_namelist", return_value=[]), \
@@ -183,7 +202,7 @@ class HarnessMutations(ScratchMutationCase):
         self.assertFalse(self.run_chain(name)[0])
         shutil.rmtree(self.root / name)
         bad, _ = self.run_chain(name, omit_domain=True)
-        self.assertIn("no wrfrst files at 600s for d02", "\n".join(bad))
+        self.assertIn("missing straight restart wrfrst_d02_", "\n".join(bad))
 
     def test_chain_checks_extra_resumed_timestamp_and_restart_alarm(self):
         name = "real_d0_r8_fp64_cpu_chain"
@@ -196,7 +215,8 @@ class HarnessMutations(ScratchMutationCase):
         refdir, out = self.root / "refs", self.root / "out"
         ref = fixture(refdir, (0, 180))
         cfg = self.root / "run.ini"
-        cfg.write_text("[output]\nauxhist3=true\n")
+        cfg.write_text("[time]\ndt=60\n[run]\nrun_time=180\n[restart]\ninterval=120\n"
+                       "[output]\nauxhist3=true\n[phys]\nauxhist3_interval=3\n")
         fixture(out, (0, 180))
         aux = fixture(refdir, (0, 180), kind="auxhist3")
         fixture(out, (0, 180), kind="auxhist3")
@@ -204,7 +224,7 @@ class HarnessMutations(ScratchMutationCase):
         cpp_rst = fixture(out, (120,), kind="wrfrst")
         refs = {"": str(ref)}
         self.assertFalse(wrf_suite.exact_case(refs, str(out), 180, ["output.auxhist3=true"])[0])
-        self.assertFalse(wrf_suite.wrfrst_case(refs, str(out))[0])
+        self.assertFalse(wrf_suite.wrfrst_case(refs, str(out), cfg, [])[0])
         aux.unlink()
         rst.unlink()
         cpp_rst.unlink()
@@ -212,7 +232,7 @@ class HarnessMutations(ScratchMutationCase):
             wrf_suite.exact_case(refs, str(out), 180, ["output.auxhist3=true"])[0]))
         self.assertIn("auxhist3: no WRF reference", "\n".join(
             wrf_suite.exact_case(refs, str(out), 180, [], cfg=cfg)[0]))
-        self.assertIn("no WRF wrfrst reference", "\n".join(wrf_suite.wrfrst_case(refs, str(out))[0]))
+        self.assertIn("missing WRF reference restart", "\n".join(wrf_suite.wrfrst_case(refs, str(out), cfg, [])[0]))
 
     def test_wrf_leg_rejects_cppwrf_reference_even_without_namelist(self):
         ref = fixture(self.root / "ref", (0, 180))
@@ -345,14 +365,16 @@ class HarnessMutations(ScratchMutationCase):
         self.assertIn("selected no checks", err.getvalue())
 
     def test_reporter_prints_zero_counts_and_deduplicates_passes(self):
-        for name in ("unit.log", "selftest.log", "files.log", "idealfiles.log"):
+        for name in ("unit.log", "selftest.log"):
             (self.root / name).write_text("exit 0\n")
+        for name in ("files.log", "idealfiles.log"):
+            (self.root / name).write_text("PASS files_case\nexit 0\n")
         (self.root / "setup.out").touch()
         (self.root / "suite.log").write_text(
             "PASS case some text [vs WRF tol 0]  (2 s)\n"
             "PASS case repeated [vs WRF tol 0]  (3 s)\n"
             "PASS legacy untagged\nSUITE PASS 2 FAIL 0 SKIP 0\nexit 0\n")
-        result = subprocess.run(["bash", ROOT / "tools/gcp/suite_status.sh", self.root, "case", "1"],
+        result = subprocess.run(["bash", ROOT / "tools/gcp/suite_status.sh", self.root, "case,legacy", "1"],
                                 capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("PASS 2\nFAIL 0\nSKIP 0", result.stdout)
@@ -429,6 +451,7 @@ class ComparatorMutations(ScratchMutationCase):
         cmd = [sys.executable, ROOT / "tests/init_real/compare_real.py", cpp, wrf]
         for path in (wrf, cpp):
             with Dataset(path, "w") as ds:
+                ds.createDimension("Time", 1)
                 ds.createVariable("I64", "i8", ())[:] = 2**53
         result = subprocess.run(cmd, capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
@@ -450,7 +473,7 @@ if [[ -n "$FAKE_GENERATED" ]]; then cp "$FAKE_GENERATED"/wrf* "$2"; fi
         runs = self.root / "runs"
         ref = runs / "real/run_P1"
         ref.mkdir(parents=True)
-        (ref / "namelist.input").write_text("&domains max_dom=1, /")
+        (ref / "namelist.input").write_text("&domains max_dom=1, /\n&time_control interval_seconds=3600, /")
         cmd = ["bash", ROOT / "tests/init_real/run_real_test.sh", build]
         env = dict(os.environ, CPPWRF_WRF_RUNS=str(runs), FAKE_GENERATED="")
         for args, diagnostic in (([], "Missing reference case"), ([ref], "missing WRF reference wrfinput_d01")):
@@ -463,6 +486,7 @@ if [[ -n "$FAKE_GENERATED" ]]; then cp "$FAKE_GENERATED"/wrf* "$2"; fi
         generated.mkdir()
         for name in ("wrfinput_d01", "wrfbdy_d01"):
             with Dataset(ref / name, "w") as ds:
+                ds.createDimension("Time", 1)
                 ds.createVariable("T", "f8", ())[:] = 42
             shutil.copyfile(ref / name, generated / name)
         env["FAKE_GENERATED"] = str(generated)

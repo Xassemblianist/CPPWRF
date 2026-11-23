@@ -16,8 +16,8 @@
 # uninitialised open-water locals.
 # MYNN's first step depends on a restart alarm ringing at its end (solve_em's restart_flag), so its history
 # with restart_interval 1 differs from the plain run: mynn (no restart files) and mynnr (rst_/rsm_ only).
-# A case whose reference (run, restart or resumed directory named below) is missing is a SKIP, which fails the
-# test (exit 1) unless CPPWRF_ALLOW_SKIP=1; the last line counts the results.
+# CPPWRF_ALLOW_SKIP=1 permits missing base runs if another case compares files. An available run must supply
+# every registered leg and each invocation must compare at least one file.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
@@ -78,6 +78,13 @@ WORK=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}/wrf_files_test
 R=${CPPWRF_WRF_RUNS}
 cd "$REPO_ROOT"
 
+has_file() {
+  for path in "$@"; do
+    if [ -f "$path" ]; then return 0; fi
+  done
+  return 1
+}
+
 # name | config | wrfout reference dir | restart reference dir (or -) | extra --set
 CASES="
 p1|configs/real_p1_r8.ini|$R/run_P1_r8/steps|$R/rst_P1_r8|
@@ -125,11 +132,23 @@ g9f7|configs/real_p1_r8.ini|$R/run_G9F7_r8/steps|$R/rst_G9F7|--set real.dir=$R/r
 "
 want=" $* "
 fail=0 n=0 skip=0
+for requested in "$@"; do
+  if ! cut -d'|' -f1 <<< "$CASES" | grep -Fxq -- "$requested" || [ -z "$requested" ]; then
+    echo "FAIL unknown file case $requested"; fail=1
+  fi
+done
 while IFS='|' read -r name cfg ref rst extra; do
   [ -z "$name" ] && continue
   [ $# -gt 0 ] && [[ "$want" != *" $name "* ]] && continue
   [ -d "$ref" ] || { echo "SKIP $name: $ref not found"; skip=$((skip + 1)); continue; }
-  [ "$rst" = "-" ] || [ -d "$rst" ] || { echo "SKIP $name: $rst not found"; skip=$((skip + 1)); continue; }
+  rsm=${rst/\/rst_/\/rsm_}
+  if [ "$rst" != "-" ] && { [ ! -d "$rst" ] || [ ! -d "$rsm" ]; }; then
+    echo "FAIL $name: required restart or resumed leg missing ($rst, $rsm)"; fail=1; continue
+  fi
+  if ! has_file "$ref"/wrfout_d0* ||
+     { [ "$rst" != "-" ] && ! has_file "$rst"/wrfrst_d0*; }; then
+    echo "FAIL $name: missing straight history or restart reference files"; fail=1; continue
+  fi
   sets=(--set output.format=wrfout --set output.out_interval=1 --set output.dir="$WORK/$name")
   if { [ "$rst" != "-" ] && [ -d "$rst" ]; } || compgen -G "$ref/wrfrst_d0*" > /dev/null; then
     sets+=(--set restart.interval=60)
@@ -153,7 +172,7 @@ while IFS='|' read -r name cfg ref rst extra; do
   if ! "$EXE" "$cfg" "${sets[@]}" > "$WORK/$name/run.log" 2>&1; then
     echo "FAIL $name: cppwrf failed"; tail -3 "$WORK/$name/run.log"; fail=1; continue
   fi
-  ok=1
+  ok=1 before=$n
   for dir in "$ref" "$rst"; do
     [ "$dir" = "-" ] || [ ! -d "$dir" ] && continue
     for f in "$dir"/wrfout_d0* "$dir"/wrfrst_d0*; do
@@ -166,8 +185,8 @@ while IFS='|' read -r name cfg ref rst extra; do
     done
   done
   # resumed from WRF's restart file at minute 1 against WRF's resumed run (make_resumed_refs.sh)
-  rsm=${rst/\/rst_/\/rsm_}
-  if [ "$rst" != "-" ] && [ -d "$rsm" ]; then
+  if [ "$rst" != "-" ]; then
+    before_resume=$n
     rdir=$WORK/$name/resumed; mkdir -p "$rdir"
     rsets=("${sets[@]}" --set output.dir="$rdir")
     at=$(rst_info at "$rst" "$ref")
@@ -179,15 +198,19 @@ while IFS='|' read -r name cfg ref rst extra; do
         echo "FAIL $name: resumed run failed"; tail -3 "$rdir/run.log"; ok=0
       else
         for f in "$rsm"/wrfout_d0*; do
+          [ -f "$f" ] || continue
           b=$(basename "$f"); ours=$rdir/$b; [ -f "$ours" ] || ours=$rdir/${b:7:3}/$b
           $CMP "$(ignored "$f" "$name")" "$ours" "$f" > "$rdir/cmp.log" 2>&1 || { ok=0; echo "FAIL $name resumed $b"; head -20 "$rdir/cmp.log"; }
           n=$((n + 1))
         done
       fi
     fi
+    if [ "$n" = "$before_resume" ]; then echo "FAIL $name: resumed leg compared 0 files"; ok=0; fi
   fi
+  if [ "$n" = "$before" ]; then echo "FAIL $name: compared 0 files"; ok=0; fi
   if [ $ok = 1 ]; then echo "PASS $name"; rm -rf "${WORK:?}/$name"; else fail=1; fi
 done <<< "$CASES"
 echo "compared $n files, $skip cases skipped"
 [ "$skip" = 0 ] || [ "${CPPWRF_ALLOW_SKIP:-0}" = 1 ] || fail=1
+[ "$n" -gt 0 ] || fail=1
 exit $fail

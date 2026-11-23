@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Restart chains (wrf_suite.restart_chain, suite.chain=MID,INTERVAL): CPPWRF's run with restart files every
 INTERVAL s and the runs resumed at MID s from its wrfrst files (and, for one domain, its own restart_<step>.nc) must
-write the same wrfout frames and wrfrst files after MID at tolerance 0. The physics calls run less often than every
-step (radt, bldt, cudt > dt) and MID and the wrfrst files after it fall between their calls, so the resumed runs
+write their scheduled wrfout and wrfrst records. Shared records after MID must match at tolerance 0. The physics
+calls run less often than every step (radt, bldt, cudt > dt) and MID and the wrfrst files after it fall between their calls, so the resumed runs
 must carry what WRF's restart stream (Registry r) carries between the calls. Each chain also compares the straight
 and the resumed runs with WRF's uninterrupted run of the chain's very configuration (suite.chain_wrf, every domain)
 at tolerance 0: D0 and SR1 with their WRF runs; P4, G2, P8, NMP1, SLAB1 and N3, whose physics intervals (radt, bldt,
