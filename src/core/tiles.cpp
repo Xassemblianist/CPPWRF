@@ -272,6 +272,10 @@ void move_pieces(const std::vector<Piece>& ps, char* msg, std::size_t bytes, boo
         else std::memcpy(m, f, w);
         m += w;
       }
+    if (!put) {  // the box's alignment padding is sent as zeros, not as stale bytes (layout_pieces)
+      const std::size_t pb = piece_bytes(e, p);
+      std::memset(m, 0, (pb + 7) / 8 * 8 - pb);
+    }
   }
 #endif
 }
@@ -280,11 +284,15 @@ void move_pieces(const std::vector<Piece>& ps, char* msg, std::size_t bytes, boo
 struct Hdr {
   std::uint32_t seq, kind;
   std::uint64_t bytes;
+  std::uint64_t fp = 0;  // a halo message: the fingerprint of its boxes (Seg::fp); else 0
 };
-enum Kind : std::uint32_t { kExchange = 1, kWrap, kMax, kSum, kCode, kOwner, kDownload, kRaw, kService, kUpload, kGather };
+enum Kind : std::uint32_t {
+  kExchange = 1, kWrap, kMax, kSum, kCode, kOwner, kDownload, kRaw, kService, kUpload, kGather, kLine, kMaxEach
+};
 enum ServiceOp : std::int32_t { kOpDone = 0, kOpDownload, kOpUpload };
 
-// CPPWRF_TILE_TRACE=1: every message on stderr (worker, collective, kind, peer, bytes)
+// CPPWRF_TILE_TRACE=1: every message on stderr (worker, collective, kind, peer, bytes). It only prints: every worker
+// moves the same messages with it or without it (a rank's own setting cannot make its calls differ from the others')
 bool trace() {
   static const bool on = [] {
     const char* e = std::getenv("CPPWRF_TILE_TRACE");
@@ -341,6 +349,11 @@ static_assert(kHdr % 8 == 0, "the boxes of a message are 8-byte aligned");
 struct Seg {
   int peer;
   std::size_t off, bytes;  // the header at off, the boxes (bytes) after it
+  // the fingerprint of the message's boxes, the same for its sender and its receiver: the exchange's kind and for
+  // each box its field's name, element size, levels and extents, in their order. A receiver that expects other
+  // boxes than its sender packed (the workers' calls differ in their kind, their fields or their order) stops
+  // before it unpacks a byte.
+  std::uint64_t fp = 0;
 };
 
 #if defined(CPPWRF_USE_GPU)
@@ -377,8 +390,13 @@ __global__ void kpieces(const DevPiece* ps, int n, char* buf, int put) {
   } else {
     std::uint32_t* a = reinterpret_cast<std::uint32_t*>(p.f) + e;
     std::uint32_t* c = reinterpret_cast<std::uint32_t*>(buf + p.off) + q;
-    if (put) *a = *c;
-    else *c = *a;
+    if (put) {
+      *a = *c;
+    } else {
+      *c = *a;
+      // an odd count of 4-byte elements: the box's 4 bytes of alignment padding are sent as zeros, not stale bytes
+      if (q == (long long)p.nx * p.ny * p.nk - 1 && (q & 1) == 0) c[1] = 0;
+    }
   }
 }
 #endif
@@ -409,6 +427,7 @@ struct HostBuf {
 struct Halo {
   std::map<std::vector<long long>, std::unique_ptr<Plan>> plans;
   HostBuf hs, hr;  // host send / receive buffers (pinned on the GPU)
+  std::vector<Hdr> ctl_out, ctl_in;  // the headers sent and received beside device-buffer messages
 #if defined(CPPWRF_USE_GPU)
   char* ds = nullptr;  // device send / receive buffers
   char* dr = nullptr;
@@ -497,13 +516,29 @@ void launch_pieces(const Plan& P, int list, char* buf, bool put) {
 }
 #endif
 
+std::uint64_t fnv(std::uint64_t h, const void* p, std::size_t n) {
+  const auto* c = static_cast<const unsigned char*>(p);
+  for (std::size_t k = 0; k < n; ++k) h = (h ^ c[k]) * 0x100000001b3ULL;
+  return h;
+}
+std::uint64_t fingerprint(Kind kind, const std::vector<Piece>& ps) {
+  std::uint64_t h = fnv(0xcbf29ce484222325ULL, &kind, sizeof kind);
+  for (const Piece& p : ps) {
+    const Entry& e = W->reg.e[std::size_t(p.entry)];
+    h = fnv(h, e.name.data(), e.name.size());
+    const std::int64_t v[4] = {e.esz, levels(e.L), p.x.n(), p.y.n()};
+    h = fnv(h, v, sizeof v);
+  }
+  return h;
+}
+
 // The plan of the boxes snd[r] to every worker r, rcv[s] from every worker s (empty lists: no message) and the
 // pieces self_src the worker copies into its own self_dst (the same sizes, in the same order)
 std::unique_ptr<Plan> make_plan(Kind kind, std::vector<std::vector<Piece>>& snd, std::vector<std::vector<Piece>>& rcv,
                                 std::vector<Piece>& self_src, std::vector<Piece>& self_dst) {
   auto P = std::make_unique<Plan>();
   P->kind = kind;
-  auto place = [](std::vector<std::vector<Piece>>& lists, std::vector<Piece>& all, std::vector<Seg>& segs) {
+  auto place = [kind](std::vector<std::vector<Piece>>& lists, std::vector<Piece>& all, std::vector<Seg>& segs) {
     std::size_t o = 0;
     for (int r = 0; r < int(lists.size()); ++r) {
       std::vector<Piece>& ps = lists[std::size_t(r)];
@@ -513,7 +548,7 @@ std::unique_ptr<Plan> make_plan(Kind kind, std::vector<std::vector<Piece>>& snd,
         p.off += o + kHdr;
         all.push_back(p);
       }
-      segs.push_back(Seg{r, o, nb});
+      segs.push_back(Seg{r, o, nb, fingerprint(kind, ps)});
       o += kHdr + nb;
     }
     return o;
@@ -613,42 +648,60 @@ void run_plan(const Plan& P) {
   char* sb = H.hs.p;
   char* rb = H.hr.p;
 #endif
+  // each message's header (the collective, its kind, its bytes, its boxes' fingerprint) in front of its boxes:
+  // staged, in the host buffer; with device buffers, a host header of its own sent before the message (the same
+  // pair of workers and tag: MPI keeps their order)
   std::vector<Post> out, in;
-  out.reserve(P.out.size());
-  in.reserve(P.in.size());
-  for (const Seg& m : P.out) {
+  out.reserve(2 * P.out.size());
+  in.reserve(2 * P.in.size());
+  std::vector<Hdr>& hs = H.ctl_out;
+  std::vector<Hdr>& hr = H.ctl_in;
+  hs.assign(P.out.size(), Hdr{});
+  hr.assign(P.in.size(), Hdr{});
+  for (std::size_t q = 0; q < P.out.size(); ++q) {
+    const Seg& m = P.out[q];
     if (trace())
       std::fprintf(stderr, "tile %d: collective %u kind %u send to %d, %zu bytes\n", W->id, W->seq, unsigned(P.kind), m.peer, m.bytes);
+    const Hdr h{W->seq, P.kind, m.bytes, m.fp};
     if (dev) {
+      hs[q] = h;
+      out.push_back(Post{m.peer, reinterpret_cast<char*>(&hs[q]), kHdr});
       out.push_back(Post{m.peer, sb + m.off + kHdr, m.bytes});
     } else {
-      const Hdr h{W->seq, P.kind, m.bytes};
       std::memcpy(sb + m.off, &h, sizeof h);
       out.push_back(Post{m.peer, sb + m.off, kHdr + m.bytes});
     }
   }
-  for (const Seg& m : P.in) {
+  for (std::size_t q = 0; q < P.in.size(); ++q) {
+    const Seg& m = P.in[q];
     if (trace())
       std::fprintf(stderr, "tile %d: collective %u kind %u recv from %d, %zu bytes\n", W->id, W->seq, unsigned(P.kind), m.peer, m.bytes);
-    in.push_back(dev ? Post{m.peer, rb + m.off + kHdr, m.bytes} : Post{m.peer, rb + m.off, kHdr + m.bytes});
+    if (dev) {
+      in.push_back(Post{m.peer, reinterpret_cast<char*>(&hr[q]), kHdr});
+      in.push_back(Post{m.peer, rb + m.off + kHdr, m.bytes});
+    } else {
+      in.push_back(Post{m.peer, rb + m.off, kHdr + m.bytes});
+    }
   }
   W->comm->exchange(out, in, dev);
-  H.messages += long(out.size());
+  H.messages += long(P.out.size());
   for (const Seg& m : P.out) H.sent += double(m.bytes);
-  if (!dev)
-    for (const Seg& m : P.in) {
-      Hdr h{};
-      std::memcpy(&h, rb + m.off, sizeof h);
-      if (h.seq != W->seq || h.kind != P.kind || h.bytes != m.bytes) {
-        char b[240];
-        std::snprintf(b, sizeof b,
-                      "decomposition: worker %d expected collective %u of kind %u with %zu bytes from worker %d and got "
-                      "collective %u of kind %u with %llu bytes (the workers' calls differ)",
-                      W->id, W->seq, unsigned(P.kind), m.bytes, m.peer, h.seq, h.kind,
-                      static_cast<unsigned long long>(h.bytes));
-        throw std::logic_error(b);
-      }
+  for (std::size_t q = 0; q < P.in.size(); ++q) {  // before a byte of the messages is unpacked
+    const Seg& m = P.in[q];
+    Hdr h{};
+    if (dev) h = hr[q];
+    else std::memcpy(&h, rb + m.off, sizeof h);
+    if (h.seq != W->seq || h.kind != P.kind || h.bytes != m.bytes || h.fp != m.fp) {
+      char b[300];
+      std::snprintf(b, sizeof b,
+                    "decomposition: worker %d expected collective %u of kind %u with %zu bytes from worker %d and got "
+                    "collective %u of kind %u with %llu bytes%s (the workers' calls differ)",
+                    W->id, W->seq, unsigned(P.kind), m.bytes, m.peer, h.seq, h.kind,
+                    static_cast<unsigned long long>(h.bytes),
+                    h.fp != m.fp ? " of other fields or in another order" : "");
+      throw std::logic_error(b);
     }
+  }
 #if defined(CPPWRF_USE_GPU)
   host_section_end();
   if (!dev && P.rbytes) {
@@ -696,11 +749,14 @@ int index_of(const void* p, bool data = false) {
   throw std::logic_error("decomposition: exchange of a field the worker did not allocate");
 }
 
+// (a field given twice is exchanged once, at its first place: two boxes of one field would write the same points from
+// two blocks of the unpack launch)
 std::vector<int> entries_of(const void* const* bases, int n, bool data = false) {
   std::vector<int> idx;
   idx.reserve(std::size_t(n));
   for (int k = 0; k < n; ++k) {
     const int i = index_of(bases[k], data);
+    if (std::find(idx.begin(), idx.end(), i) != idx.end()) continue;
     if (!domain_field(W->reg.e[std::size_t(i)]))
       throw std::logic_error("decomposition: exchange of " + W->reg.e[std::size_t(i)].name + ", not a field of a decomposed domain");
     idx.push_back(i);
@@ -824,16 +880,18 @@ bool line_hook(const void* data, int axis, int dst, int src, int t0, int t1) {
   }
   std::vector<Piece> none, none2;
   exchange_planned(std::vector<long long>{2, axis, dst, src, t0, t1, i},
-                   [&] { return make_plan(kWrap, snd, rcv, none, none2); });
+                   [&] { return make_plan(kLine, snd, rcv, none, none2); });
   return true;
 }
 
 // every worker's n bytes at v, in worker order (a collective): one allgather of the transport (MPI_Allgather), each
-// worker's value behind a header that names the collective; else (tiles, CPPWRF_TILE_TRACE) a message to every worker
+// worker's value behind a header that names the collective; else (tiles) a message to every worker
 std::vector<char> all_values(Kind kind, const void* v, std::size_t n) {
   std::vector<char> all(std::size_t(W->n) * n);
   if (n) std::memcpy(all.data() + std::size_t(W->id) * n, v, n);
-  if (!trace()) {
+  {
+    if (trace())
+      std::fprintf(stderr, "tile %d: collective %u kind %u allgather, %zu bytes\n", W->id, W->seq, unsigned(kind), n);
     std::vector<char> mine(kHdr + n), got(std::size_t(W->n) * (kHdr + n));
     const Hdr h{W->seq, kind, n};
     std::memcpy(mine.data(), &h, sizeof h);
@@ -1198,14 +1256,14 @@ class ThreadComm : public Comm {
     }
     for (const Post& m : out) {
       std::vector<char> b(m.bytes);
-      if (m.bytes && gpuMemcpy(b.data(), m.p, m.bytes, gpuMemcpyDeviceToHost) != gpuSuccess)
+      if (m.bytes && gpuMemcpy(b.data(), m.p, m.bytes, gpuMemcpyDefault) != gpuSuccess)  // (a header: host memory)
         throw std::runtime_error("tiles: a device-buffer message (D2H)");
       send(m.peer, std::move(b));
     }
     for (const Post& m : in) {
       const std::vector<char> r = recv(m.peer);
       if (r.size() != m.bytes) throw std::logic_error("decomposition: a halo message of another size (the workers' calls differ)");
-      if (m.bytes && gpuMemcpy(m.p, r.data(), m.bytes, gpuMemcpyHostToDevice) != gpuSuccess)
+      if (m.bytes && gpuMemcpy(m.p, r.data(), m.bytes, gpuMemcpyDefault) != gpuSuccess)
         throw std::runtime_error("tiles: a device-buffer message (H2D)");
     }
   }
@@ -1657,7 +1715,7 @@ int first_code(int code) {
 
 void max_each(double* v, std::size_t n) {
   if (!W) return;
-  const std::vector<char> b = all_values(kMax, v, n * sizeof(double));
+  const std::vector<char> b = all_values(kMaxEach, v, n * sizeof(double));
   // the other workers' values in worker order, as they were received one by one
   for (int o = 0; o < W->n; ++o)
     if (o != W->id) {

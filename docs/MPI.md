@@ -83,7 +83,8 @@ Transport (HALO1). An exchange of a set of fields (a fill's exchange, a wrap exc
 direction) is *planned* at its first call and the plan is kept (per worker, keyed by the kind and the fields'
 registry entries; a field freed and allocated again is a new entry, so a plan never names a freed field): the boxes
 each worker sends and receives, their offsets in one send buffer and one receive buffer (a message per peer:
-a 16-byte header naming the collective, then its boxes, each 8-byte aligned), and on the GPU the boxes as a table
+a 24-byte header naming the collective, its kind, its bytes and a fingerprint of its boxes, then its boxes, each
+8-byte aligned, alignment padding sent as zeros), and on the GPU the boxes as a table
 in device memory. Every later exchange with that plan:
 
 1. packs every box it sends with **one** kernel launch on the worker's stream (`kpieces`: a block belongs to one box,
@@ -100,8 +101,14 @@ in device memory. Every later exchange with that plan:
 
 The buffers (device, pinned host) are the worker's, grown to the largest exchange and kept for the run. The CPU
 build packs and unpacks with `memcpy` into the same buffers. MPI messages of the exchanges travel on a duplicate of
-`MPI_COMM_WORLD` with a tag of their own; the received size is checked, and on the host paths the header (the
-collective's number and kind) as before.
+`MPI_COMM_WORLD` with a tag of their own (freed after a successful run); the received size is checked, and the
+header (the collective's number and kind, the bytes, the fingerprint of the boxes: each box's field name, element
+size, levels and extents in their order) before a byte is unpacked: workers whose calls differ in their kind,
+their fields or their order stop with a message instead of unpacking another exchange's bytes. With device buffers
+the header is a host message of its own posted just before each message (the same pair and tag: MPI keeps their
+order). Every count is checked and the request storage allocated before the first post; a failed post or wait
+calls `MPI_Abort` with the buffers alive. Periodic lines and per-level maxima have kinds of their own. A field
+given twice to one exchange is exchanged once.
 
 Why the bits cannot change: the plan's boxes are the ones the previous code computed per call (the same functions of
 the patch table); pack and unpack copy raw 4- or 8-byte patterns, no arithmetic; the boxes a worker receives are
@@ -130,7 +137,8 @@ mapped once), which a GPU-aware MPI does itself over NVLink / PCIe where it can.
 The maxima, the fatal codes, the per-row reductions and the owner's value reach every worker in one `MPI_Allgather`
 (each value behind the header that names the collective, checked on arrival); every worker then combines them in
 worker order, as it combined the messages it received from each worker in turn before (HALO1; before: a message
-from every rank to every other rank). Tiles, and `CPPWRF_TILE_TRACE=1`, keep the messages.
+from every rank to every other rank). Tiles keep the messages. `CPPWRF_TILE_TRACE=1` only prints: a rank-local
+setting cannot make the ranks' calls differ (it selected the messages before, which could hang an MPI run).
 
 ### 3.6 Input and output
 
@@ -221,8 +229,9 @@ CPPWRF_TILES=2x2 build/cppwrf CONFIG.ini
   takes; every column is computed by itself, so the values do not change.
 - The run prints `cppwrf: peak host memory: ... MiB the writer (rank 0), ... MiB the largest other rank, ... MiB in all`.
 - GPU builds, the halo transport (section 3.4): `run.gpu_aware_mpi = auto | on | off` (the environment
-  `CPPWRF_GPU_AWARE_MPI` overrides it; rank 0's choice holds for every rank). `auto` (default): device buffers to MPI
-  when the library reports at run time that it takes device memory (Open MPI: `MPIX_Query_cuda_support()`, built
+  `CPPWRF_GPU_AWARE_MPI` overrides it; rank 0's mode holds for every rank). `auto` (default): device buffers to MPI
+  when the library of every rank reports at run time that it takes device memory (one rank that does not, or cannot
+  say, gives pinned host buffers for all) (Open MPI: `MPIX_Query_cuda_support()`, built
   with CUDA; MPICH 4 or later: `MPIX_GPU_query_support`, which MPICH enables with `MPIR_CVAR_ENABLE_GPU=1` when it
   was built for the GPU; ROCm: the `rocm` equivalents), else pinned host buffers. `on`: device buffers whatever the
   library says (one that does not take device memory then fails or crashes). `off`: pinned host buffers. Rank 0 prints

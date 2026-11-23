@@ -1634,6 +1634,9 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       pre.myj = (o_.sf_sfclay_physics == 2 || o_.sf_sfclay_physics == 4); pre.frpcpn = true;  // SR is passed by first_rk_step_part1
       pre.rdlai2d = o_.rdlai2d; pre.dt = dtbl; pre.xice_threshold = xice_threshold;
       column_for(cols, pre);
+      // KLsmPre's stop (kFatalNoahUrbanLai) is this translation unit's flag: read before land SFLX, the RC carry and
+      // the optional dumps consume the columns it set up (a download of the dumps waits for this check first)
+      fatal_check();
 
       // SFLX on the land points (ICE == 0)
       noah::NoahKernel nk{};

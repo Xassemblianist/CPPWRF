@@ -46,6 +46,16 @@ void column_work_reserve(const Range2D& r0, std::size_t bytes_per_col) {
   grow(want);
 }
 
+void column_work_release() noexcept {
+  try {
+    std::lock_guard<std::mutex> lk(mtx);
+    dev_free(buf);
+  } catch (...) {
+  }
+  buf = nullptr;
+  buf_bytes = 0;
+}
+
 namespace detail {
 char* column_work_buffer(std::size_t bytes, std::size_t* have) {
   std::lock_guard<std::mutex> lk(mtx);
@@ -56,6 +66,7 @@ char* column_work_buffer(std::size_t bytes, std::size_t* have) {
 }  // namespace detail
 #else
 void column_work_reserve(const Range2D&, std::size_t) {}
+void column_work_release() noexcept {}
 namespace detail {
 char* column_work_buffer(std::size_t, std::size_t* have) {
   *have = 0;

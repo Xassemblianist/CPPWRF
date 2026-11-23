@@ -897,6 +897,12 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   for (int i = 0; i < max_dom; ++i) {
     doms[i].model = Model::build(doms[i].spec.cfg);
   }
+  // module_convtrans_prep.F's SAVE stepave_count: one counter for every domain of the run (the first suite's)
+  for (int i = 0, first = -1; i < max_dom; ++i)
+    if (doms[i].model.suite) {
+      if (first < 0) first = i;
+      else doms[i].model.suite->share_convtrans_counter(*doms[first].model.suite);
+    }
   for (int i = 1; i < max_dom; ++i) {
     const DomInstance& p = doms[doms[i].spec.parent_id - 1];
     // a nest whose wrfinput starts later (WRF: nests_to_open opens it at its start_* time) is not ported: every nest

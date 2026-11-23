@@ -212,12 +212,16 @@ void NcOut::stage_bytes(Batch& b, const std::string& name, char mem, std::size_t
   if (b.staged.size() < b.spare.size()) s.bytes = std::move(b.spare[b.staged.size()]);  // an earlier record's buffer
   s.bytes.resize(n * esize);
   if (n) fill_in(s.bytes.data());
+  // the batch owns the bytes before any chunk of them is queued: a later error (this submit's, a later variable's)
+  // destroys the batch, whose destructor waits for the queued chunks before the bytes go
+  b.staged.push_back(std::move(s));  // the buffer moves, its data pointer stays
+  const Staged& t = b.staged.back();
   // the chunks HDF5 will compress: one record, memory type = file type, every value given
   std::size_t total = 1;
   for (std::size_t d = 1; d < vi.len.size(); ++d) total *= vi.len[d];
   if (!vi.chunk.empty() && vi.len.size() >= 2 && vi.chunk[0] == 1 && mem == vi.type && total == n) {
     deflate::Record r;
-    r.data = s.bytes.data();
+    r.data = t.bytes.data();
     r.len.assign(vi.len.begin() + 1, vi.len.end());
     r.chunk.assign(vi.chunk.begin() + 1, vi.chunk.end());
     r.elsize = esize;
@@ -230,7 +234,6 @@ void NcOut::stage_bytes(Batch& b, const std::string& name, char mem, std::size_t
     else { const int i = NC_FILL_INT; std::memcpy(r.fill.data(), &i, esize); }
     deflate::submit(r, *b.group);
   }
-  b.staged.push_back(std::move(s));  // the buffer moves, its data pointer (r.data) stays
 }
 
 void NcOut::flush(Batch& b) {

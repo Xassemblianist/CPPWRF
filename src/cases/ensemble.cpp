@@ -9,8 +9,10 @@
 #include <atomic>
 #include <cctype>
 #include <chrono>
+#include <cstdlib>
 #include <cstdio>
 #include <exception>
+#include <filesystem>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -21,6 +23,10 @@
 #include "core/backend.hpp"
 #include "core/tiles.hpp"
 #include "io/option_tiers.hpp"
+#ifdef CPPWRF_HAVE_NETCDF
+#include "wrf_io/namelist.hpp"
+#include "wrf_io/output_queue.hpp"
+#endif
 
 #if defined(_OPENMP)
 #include <omp.h>
@@ -84,6 +90,52 @@ std::string member_dir(const io::Config& base, int i) {
   return d + "/member" + std::to_string(i);
 }
 
+// a path as the file system resolves it (symbolic links of its existing part followed, . and .. removed)
+std::string resolved(const std::string& p) {
+  std::error_code ec;
+  const std::filesystem::path a = std::filesystem::absolute(p, ec);
+  if (ec) return std::filesystem::path(p).lexically_normal().string();
+  const std::filesystem::path c = std::filesystem::weakly_canonical(a, ec);
+  return (ec ? a.lexically_normal() : c).string();
+}
+
+// the directories a member writes into: its output.dir (native files: run.json, diag.csv, snapshots, restarts) and
+// with output.format = wrfout / both its WRF files' (output.wrf_dir, default output.dir)
+struct Dests {
+  std::string native, wrf;  // resolved; empty: none
+};
+Dests member_dests(const io::Config& m) {
+  const std::string fmt = m.get_string("output.format", "native");
+  const std::string dir = m.get_string("output.dir");
+  Dests d;
+  if (fmt != "wrfout") d.native = resolved(dir);
+  if (fmt == "wrfout" || fmt == "both") d.wrf = resolved(m.get_string("output.wrf_dir", dir));
+  return d;
+}
+
+// the WRF stream file names of the member's namelist (history_outname, rst_outname, auxhist3_outname: placed in the
+// WRF directory) stay in it: no '..' component
+void check_stream_names(const io::Config& m, int i) {
+#ifdef CPPWRF_HAVE_NETCDF
+  if (m.get_string("output.format", "native") == "native") return;
+  const std::string real_dir = m.get_string("real.dir", "");
+  const std::string nl = m.get_string("output.wrf_namelist", real_dir.empty() ? "" : real_dir + "/namelist.input");
+  if (nl.empty() || !std::filesystem::exists(nl)) return;
+  const wrf_io::Namelist n = wrf_io::Namelist::read(nl);
+  for (const char* key : {"history_outname", "rst_outname", "auxhist3_outname"})
+    for (std::string v : n.values("time_control", key)) {
+      if (v.size() >= 2 && (v.front() == '\'' || v.front() == '"') && v.back() == v.front()) v = v.substr(1, v.size() - 2);
+      for (const auto& c : std::filesystem::path(v))
+        if (c == "..")
+          throw io::ConfigError("ensemble member " + std::to_string(i) + ": " + nl + ": " + key + " = '" + v +
+                                "' leaves the member's WRF directory (a '..' component): members would share its files");
+    }
+#else
+  (void)m;
+  (void)i;
+#endif
+}
+
 // a member is one domain in one patch: no nests, no tiles (MPI ranks are refused by main)
 void check_member(const io::Config& m, int i) {
   const std::string who = "ensemble member " + std::to_string(i) + ": ";
@@ -94,7 +146,9 @@ void check_member(const io::Config& m, int i) {
 }
 
 struct Shared {
-  std::mutex host;  // the host work of the members (NetCDF is not thread-safe): one member at a time
+#ifndef CPPWRF_HAVE_NETCDF
+  std::mutex host;  // the host work of the members: one member at a time
+#endif
   std::atomic<bool> stop{false};  // an error in a member: the others stop at their next step
   std::atomic<int> first{-1};     // the member whose error came first (the one rethrown)
   void fail(int i) {
@@ -104,35 +158,109 @@ struct Shared {
   }
 };
 
-// one member's run: main's time loop of a single domain, the host work under the shared lock
+// The lock of a member's host work (input, output, boundaries, the start and the end: one member at a time). With
+// NetCDF it is the process's NetCDF lock (wrf_io/output_queue.hpp): one lock for the members' host work and the
+// output writer thread's NetCDF calls (output.write_queue_mb > 0), which therefore fall in between the members' host
+// work, while the members step; a member that waits for the writer's queue lets it go there (output_queue::submit,
+// drain) as a single run does. One lock, so no order between two locks to keep. Else a mutex.
+class HostLock {
+ public:
+  explicit HostLock(Shared& sh) : sh_(sh) {}
+  ~HostLock() {
+    if (owns()) unlock();
+  }
+  HostLock(const HostLock&) = delete;
+  HostLock& operator=(const HostLock&) = delete;
+#ifdef CPPWRF_HAVE_NETCDF
+  void lock() { wrf_io::nc_hold(); }
+  void unlock() { wrf_io::nc_unhold(); }
+  bool owns() const { return wrf_io::nc_held(); }  // (output_queue::drain lets it go: DomainRunner::finish)
+#else
+  void lock() {
+    sh_.host.lock();
+    owns_ = true;
+  }
+  void unlock() {
+    owns_ = false;
+    sh_.host.unlock();
+  }
+  bool owns() const { return owns_; }
+#endif
+
+ private:
+  Shared& sh_;
+#ifndef CPPWRF_HAVE_NETCDF
+  bool owns_ = false;
+#endif
+};
+
+// one member's run: main's time loop of a single domain, the host work under the members' lock
 int run_member(const io::Config& cfg, const std::string& dir, Shared& sh) {
-  std::unique_lock<std::mutex> lk(sh.host);  // declared first: the runner and the model are destroyed under it
+  HostLock lk(sh);  // declared first: the runner and the model are destroyed under it
+  lk.lock();
   Model m = Model::build(cfg);
   DomainRunner r(cfg, m, dir, "d01");
   try {
-    if (!r.start()) return 3;
-    const bool overlap = step_graphs_on();
-    lk.unlock();
-    for (long n = r.start_step + 1; n <= m.nsteps; ++n) {
-      lk.lock();
-      if (sh.stop.load()) return 4;
-      r.before_step(n);
+    int rc = 0;
+    if (!r.start()) {
+      rc = 3;
+    } else {
+      const bool overlap = step_graphs_on();
       lk.unlock();
-      m.rk->step(*m.st, *m.tend, *m.base);
-      // the step's own wait before the lock: a member that reads its fields does not hold the others' host work
-      if (!overlap || n == m.nsteps || r.reads_state(n)) dev_sync();
-      lk.lock();
-      if (!r.after_step(n)) return 3;
-      lk.unlock();
+      for (long n = r.start_step + 1; n <= m.nsteps && rc == 0; ++n) {
+        lk.lock();
+        if (sh.stop.load()) {
+          rc = 4;
+          break;
+        }
+        r.before_step(n);
+        lk.unlock();
+        m.rk->step(*m.st, *m.tend, *m.base);
+        // the step's own wait before the lock: a member that reads its fields does not hold the others' host work
+        if (!overlap || n == m.nsteps || r.reads_state(n)) dev_sync();
+        lk.lock();
+        if (!r.after_step(n)) rc = 3;
+        else if (n < m.nsteps) lk.unlock();
+      }
+      if (!lk.owns()) lk.lock();
+      if (rc == 0) r.finish();
+      if (!lk.owns()) lk.lock();  // (finish lets the NetCDF lock go when it drains the output queue)
     }
-    lk.lock();
-    r.finish();
-    return 0;
+    // the fatal checks of the launched steps are read here, where a raised code is this member's error (not in the
+    // destructors below, which free device memory)
+    dev_sync();
+    return rc;
   } catch (...) {
-    if (!lk.owns_lock()) lk.lock();
+    if (!lk.owns()) lk.lock();
+    discard_pending_checks();
     throw;
   }
 }
+
+// debugging dumps write fixed file names: one member's run only
+void check_no_dumps(int n) {
+  if (n < 2) return;
+  for (const char* e : {"CPPWRF_VM_DUMP", "CPPWRF_NOAH_DUMP", "CPPWRF_GF_DUMP", "CPPWRF_GFL_DUMP", "CPPWRF_NTIEDTKE_DUMP"})
+    if (const char* v = std::getenv(e); v && *v)
+      throw io::ConfigError(std::string(e) + ": its files have one name for every member (run the member alone: "
+                            "--set ensemble.member=I)");
+}
+
+// the threads of the members: joined on every way out (one that could not be started stops the others)
+struct Workers {
+  std::vector<std::thread> th;
+  ~Workers() {
+    for (std::thread& t : th)
+      if (t.joinable()) t.join();
+  }
+};
+// the device's work budget shared while the members run; back to one share on every way out
+struct WorkShare {
+  explicit WorkShare(int n) { set_device_work_share(n); }
+  ~WorkShare() { set_device_work_share(1); }
+  WorkShare(const WorkShare&) = delete;
+  WorkShare& operator=(const WorkShare&) = delete;
+};
 
 }  // namespace
 
@@ -147,6 +275,9 @@ io::Config ensemble_member_config(const std::string& path, const std::vector<std
                           std::to_string(i));
   std::vector<std::string> all = ov;
   all.push_back("output.dir=" + member_dir(cfg, i));  // before the member's own: an output.dir there wins
+  // a WRF directory of the configuration (output.wrf_dir) is the members' root as output.dir is: member I writes its
+  // WRF files to <output.wrf_dir>/memberI (an output.wrf_dir in memberI wins)
+  if (cfg.has("output.wrf_dir")) all.push_back("output.wrf_dir=" + cfg.get_string("output.wrf_dir") + "/member" + std::to_string(i));
   for (const std::string& s : member_sets(cfg, i)) all.push_back(s);
   io::Config m = io::Config::load(path, all);
   m.erase_section("ensemble");  // the member's configuration is that of its single run (restart files record it)
@@ -163,16 +294,27 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
 
   std::vector<io::Config> cfgs;
   std::vector<std::string> dirs;
+  std::vector<Dests> dests;
   for (int i = 1; i <= n; ++i) {
     cfgs.push_back(ensemble_member_config(path, ov, cfg, i));
     check_member(cfgs.back(), i);
     io::check_option_tiers(cfgs.back(), "ensemble member " + std::to_string(i) + ": ");
+    check_stream_names(cfgs.back(), i);
     dirs.push_back(cfgs.back().get_string("output.dir"));
-    for (int j = 0; j + 1 < i; ++j)
-      if (dirs[std::size_t(j)] == dirs.back())
-        throw io::ConfigError("ensemble members " + std::to_string(j + 1) + " and " + std::to_string(i) +
-                              " write to the same output.dir '" + dirs.back() + "'");
+    dests.push_back(member_dests(cfgs.back()));
+    // the directories as the file system resolves them (a/../a, symbolic links): no file of two members in one
+    const Dests& d = dests.back();
+    for (int j = 0; j + 1 < i; ++j) {
+      const Dests& e = dests[std::size_t(j)];
+      const std::string who = "ensemble members " + std::to_string(j + 1) + " and " + std::to_string(i);
+      if (!d.native.empty() && d.native == e.native)
+        throw io::ConfigError(who + " write to the same output.dir '" + dirs.back() + "' (" + d.native + ")");
+      if (!d.wrf.empty() && d.wrf == e.wrf)
+        throw io::ConfigError(who + " write their WRF files to the same directory " + d.wrf +
+                              " (output.wrf_dir, default output.dir)");
+    }
   }
+  check_no_dumps(n);
   int per = 1;
 #if defined(_OPENMP)
   per = std::max(1, omp_get_max_threads() / (threads ? n : 1));
@@ -184,12 +326,14 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
 
   Shared sh;
   std::vector<int> rc(std::size_t(n), 0);
+  std::vector<char> started(std::size_t(n), 0);
   std::vector<double> wall(std::size_t(n), 0.0);
   std::vector<std::exception_ptr> err(static_cast<std::size_t>(n));
   const auto t0 = std::chrono::steady_clock::now();
   const int dev = current_device();
   auto body = [&](int i) {
     const auto t = std::chrono::steady_clock::now();
+    started[std::size_t(i)] = 1;
     try {
       rc[std::size_t(i)] = run_member(cfgs[std::size_t(i)], dirs[std::size_t(i)], sh);
     } catch (...) {
@@ -201,38 +345,51 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
   if (!threads) {
     for (int i = 0; i < n && !sh.stop.load(); ++i) body(i);
   } else {
-    set_device_work_share(n);  // the members share the device's work budget, as ranks on one device do
-    std::vector<std::thread> th;
-    for (int i = 0; i < n; ++i)
-      th.emplace_back([&, i] {
+    const WorkShare share(n);  // the members share the device's work budget, as ranks on one device do
+    Workers w;
+    for (int i = 0; i < n && !sh.stop.load(); ++i) {
+      try {
+        w.th.emplace_back([&, i] {
 #if defined(CPPWRF_USE_GPU)
-        if (gpuSetDevice(dev) != gpuSuccess) {
-          err[std::size_t(i)] = std::make_exception_ptr(std::runtime_error("ensemble: gpuSetDevice failed"));
-          sh.fail(i);
-          return;
-        }
+          if (gpuSetDevice(dev) != gpuSuccess) {
+            started[std::size_t(i)] = 1;
+            err[std::size_t(i)] = std::make_exception_ptr(std::runtime_error("ensemble: gpuSetDevice failed"));
+            sh.fail(i);
+            return;
+          }
 #else
-        (void)dev;
+          (void)dev;
 #endif
 #if defined(_OPENMP)
-        omp_set_num_threads(per);
+          omp_set_num_threads(per);
 #endif
-        set_thread_stream_sync(true);
-        body(i);
-        {
-          std::lock_guard<std::mutex> g(sh.host);
-          release_host_staging();  // the thread ends: its upload buffer is not kept for the process
-        }
-      });
-    for (std::thread& x : th) x.join();
-    set_device_work_share(1);
-  }
+          set_thread_stream_sync(true);
+          // the member's own fatal flags (core/backend.hpp): a code one member raises stops that member, never
+          // another one that runs the same scheme at the same time
+          set_fatal_slot(i + 1);
+          body(i);
+          // the thread ends: its stream, graphs, flag slots, work and upload buffers are not kept for the process
+          HostLock lk(sh);
+          lk.lock();
+          release_thread_device();
+          release_host_staging();
+        });
+      } catch (const std::exception& e) {  // (a thread limit of the system): the members started stop
+        started[std::size_t(i)] = 1;
+        err[std::size_t(i)] = std::make_exception_ptr(
+            std::runtime_error(std::string("ensemble: the thread of the member cannot be started (") + e.what() + ")"));
+        sh.fail(i);
+      }
+    }
+  }  // (the threads joined, the work share back to 1)
   const double total = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
   int worst = 0;
   for (int i = 0; i < n; ++i) {
-    const char* what = err[std::size_t(i)] ? "error" : rc[std::size_t(i)] == 4 ? "stopped (another member failed)"
-                       : rc[std::size_t(i)] == 3                              ? "stopped (non-finite values)"
-                                                                              : "done";
+    const char* what = err[std::size_t(i)]        ? "error"
+                       : !started[std::size_t(i)] ? "not started (another member failed)"
+                       : rc[std::size_t(i)] == 4  ? "stopped (another member failed)"
+                       : rc[std::size_t(i)] == 3  ? "stopped (non-finite values)"
+                                                  : "done";
     std::printf("cppwrf: ensemble member %d: %s, %.2f s\n", i + 1, what, wall[std::size_t(i)]);
     worst = std::max(worst, rc[std::size_t(i)]);
   }

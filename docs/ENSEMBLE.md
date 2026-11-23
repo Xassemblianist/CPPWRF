@@ -21,7 +21,13 @@ mode = threads                               ; threads (default) | sequential
   apply after the command line's `--set`, so `--set` changes every member and `memberI` changes one. A member without
   a `memberI` key is the configuration as it is.
 - Member I writes to `<output.dir>/memberI`, where `output.dir` is the configuration's (default `out/<case>`). An
-  `output.dir` in `memberI` wins. Two members with one directory are refused.
+  `output.dir` in `memberI` wins. A WRF directory of the configuration (`output.wrf_dir`) is a root in the same way:
+  member I writes its WRF files to `<output.wrf_dir>/memberI` (an `output.wrf_dir` in `memberI` wins). Two members
+  with one native directory, or one WRF directory, are refused; the directories are compared as the file system
+  resolves them (`a/x/../b`, symbolic links). A namelist `history_outname`, `rst_outname` or `auxhist3_outname` with a
+  `..` component (a file outside the member's WRF directory) is refused, and so are the debugging dumps
+  (`CPPWRF_VM_DUMP`, `CPPWRF_NOAH_DUMP`, `CPPWRF_GF_DUMP`, `CPPWRF_GFL_DUMP`, `CPPWRF_NTIEDTKE_DUMP`: one file name for
+  every member) in an ensemble of more than one member.
 - The member's configuration is the file plus the overrides, without the `[ensemble]` section. That is also what
   its restart files record, so a member's restart file resumes as a single run.
 - `cppwrf ens.ini --set ensemble.member=I` runs member I alone, as a plain single run, into the same directory
@@ -32,6 +38,8 @@ mode = threads                               ; threads (default) | sequential
 - Exit status: the largest member status (3: a member stopped on non-finite values; the others run on). An error
   in a member (a WRF fatal stop, a configuration error, a CUDA error) stops every member at its next step and is
   reported as the error of the run; the log names the member that failed first.
+- A member thread that cannot be started (a system thread limit) is that member's error: the members already
+  started stop at their next step and are joined; members never started are reported as such.
 - Not yet: nested members (`domains.max_dom > 1`), tiles (`run.tiles`) or MPI ranks in an ensemble (refused at
   start-up).
 
@@ -44,18 +52,23 @@ src/main.cpp). The members share no field. What they share is either read-only o
 | State | Where | In an ensemble |
 |---|---|---|
 | CUDA stream of all launches and copies | `gpu_stream_raw`, thread_local (core/backend.cpp) | one per member thread (made for tiles, P03) |
-| CUDA graphs of the step, their cache, the pinned fatal-flag slots | `graphs()`, thread_local | one per member thread; capture mode `ThreadLocal` |
-| column physics work buffer, RRTMG batch scratch | core/column_work.cpp, ra_rrtmg_common/batch_memory.cpp, thread_local | one per member thread |
+| CUDA graphs of the step, their cache, the pinned fatal-flag slots | `graphs()`, thread_local | one per member thread; capture mode `ThreadLocal`; released at the thread's end (`release_thread_device`, with its stream) |
+| column physics work buffer, RRTMG batch scratch | core/column_work.cpp, ra_rrtmg_common/batch_memory.cpp, thread_local | one per member thread; the column buffer released at the thread's end |
+| convtrans_prep's averaging counter (WRF's SAVE `stepave_count`) | `PhysicsSuite::stepave_count_`, one per run (the domains of a nested run share it) | each member's own, 0 at its start (was one per host thread: a sequential member inherited the previous member's count) |
 | upload staging buffer | `thread_staging`, thread_local | one per member thread, freed at its end |
 | Thompson / P3 device tables | physics_coupling.cpp, a mutex-guarded cache keyed by options and device | one copy per process for the members with the same tables |
 | RRTMG / glibc / libmvec device tables | `static __device__ const` | read-only, one per process |
 | local-memory (stack) reserve | `reserve_local_memory`, mutex-guarded, the largest frame per device | once per process (cudaLimitStackSize is per context) |
 | device work budget share | `set_device_work_share` | N while the members run (as ranks on one device): chunk sizes, never values |
-| NetCDF (not thread-safe), host-side readers and writers | input, boundaries, output, restart | one member at a time: the host work between steps runs under one lock |
-| WRF fatal flags | `fatal_code_host`, the per translation unit `fatal_code_dev` | shared: a raised flag stops the ensemble (below) |
+| NetCDF (not thread-safe), host-side readers and writers | input, boundaries, output, restart | one member at a time: the host work between steps runs under the process's NetCDF lock (below) |
+| WRF fatal flags | `fatal_code_host[slot]`, the per translation unit `fatal_code_dev[slot]` | one slot per member thread (below) |
 
 The time steps of the members run at the same time; their host work between the steps (`before_step`,
-`after_step`, the start, the end) runs one member at a time under the ensemble's lock. Two changes make the
+`after_step`, the start, the end) runs one member at a time under the ensemble's lock. In NetCDF builds that lock is
+the process's NetCDF lock of the output writer thread (wrf_io/output_queue.hpp, docs/PERF.md IO2): the writer's
+NetCDF calls fall between the members' host work while the members step, a member waiting for the writer's queue
+lets the lock go as a single run does, and there is no second lock whose order could deadlock. Ensembles therefore
+run with `output.write_queue_mb > 0` (the default) as single runs do. Two changes make the
 threads independent on the device, neither of which changes a single run's work:
 
 - `dev_sync` in a member thread waits for the member's own stream (`set_thread_stream_sync`), not for the whole
@@ -67,17 +80,25 @@ threads independent on the device, neither of which changes a single run's work:
 Results do not depend on the chunk sizes of the column physics and RRTMG batches (each column is computed alone;
 the budget is divided among ranks or tiles on one device the same way), nor on the number of OpenMP threads.
 
-The fatal flags are the one piece of shared mutable device state: a WRF fatal condition raised by a kernel of one
-member may be read by another member's check. That only matters on the way to a stop, and the whole ensemble stops
-on any member's fatal error, so no output differs; the member named as failing first may then be the wrong one.
-Per-member fatal flags (a flag word per stream) are left for later.
+The fatal flags are per member (core/backend.hpp): member i's thread uses slot i (slot 0 outside an ensemble and in
+sequential mode). On the host the CPU kernels' OpenMP threads raise into the launching thread's slot; on a CUDA
+device each translation unit's flag has a word per slot, and a member's launches carry the slot as the bytes of
+dynamic shared memory they ask for (0, the launches unchanged, outside an ensemble), which `raise_fatal` reads back
+(`%dynamic_smem_size`) only when it raises. A member's check reads and clears its own slot on its own stream, with
+every transfer checked. A member that stops (another member failed) reads its pending checks at a point where a
+raised code is its own error, before the destructors that free device memory; an error already on its way drops
+them unread. HIP: one slot for every launch (the members on an AMD device share the flag, as before).
 
 Proof: ctest `ensemble` (tests/verify/ensemble_test.py, CPU builds and GPU builds alike): a tiny squall2d as an
 ensemble of three members (Kessler; WSM6 with other species; a warmer bubble in shear), in threads and in
 sequence, every file of every member (native snapshots, wrfout, wrfrst, CPPWRF's restart files; diag.csv without
 its wall-time column) byte-identical to the plain single run of squall2d.ini with the member's overrides as `--set`,
-and to `--set ensemble.member=2`; refused: an unknown ensemble key, a member index above `members`, two members with
-one `output.dir`, an unknown mode. Section 5 lists the real-data and GPU checks.
+and to `--set ensemble.member=I` for every member (all files, recursively; run.json without the output directory
+of its configuration), with the output writer thread on (`write_queue_mb` 1024) and off (0); refused: an unknown
+ensemble key, a member index above `members`, two members with one `output.dir` (also as `dir/x/../member1`) or one
+`output.wrf_dir`, an unknown mode. ctest `ensemble_cumulus` (data: run_P8_r8): P8 with Grell-Freitas and P8 without
+cumulus, both writing restart files every step, sequential and threads, against their single runs (a
+convtrans_prep counter kept from the first member changes the second member's restart file). Section 5 lists the real-data and GPU checks.
 
 ## 3. The options compared
 

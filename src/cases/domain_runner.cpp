@@ -389,7 +389,7 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
     // and what the run carries that WRF's restart stream does not (a run resumed from this file goes on as this
     // one): the step its curr_secs2 counts from (buckets, prec_acc_dt, CLWRF, the FDDA interpolation),
     // convtrans_prep's averaging counter
-    meta.scalars.emplace_back("STEPAVE_COUNT", double(phys::driver::PhysicsSuite::convtrans_stepave_count()));
+    meta.scalars.emplace_back("STEPAVE_COUNT", double(m_.suite->convtrans_stepave_count()));
   }
   // the step the run started at (also without column physics: the history's START_DATE and alarm 55 count from it)
   meta.scalars.emplace_back("RUN_START_STEP", double(run_start_step_));
@@ -670,7 +670,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
     if (m_.suite) {  // the scalars save_restart_file stores (WRF's wrfrst: NSTEPS, DECLIN, SOLCON below)
       m_.suite->nsteps = int(std::lround(meta.scalar("NSTEPS", 0.0)));
       if (m_.suite->rad_) m_.suite->rad_->set_solar(meta.scalar("DECLIN", 0.0), meta.scalar("SOLCON", 0.0));
-      phys::driver::PhysicsSuite::set_convtrans_stepave_count(int(std::lround(meta.scalar("STEPAVE_COUNT", 0.0))));
+      m_.suite->set_convtrans_stepave_count(int(std::lround(meta.scalar("STEPAVE_COUNT", 0.0))));
     }
     native_run_start = std::lround(meta.scalar("RUN_START_STEP", double(meta.step)));
     // the alarms of the run that wrote the file (save_restart_file). A history or auxhist3 interval changed in this

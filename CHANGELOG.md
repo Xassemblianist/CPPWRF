@@ -83,6 +83,28 @@ resumes across versions from WRF's wrfrst files.
   only with HDF5 1.10 to 1.14 (another version keeps HDF5's own filter: the same bytes); docs/PERF.md IO2.
 
 ### Fixed
+- Ensembles: convtrans_prep's averaging counter (WRF's SAVE `stepave_count`) is each run's own (one per run, shared
+  by its domains) instead of one per host thread, so a sequential member no longer inherits the previous member's
+  count (in its restart file, or as a divisor after a WRF restart). WRF fatal flags are per member (a slot per member
+  thread; on CUDA the slot travels with each launch): one member's fatal code no longer stops another member, and a
+  stopping member reads its pending checks before its destructors. `output.wrf_dir` is a per-member root as
+  `output.dir`; member directories are compared as resolved paths; stream names that leave the WRF directory and
+  debugging dumps are refused. Members run with the output writer thread (one NetCDF lock for the members' host work
+  and the writer). A member thread that cannot be started stops the ensemble cleanly; a member thread frees its
+  stream, graphs, flag slots and work buffer at its end.
+- Decomposed runs: CPPWRF_TILE_TRACE only prints (a rank-local setting changed the transport of the collectives and
+  could hang an MPI run); halo messages carry a fingerprint of their boxes (fields, element sizes, extents; device
+  buffers: a host header beside each message) checked before any byte is unpacked, and periodic lines and per-level
+  maxima have kinds of their own; `run.gpu_aware_mpi = auto` hands device buffers to MPI only when every rank's
+  library takes them (rank 0's mode for all); counts and request storage are checked before the first post and a
+  failed post or wait aborts with the buffers alive; a field given twice to one exchange is exchanged once; alignment
+  padding is sent as zeros; the duplicated communicator is freed after a successful run.
+- Fatal checks: every flag copy, reset and wait is checked (a failed transfer stops the run instead of reading 0);
+  a pinned slot is cleared before its copy; the flag of Noah's land preprocessing (urban LAI) is checked right after
+  it, before land SFLX and the dumps use its columns.
+- NetCDF-4 output: the staged bytes of a variable belong to the record before their chunks are queued, and a chunk
+  that cannot be queued or compressed is no longer counted, so an error between staging and writing waits for the
+  queued compression and then frees the bytes.
 - sfclayrev with fractional_seaice = 1: USTM_SEA is 0 on entry to every open-water call (WRF's automatic array has
   no defined value; CPPWRF carried the last call's) and ch = chs only in the non-fractional branch, as
   module_surface_driver.F.

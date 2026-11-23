@@ -482,6 +482,25 @@ inline Range2D edge_cols(Edge e, int i0, int i1) {
 }
 }  // namespace tile
 
+// ---- the fatal flags' slots (raise_fatal, fatal_check below) ----
+constexpr int kFatalSlots = 1025;
+extern int fatal_code_host[kFatalSlots];
+const char* fatal_message(int code);
+[[noreturn]] void fatal_stop(int code);  // prints WRF's FATAL block, throws FatalError
+namespace detail {
+inline thread_local int fatal_slot = 0;  // the calling host thread's slot
+// the dynamic shared memory of a launch: its slot (CUDA), 0 otherwise
+inline unsigned fatal_launch_smem() {
+#if defined(CPPWRF_USE_CUDA)
+  return unsigned(fatal_slot);
+#else
+  return 0u;
+#endif
+}
+// a failed transfer or wait of a fatal check: throws (the run stops with the runtime's message, also when the flag
+// could not be read)
+void fatal_transfer_failed(int err, const char* what);
+}  // namespace detail
 // ---- memory (implemented in backend.cpp) ----
 void* dev_alloc(std::size_t bytes);   // zero-initialised
 void dev_free(void* p);
@@ -504,6 +523,12 @@ void host_section_end();
 // waits for the thread's own stream only, so the other members' work runs on. Off (the default): the whole device.
 // CPU build: no effect.
 void set_thread_stream_sync(bool on);
+// The fatal checks of the calling thread's launched segments are dropped unread and an open capture is ended (an
+// error is already being reported: the destructors that free device memory then wait for nothing that could raise)
+void discard_pending_checks() noexcept;
+// An ensemble member's thread at its end: its stream waited for and destroyed, its graphs, events, pinned flag slots
+// and column work buffer freed (a later use on the thread creates them anew). CPU build: no effect.
+void release_thread_device() noexcept;
 // A host buffer of at least `bytes` to build an upload in (Field::fill_host): one per host thread, reused (grown as
 // needed, kept for the run) instead of a new allocation per field, pinned on the GPU (a faster copy). A nested use
 // while the thread's buffer is held gets a buffer of its own.
@@ -643,7 +668,7 @@ template <class K> void parallel_for(const Range3D& r0, const K& k) {
   (void)reserved;
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::k3d<<<g, b, 0, gpu_launch_stream()>>>(k, r);
+  detail::k3d<<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(k, r);
   gpu_check_launch("parallel_for");
   if (kt) ktime::end(typeid(K).name());
 }
@@ -660,7 +685,7 @@ template <class K> void column_for(const Range2D& r0, const K& k) {
   (void)reserved;
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::k2d<<<g, b, 0, gpu_launch_stream()>>>(k, r);
+  detail::k2d<<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(k, r);
   gpu_check_launch("column_for");
   if (kt) ktime::end(typeid(K).name());
 }
@@ -670,20 +695,30 @@ template <class K> void parallel_for(const Range3D& r0, const K& k) {
   static_assert(std::is_trivially_copyable_v<K>, "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
   Range3D r = r0;
   tile::clip(r);
-#pragma omp parallel for collapse(2) schedule(static)
-  for (int kk = r.k0; kk < r.k1; ++kk)
-    for (int j = r.j0; j < r.j1; ++j)
+  const int fs = detail::fatal_slot;  // the OpenMP threads raise into the launching thread's flag (raise_fatal)
+#pragma omp parallel
+  {
+    detail::fatal_slot = fs;
+#pragma omp for collapse(2) schedule(static)
+    for (int kk = r.k0; kk < r.k1; ++kk)
+      for (int j = r.j0; j < r.j1; ++j)
 #pragma omp simd
-      for (int i = r.i0; i < r.i1; ++i) k(i, j, kk);
+        for (int i = r.i0; i < r.i1; ++i) k(i, j, kk);
+  }
   tile::after_launch(typeid(K).name());
 }
 template <class K> void column_for(const Range2D& r0, const K& k) {
   static_assert(std::is_trivially_copyable_v<K>, "kernels are copied to the device: trivially copyable structs/lambdas only (no std::string, std::vector, ...)");
   Range2D r = r0;
   tile::clip(r);
-#pragma omp parallel for collapse(2) schedule(static)
-  for (int j = r.j0; j < r.j1; ++j)
-    for (int i = r.i0; i < r.i1; ++i) k(i, j);
+  const int fs = detail::fatal_slot;  // the OpenMP threads raise into the launching thread's flag (raise_fatal)
+#pragma omp parallel
+  {
+    detail::fatal_slot = fs;
+#pragma omp for collapse(2) schedule(static)
+    for (int j = r.j0; j < r.j1; ++j)
+      for (int i = r.i0; i < r.i1; ++i) k(i, j);
+  }
   tile::after_launch(typeid(K).name());
 }
 #endif
@@ -817,7 +852,7 @@ template <class K, int N = 8> class LaunchBatch {
     const dim3 b(64, by, 1), g(s.gx, (s.nj + by - 1) / by, s.nz);
     const bool kt = ktime::on();
     if (kt) ktime::begin();
-    detail::kbatch<K, N><<<g, b, 0, gpu_launch_stream()>>>(a_);
+    detail::kbatch<K, N><<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(a_);
     a_.n = 0;
     gpu_check_launch("LaunchBatch");
     if (kt) ktime::end(typeid(K).name());
@@ -848,7 +883,7 @@ template <class... K> void parallel_fused(const Part<K>&... parts) {
   const dim3 b(64, by, 1), g(s.gx, (s.nj + by - 1) / by, s.nz);
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::kfused<K...><<<g, b, 0, gpu_launch_stream()>>>(a);
+  detail::kfused<K...><<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(a);
   gpu_check_launch("parallel_fused");
   if (kt) ktime::end(typeid(Args).name());
 #else
@@ -891,35 +926,57 @@ struct FatalError : std::runtime_error {
   int code;
   FatalError(int c, const char* msg) : std::runtime_error(msg), code(c) {}
 };
-extern int fatal_code_host;
-const char* fatal_message(int code);
-[[noreturn]] void fatal_stop(int code);  // prints WRF's FATAL block, throws FatalError
+// The flags of a run: slot 0, or an ensemble member's own (cases/ensemble.cpp, one host thread per member on one
+// device: set_fatal_slot). On the host one flag per slot; the CPU kernels' OpenMP threads take the slot of the
+// thread that launches them (column_for / parallel_for). On a CUDA device each translation unit's flag has one
+// word per slot; a launch of column_for / parallel_for / LaunchBatch / parallel_fused carries its slot as the bytes
+// of dynamic shared memory it asks for (0 outside an ensemble: the launches are unchanged), which raise_fatal reads
+// back (%dynamic_smem_size) only when it raises. HIP: slot 0 for every launch (the members of an ensemble share it).
+// the calling thread's slot (0 <= slot < kFatalSlots; an ensemble member's thread before its first launch)
+void set_fatal_slot(int slot);
 #if defined(CPPWRF_GPUCC)
 namespace detail {
-static __device__ int fatal_code_dev;
+static __device__ int fatal_code_dev[kFatalSlots];
 }
 #endif
 // the flag becomes the smallest non-zero code raised (codes are positive; 0: none)
 CPPWRF_HD inline void raise_fatal(int code) {
 #if defined(CPPWRF_DEVICE_CODE)
-  int old = *static_cast<volatile int*>(&detail::fatal_code_dev);
+#if defined(CPPWRF_USE_CUDA) || (defined(__CUDACC__) && !defined(__HIP__))
+  unsigned slot;
+  asm("mov.u32 %0, %%dynamic_smem_size;" : "=r"(slot));
+  if (slot >= unsigned(kFatalSlots)) slot = 0;
+#else
+  const unsigned slot = 0;
+#endif
+  int* f = &detail::fatal_code_dev[slot];
+  int old = *static_cast<volatile int*>(f);
   while (old == 0 || code < old) {
-    const int seen = atomicCAS(&detail::fatal_code_dev, old, code);
+    const int seen = atomicCAS(f, old, code);
     if (seen == old) break;
     old = seen;
   }
 #else
-  int old = __atomic_load_n(&fatal_code_host, __ATOMIC_RELAXED);
-  while ((old == 0 || code < old) &&
-         !__atomic_compare_exchange_n(&fatal_code_host, &old, code, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+  int* f = &fatal_code_host[detail::fatal_slot];
+  int old = __atomic_load_n(f, __ATOMIC_RELAXED);
+  while ((old == 0 || code < old) && !__atomic_compare_exchange_n(f, &old, code, false, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
   }
 #endif
 }
 #if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
 namespace detail {
-static inline void fatal_reset_dev() {  // clears this translation unit's device flag after a stop
+inline std::size_t fatal_offset() { return std::size_t(fatal_slot) * sizeof(int); }
+inline void fatal_ck(gpuError_t e, const char* what) {
+  if (e != gpuSuccess) fatal_transfer_failed(int(e), what);
+}
+// clears this translation unit's device flag of the calling thread's slot after a stop, on the thread's own stream
+// (a copy on the legacy stream would join another ensemble member's capture)
+static inline void fatal_reset_dev() {
   const int zero = 0;
-  gpuMemcpyToSymbol(fatal_code_dev, &zero, sizeof(int));
+  gpuStream_t s = gpu_launch_stream();
+  fatal_ck(gpuMemcpyToSymbolAsync(fatal_code_dev, &zero, sizeof(int), fatal_offset(), gpuMemcpyHostToDevice, s),
+           "fatal flag reset");
+  fatal_ck(gpuStreamSynchronize(s), "fatal flag reset");
 }
 }  // namespace detail
 #endif
@@ -927,8 +984,9 @@ static inline void fatal_check() {
 #if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
   // inside a time step (StepScope): the flag is copied to a pinned slot on the stream and read at the step's end
   if (int* slot = detail::fatal_poll_slot(&detail::fatal_reset_dev)) {
-    gpuMemcpyFromSymbolAsync(slot, detail::fatal_code_dev, sizeof(int), 0, gpuMemcpyDeviceToHost,
-                             gpu_launch_stream());
+    detail::fatal_ck(gpuMemcpyFromSymbolAsync(slot, detail::fatal_code_dev, sizeof(int), detail::fatal_offset(),
+                                              gpuMemcpyDeviceToHost, gpu_launch_stream()),
+                     "fatal flag copy");
     return;
   }
   detail::fatal_flush();
@@ -937,21 +995,24 @@ static inline void fatal_check() {
   // and only then cleared. The flags are shared by the tiles of one process (and of one device), never lowered
   // by a read, and every worker reads them after its own kernels and before the collective: every worker gets
   // the smallest code raised by any worker in this call. Nothing raised: nothing to clear.
-  int code = tile::hooks.first_code ? __atomic_load_n(&fatal_code_host, __ATOMIC_RELAXED)
-                                    : __atomic_exchange_n(&fatal_code_host, 0, __ATOMIC_RELAXED);
+  int* hf = &fatal_code_host[detail::fatal_slot];
+  int code = tile::hooks.first_code ? __atomic_load_n(hf, __ATOMIC_RELAXED) : __atomic_exchange_n(hf, 0, __ATOMIC_RELAXED);
 #if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
   // the flag is read now (a decomposed run inside a step: the graph segment so far is launched and waited for, the
   // capture resumes after the collective)
   host_section_begin();
   int dcode = 0;
   const int zero = 0;
+  const std::size_t off = detail::fatal_offset();
   gpuStream_t s = gpu_launch_stream();
-  gpuMemcpyFromSymbolAsync(&dcode, detail::fatal_code_dev, sizeof(int), 0, gpuMemcpyDeviceToHost, s);
-  gpuStreamSynchronize(s);
+  detail::fatal_ck(gpuMemcpyFromSymbolAsync(&dcode, detail::fatal_code_dev, sizeof(int), off, gpuMemcpyDeviceToHost, s),
+                   "fatal flag copy");
+  detail::fatal_ck(gpuStreamSynchronize(s), "fatal flag copy");
   if (dcode != 0) {
     if (!tile::hooks.first_code) {
-      gpuMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, gpuMemcpyHostToDevice, s);
-      gpuStreamSynchronize(s);
+      detail::fatal_ck(gpuMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), off, gpuMemcpyHostToDevice, s),
+                       "fatal flag reset");
+      detail::fatal_ck(gpuStreamSynchronize(s), "fatal flag reset");
     }
     if (code == 0 || dcode < code) code = dcode;
   }
@@ -959,10 +1020,11 @@ static inline void fatal_check() {
   if (tile::hooks.first_code) {
     code = tile::hooks.first_code(code);
     if (code != 0) {
-      __atomic_store_n(&fatal_code_host, 0, __ATOMIC_RELAXED);
+      __atomic_store_n(hf, 0, __ATOMIC_RELAXED);
 #if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
-      gpuMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), 0, gpuMemcpyHostToDevice, s);
-      gpuStreamSynchronize(s);
+      detail::fatal_ck(gpuMemcpyToSymbolAsync(detail::fatal_code_dev, &zero, sizeof(int), off, gpuMemcpyHostToDevice, s),
+                       "fatal flag reset");
+      detail::fatal_ck(gpuStreamSynchronize(s), "fatal flag reset");
 #endif
     }
   }

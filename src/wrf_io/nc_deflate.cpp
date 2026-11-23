@@ -320,17 +320,27 @@ void submit(const Record& r, Group& g) {
     if (r.chunk[d] == 0 || r.len[d] == 0) return;
     nc *= (r.len[d] + r.chunk[d] - 1) / r.chunk[d];
   }
-  {
-    std::lock_guard<std::mutex> lk(g.m);
-    g.pending += long(nc);
-  }
   auto shared = std::make_shared<Record>(r);
-  for (std::size_t c = 0; c < nc; ++c)
-    pool().submit([shared, c, &g] {
-      compress_chunk(*shared, c, g);
+  for (std::size_t c = 0; c < nc; ++c) {
+    {  // counted before it is queued, uncounted if it cannot be (wait(g) then waits for the chunks queued only)
+      std::lock_guard<std::mutex> lk(g.m);
+      ++g.pending;
+    }
+    try {
+      pool().submit([shared, c, &g] {
+        try {
+          compress_chunk(*shared, c, g);
+        } catch (...) {  // (memory): no precomputed chunk, HDF5's filter compresses it itself
+        }
+        std::lock_guard<std::mutex> lk(g.m);
+        if (--g.pending == 0) g.done.notify_all();
+      });
+    } catch (...) {
       std::lock_guard<std::mutex> lk(g.m);
       if (--g.pending == 0) g.done.notify_all();
-    });
+      throw;
+    }
+  }
 }
 
 void wait(Group& g) {

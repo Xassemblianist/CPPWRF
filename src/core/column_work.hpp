@@ -139,6 +139,8 @@ class ColumnSlots {
 // of them (at least two). The kernels of every scheme and domain run one after another on the one launch stream
 // and share it. CPU build: no-op.
 void column_work_reserve(const Range2D& r, std::size_t bytes_per_col);
+// frees the calling thread's buffer (an ensemble member's thread at its end: core/backend.hpp release_thread_device)
+void column_work_release() noexcept;
 
 namespace detail {
 // the buffer and its size (CUDA; grown to the request when it is smaller: then outside the time loop only if the

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "core/backend.hpp"
+#include "core/column_work.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -75,14 +76,14 @@ void gpu_check_launch(const char* where) {
   ck(gpuDeviceSynchronize(), where);
 #endif
 }
+// one per host thread: the tiles of a tiled run (src/core/tiles.cpp) each launch on their own stream; an ensemble
+// member's thread destroys its own at its end (release_thread_device)
+namespace {
+thread_local gpuStream_t t_stream = nullptr;
+}
 void* gpu_stream_raw() {
-  // one per host thread: the tiles of a tiled run (src/core/tiles.cpp) each launch on their own stream
-  thread_local gpuStream_t s = [] {
-    gpuStream_t t = nullptr;
-    ck(gpuStreamCreate(&t), "gpuStreamCreate");  // blocking: orders with any work on the legacy stream 0
-    return t;
-  }();
-  return s;
+  if (!t_stream) ck(gpuStreamCreate(&t_stream), "gpuStreamCreate");  // blocking: orders with any work on the legacy stream 0
+  return t_stream;
 }
 static gpuStream_t stream() { return static_cast<gpuStream_t>(gpu_stream_raw()); }
 
@@ -266,9 +267,12 @@ struct Graphs {
     in_step = false;
   }
 };
-Graphs& graphs() {  // never destroyed: device memory may be freed by static objects at exit; one per host thread
-  thread_local Graphs* gs = new Graphs;
-  return *gs;
+// one per host thread, never destroyed at exit (device memory may be freed by static objects then); an ensemble
+// member's thread releases its own (release_thread_device)
+thread_local Graphs* t_graphs = nullptr;
+Graphs& graphs() {
+  if (!t_graphs) t_graphs = new Graphs;
+  return *t_graphs;
 }
 struct GraphStats {
   ~GraphStats() {
@@ -316,17 +320,63 @@ int* fatal_poll_slot(void (*reset)()) {
   // collective of every check
   if (!gs.in_step || tile::hooks.first_code) return nullptr;
   // a stop raised by host code (a kernel run on the host): the checks before this one come first, as before
-  if (int hc = __atomic_exchange_n(&fatal_code_host, 0, __ATOMIC_RELAXED)) {
+  if (int hc = __atomic_exchange_n(&fatal_code_host[fatal_slot], 0, __ATOMIC_RELAXED)) {
     sync_begin();
     gs.flush();
     fatal_stop(hc);
   }
   if (gs.cur.size() >= std::size_t(kSlots)) throw std::runtime_error("fatal_check: too many checks in one step");
   int* slot = gs.slots + gs.bank * kSlots + int(gs.cur.size());
+  *slot = 0;  // a copy that fails (fatal_check throws) leaves no earlier value to be read
   gs.cur.push_back({slot, reset});
   return slot;
 }
 void fatal_flush() { graphs().flush(); }
+void fatal_transfer_failed(int err, const char* what) { ck(gpuError_t(err), what); }
+}  // namespace detail
+
+void discard_pending_checks() noexcept {
+  if (!t_graphs) return;
+  Graphs& gs = *t_graphs;
+#if defined(CPPWRF_USE_CUDA)
+  if (gs.capturing) {
+    cudaGraph_t g = nullptr;
+    cudaStreamEndCapture(stream(), &g);
+    if (g) cudaGraphDestroy(g);
+    gs.capturing = false;
+  }
+#endif
+  if (gs.ev_pending) (void)gpuEventSynchronize(gs.ev);
+  (void)gpuGetLastError();
+  gs.ev_pending = false;
+  gs.pend.clear();
+  gs.cur.clear();
+  gs.pend_done = -1;
+  gs.in_step = false;
+}
+
+void release_thread_device() noexcept {
+  discard_pending_checks();
+  if (t_stream) (void)gpuStreamSynchronize(t_stream);
+  column_work_release();  // (dev_free: before the graphs go, which it would make anew)
+  if (Graphs* gs = t_graphs) {
+#if defined(CPPWRF_USE_CUDA)
+    for (auto& [k, v] : gs->cache)
+      for (cudaGraphExec_t e : v) cudaGraphExecDestroy(e);
+#endif
+    if (gs->ev) (void)gpuEventDestroy(gs->ev);
+    if (gs->slots) (void)gpuFreeHost(gs->slots);
+    if (gs->done_one) (void)gpuFree(const_cast<int*>(gs->done_one));
+    delete gs;
+    t_graphs = nullptr;
+  }
+  if (t_stream) {
+    (void)gpuStreamDestroy(t_stream);
+    t_stream = nullptr;
+  }
+  (void)gpuGetLastError();
+}
+namespace detail {
 
 void reserve_local_memory(const void* kernel, const char* kernel_type) {
 #if defined(CPPWRF_USE_CUDA)
@@ -530,6 +580,13 @@ void host_section_begin() {}
 void host_section_end() {}
 void dev_sync() {}
 void set_thread_stream_sync(bool) {}
+void discard_pending_checks() noexcept {}
+void release_thread_device() noexcept {}
+namespace detail {
+void fatal_transfer_failed(int err, const char* what) {
+  throw std::runtime_error(std::string(what) + " failed (" + std::to_string(err) + ")");
+}
+}  // namespace detail
 int current_device() { return 0; }
 const char* backend_name() { return "cpu"; }
 void device_memory_report(const char*) {}
@@ -613,7 +670,12 @@ void release_host_staging() {
   t.bytes = 0;
 }
 
-int fatal_code_host = 0;
+int fatal_code_host[kFatalSlots] = {};
+
+void set_fatal_slot(int slot) {
+  if (slot < 0 || slot >= kFatalSlots) throw std::logic_error("set_fatal_slot: slot " + std::to_string(slot));
+  detail::fatal_slot = slot;
+}
 
 const char* fatal_message(int code) {
   switch (code) {

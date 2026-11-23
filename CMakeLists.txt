@@ -291,6 +291,7 @@ if(TARGET netCDF::netcdf OR NETCDF_FOUND OR NETCDF_INCDIR)
     add_subdirectory(src/io_netcdf)
     target_link_libraries(cppwrf_core PUBLIC cppwrf_io_netcdf)
     target_compile_definitions(cppwrf_core PUBLIC CPPWRF_HAVE_NETCDF)
+    set(CPPWRF_NETCDF_OUTPUT ON)
   endif()
   if(EXISTS ${CMAKE_SOURCE_DIR}/tests/io_netcdf)
     add_subdirectory(tests/io_netcdf)
@@ -467,11 +468,23 @@ if(TARGET cppwrf)
            $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/restart_resume WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(restart_resume PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                        ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
-  # an ensemble of 3 members (one host thread each, and one after the other): every member's files byte-identical to
-  # its single run (tests/verify/ensemble_test.py; a tiny squall2d, no data)
+  # an ensemble of 3 members (one host thread each, and one after the other; the output writer thread on and off):
+  # every member's files byte-identical to its single run (tests/verify/ensemble_test.py; a tiny squall2d, no data)
+  if(CPPWRF_NETCDF_OUTPUT)
+    set(_ens_nc ON)
+  else()
+    set(_ens_nc OFF)
+  endif()
   add_test(NAME ensemble COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/ensemble_test.py
-           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/ensemble WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/ensemble --netcdf ${_ens_nc} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(ensemble PROPERTIES LABELS unit ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
+  # members with Grell-Freitas (P8) and without cumulus, sequential and threads: convtrans_prep's averaging counter
+  # is each member's own (ensemble_test.py --cumulus; skipped without ${CPPWRF_WRF_RUNS}/run_P8_r8/steps)
+  add_test(NAME ensemble_cumulus COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/ensemble_test.py
+           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/ensemble_cumulus --netcdf ${_ens_nc} --cumulus
+           WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(ensemble_cumulus PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                       ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 endif()
 
 # Differential tests against WRF v4.8.0's own compiled code (gfortran; slow): physics schemes, the
