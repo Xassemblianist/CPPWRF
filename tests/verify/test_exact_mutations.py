@@ -2,9 +2,10 @@
 """Exercise exact.compare_stream with single edits to synthetic WRF output.
 
 Run with python3 -I tests/verify/test_exact_mutations.py -v.
-NetCDF fixtures are temporary and live under ~/cppwrf_scratch/cdx9_tmp.
+NetCDF fixtures are temporary. Set CPPWRF_MUTATION_SCRATCH to override ~/cppwrf_scratch/cdx9_tmp.
 """
 
+import os
 from pathlib import Path
 import runpy
 import shutil
@@ -17,7 +18,7 @@ import numpy as np
 
 # Load the sibling by path because -I excludes the script directory from sys.path.
 compare_stream = runpy.run_path(str(Path(__file__).with_name("exact.py")))["compare_stream"]
-SCRATCH = Path.home() / "cppwrf_scratch" / "cdx9_tmp"
+SCRATCH = Path(os.environ.get("CPPWRF_MUTATION_SCRATCH", Path.home() / "cppwrf_scratch" / "cdx9_tmp"))
 FILL = -9999.0
 
 

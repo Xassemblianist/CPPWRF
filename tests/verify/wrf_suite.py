@@ -620,7 +620,8 @@ def restarted_case(b, cfg, sets, refs, t, mid, out, native=False):
             aux_shared = aux_ref & ({s for s in aux_ref if s <= split} | aux_resumed)
             for path, due in ((first, history_schedule(origin, aux_iv, times_at(origin, mid + dt), initial=True)),
                               (resumed, aux_resumed)):
-                bad += [f"{d} {path} auxhist3: {x}" for x in history_inventory(stream_files(path, "auxhist3", d), due, origin)]
+                bad += [f"{d} {path} auxhist3: {x}" for x in
+                        history_inventory(stream_files(path, "auxhist3", d), due, origin, require_xtime=False)]
         aux_schedules[d] = end, aux_shared, aux_ref
     b2, what = exact_case(refs, [first, resumed], t, sets, cfg=cfg, split=split, required_times=shared,
                           ignore_atts=() if native else ("START_DATE",), aux_schedules=aux_schedules,
@@ -680,8 +681,8 @@ def history_schedule(start, interval, end, *, initial=False):
     return {times_at(start, i * interval) for i in range(0 if initial else 1, count + 1)}
 
 
-def history_inventory(files, expected, origin):
-    """Check one leg's clock without borrowing records from a comparison stream."""
+def history_inventory(files, expected, origin, *, require_xtime=True):
+    """Check one leg's Times against its schedule. The default auxhist3 field list omits XTIME."""
     import netCDF4
     import exact
     seen, errors = set(), []
@@ -692,16 +693,19 @@ def history_inventory(files, expected, origin):
                 xtime = ds.variables.get("XTIME")
                 if not len(times):
                     errors.append(f"{f}: zero records")
-                if xtime is None or len(xtime) != len(times):
-                    errors.append(f"{f}: expected one XTIME per history record")
-                    continue
-                for i, minutes in enumerate(xtime[:]):
+                if xtime is not None and xtime.dimensions == ("Time",) and xtime.shape == (len(times),):
+                    minutes = xtime[:]
+                else:
+                    minutes = None
+                    if require_xtime or xtime is not None:
+                        errors.append(f"{f}: expected one XTIME per history record")
+                for i in range(len(times)):
                     stamp = exact.text(times, i).decode()
                     if stamp in seen:
                         errors.append(f"duplicate Times in CPPWRF: {stamp} in {f}")
                     seen.add(stamp)
-                    if not xtime_matches(minutes, seconds_between(origin, stamp)):
-                        errors.append(f"{f}: XTIME {minutes} disagrees with history Times {stamp}")
+                    if minutes is not None and not xtime_matches(minutes[i], seconds_between(origin, stamp)):
+                        errors.append(f"{f}: XTIME {minutes[i]} disagrees with history Times {stamp}")
     if expected - seen:
         errors.append(f"CPPWRF missing {sorted(expected - seen)}")
     if seen - expected:
@@ -792,7 +796,7 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False, wrf=No
                 history_inventory(stream_files(straight, "wrfout", d), straight_schedule[d], origin)]
         if d in straight_aux:
             bad += [f"straight: {d}.auxhist3: {x}" for x in
-                    history_inventory(stream_files(straight, "auxhist3", d), straight_aux[d], origin)]
+                    history_inventory(stream_files(straight, "auxhist3", d), straight_aux[d], origin, require_xtime=False)]
     if seed_errors:
         return seed_errors + bad, ""
     rst = os.path.join(out, "rst")
@@ -840,7 +844,7 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False, wrf=No
                 due = {s for s in history_schedule(*aux_clock, end) if s > start}
                 resumed_aux[what][dom] = due
                 bad += [f"{what}: {dom}.auxhist3: {x}" for x in
-                        history_inventory(stream_files(d_out, "auxhist3", dom), due, origin)]
+                        history_inventory(stream_files(d_out, "auxhist3", dom), due, origin, require_xtime=False)]
                 streams.append("auxhist3")
             bad += start_dates(restart_files, start if wrfrst_resume else origin, restart_times=resumed_restarts,
                                history_clock=clock, aux_clock=aux_clock, end=end)

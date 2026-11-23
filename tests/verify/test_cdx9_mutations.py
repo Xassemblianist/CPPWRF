@@ -23,8 +23,6 @@ import wrf_suite as suite
 import test_harness_mutations as harness
 from test_harness_mutations import ROOT, START, ScratchMutationCase, fixture
 
-harness.SCRATCH = Path.home() / "cppwrf_scratch" / "cdx9_tmp"
-
 
 class RestartClockMutations(ScratchMutationCase):
     def n3(self, mutation=None, *, native_only=False):
@@ -431,7 +429,83 @@ done
                 self.assertEqual(rc, expected, output)
 
 
+def auxhist3_fixture(directory, seconds, *, start=START):
+    """A subset of A09's h:3 variables with the WRF NetCDF record layout."""
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"auxhist3_d01_{suite.times_at(START, seconds[0])}"
+    with Dataset(path, "w") as ds:
+        ds.createDimension("Time", None)
+        ds.createDimension("DateStrLen", 19)
+        ds.createDimension("west_east", 1)
+        ds.createDimension("south_north", 1)
+        ds.START_DATE = start
+        ds.SIMULATION_START_DATE = START
+        times = ds.createVariable("Times", "S1", ("Time", "DateStrLen"))
+        t2min = ds.createVariable("T2MIN", "f8", ("Time", "south_north", "west_east"))
+        for i, sec in enumerate(seconds):
+            times[i] = np.frombuffer(suite.times_at(START, sec).encode("ascii"), dtype="S1")
+            t2min[i, 0, 0] = 273.0 + sec / 3600
+    return path
+
+
 class ContentMutations(ScratchMutationCase):
+    def test_a09_split_reads_multirecord_auxhist3_without_xtime(self):
+        name = "real_a09_r8_fp64_cpu_1h_rst"
+        _, _, cfg, sets, _, end, _ = next(c for c in suite.CASES if c[0] == name)
+        mid = int(suite.restart_at(sets))
+        split = suite.times_at(START, mid)
+        refdir = self.root / "ref"
+        ref = fixture(refdir, tuple(range(0, end + 1, 600)))
+        auxhist3_fixture(refdir, range(0, end + 1, 180))
+        seed = fixture(refdir, (mid,), kind="wrfrst")
+        with Dataset(seed, "a") as ds:
+            ds.setncattr(suite.HISTORY_ALARM, 600)
+            ds.setncattr(suite.AUX_ALARM, 180)
+        (refdir / "namelist.input").touch()
+
+        for missing_tick in (False, True):
+            with self.subTest(missing_tick=missing_tick):
+                def run_stub(_binary, _cfg, _sets, out):
+                    out = Path(out)
+                    if out.name == "a_first":
+                        fixture(out, tuple(range(0, mid + 1, 600)))
+                        auxhist3_fixture(out, range(0, mid + 1, 180))
+                        shutil.copyfile(seed, out / seed.name)
+                    else:
+                        fixture(out, tuple(range(mid + 600, end + 1, 600)), start=split)
+                        ticks = list(range(mid + 180, end + 1, 180))
+                        if missing_tick:
+                            ticks.remove(2160)
+                        auxhist3_fixture(out, ticks, start=split)
+                    return 0, ""
+
+                with patch.object(suite, "run", run_stub):
+                    bad, _ = suite.restarted_case("stub", cfg, sets, {"": str(ref)}, end, mid,
+                                                  self.root / str(missing_tick))
+                if missing_tick:
+                    self.assertIn("b_resumed auxhist3: CPPWRF missing ['2026-10-12_00:36:00']", "\n".join(bad))
+                else:
+                    self.assertFalse(bad, bad)
+
+    def test_auxhist3_inventory_checks_xtime_when_present(self):
+        ticks = (0, 180, 360)
+        path = auxhist3_fixture(self.root, ticks)
+        expected = {suite.times_at(START, sec) for sec in ticks}
+        self.assertIn("expected one XTIME per history record",
+                      "\n".join(suite.history_inventory([path], expected, START)))
+        with Dataset(path, "a") as ds:
+            ds.createVariable("XTIME", "f8", ("Time",))[:] = [0, 3, 6]
+        self.assertFalse(suite.history_inventory([path], expected, START, require_xtime=False))
+        with Dataset(path, "a") as ds:
+            ds["XTIME"][1] = 4
+        self.assertIn("XTIME 4.0 disagrees with history Times 2026-10-12_00:03:00",
+                      "\n".join(suite.history_inventory([path], expected, START, require_xtime=False)))
+        malformed = auxhist3_fixture(self.root / "scalar-xtime", ticks)
+        with Dataset(malformed, "a") as ds:
+            ds.createVariable("XTIME", "f8").assignValue(0)
+        self.assertIn("expected one XTIME per history record",
+                      "\n".join(suite.history_inventory([malformed], expected, START, require_xtime=False)))
+
     def test_auxhist3_requires_all_configured_ticks_and_effective_opt_ins(self):
         cfg = output_config(self.root, "[output]\nauxhist3=true ; diagnostics\n[phys]\nauxhist3_interval=3\n")
         w, c = self.root / "ref", self.root / "out"
