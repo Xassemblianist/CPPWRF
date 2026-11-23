@@ -578,7 +578,8 @@ cases' initial arrays are whole on every worker while they are read, the lateral
 and the writer holds the output frame it writes (memory that does not shrink with the worker count). CUDA graphs are off with several workers (the exchanges synchronise them from the host). A
 patch must be at least 3 points wide; a 2-D (x-z) domain has one patch along y (`run.ranks = Nx1`), a y-z domain
 one along x. `CPPWRF_TILE_CHECK` is for tiles without nests. Proved: the layouts and cases of docs/MPI.md, section
-5, on one machine; runs on several GPUs or several nodes have not been made (docs/MPI.md, section 6).
+5, on one machine, and two GPUs of one node (docs/MPI.md, section 6); runs on several nodes have not been made
+(docs/MPI.md, section 7).
 
 The suite's cases `*_tPxQ` (tests/verify/cases/85_tiles.py) run other cases as tiles against the same WRF
 references; `tools/colab/colab_tiles.sh` runs suite cases with several tile layouts and the check on a Colab
@@ -795,8 +796,8 @@ restart_file = out/real/restart_000060.nc   # or .../wrfrst_d01_2026-10-12_01:00
 ```
 
 CPPWRF's own `restart_<step>.nc` files record a format version (`CPPWRF_RESTART_VERSION`, now 6: the scalars NSTEPS,
-DECLIN and SOLCON as `SCALAR_<name>` attributes; WW, WW_M, PHP, ALT; in a run of one patch the halo points of every
-field as `HALO_<name>`; the step the run started at, convtrans_prep's averaging counter and the history, auxhist3,
+DECLIN and SOLCON as `SCALAR_<name>` attributes; WW, WW_M, PHP, ALT; the halo points of every field beyond the
+domain's edges as `HALO_<name>`, the same in every decomposition; the step the run started at, convtrans_prep's averaging counter and the history, auxhist3,
 auxinput4 and auxinput10 alarms with the configured history / auxhist3 / restart intervals, the restart alarm's
 PrevRingTime and one-shot RingTime; REFL_10CM and Noah-MP's land-point flag, which WRF's restart stream leaves out; so
 that a run resumed from the file continues the uninterrupted one bit for bit, also between two radiation, PBL or

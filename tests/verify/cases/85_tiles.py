@@ -58,6 +58,9 @@ _TILED = [
     ("real_mynnx1_r8_fp64_cuda_1h", "2x1"),
     ("ideal_quarter_ss_k2_fp64_cuda", "2x2"),
     ("ideal_squall2d_x_fp64_cuda", "2x1"),
+    # P4's restart chain (tests/verify/cases/66_restart_chain.py) as 2 x 2 tiles: straight and resumed from the wrfrst
+    # file and from CPPWRF's own restart file (its halo points HALO_<name> go to the patches that hold them)
+    ("real_p4_r8_fp64_cpu_chain", "2x2"),
 ]
 
 CASES = [(f"{n}_t{lay}", c[1], c[2], list(c[3]) + [f"run.tiles={lay}"], c[4], c[5], dict(c[6]))
@@ -67,7 +70,8 @@ CASES = [(f"{n}_t{lay}", c[1], c[2], list(c[3]) + [f"run.tiles={lay}"], c[4], c[
 # gathers of nests, Tiedtke's row flag, the land-ice Noah carry, FDDA, terrain options, Morrison, Grell-Freitas's
 # averaging): the CPU case's configuration, reference, time and tolerances with the cuda_dp backend
 _TILED_CUDA = [(n, lay) for n, lay in _TILED if n.startswith("real_") and _BASE[n][1] == "cpu_dp"
-               and n not in ("real_p4_r8_fp64_cpu", "real_mynnx1_r8_fp64_cpu")]  # these two have CUDA tiled cases
+               and n not in ("real_p4_r8_fp64_cpu", "real_mynnx1_r8_fp64_cpu")  # these two have CUDA tiled cases
+               and not n.endswith("_chain")]  # the CUDA restart chains run as one patch
 _CUDA_NAME = {n: n.replace("_fp64_cpu", "_fp64_cuda") for n, _ in _TILED_CUDA}
 CASES += [(f"{_CUDA_NAME[n]}_t{lay}", "cuda_dp", c[2], list(c[3]) + [f"run.tiles={lay}"], c[4], c[5], dict(c[6]))
           for n, lay in _TILED_CUDA for c in [_BASE[n]]]
@@ -78,9 +82,22 @@ CASES += [(f"{_CUDA_NAME[n]}_t{lay}", "cuda_dp", c[2], list(c[3]) + [f"run.tiles
 _WRST = [("real_d0v_r8_fp64_cpu", ["restart.interval=10"])]
 CASES += [(f"{n}_wrst", c[1], c[2], list(c[3]) + sets, c[4], c[5], dict(c[6])) for n, sets in _WRST for c in [_BASE[n]]]
 
+# The restart files do not depend on the decomposition (suite.layout_restart=LAYOUT,INTERVAL:
+# wrf_suite.layout_restart): the configuration of the case NAME (a restart chain: without suite.chain) runs as one
+# patch and as LAYOUT tiles with restart files every INTERVAL s, and CPPWRF's own restart_<step>.nc files
+# (HALO_<name>: the halo points beyond the domain's edges, gathered from the edge patches) and the wrfrst files of the
+# two runs must be identical, every variable, dimension and attribute. NAME_rst_tLAYOUT (NAME without _chain).
+# quarter_ss: the halo points of periodic directions (the wrap across the patches).
+_LAYOUT_RST = [("real_p4_r8_fp64_cpu_chain", "2x2", 180), ("ideal_quarter_ss_k2_fp64_cpu", "2x2", 120)]
+_RST_NAME = {n: f"{n.removesuffix('_chain')}_rst_t{lay}" for n, lay, _ in _LAYOUT_RST}
+CASES += [(_RST_NAME[n], c[1], c[2], [x for x in c[3] if not x.startswith("suite.chain=")]
+           + [f"suite.layout_restart={lay},{iv:g}"], c[4], c[5], dict(c[6]))
+          for n, lay, iv in _LAYOUT_RST for c in [_BASE[n]]]
+
 # the data tars (tests/verify/vm_data.txt) each case reads: those of the case it tiles
 DATA = {f"{n}_t{lay}": _BASE_DATA[n] for n, lay in _TILED}
 DATA.update({f"{_CUDA_NAME[n]}_t{lay}": _BASE_DATA[n] for n, lay in _TILED_CUDA})
 DATA.update({f"{n}_wrst": _BASE_DATA[n] for n, _ in _WRST})
+DATA.update({_RST_NAME[n]: _BASE_DATA[n] for n, _, _ in _LAYOUT_RST})
 # the GPU runs take run_KESSKF_r8 from kesskf_data.tar (v05_files_data.tar's absolute links are for the CPU suite)
 DATA["real_kesskf_r8_fp64_cuda_t3x1"] = "kesskf_data.tar,v05_iofields.tar"

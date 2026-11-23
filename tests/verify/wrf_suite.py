@@ -406,6 +406,64 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False):
                  f"{nrst} wrfrst files")
 
 
+def layout_restart_at(sets):
+    """A decomposition restart case (suite.layout_restart=LAYOUT,INTERVAL in its --set list: layout_restart),
+    (LAYOUT, INTERVAL [s]), or None."""
+    v = next((x.split("=", 1)[1] for x in sets if x.startswith("suite.layout_restart=")), None)
+    if not v:
+        return None
+    lay, iv = v.split(",")
+    return lay, float(iv)
+
+
+def layout_restart(b, cfg, sets, refs, t, lay, iv, out):
+    """The restart files do not depend on the decomposition: CPPWRF's run to `t` s with restart files every `iv` s as
+    one patch and as run.tiles=`lay` patches must write the same files, CPPWRF's own restart_<step>.nc (with the
+    halo points HALO_<name>) and the wrfrst files, each identical (exact.py: every variable at tolerance 0, the
+    dimensions, types, variable and global attributes, all of them). `refs`: the WRF run whose inputs (and
+    namelist.input, when there) the case reads; not compared. (differences, summary)"""
+    import netCDF4
+    import exact
+    nl = os.path.join(os.path.dirname(next(iter(refs.values()))), "namelist.input")
+    common = sets + ["output.format=wrfout", f"run.run_time={t:g}", f"restart.interval={iv:g}"] + \
+        ([f"output.wrf_namelist={nl}"] if os.path.exists(nl) else [])
+    one, tiled = os.path.join(out, "a_one"), os.path.join(out, "b_tiled")
+    for d, extra in ((one, []), (tiled, [f"run.tiles={lay}"])):
+        rc, log = run(b, cfg, common + extra, d)
+        if rc != 0:
+            return [f"{os.path.basename(d)} run failed: {log[-200:]}"], ""
+
+    def files(d):
+        return {os.path.relpath(f, d): f for pat in ("restart_*.nc", "wrfrst_d??_*", "d??/wrfrst_d??_*")
+                for f in glob.glob(os.path.join(d, pat))}
+    A, B = files(one), files(tiled)
+    bad = []
+    if sorted(A) != sorted(B):
+        bad.append(f"files: one patch {sorted(A)}, {lay} {sorted(B)}")
+    nat = [n for n in A if n.startswith("restart_")]
+    if not nat or not any(n not in nat for n in A):
+        bad.append(f"one patch wrote {len(nat)} restart_<step>.nc and {len(A) - len(nat)} wrfrst files (both expected)")
+    nhalo = 0
+    for name in sorted(set(A) & set(B)):
+        with _NC, netCDF4.Dataset(A[name]) as x, netCDF4.Dataset(B[name]) as y:
+            exact.raw(x), exact.raw(y)
+            bad += [f"{name}: {m}" for m in exact.metadata(x, y, ignore=())]
+            for v in x.variables:
+                if v not in y.variables:
+                    continue
+                if x[v].dtype.kind == "S":
+                    dif = None if exact.text(x[v]) == exact.text(y[v]) else "text differs"
+                else:
+                    dif = exact.describe(x[v][:], y[v][:])
+                if dif:
+                    bad.append(f"{name}.{v}: {dif}")
+            nhalo += sum(1 for v in x.variables if v.startswith("HALO_")) if name in nat else 0
+    if nat and not nhalo:
+        bad.append("the restart_<step>.nc files hold no HALO_<name> variables")
+    return bad, (f"{lay} = one patch: {len(nat)} restart_<step>.nc ({nhalo} HALO_ variables), "
+                 f"{len(A) - len(nat)} wrfrst files identical")
+
+
 def chain_first_step(b, cfg, common, resumed, mid, out):
     """restart_chain's diagnosis of a difference: the runs to one step past `mid` (the straight one, and each resumed
     one from its file) write CPPWRF's restart file there (the last step); their variables that differ."""
@@ -653,7 +711,13 @@ def main():
         rst_check = wrfrst_check(sets)
         native = "suite.native_restart" in sets
         chain = chain_at(sets)
+        lrst = layout_restart_at(sets)
         sets = [x for x in sets if not x.startswith("suite.")]
+        if lrst:  # the restart files of a decomposed run against those of one patch (layout_restart)
+            bad, what = layout_restart(b, cfg, sets, refs, t, lrst[0], lrst[1], out)
+            done(out, not bad)
+            return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
+                             + (f"  [{'; '.join(x[:300] for x in bad[:8])}{' ...' if len(bad) > 8 else ''}]" if bad else ""))
         if chain:  # CPPWRF resumed against CPPWRF straight (restart_chain)
             bad, what = restart_chain(b, cfg, sets, refs, t, chain[0], chain[1], out, chain[2])
             done(out, not bad)
