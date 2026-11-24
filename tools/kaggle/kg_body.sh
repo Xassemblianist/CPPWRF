@@ -135,9 +135,10 @@ FIRST=
 for L in ${LAYOUTS//,/ }; do
   [ $SECONDS -lt $END ] || { echo "TIMEOUT before layout $L" >> "$OUT/summary.txt"; break; }
   R=$W/run_$L ENVS= N=1
-  # L@on / L@off / L@auto: the halo transport of the layout forced
-  G=${L#*@}; [ "$G" != "$L" ] || G=
-  LL=${L%@*}
+  # L@on / L@off / L@auto: the halo transport of the layout forced; L~N: a repetition of layout L (its own name)
+  LB=${L%%~*}
+  G=${LB#*@}; [ "$G" != "$LB" ] || G=
+  LL=${LB%@*}
   GENV=
   case $G in
     "") ;;
@@ -163,6 +164,8 @@ for L in ${LAYOUTS//,/ }; do
   OMP_NUM_THREADS=$(( $(nproc) / N > 0 ? $(nproc) / N : 1 )) timeout $((END - SECONDS)) \
     python3 tests/verify/wrf_suite.py --cuda-dp $R --only "$CASES" --exact --keep --out $W/s_$L > "$OUT/suite_$L.log" 2>&1
   echo "exit $? ($((SECONDS - t0)) s, layout $L, $N processes)" >> "$OUT/suite_$L.log"
+  # the whole logs of the layout's failed runs (wrf_suite.py's <dir>.failed.log)
+  find $W/s_$L -name '*.failed.log' 2> /dev/null | while read -r f; do mkdir -p "$OUT/failed_$L"; cp "$f" "$OUT/failed_$L/"; done
   # the error lines of the layout's runs (the suite keeps only the end of a failed run's output)
   grep -n -i -B2 -A6 "error\|abort\|signal\|terminate\|what()\|refus" $W/run_$L.log 2> /dev/null | tail -200 > "$OUT/runerr_$L.txt"
   kill $S1 $S2 2> /dev/null; wait $S1 $S2 2> /dev/null
