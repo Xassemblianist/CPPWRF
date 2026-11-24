@@ -163,6 +163,8 @@ for L in ${LAYOUTS//,/ }; do
   OMP_NUM_THREADS=$(( $(nproc) / N > 0 ? $(nproc) / N : 1 )) timeout $((END - SECONDS)) \
     python3 tests/verify/wrf_suite.py --cuda-dp $R --only "$CASES" --exact --keep --out $W/s_$L > "$OUT/suite_$L.log" 2>&1
   echo "exit $? ($((SECONDS - t0)) s, layout $L, $N processes)" >> "$OUT/suite_$L.log"
+  # the error lines of the layout's runs (the suite keeps only the end of a failed run's output)
+  grep -n -i -B2 -A6 "error\|abort\|signal\|terminate\|what()\|refus" $W/run_$L.log 2> /dev/null | tail -200 > "$OUT/runerr_$L.txt"
   kill $S1 $S2 2> /dev/null; wait $S1 $S2 2> /dev/null
   {
     echo "# rank -> device lines of the runs' logs"
