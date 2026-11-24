@@ -5,7 +5,7 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
-## Unreleased
+## 1.5.0 (2026-11-24)
 
 ### Added
 - Ensembles in one process (docs/ENSEMBLE.md, USER_GUIDE section 7): an `[ensemble]` section (`members`,

@@ -44,16 +44,16 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files. For v1.4.0 at `fbded83`, CPU CI passed
-  487 FP64 checks and 44 FP32 checks, all 531 against WRF at tolerance 0. The same run passed 42 WRF output file
-  checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 42/42. For v1.3.0 at `318159a`, CPU CI reported
+  process, in every variable and output time of the wrfout and wrfrst files. For v1.5.0 at `ac13ebe`, CPU CI passed
+  489 FP64 checks and 44 FP32 checks, all 533 against WRF at tolerance 0. CPU CI also passed 42 WRF output file
+  checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 44/44. For v1.3.0 at `318159a`, CPU CI reported
   483 FP64 passes, including the legacy Straka RMS check. The suite covers real-data domains in the mid-latitudes,
   the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and 72 h forecasts, WRF's default
   namelist and WRF's idealized cases.
-- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build. For v1.4.0 at `a63ed9f`, all 423 CUDA FP64
+- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build. For v1.5.0 at `40628eb`, all 423 CUDA FP64
   checks passed against WRF at tolerance 0 on the RTX PRO 6000 Blackwell of a Colab G4. Earlier G4 runs reported
-  423 passes for v1.3.0, 422 for v1.2.3, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1. Earlier subsets ran on
-  NVIDIA L4 and A100.
+  423 passes for v1.4.0 and v1.3.0, 422 for v1.2.3, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1. Earlier subsets
+  ran on NVIDIA L4 and A100.
 - **CPU and GPU, FP32** (`-DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default
   real*4 build) on 24 configurations, the 44 `cpu_sp` and 44 `cuda_sp_id` cases of the suite (P1-P4, P9, Noah-MP,
   Thompson, MYNN, WDM6, Morrison, the nests N1 / N3 and more). The CUDA FP32 build defaults to this identity mode
@@ -66,9 +66,9 @@ updates, branches, constants and defaults. Every result is checked against WRF i
   and ensembles on GPUs with slow FP64; use FP64 when the answer must be WRF real*8's (verification, comparisons with
   WRF runs, continuing a WRF run).
 
-Every WRF option is either ported identically or rejected with an error; nothing is silently ignored. Not proved:
-runs on several GPUs or several nodes (MPI ranks and tiles are proved on one machine, docs/MPI.md). Not ported: moving nests, ndown.exe, I/O forms other than NetCDF,
-and the schemes listed under [Rejected Options and Why](#rejected-options-and-why).
+Every WRF option is either ported identically or rejected with an error. All verified MPI layouts ran on a single
+node, including CUDA FP64 on two GPUs. See [MPI.md](MPI.md). The missing features include moving nests, `ndown.exe`,
+I/O forms other than NetCDF, and the schemes listed under [Rejected Options and Why](#rejected-options-and-why).
 
 The design (one source for CPU and GPU kernels, the physics driver, the nests) is described in
 docs/PHYSICS_SUITE.md, docs/PHYSICS_DRIVER.md, docs/NESTING.md and docs/NEST_NUMERICS.md.

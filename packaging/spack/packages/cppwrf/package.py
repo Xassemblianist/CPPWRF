@@ -11,11 +11,12 @@ class Cppwrf(CMakePackage, CudaPackage):
 
     homepage = "https://github.com/Xassemblianist/CPPWRF"
     git = "https://github.com/Xassemblianist/CPPWRF.git"
-    url = "https://github.com/Xassemblianist/CPPWRF/archive/refs/tags/v1.4.0.tar.gz"
+    url = "https://github.com/Xassemblianist/CPPWRF/archive/refs/tags/v1.5.0.tar.gz"
 
     license("GPL-3.0-or-later")
 
     version("main", branch="main")
+    version("1.5.0", tag="v1.5.0")
     version("1.4.0", tag="v1.4.0")
     version("1.3.0", tag="v1.3.0")
     version("1.2.3", tag="v1.2.3")

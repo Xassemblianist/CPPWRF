@@ -6,9 +6,9 @@ Yes, in FP64, for the configurations CPPWRF verifies. `cpu-fp64` and `gpu-fp64` 
 at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must equal NaN, and -0 must differ from
 +0.
 
-- **What was compared.** For v1.4.0 at `fbded83`, CPU CI passed 531 suite checks against WRF at tolerance 0
-  (487 FP64 and 44 FP32), 42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 42/42.
-  Another 154 CPU FP64 cases run with `--slow`. The v1.4.0 Colab G4 run at `a63ed9f` passed all 423 CUDA FP64
+- **What was compared.** For v1.5.0 at `ac13ebe`, CPU CI passed 533 suite checks against WRF at tolerance 0
+  (489 FP64 and 44 FP32), 42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 44/44.
+  Another 154 CPU FP64 cases run with `--slow`. The v1.5.0 Colab G4 run at `40628eb` passed all 423 CUDA FP64
   checks against WRF at tolerance 0. The v1.3.0 runs at `318159a` reported 483 CPU FP64 and 423 CUDA FP64 passes,
   including the legacy Straka RMS checks. The `ideal_grav2d_x` cases verify the Straka density current on CPU and
   CUDA against WRF real*8 at tolerance 0. The suite runs CPU checks on each push and GPU checks for each release.
@@ -79,7 +79,8 @@ From the difference between the two single-domain P4 cases (C2 and C1), peak mem
 in FP32 and 5.2 KiB in FP64.
 
 `cppwrf-fit namelist.input` estimates the memory and the run time of your namelist on your machine. On the CPU, the
-limit is the machine's RAM. One run is one machine: MPI ranks and tiles are proved on one machine only (docs/MPI.md).
+limit is the machine's RAM. All verified MPI and tile layouts ran on one node. The CUDA FP64 checks covered up to
+two GPUs. See [MPI.md](MPI.md).
 
 ### Can I use my WRF namelist?
 
@@ -90,7 +91,6 @@ silently. `physics_suite` and the `-1` options work as in WRF.
 
 ### What is not ported?
 
-- runs on several GPUs or several nodes (MPI ranks are proved on one machine only, docs/MPI.md);
 - moving nests, vertical nest refinement, ndown.exe;
 - the urban canopy models other than the single-layer UCM (sf_urban_physics = 1 with Noah), and the lake model;
 - the schemes outside the ported list: other microphysics, cumulus, PBL, surface-layer and land-surface schemes,

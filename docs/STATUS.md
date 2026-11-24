@@ -1,21 +1,20 @@
 # CPPWRF: status and verification
 
-Version 1.4.0. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the verified scope of the release.
+Version 1.5.0. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the verified scope of the release.
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
-is verified against WRF, and the current results. At `fbded83` (v1.4.0), `tests/verify/wrf_suite.py` defines 1159
-cases (623 CPU FP64, 405 CUDA FP64, 43 fast CUDA FP32, 44 CPU FP32 (`cpu_sp`) and 44 CUDA FP32 identity
-(`cuda_sp_id`)), plus 18 restart configurations. CPU CI passed 531 suite checks at tolerance 0 against WRF,
-including 469 CPU FP64 cases outside `--slow`, 18 restart checks, and 44 `cpu_sp` cases. The same run passed 42 WRF
-output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 42/42. The 154 slow CPU cases are 9 runs
-of 24 h, 30 h and 72 h and 145 Noah-MP option cases. The `ideal_grav2d_x` cases verify the Straka density current
-against WRF real*8 at tolerance 0 on CPU and CUDA.
+is verified against WRF, and the current results. At `091ffae` (v1.5.0), `tests/verify/wrf_suite.py` defines 1161
+cases (625 CPU FP64, 405 CUDA FP64, 43 fast CUDA FP32, 44 CPU FP32 (`cpu_sp`) and 44 CUDA FP32 identity
+(`cuda_sp_id`)), plus 18 restart configurations. CPU CI at `ac13ebe` passed 533 suite checks at tolerance 0 against
+WRF, including 471 CPU FP64 cases outside `--slow` (two new `*_chk` tile-check cases), 18 restart checks, and 44
+`cpu_sp` cases. CPU CI also passed 42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and
+CTest 44/44. The 154 slow CPU cases are 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases. The
+`ideal_grav2d_x` cases verify the Straka density current against WRF real*8 at tolerance 0 on CPU and CUDA.
 
-For v1.4.0 at `a63ed9f`, the Colab G4 passed all 423 CUDA FP64 checks against WRF at tolerance 0. For 1.1.0 the
-Colab G4 reported 338 CUDA FP64 passes, including all 319 cases at tolerance 0, 18 GPU restart checks and the
-legacy `straka_wrf_cuda` RMS check. The 43 CUDA FP32 cases with `restart_p1_fp32_cuda` gave 44 runs within their
-tolerances. The GPU runs from v1.2.0 through v1.4.0, including the 423 CUDA FP64 passes for v1.3.0, are listed in
-[RELEASE_NOTES.md](RELEASE_NOTES.md).
+For v1.5.0 at `40628eb`, the Colab G4 passed all 423 CUDA FP64 and 44 CUDA FP32 identity checks against WRF at
+tolerance 0. For 1.1.0 the Colab G4 reported 338 CUDA FP64 passes, including all 319 cases at tolerance 0, 18 GPU
+restart checks and the legacy `straka_wrf_cuda` RMS check. The 43 CUDA FP32 cases with `restart_p1_fp32_cuda` gave
+44 runs within their tolerances. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the GPU runs from v1.2.0 through v1.5.0.
 
 ## Implemented
 
@@ -40,7 +39,7 @@ tolerances. The GPU runs from v1.2.0 through v1.4.0, including the 423 CUDA FP64
 | Namelist | physics_suite CONUS and tropical (the -1 options), in tools/wrf2cppwrf.py and in the WRF I/O schema | verified |
 | Diagnostics | accumulation buckets bucket_mm and bucket_J (I_RAINC, I_RAINNC, I_ACSWUPT ... I_ACLWDNBC) and the precipitation windows prec_acc_dt (PREC_ACC_C, PREC_ACC_NC, SNOW_ACC_NC, per domain), output_diagnostics = 1 (T2MIN ... RAINNCVSTD over auxhist3_interval, the auxhist3 files), with the column physics; radar reflectivity (do_radar_ref); nwp_diagnostics is not ported | verified |
 | I/O | reads wrfinput_d0N / wrfbdy_d01; writes WRF v4.8.0 wrfout_d0N and wrfrst_d0N files (WRF I/O schema, iofields_filename, history_outname / rst_outname, frames_per_outfile, use_netcdf_classic) and its own restart files; native binary output; cppwrf_real (real.exe) | verified |
-| Domain decomposition | one domain and its nests as P x Q patches, each with its own memory (its points and a halo): tiles (`run.tiles`, host threads with their own fields and CUDA streams) or MPI ranks (a `CPPWRF_MPI` build under `mpirun`, `run.ranks`); halo exchanges, layout-independent reductions, one writer of the output; the same bits for every worker count and layout (docs/MPI.md: 13 layouts of up to 8 ranks on eight cases, 53 suite cases in three layouts, up to 48 ranks against the one-process run; suite cases `*_tPxQ`). Not run: several GPUs, several nodes | verified |
+| Domain decomposition | One domain and its nests run as P x Q patches with separate memory for their points and halos. Patches can be tiles (`run.tiles`) or MPI ranks (`CPPWRF_MPI`, `run.ranks`). Halo exchanges, layout-independent reductions and one output writer give the same bits across the tested layouts, including up to 48 CPU ranks and CUDA FP64 on two Tesla T4 GPUs on one node. See [MPI.md](MPI.md) and [RELEASE_NOTES.md](RELEASE_NOTES.md). | verified |
 | Ideal cases | WRF's ideal.exe for em_hill2d_x, em_quarter_ss, em_squall2d_x/y, em_grav2d_x; CPPWRF's own analytic tests (rest state, warm bubble, Straka, inertia-gravity wave, 2-D squall line) | verified |
 
 Tier: every row is **verified**, its whole-model output identical to WRF's at tolerance 0 (CPU FP64 and CUDA FP64,
@@ -293,6 +292,8 @@ on the AMD CPU of Colab's G4 runtime (`tools/colab/colab_suite.sh --gpu G4 --any
 suite, the output files, ideal files, differential and ctest tests); the Intel L4 runtime and the GCP VMs stay
 possible. The historical CPU suite totals include the legacy `straka_wrf` RMS check at 1e-4 K. The CPU FP64 cases
 against WRF real*8, including `ideal_grav2d_x`, use tolerance 0.
+For 1.5.0 at `ac13ebe`, CPU CI reported suite PASS 533 FAIL 0 at tolerance 0 against WRF. CPU CI also passed
+42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 44/44.
 The CPU result does not depend on the OpenMP thread count or on the Intel machine: P4, P6, P8, P9, MYNN,
 P1 with Noah-MP and the two-way nest N3s (1 h, both domains) and em_quarter_ss (30 min) with 1, 16 and 44
 threads are bit-identical to serial WRF on c3 (Sapphire Rapids) and n2 machines (`run.threads` in
@@ -336,6 +337,8 @@ restart checks and the legacy RMS check, 356 PASS, 0 FAIL. For 1.2.3 (c29a32d, 2
 restart checks and the legacy RMS check, 422 PASS, 0 FAIL, 1 not run (its data tar was missing from the GPU data list).
 For 1.3.0 (318159a, 2026-11-22): 404 cases, 18 GPU restart checks and the legacy RMS check, 423 PASS, 0 FAIL, 0 SKIP.
 For 1.4.0 (`a63ed9f`, 2026-11-23), 405 cases and 18 GPU restart checks passed against WRF at tolerance 0
+(423 PASS, 0 FAIL, 0 SKIP).
+For 1.5.0 (`40628eb`, 2026-11-24), all 405 cases and 18 GPU restart checks passed against WRF at tolerance 0
 (423 PASS, 0 FAIL, 0 SKIP).
 The legacy RMS check used WRF real*4 and a tolerance of 1e-4 K. The `ideal_grav2d_x` case uses tolerance 0 against
 WRF real*8. Earlier subsets also ran on Colab's L4 (sm_89) and A100
