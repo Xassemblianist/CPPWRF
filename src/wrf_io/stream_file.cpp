@@ -86,7 +86,7 @@ void StreamFile::write(const std::string& date, const StreamValueFn& value) {
   // the record's memory in the queue: its values and about as much in precompressed chunks (their input copies)
   const std::size_t bytes = 2 * NcOut::bytes(*b);
   std::shared_ptr<NcOut> nc = nc_;
-  output_queue::submit(bytes, [nc, b, date, rec, t0, t1, t_value, download, timed, secs, path = path_]() mutable {
+  output_queue::submit(bytes, path_, [nc, b, date, rec, t0, t1, t_value, download, timed, secs, path = path_]() mutable {
     const deflate::Stats w0 = timed ? deflate::stats() : deflate::Stats{};
     const auto t2 = clk::now();
     const deflate::UseGroup use(b->group.get());  // the record's own precomputed chunks first (also at the sync)

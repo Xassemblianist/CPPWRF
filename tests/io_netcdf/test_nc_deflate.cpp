@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
       nc.stage(*b, "HGT", recs[r].hgt, r);
       nc.stage_int(*b, "LU_INDEX", recs[r].lu, r);
       nc.stage(*b, "P_TOP", {5000.0}, r);
-      oq::submit(2 * NcOut::bytes(*b), [ncp, b, date, r]() mutable {
+      oq::submit(2 * NcOut::bytes(*b), path, [ncp, b, date, r]() mutable {
         ncp->put_text("Times", date, r);
         ncp->flush(*b);
         ncp->sync();
@@ -150,18 +150,58 @@ int main(int argc, char** argv) {
     std::atomic<bool> go{false}, later_ran{false};
     std::string msg;
     try {
-      oq::submit(1, [&go] {
+      oq::submit(1, "f1.nc", [&go] {
         while (!go) std::this_thread::yield();
         throw std::runtime_error("netcdf: put T: a test error");
       });
-      oq::submit(1, [&later_ran] { later_ran = true; });
+      oq::submit(1, "f2.nc", [&later_ran] { later_ran = true; });
       go = true;
       oq::drain();
     } catch (const std::exception& e) {
       msg = e.what();
     }
-    assert(msg == "netcdf: put T: a test error" && !later_ran);
+    assert(msg == "netcdf: put T: a test error (writing f1.nc)" && !later_ran);
     oq::check();  // reported once
+    // the runs of an ensemble's members (OwnerScope): an error of member 1's job is member 1's, named with its file
+    // and the member; member 2's jobs are written, and its drain waits for its own jobs, not for member 1's queued
+    // after them
+    {
+      std::atomic<bool> hold{false}, m2_ran{false}, m1_later{false};
+      {
+        const oq::OwnerScope m2(2, "ensemble member 2");
+        oq::submit(1, "m2_a.nc", [&m2_ran] { m2_ran = true; });
+      }
+      {
+        const oq::OwnerScope m1(1, "ensemble member 1");
+        oq::submit(1, "m1_a.nc", [&hold] {
+          while (!hold) std::this_thread::yield();
+          throw std::runtime_error("netcdf: put U: a test error");
+        });
+        oq::submit(1, "m1_b.nc", [&m1_later] { m1_later = true; });
+      }
+      {
+        const oq::OwnerScope m2(2, "ensemble member 2");
+        oq::drain();  // member 1's job still blocked: returns, without member 1's error
+        assert(m2_ran && !hold);
+        hold = true;
+        oq::submit(1, "m2_b.nc", [&m2_ran] { m2_ran = false; });  // after member 1's error: written
+        oq::drain();
+        assert(!m2_ran);
+        oq::check();
+      }
+      std::string m1msg;
+      {
+        const oq::OwnerScope m1(1, "ensemble member 1");
+        try {
+          oq::drain();
+        } catch (const std::exception& e) {
+          m1msg = e.what();
+        }
+        oq::check();  // reported once
+      }
+      assert(m1msg == "netcdf: put U: a test error (writing m1_a.nc, ensemble member 1)" && !m1_later);
+      oq::check();  // the process's own run: no error of its own
+    }
     oq::finish();
   }
   std::remove(side.c_str());

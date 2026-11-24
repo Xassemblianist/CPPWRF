@@ -12,7 +12,10 @@ environment's; the ensemble's members get a share of it), and of `--set ensemble
 diag.csv without its wall-time column, run.json without the output directories and output.write_queue_mb of its
 configuration. Refused: an
 unknown ensemble key, a member above ensemble.members, two members with one output.dir (also spelled
-differently: dir/x/../dir), two members with one output.wrf_dir, an unknown mode.
+differently: dir/x/../dir; also with output.format = wrfout, whose run.json, diag.csv and restart files go there),
+two members with one output.wrf_dir, one member's output.dir as another's WRF directory, a history_outname
+directory below one member's WRF directory as another's WRF directory, a date tag in a stream name's directory,
+an unknown mode, CPPWRF_G3_DUMP.
 
 --cumulus (data: ${CPPWRF_WRF_RUNS}/run_P8_r8/steps; exit 77 without it): P8 (Grell-Freitas, cu_physics = 3) and P8
 with cu_physics = 0, both writing a restart file after 3 steps, in sequential and threads mode, against their
@@ -86,11 +89,11 @@ def main():
         print(f"{'ok  ' if ok else 'FAIL'} {what}")
         fails += not ok
 
-    def run(name, cfg, sets, fail=False):
+    def run(name, cfg, sets, fail=False, env=None):
         cmd = [binary, cfg]
         for s in sets:
             cmd += ["--set", s]
-        r = subprocess.run(cmd, capture_output=True, text=True)
+        r = subprocess.run(cmd, capture_output=True, text=True, env=dict(os.environ, **(env or {})))
         with open(os.path.join(work, name + ".log"), "w") as f:
             f.write(r.stdout + r.stderr)
         if fail:
@@ -180,13 +183,33 @@ def main():
         ("same_dir_alias", [f"ensemble.member3=output.dir={work}/same_dir_alias/x/../member1"],
          "write to the same output.dir"),
         ("bad_mode", ["ensemble.mode=batch"], "ensemble.mode: threads or sequential"),
+        ("g3_dump", [], "CPPWRF_G3_DUMP: its files have one name for every member", {"CPPWRF_G3_DUMP": f"{work}/g3.bin"}),
     ]
     if netcdf == "ON":
+        # output.format = wrfout: run.json, diag.csv and the native restart files still go to output.dir
+        refusals.append(("wrfout_same_dir", ["output.format=wrfout",
+                                             f"ensemble.member3=output.dir={work}/wrfout_same_dir/member1 | "
+                                             f"output.wrf_dir={work}/wrfout_same_dir_wrf3"],
+                         "write to the same output.dir"))
         refusals.append(("same_wrf_dir", [f"ensemble.member1=output.wrf_dir={work}/wrf",
                                           f"ensemble.member2=output.wrf_dir={work}/wrf"],
                          "write their WRF files to the same directory"))
-    for name, sets, msg in refusals:
-        rc, log = run(name, ens, BASE + [f"output.dir={work}/{name}"] + sets, fail=True)
+        # one member's native directory as another's WRF directory
+        refusals.append(("cross_dir", [f"ensemble.member3=output.wrf_dir={work}/cross_dir/member1"],
+                         "write files to the same directory"))
+        # a stream name's directory below one member's WRF directory as another's WRF directory
+        nl_sub = os.path.join(work, "namelist_sub.input")
+        with open(nl_sub, "w") as f:
+            f.write("&time_control\n history_outname = 'sub/wrfout_d<domain>_<date>'\n/\n")
+        refusals.append(("stream_sub", [f"output.wrf_namelist={nl_sub}",
+                                        f"ensemble.member2=output.wrf_dir={work}/stream_sub/member1/sub"],
+                         "write files to the same directory"))
+        nl_date = os.path.join(work, "namelist_date.input")
+        with open(nl_date, "w") as f:
+            f.write("&time_control\n history_outname = '<date>/wrfout_d<domain>'\n/\n")
+        refusals.append(("stream_date", [f"output.wrf_namelist={nl_date}"], "a date tag in its directory part"))
+    for name, sets, msg, *env in refusals:
+        rc, log = run(name, ens, BASE + [f"output.dir={work}/{name}"] + sets, fail=True, env=env[0] if env else None)
         note(rc != 0 and msg in log, f"{name}: refused with '{msg}'" if rc != 0 and msg in log
              else f"{name}: exit {rc}, no '{msg}' in {log.strip().splitlines()[-2:]}")
     if netcdf == "ON":  # a WRF directory of the configuration: one per member under it

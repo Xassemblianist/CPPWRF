@@ -14,12 +14,15 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #ifdef CPPWRF_HAVE_HDF5
 #include <dlfcn.h>
 #include <hdf5.h>
+#include <link.h>
 #endif
 
 namespace cppwrf::wrf_io::deflate {
@@ -186,18 +189,39 @@ void compress_chunk(const Record& r, std::size_t c, Group& g) {
 }
 
 #ifdef CPPWRF_HAVE_HDF5
+// every shared library of the process that has an H5Z_register (its own or of a library it depends on) has this one:
+// one HDF5 library in the process (two would each have their own filter table)
+bool one_h5z_register(void* reg) {
+  std::vector<std::string> names;  // (dlopen after the walk: not under the loader's lock of dl_iterate_phdr)
+  dl_iterate_phdr(
+      [](dl_phdr_info* info, std::size_t, void* data) {
+        // (the program itself, without a name: RTLD_DEFAULT found reg there)
+        if (info->dlpi_name && *info->dlpi_name) static_cast<std::vector<std::string>*>(data)->push_back(info->dlpi_name);
+        return 0;
+      },
+      &names);
+  for (const std::string& n : names)
+    if (void* h = dlopen(n.c_str(), RTLD_LAZY | RTLD_NOLOAD)) {
+      void* f = dlsym(h, "H5Z_register");
+      dlclose(h);
+      if (f && f != reg) return false;
+    }
+  return true;
+}
+
 // the precomputed output of a filter input, if there is one (removed from the results)
 bool take(int level, const unsigned char* p, std::size_t n, std::vector<unsigned char>& out) {
   const std::uint64_t key = sample_key(p, n);
   std::lock_guard<std::mutex> lk(g_mutex);
   // the entries of this key only (equal inputs give equal outputs: any entry of the same bytes and level will do)
-  // the writing thread's own group first (UseGroup): another file's record with the same values (wrfrst and the
-  // history frame of the same time) keeps its own entries for its own puts
+  // the writing thread's own group only (UseGroup): another file's record with the same values (wrfrst and the
+  // history frame of the same time, another ensemble member's static fields) keeps its own entries for its own puts;
+  // a thread without a group (a direct NcOut caller) takes any entry
   const auto [b, end] = g_ready.equal_range(key);
   for (int pass = 0; pass < 2; ++pass)
     for (auto it = b; it != end; ++it) {
       Entry& e = *it->second;
-      if ((pass == 1 || e.group == t_group) && e.level == level && e.in.size() == n &&
+      if ((pass == 1 ? t_group == nullptr : e.group == t_group) && e.level == level && e.in.size() == n &&
           std::memcmp(e.in.data(), p, n) == 0) {
         out = std::move(e.out);
         g_ready.erase(it);
@@ -300,12 +324,18 @@ void install() {
     // filter); another version, a library without the exported symbol (a static build) or a failed registration
     // keeps HDF5's own filter: the same bytes, compressed in the writing thread. The library and its filter table are
     // initialised first (H5open, H5Zfilter_avail), so that the built-in registration cannot come after this one.
+    // Also kept: a library of another minor version than the headers of the build (the class's layout is theirs), an
+    // odd (development) minor version, and an H5Z_register of another shared library than the H5open in use.
+    static_assert(H5Z_CLASS_T_VERS == 1, "H5Z_class2_t of HDF5 1.10 to 1.14");
     unsigned maj = 0, min = 0, rel = 0;
-    if (H5open() < 0 || H5get_libversion(&maj, &min, &rel) < 0 || maj != 1 || min < 10 || min > 14) return;
+    if (H5open() < 0 || H5get_libversion(&maj, &min, &rel) < 0 || maj != 1 || min < 10 || min > 14 || min % 2 != 0 ||
+        maj != H5_VERS_MAJOR || min != H5_VERS_MINOR)
+      return;
     if (H5Zfilter_avail(H5Z_FILTER_DEFLATE) <= 0) return;
     using RegisterFn = herr_t (*)(const H5Z_class2_t*);
     auto reg = reinterpret_cast<RegisterFn>(dlsym(RTLD_DEFAULT, "H5Z_register"));
     if (!reg) return;
+    if (!one_h5z_register(reinterpret_cast<void*>(reg))) return;
     // same id and name as HDF5's own class (H5Zdeflate.c H5Z_DEFLATE): the name goes into the filter pipeline messages
     static const H5Z_class2_t cls = {H5Z_CLASS_T_VERS, H5Z_FILTER_DEFLATE, 1, 1, "deflate", nullptr, nullptr, filter};
     g_installed = reg(&cls) >= 0;

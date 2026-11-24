@@ -18,6 +18,7 @@
 // record is written in the caller's thread, as before. A decomposed run (tiles, MPI) writes synchronously.
 #include <cstddef>
 #include <functional>
+#include <string>
 
 namespace cppwrf::wrf_io {
 
@@ -60,14 +61,32 @@ bool on();
 // its exception propagates).
 // Waits (without the NetCDF lock) while the queue holds other records and bytes would exceed the cap. Rethrows the
 // error of an earlier job first (check).
-void submit(std::size_t bytes, std::function<void()> job);
-// the first error of a job, rethrown once in the submitting thread, with the job's message; after an error the
-// writer skips the jobs still queued (the synchronous writer would have stopped at it)
+// file: the path it writes, named in the message of its error (with the run's OwnerScope label)
+void submit(std::size_t bytes, const std::string& file, std::function<void()> job);
+// The run of the calling thread's jobs, for this scope (an ensemble member's thread; default 0: the process's run).
+// Each run has its own errors and its own drain: one member's writer error stops that member (its message names the
+// file and the member), the writer goes on with the other members' records, and a member that ends waits for its
+// own records only. label: a string that outlives the scope ("ensemble member 2"), or nullptr.
+class OwnerScope {
+ public:
+  OwnerScope(int owner, const char* label);
+  ~OwnerScope();
+  OwnerScope(const OwnerScope&) = delete;
+  OwnerScope& operator=(const OwnerScope&) = delete;
+
+ private:
+  int owner_;
+  const char* label_;
+};
+// the first error of a job of the calling thread's run, rethrown once in that thread, with the job's message and
+// the file it was writing; after an error the writer skips that run's jobs still queued (its synchronous writer
+// would have stopped at it)
 void check();
-// waits for every queued job (without the NetCDF lock), then check(); the calling thread then lets go of the lock
+// waits for the calling thread's run's queued jobs (without the NetCDF lock), then check(); the calling thread then
+// lets go of the lock
 void drain();
-// at the end of the process, also after an error: drain(), an error of a job printed instead of thrown; false when
-// one was (the run's exit status is then that of an error, not of a non-finite stop)
+// at the end of the process, also after an error: every run's jobs written, the errors not reported yet printed
+// instead of thrown; false when one was (the run's exit status is then that of an error, not of a non-finite stop)
 bool finish() noexcept;
 // before a new file is created (NcOut): an error of an earlier job rethrown (no new file after a known error); a
 // file of the same path still open in queued jobs (path_open): those jobs done first, so that it is closed before

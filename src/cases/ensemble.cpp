@@ -99,41 +99,53 @@ std::string resolved(const std::string& p) {
   return (ec ? a.lexically_normal() : c).string();
 }
 
-// the directories a member writes into: its output.dir (native files: run.json, diag.csv, snapshots, restarts) and
-// with output.format = wrfout / both its WRF files' (output.wrf_dir, default output.dir)
-struct Dests {
-  std::string native, wrf;  // resolved; empty: none
+// The directories a member writes files into, as the file system resolves them: its output.dir in every
+// output.format (run.json, diag.csv, native snapshots and restart_*.nc: DomainRunner writes them whatever the
+// format), and with output.format = wrfout / both the directory of its WRF files (output.wrf_dir, default
+// output.dir) and the directories that the namelist's stream names (history_outname, rst_outname,
+// auxhist3_outname) put below it. Two members never share one of these directories (also across kinds: one
+// member's output.dir is not another's WRF directory), so no file of one member has the path of another's.
+struct Dest {
+  std::string dir;   // resolved
+  std::string what;  // for the message
 };
-Dests member_dests(const io::Config& m) {
+std::vector<Dest> member_dests(const io::Config& m, int i) {
   const std::string fmt = m.get_string("output.format", "native");
   const std::string dir = m.get_string("output.dir");
-  Dests d;
-  if (fmt != "wrfout") d.native = resolved(dir);
-  if (fmt == "wrfout" || fmt == "both") d.wrf = resolved(m.get_string("output.wrf_dir", dir));
-  return d;
-}
-
-// the WRF stream file names of the member's namelist (history_outname, rst_outname, auxhist3_outname: placed in the
-// WRF directory) stay in it: no '..' component
-void check_stream_names(const io::Config& m, int i) {
+  std::vector<Dest> d;
+  d.push_back({resolved(dir), "output.dir '" + dir + "'"});
+  if (fmt != "wrfout" && fmt != "both") return d;
+  const std::string wrf = m.get_string("output.wrf_dir", dir);
+  d.push_back({resolved(wrf), "WRF files (output.wrf_dir, default output.dir) '" + wrf + "'"});
 #ifdef CPPWRF_HAVE_NETCDF
-  if (m.get_string("output.format", "native") == "native") return;
+  // the namelist WrfHistory reads (output.wrf_namelist, default real.dir/namelist.input; none: WRF's default names,
+  // which have no directory part)
   const std::string real_dir = m.get_string("real.dir", "");
   const std::string nl = m.get_string("output.wrf_namelist", real_dir.empty() ? "" : real_dir + "/namelist.input");
-  if (nl.empty() || !std::filesystem::exists(nl)) return;
+  if (nl.empty() || !std::filesystem::exists(nl)) return d;
   const wrf_io::Namelist n = wrf_io::Namelist::read(nl);
+  const std::string who = "ensemble member " + std::to_string(i) + ": " + nl + ": ";
   for (const char* key : {"history_outname", "rst_outname", "auxhist3_outname"})
     for (std::string v : n.values("time_control", key)) {
       if (v.size() >= 2 && (v.front() == '\'' || v.front() == '"') && v.back() == v.front()) v = v.substr(1, v.size() - 2);
-      for (const auto& c : std::filesystem::path(v))
+      const std::filesystem::path p(v);
+      for (const auto& c : p)
         if (c == "..")
-          throw io::ConfigError("ensemble member " + std::to_string(i) + ": " + nl + ": " + key + " = '" + v +
+          throw io::ConfigError(who + key + " = '" + v +
                                 "' leaves the member's WRF directory (a '..' component): members would share its files");
+      // (WrfHistory: <WRF directory>/<name>) a member is domain 1 (no nests); a date tag left in the directory part: a directory per date, which the
+      // check cannot list
+      std::string sub = p.parent_path().string();
+      for (std::size_t k = sub.find("<domain>"); k != std::string::npos; k = sub.find("<domain>")) sub.replace(k, 8, "01");
+      if (sub.empty()) continue;
+      if (sub.find('<') != std::string::npos)
+        throw io::ConfigError(who + key + " = '" + v + "': a date tag in its directory part is not supported in an ensemble");
+      d.push_back({resolved(wrf + "/" + sub), std::string(key) + " '" + v + "' below '" + wrf + "'"});
     }
 #else
-  (void)m;
   (void)i;
 #endif
+  return d;
 }
 
 // a member is one domain in one patch: no nests, no tiles (MPI ranks are refused by main)
@@ -195,7 +207,14 @@ class HostLock {
 };
 
 // one member's run: main's time loop of a single domain, the host work under the members' lock
-int run_member(const io::Config& cfg, const std::string& dir, Shared& sh) {
+int run_member(const io::Config& cfg, const std::string& dir, Shared& sh, int i) {
+#ifdef CPPWRF_HAVE_NETCDF
+  // the member's WRF records: its own writer errors (named with the file and the member) and its own drain at the end
+  const std::string label = "ensemble member " + std::to_string(i + 1);
+  const wrf_io::output_queue::OwnerScope owner(i + 1, label.c_str());
+#else
+  (void)i;
+#endif
   HostLock lk(sh);  // declared first: the runner and the model are destroyed under it
   lk.lock();
   Model m = Model::build(cfg);
@@ -240,7 +259,8 @@ int run_member(const io::Config& cfg, const std::string& dir, Shared& sh) {
 // debugging dumps write fixed file names: one member's run only
 void check_no_dumps(int n) {
   if (n < 2) return;
-  for (const char* e : {"CPPWRF_VM_DUMP", "CPPWRF_NOAH_DUMP", "CPPWRF_GF_DUMP", "CPPWRF_GFL_DUMP", "CPPWRF_NTIEDTKE_DUMP"})
+  for (const char* e : {"CPPWRF_VM_DUMP", "CPPWRF_NOAH_DUMP", "CPPWRF_GF_DUMP", "CPPWRF_GFL_DUMP", "CPPWRF_NTIEDTKE_DUMP",
+                        "CPPWRF_G3_DUMP"})
     if (const char* v = std::getenv(e); v && *v)
       throw io::ConfigError(std::string(e) + ": its files have one name for every member (run the member alone: "
                             "--set ensemble.member=I)");
@@ -294,25 +314,28 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
 
   std::vector<io::Config> cfgs;
   std::vector<std::string> dirs;
-  std::vector<Dests> dests;
+  std::vector<std::vector<Dest>> dests;
   for (int i = 1; i <= n; ++i) {
     cfgs.push_back(ensemble_member_config(path, ov, cfg, i));
     check_member(cfgs.back(), i);
     io::check_option_tiers(cfgs.back(), "ensemble member " + std::to_string(i) + ": ");
-    check_stream_names(cfgs.back(), i);
     dirs.push_back(cfgs.back().get_string("output.dir"));
-    dests.push_back(member_dests(cfgs.back()));
+    dests.push_back(member_dests(cfgs.back(), i));
     // the directories as the file system resolves them (a/../a, symbolic links): no file of two members in one
-    const Dests& d = dests.back();
-    for (int j = 0; j + 1 < i; ++j) {
-      const Dests& e = dests[std::size_t(j)];
-      const std::string who = "ensemble members " + std::to_string(j + 1) + " and " + std::to_string(i);
-      if (!d.native.empty() && d.native == e.native)
-        throw io::ConfigError(who + " write to the same output.dir '" + dirs.back() + "' (" + d.native + ")");
-      if (!d.wrf.empty() && d.wrf == e.wrf)
-        throw io::ConfigError(who + " write their WRF files to the same directory " + d.wrf +
-                              " (output.wrf_dir, default output.dir)");
-    }
+    for (int j = 0; j + 1 < i; ++j)
+      for (const Dest& a : dests[std::size_t(j)])
+        for (const Dest& b : dests.back())
+          if (a.dir == b.dir) {
+            const std::string who = "ensemble members " + std::to_string(j + 1) + " and " + std::to_string(i);
+            if (a.what.rfind("output.dir", 0) == 0 && b.what.rfind("output.dir", 0) == 0)
+              throw io::ConfigError(who + " write to the same output.dir '" + dirs.back() + "' (" + b.dir + ")");
+            if (a.what.rfind("WRF files", 0) == 0 && b.what.rfind("WRF files", 0) == 0)
+              throw io::ConfigError(who + " write their WRF files to the same directory " + b.dir +
+                                    " (output.wrf_dir, default output.dir)");
+            throw io::ConfigError(who + " write files to the same directory " + b.dir + ": member " +
+                                  std::to_string(j + 1) + "'s " + a.what + ", member " + std::to_string(i) + "'s " +
+                                  b.what);
+          }
   }
   check_no_dumps(n);
   int per = 1;
@@ -322,6 +345,13 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
   std::printf("cppwrf: ensemble of %d members, %s%s\n", n, threads ? "one host thread each" : "one after the other",
               threads ? (", " + std::to_string(per) + " OpenMP threads each").c_str() : "");
   for (int i = 1; i <= n; ++i) std::printf("cppwrf: ensemble member %d: %s\n", i, dirs[std::size_t(i - 1)].c_str());
+#if defined(CPPWRF_USE_HIP)
+  // (core/backend.hpp, set_fatal_slot) the device's fatal flag has one word on HIP
+  if (threads)
+    std::printf("cppwrf: note: HIP: the members share the device's fatal flag: a WRF stop raised in a device kernel "
+                "stops the ensemble, but the member named as failing first can be another one than the one that "
+                "raised it (ensemble.mode = sequential or ensemble.member = I to name it)\n");
+#endif
   std::fflush(stdout);
 
   Shared sh;
@@ -335,7 +365,7 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
     const auto t = std::chrono::steady_clock::now();
     started[std::size_t(i)] = 1;
     try {
-      rc[std::size_t(i)] = run_member(cfgs[std::size_t(i)], dirs[std::size_t(i)], sh);
+      rc[std::size_t(i)] = run_member(cfgs[std::size_t(i)], dirs[std::size_t(i)], sh, i);
     } catch (...) {
       err[std::size_t(i)] = std::current_exception();
       sh.fail(i);
@@ -365,7 +395,8 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
 #endif
           set_thread_stream_sync(true);
           // the member's own fatal flags (core/backend.hpp): a code one member raises stops that member, never
-          // another one that runs the same scheme at the same time
+          // another one that runs the same scheme at the same time (HIP: the host flags; the device's one word is
+          // read by every member's checks, see above)
           set_fatal_slot(i + 1);
           body(i);
           // the thread ends: its stream, graphs, flag slots, work and upload buffers are not kept for the process

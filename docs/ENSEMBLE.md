@@ -22,12 +22,15 @@ mode = threads                               ; threads (default) | sequential
   a `memberI` key is the configuration as it is.
 - Member I writes to `<output.dir>/memberI`, where `output.dir` is the configuration's (default `out/<case>`). An
   `output.dir` in `memberI` wins. A WRF directory of the configuration (`output.wrf_dir`) is a root in the same way:
-  member I writes its WRF files to `<output.wrf_dir>/memberI` (an `output.wrf_dir` in `memberI` wins). Two members
-  with one native directory, or one WRF directory, are refused; the directories are compared as the file system
-  resolves them (`a/x/../b`, symbolic links). A namelist `history_outname`, `rst_outname` or `auxhist3_outname` with a
-  `..` component (a file outside the member's WRF directory) is refused, and so are the debugging dumps
-  (`CPPWRF_VM_DUMP`, `CPPWRF_NOAH_DUMP`, `CPPWRF_GF_DUMP`, `CPPWRF_GFL_DUMP`, `CPPWRF_NTIEDTKE_DUMP`: one file name for
-  every member) in an ensemble of more than one member.
+  member I writes its WRF files to `<output.wrf_dir>/memberI` (an `output.wrf_dir` in `memberI` wins). Every
+  directory a member writes into is its own: its `output.dir` (run.json, diag.csv, native snapshots and restart files,
+  in every `output.format`, `wrfout` too), its WRF directory, and the directories a namelist `history_outname`,
+  `rst_outname` or `auxhist3_outname` names below that (`sub/wrfout_d<domain>_<date>`). Two members with one of them
+  in common, of the same kind or not (one member's `output.dir` as another's WRF directory), are refused; the
+  directories are compared as the file system resolves them (`a/x/../b`, symbolic links). A stream name with a `..`
+  component (a file outside the member's WRF directory) or a date tag in its directory part is refused, and so are
+  the debugging dumps (`CPPWRF_VM_DUMP`, `CPPWRF_NOAH_DUMP`, `CPPWRF_GF_DUMP`, `CPPWRF_GFL_DUMP`,
+  `CPPWRF_NTIEDTKE_DUMP`, `CPPWRF_G3_DUMP`: one file name for every member) in an ensemble of more than one member.
 - The member's configuration is the file plus the overrides, without the `[ensemble]` section. That is also what
   its restart files record, so a member's restart file resumes as a single run.
 - `cppwrf ens.ini --set ensemble.member=I` runs member I alone, as a plain single run, into the same directory
@@ -87,7 +90,16 @@ dynamic shared memory they ask for (0, the launches unchanged, outside an ensemb
 (`%dynamic_smem_size`) only when it raises. A member's check reads and clears its own slot on its own stream, with
 every transfer checked. A member that stops (another member failed) reads its pending checks at a point where a
 raised code is its own error, before the destructors that free device memory; an error already on its way drops
-them unread. HIP: one slot for every launch (the members on an AMD device share the flag, as before).
+them unread. HIP: the device flag has one word for every launch (no per-launch slot), and every thread's checks
+read and clear that word (the host flags keep their slots). A code raised in a device kernel therefore always stops
+the ensemble, but the member named as failing first can be another member than the one that raised it (the run
+says so at its start); `mode = sequential` or `ensemble.member=I` names it.
+
+The output writer thread keeps each member's records apart: a writer error stops the member whose file it was
+writing (its message names the file and the member), the writer goes on with the other members' records, and a
+member that ends waits for its own queued records only (then frees its device memory), not for the records the other
+members queue after them. The queue's cap (`output.write_queue_mb`) is one for the process and is checked again by
+every waiting member after it wakes.
 
 Proof: ctest `ensemble` (tests/verify/ensemble_test.py, CPU builds and GPU builds alike): a tiny squall2d as an
 ensemble of three members (Kessler; WSM6 with other species; a warmer bubble in shear), in threads and in
