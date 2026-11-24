@@ -54,6 +54,25 @@ resumes across versions from WRF's wrfrst files.
   only with HDF5 1.10 to 1.14 (another version keeps HDF5's own filter: the same bytes); docs/PERF.md IO2.
 
 ### Fixed
+- Ensembles and the output writer, second audit: HIP builds read the device fatal flag where HIP kernels raise it
+  (one word for every launch; was a member's own slot, never written: a HIP threads ensemble missed every device
+  stop); every directory a member writes to is its own in every `output.format` (`wrfout` members' run.json,
+  diag.csv and native restarts in `output.dir` included, one member's `output.dir` against another's WRF directory,
+  the subdirectories of namelist stream names; a date tag in a stream name's directory is refused);
+  `CPPWRF_G3_DUMP` is refused in an ensemble. The writer thread keeps each member's records apart: a writer error is
+  the member's whose file it was writing and names the file (single runs: the file too), the other members' records
+  are written on, and a member that ends waits for its own records only; members woken together re-check the queue's
+  cap; a new file of the same path is not created after a writer error found while waiting for the old one; open
+  files are keyed by their resolved path (symbolic links). Precomputed chunks are taken by their own record's group
+  only (a thread without a group: any); the HDF5 filter replacement also requires the headers' minor version, an even
+  minor version and one HDF5 library in the process. Halo fingerprints include the field's domain and extents and a
+  periodic line's arguments; GPU halo padding is sent as zeros.
+- MPI runs: `run.gpu_aware_mpi = on` is refused at the start when the library of a rank reports that it does not
+  take device memory (was a crash in the transport; a library that cannot say is still taken at the setting's word).
+  A rank that stops names itself and the MPI operation it was in (MPI errors are returned and reported with MPI's
+  error string; a fatal signal, MPI_Abort and an exit without MPI_Finalize print the rank and the operation);
+  wrf_suite.py keeps a failed run's whole log beside its output directory (`<dir>.failed.log`) and quotes its error
+  lines.
 - Ensembles: convtrans_prep's averaging counter (WRF's SAVE `stepave_count`) is each run's own (one per run, shared
   by its domains) instead of one per host thread, so a sequential member no longer inherits the previous member's
   count (in its restart file, or as a divisor after a WRF restart). WRF fatal flags are per member (a slot per member

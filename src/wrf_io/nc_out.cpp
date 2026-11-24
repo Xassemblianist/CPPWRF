@@ -35,10 +35,14 @@ std::multiset<std::string>& open_paths() {
   static auto* s = new std::multiset<std::string>;  // never destroyed (an NcOut may close at exit)
   return *s;
 }
+// as the file system resolves it (symbolic links of its existing part followed, . and .. removed): two spellings of
+// one file are one key
 std::string path_key(const std::string& p) {
   std::error_code ec;
   const std::filesystem::path a = std::filesystem::absolute(p, ec);
-  return (ec ? std::filesystem::path(p) : a).lexically_normal().string();
+  if (ec) return std::filesystem::path(p).lexically_normal().string();
+  const std::filesystem::path c = std::filesystem::weakly_canonical(a, ec);
+  return (ec ? a.lexically_normal() : c).string();
 }
 // the closed file's path out of the set; nothing escapes (called from the destructor: a scoped lock there made
 // GCC 14 emit __cxa_call_terminate, absent from GCC 13's libstdc++ that a CUDA build with a GCC 13 host links)
@@ -64,8 +68,14 @@ NcOut::NcOut(const std::string& path, bool netcdf4) : nc4_(netcdf4), key_(path_k
   const NcCall lk;
   if (netcdf4) deflate::install();
   ck(nc_create(path.c_str(), netcdf4 ? (NC_CLOBBER | NC_NETCDF4) : (NC_CLOBBER | NC_64BIT_OFFSET), &nc_), "create " + path);
-  std::lock_guard<std::mutex> g(open_m);
-  open_paths().insert(key_);
+  try {
+    std::lock_guard<std::mutex> g(open_m);
+    open_paths().insert(key_);
+  } catch (...) {  // (no destructor after a constructor that throws: the file closed here)
+    nc_close(nc_);
+    nc_ = -1;
+    throw;
+  }
 }
 
 NcOut::~NcOut() {

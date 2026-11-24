@@ -963,7 +963,10 @@ struct FatalError : std::runtime_error {
 // thread that launches them (column_for / parallel_for). On a CUDA device each translation unit's flag has one
 // word per slot; a launch of column_for / parallel_for / LaunchBatch / parallel_fused carries its slot as the bytes
 // of dynamic shared memory it asks for (0 outside an ensemble: the launches are unchanged), which raise_fatal reads
-// back (%dynamic_smem_size) only when it raises. HIP: slot 0 for every launch (the members of an ensemble share it).
+// back (%dynamic_smem_size) only when it raises. HIP: the device has one word for every launch (slot 0), which the
+// checks of every thread read and clear (detail::fatal_offset); the host flags keep their slots. In a HIP threads
+// ensemble a code raised on the device therefore stops the member whose check reads it first, and that member's
+// error stops the others: the ensemble stops, but the member it names can be another one (cases/ensemble.cpp says so).
 // the calling thread's slot (0 <= slot < kFatalSlots; an ensemble member's thread before its first launch)
 void set_fatal_slot(int slot);
 #if defined(CPPWRF_GPUCC)
@@ -997,7 +1000,9 @@ CPPWRF_HD inline void raise_fatal(int code) {
 }
 #if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
 namespace detail {
-inline std::size_t fatal_offset() { return std::size_t(fatal_slot) * sizeof(int); }
+// the device word of the calling thread's checks: the one its launches raise into (fatal_launch_smem: the slot on
+// CUDA; word 0 on HIP, where raise_fatal writes word 0 whatever the thread's slot)
+inline std::size_t fatal_offset() { return std::size_t(fatal_launch_smem()) * sizeof(int); }
 inline void fatal_ck(gpuError_t e, const char* what) {
   if (e != gpuSuccess) fatal_transfer_failed(int(e), what);
 }

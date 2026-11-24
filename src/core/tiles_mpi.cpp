@@ -3,7 +3,9 @@
 // collectives over MPI. Built only with CPPWRF_MPI.
 #if defined(CPPWRF_MPI)
 #include <mpi.h>
+#include <signal.h>
 #include <sys/resource.h>
+#include <unistd.h>
 
 #include <cctype>
 #include <climits>
@@ -35,8 +37,57 @@ void install_hooks();
 
 namespace {
 
+// Diagnostics of a rank that stops (docs/MPI.md): the MPI communicators return their errors (MPI_ERRORS_RETURN:
+// check names the call, the rank and MPI's error string, and the rank stops through mpi_run's MPI_Abort with that
+// message); the rank's current MPI operation (g_phase, a string literal) is named by a fatal signal's handler, by
+// MPI_Abort, and at an exit without MPI_Finalize (Open MPI then prints only "exiting improperly").
+int g_rank = -1;
+const char* volatile g_phase = "MPI_Init";
+volatile sig_atomic_t g_live = 0;  // MPI_Init done, MPI_Finalize not yet
+struct Phase {  // the operation of this scope; the enclosing one again after it
+  const char* prev;
+  explicit Phase(const char* p) : prev(g_phase) { g_phase = p; }
+  ~Phase() { g_phase = prev; }
+};
+// async-signal-safe: write(2) of literals and a number
+void say(const char* a, const char* b = "", const char* c = "") {
+  for (const char* t : {a, b, c}) {
+    std::size_t n = 0;
+    while (t[n]) ++n;
+    if (n) (void)!::write(2, t, n);
+  }
+}
+void say_rank(const char* what) {
+  char num[16];
+  int r = g_rank < 0 ? 0 : g_rank, k = 0;
+  char tmp[16];
+  do tmp[k++] = char('0' + r % 10); while ((r /= 10) && k < 15);
+  int j = 0;
+  if (g_rank < 0) num[j++] = '?';
+  else
+    while (k) num[j++] = tmp[--k];
+  num[j] = 0;
+  say("cppwrf: rank ", num, ": ");
+  say(what, " during ", g_phase);
+  say("\n");
+}
+struct sigaction g_old[32];
+void on_signal(int sig) {
+  say_rank(sig == SIGSEGV ? "SIGSEGV" : sig == SIGBUS ? "SIGBUS" : sig == SIGFPE ? "SIGFPE" : sig == SIGILL ? "SIGILL" : "SIGABRT");
+  sigaction(sig, &g_old[sig], nullptr);  // the handler before ours (the MPI library's, or the default) gets it
+  raise(sig);
+}
+void at_exit() {
+  if (g_live) say_rank("exits without MPI_Finalize");
+}
+
 void check(int rc, const char* what) {
-  if (rc != MPI_SUCCESS) throw std::runtime_error(std::string("MPI: ") + what + " failed");
+  if (rc != MPI_SUCCESS) {
+    char es[MPI_MAX_ERROR_STRING + 1] = {};
+    int len = 0;
+    if (MPI_Error_string(rc, es, &len) != MPI_SUCCESS) es[0] = 0;
+    throw std::runtime_error(std::string("MPI: ") + what + " failed (rank " + std::to_string(g_rank) + ": " + es + ")");
+  }
 }
 
 // Messages in order per (sender, receiver) pair (one tag per kind of message: MPI does not overtake), on a
@@ -48,14 +99,19 @@ class MpiComm : public detail::Comm {
  public:
   // the communicator is freed after a run every rank ended (release); a stopping rank leaves it to MPI_Abort: freed
   // while its messages are unmatched, it would end the run with MPI's error in place of the rank's own
-  explicit MpiComm(bool device) : device_(device) { check(MPI_Comm_dup(MPI_COMM_WORLD, &comm_), "MPI_Comm_dup"); }
+  explicit MpiComm(bool device) : device_(device) {
+    check(MPI_Comm_dup(MPI_COMM_WORLD, &comm_), "MPI_Comm_dup");
+    check(MPI_Comm_set_errhandler(comm_, MPI_ERRORS_RETURN), "MPI_Comm_set_errhandler");
+  }
   void release() {
     flush();
+    const Phase ph("the end of the run (MPI_Comm_free)");
     if (comm_ != MPI_COMM_NULL) check(MPI_Comm_free(&comm_), "MPI_Comm_free");
   }
   MpiComm(const MpiComm&) = delete;
   MpiComm& operator=(const MpiComm&) = delete;
   void send(int to, std::vector<char>&& m) override {
+    const Phase ph("a message (MPI_Isend)");
     if (m.size() > std::size_t(INT_MAX)) throw std::runtime_error("MPI: a message of more than 2 GiB");
     pending_.push_back(std::move(m));
     reqs_.push_back(MPI_REQUEST_NULL);
@@ -63,6 +119,7 @@ class MpiComm : public detail::Comm {
           "MPI_Isend");
   }
   std::vector<char> recv(int from) override {
+    const Phase ph("a message (MPI_Probe / MPI_Recv)");
     MPI_Status st;
     check(MPI_Probe(from, kMsg, comm_, &st), "MPI_Probe");
     int n = 0;
@@ -73,6 +130,7 @@ class MpiComm : public detail::Comm {
   }
   void flush() override {
     if (reqs_.empty()) return;
+    const Phase ph("the messages sent (MPI_Waitall)");
     check(MPI_Waitall(int(reqs_.size()), reqs_.data(), MPI_STATUSES_IGNORE), "MPI_Waitall");
     reqs_.clear();
     pending_.clear();
@@ -80,6 +138,8 @@ class MpiComm : public detail::Comm {
   void exchange(const std::vector<detail::Post>& out, const std::vector<detail::Post>& in, bool) override {
     // every count checked and the request and status storage in place before the first post: nothing can throw
     // while a request is active
+    const Phase ph(device_ ? "a halo exchange (device buffers: MPI_Irecv / MPI_Isend / MPI_Waitall)"
+                           : "a halo exchange (pinned host buffers: MPI_Irecv / MPI_Isend / MPI_Waitall)");
     for (const std::vector<detail::Post>* v : {&in, &out})
       for (const detail::Post& m : *v)
         if (m.bytes > std::size_t(INT_MAX)) throw std::runtime_error("MPI: a halo message of more than 2 GiB");
@@ -93,8 +153,14 @@ class MpiComm : public detail::Comm {
       if (rc == MPI_SUCCESS) rc = MPI_Isend(m.p, int(m.bytes), MPI_BYTE, m.peer, kBulk, comm_, &breqs_[r++]);
     if (rc == MPI_SUCCESS) rc = MPI_Waitall(int(r), breqs_.data(), bst_.data());
     if (rc != MPI_SUCCESS) {  // requests may still read or write the caller's buffers: stop here, with them alive
-      std::fprintf(stderr, "cppwrf: error: MPI: a halo exchange failed (posting or waiting)\n");
+      char es[MPI_MAX_ERROR_STRING + 1] = {};
+      int len = 0;
+      if (MPI_Error_string(rc, es, &len) != MPI_SUCCESS) es[0] = 0;
+      std::fprintf(stderr, "cppwrf: error (rank %d): MPI: a halo exchange failed (%s %zu receives, %zu sends: %s)\n",
+                   g_rank, r < in.size() + out.size() ? "posting" : "waiting for", in.size(), out.size(), es);
       std::fflush(stderr);
+      say_rank("MPI_Abort");
+      g_live = 0;
       MPI_Abort(MPI_COMM_WORLD, 2);
     }
     for (std::size_t q = 0; q < in.size(); ++q) {  // a message of another size: the ranks' calls differ
@@ -109,6 +175,7 @@ class MpiComm : public detail::Comm {
   bool device_buffers() const override { return device_; }
   bool allgather(const void* mine, std::size_t bytes, void* all) override {
     if (bytes > std::size_t(INT_MAX)) return false;
+    const Phase ph("a collective (MPI_Allgather)");
     check(MPI_Allgather(mine, int(bytes), MPI_BYTE, all, int(bytes), MPI_BYTE, comm_), "MPI_Allgather");
     return true;
   }
@@ -151,8 +218,9 @@ int library_takes_device_memory() {
 
 // run.gpu_aware_mpi / CPPWRF_GPU_AWARE_MPI (auto, on, off): whether the halo exchanges hand device buffers to MPI.
 // auto: when the library of every rank reports that it takes device memory (one rank that does not, or cannot say:
-// pinned host staging for all); on: always (the library of every rank must take it); off: never (pinned host
-// staging). The mode is rank 0's; the choice the same on every rank. CPU build: never.
+// pinned host staging for all); on: always, unless the library of a rank reports that it does not take device
+// memory (refused: an error at the start, never a crash in the transport; a library that cannot say is trusted);
+// off: never (pinned host staging). The mode is rank 0's; the choice the same on every rank. CPU build: never.
 bool device_transport(const std::string& key, int rank) {
   std::string v = key.empty() ? "auto" : key;
   if (const char* e = std::getenv("CPPWRF_GPU_AWARE_MPI"); e && *e) v = e;
@@ -167,6 +235,16 @@ bool device_transport(const std::string& key, int rank) {
   int yes = lib == 1 ? 1 : 0, lo = 0, hi = 0;
   check(MPI_Allreduce(&yes, &lo, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD), "MPI_Allreduce");
   check(MPI_Allreduce(&yes, &hi, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD), "MPI_Allreduce");
+  // on: refused when the library of a rank reports that it does not take device memory (its transport would read
+  // device pointers as host memory: Open MPI without CUDA segfaults in its shared-memory transport); a library that
+  // cannot say (-1) is taken at its word of the setting
+  int no = lib == 0 ? 1 : 0, any_no = 0;
+  check(MPI_Allreduce(&no, &any_no, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD), "MPI_Allreduce");
+  if (mode == 1 && any_no)
+    throw std::runtime_error(std::string("run.gpu_aware_mpi = on (CPPWRF_GPU_AWARE_MPI) but the MPI library ") +
+                             (lib == 0 ? "of this rank" : "of another rank") +
+                             " reports that it does not take device memory (built without CUDA / ROCm support): use "
+                             "auto or off (pinned host buffers), or an MPI library built with GPU support");
   use = mode == 1 ? 1 : mode == 2 ? lo : 0;
   if (rank == 0) {
     const char* m = mode == 1 ? "on" : mode == 2 ? "auto" : "off";
@@ -188,8 +266,21 @@ bool mpi_start(int* argc, char*** argv) {
   int provided = 0;
   check(MPI_Init_thread(argc, argv, MPI_THREAD_FUNNELED, &provided), "MPI_Init_thread");
   started = true;
+  g_live = 1;
+  check(MPI_Comm_set_errhandler(MPI_COMM_WORLD, MPI_ERRORS_RETURN), "MPI_Comm_set_errhandler");
+  check(MPI_Comm_rank(MPI_COMM_WORLD, &g_rank), "MPI_Comm_rank");
+  g_phase = "the start of the run";
+  // after MPI_Init (the library's own handlers, if any, are called after ours)
+  for (int sig : {SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT}) {
+    struct sigaction sa {};
+    sa.sa_handler = on_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESETHAND;
+    sigaction(sig, &sa, &g_old[sig]);
+  }
+  std::atexit(at_exit);
   int n = 1;
-  MPI_Comm_size(MPI_COMM_WORLD, &n);
+  check(MPI_Comm_size(MPI_COMM_WORLD, &n), "MPI_Comm_size");
   // a launcher that does not match the MPI library starts every process as a world of its own: each would run the
   // whole case as one process and write the same files
   if (n == 1) {
@@ -203,20 +294,27 @@ bool mpi_start(int* argc, char*** argv) {
 }
 
 void mpi_finish() {
-  if (started) MPI_Finalize();
+  if (started) {
+    g_phase = "MPI_Finalize";
+    MPI_Finalize();
+    g_live = 0;
+  }
   started = false;
 }
 
 void mpi_abort(int code) {
-  if (started) MPI_Abort(MPI_COMM_WORLD, code);
+  if (!started) return;
+  say_rank("MPI_Abort");
+  g_live = 0;
+  MPI_Abort(MPI_COMM_WORLD, code);
 }
 
 int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const std::function<int(int)>& body) {
   int n = 1, rank = 0;
-  MPI_Comm_size(MPI_COMM_WORLD, &n);
-  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
   int rc = 2;
   try {
+    check(MPI_Comm_size(MPI_COMM_WORLD, &n), "MPI_Comm_size");
+    check(MPI_Comm_rank(MPI_COMM_WORLD, &rank), "MPI_Comm_rank");
     Options o;
     std::string t = run_ranks;
     if (const char* e = std::getenv("CPPWRF_RANKS"); e && *e) t = e;
@@ -243,8 +341,8 @@ int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const st
       check(MPI_Comm_split_type(MPI_COMM_WORLD, MPI_COMM_TYPE_SHARED, rank, MPI_INFO_NULL, &node),
             "MPI_Comm_split_type");
       int local = 0, nlocal = 1;
-      MPI_Comm_rank(node, &local);
-      MPI_Comm_size(node, &nlocal);
+      check(MPI_Comm_rank(node, &local), "MPI_Comm_rank");
+      check(MPI_Comm_size(node, &nlocal), "MPI_Comm_size");
       int count = 0;
       if (gpuGetDeviceCount(&count) != gpuSuccess) count = 0;
       std::string err;
@@ -273,8 +371,9 @@ int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const st
       const auto& uuid = prop.uuid;
 #endif
       std::vector<char> ids(std::size_t(nlocal) * sizeof(uuid));
-      MPI_Allgather(&uuid, int(sizeof(uuid)), MPI_BYTE, ids.data(), int(sizeof(uuid)), MPI_BYTE, node);
-      MPI_Comm_free(&node);
+      check(MPI_Allgather(&uuid, int(sizeof(uuid)), MPI_BYTE, ids.data(), int(sizeof(uuid)), MPI_BYTE, node),
+            "MPI_Allgather");
+      check(MPI_Comm_free(&node), "MPI_Comm_free");
       if (!err.empty()) throw std::runtime_error(err);
       int share = 0;
       for (int r = 0; r < nlocal; ++r)
@@ -282,7 +381,7 @@ int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const st
       set_device_work_share(share);
       // rank 0 names the mapping unless every rank is on device 0
       std::vector<int> devs(std::size_t(n), 0);
-      MPI_Gather(&cur, 1, MPI_INT, devs.data(), 1, MPI_INT, 0, MPI_COMM_WORLD);
+      check(MPI_Gather(&cur, 1, MPI_INT, devs.data(), 1, MPI_INT, 0, MPI_COMM_WORLD), "MPI_Gather");
       if (rank == 0) {
         bool all0 = true;
         for (int d : devs) all0 = all0 && d == 0;
@@ -298,7 +397,9 @@ int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const st
     const bool device = device_transport(gpu_aware, rank);
     detail::install_hooks();
     MpiComm comm(device);
+    g_phase = "the run (outside an MPI call)";
     rc = detail::run_worker(comm, rank, o, body);
+    g_phase = "the end of the run";
     comm.release();
     // the ranks' peak resident memory: a rank holds its patch, not the domain; the writer also the fields it
     // gathers for the output
@@ -306,7 +407,7 @@ int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const st
     getrusage(RUSAGE_SELF, &ru);
     long mine = ru.ru_maxrss / 1024;
     std::vector<long> all(static_cast<std::size_t>(n), 0);
-    MPI_Gather(&mine, 1, MPI_LONG, all.data(), 1, MPI_LONG, 0, MPI_COMM_WORLD);
+    check(MPI_Gather(&mine, 1, MPI_LONG, all.data(), 1, MPI_LONG, 0, MPI_COMM_WORLD), "MPI_Gather");
     if (rank == 0) {
       long other = 0, sum = 0;
       for (int r = 0; r < n; ++r) {
@@ -319,6 +420,8 @@ int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const st
   } catch (const std::exception& e) {
     std::fprintf(stderr, "cppwrf: error (rank %d): %s\n", rank, e.what());
     std::fflush(stderr);
+    say_rank("MPI_Abort");
+    g_live = 0;
     MPI_Abort(MPI_COMM_WORLD, 2);
   }
   return rc;

@@ -253,8 +253,12 @@ CPPWRF_TILES=2x2 build/cppwrf CONFIG.ini
   when the library of every rank reports at run time that it takes device memory (one rank that does not, or cannot
   say, gives pinned host buffers for all) (Open MPI: `MPIX_Query_cuda_support()`, built
   with CUDA; MPICH 4 or later: `MPIX_GPU_query_support`, which MPICH enables with `MPIR_CVAR_ENABLE_GPU=1` when it
-  was built for the GPU; ROCm: the `rocm` equivalents), else pinned host buffers. `on`: device buffers whatever the
-  library says (one that does not take device memory then fails or crashes). `off`: pinned host buffers. Rank 0 prints
+  was built for the GPU; ROCm: the `rocm` equivalents), else pinned host buffers. `on`: device buffers unless the
+  library of a rank reports that it does not take device memory: then the run stops at its start with an error that
+  says so (an Open MPI built without CUDA had every rank crash in its shared-memory transport, `mca_btl_vader`, at the
+  first exchange); a library that cannot say (no query: an MPI without `MPIX_Query_cuda_support` /
+  `MPIX_GPU_query_support`) is taken at the setting's word, so `on` is the way to force device buffers with such a
+  library. `off`: pinned host buffers. Rank 0 prints
   the choice: `cppwrf: halo exchanges from and into device buffers (GPU-aware MPI)` or `... through pinned host
   buffers`, with what the library reported. To see what an installation offers: `ompi_info --parsable --all | grep
   mpi_built_with_cuda_support:value` (Open MPI), `mpichversion` / `MPIR_CVAR_ENABLE_GPU` (MPICH). The values do not
@@ -262,6 +266,13 @@ CPPWRF_TILES=2x2 build/cppwrf CONFIG.ini
 - GPU builds: an MPI rank runs its time steps as CUDA graphs, as one process does (the segments between its halo
   exchanges and fatal checks; `CPPWRF_GRAPHS=0` launches without them), and prepares the next step while the device
   runs the last one. Tiles (several workers in one process) launch without graphs.
+- A rank that stops names itself and the MPI operation it was in, on stderr: MPI's errors are returned to CPPWRF
+  (`MPI_ERRORS_RETURN`) and reported as `cppwrf: error (rank R): MPI: <call> failed (rank R: <MPI's error string>)`
+  before `MPI_Abort`; a fatal signal (SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGABRT) prints `cppwrf: rank R: SIGSEGV during
+  <operation>` before the library's own handler; `MPI_Abort` and an exit without `MPI_Finalize` (Open MPI then says
+  only that a process exited "improperly") print `cppwrf: rank R: MPI_Abort during <operation>` / `... exits without
+  MPI_Finalize during <operation>`. The operations: a halo exchange (pinned host or device buffers), a collective
+  (`MPI_Allgather`), a message, the run outside an MPI call, the end of the run, `MPI_Finalize`.
 - `CPPWRF_HALO_STATS=1`: each worker prints its exchanges, plans, messages and bytes sent at its end, and the wall
   time of every plan's exchanges in four parts (pack launch, wait for the stream, transfer, unpack launch; the
   overlapped ones marked) and of the other collectives by kind (3 maximum, 5 fatal codes). `CPPWRF_HALO_OVERLAP=0`:

@@ -77,7 +77,19 @@ def run(binary, cfg, sets, out, extra_env=None, *, clear_env=()):
     for name in clear_env:
         env.pop(name, None)
     r = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True)
-    return r.returncode, r.stdout + r.stderr
+    log = r.stdout + r.stderr
+    if r.returncode != 0:
+        # the whole log next to the output directory, and the lines that name the error at the end of the text
+        # (the failure messages quote the log's end; an MPI launcher's own text there would hide the rank's error)
+        try:
+            with open(out.rstrip("/") + ".failed.log", "w") as f:
+                f.write(" ".join(cmd) + "\n" + log)
+        except OSError:
+            pass
+        keys = [ln for ln in log.splitlines()
+                if ln.startswith("cppwrf: error") or ln.startswith("cppwrf: rank") or "FATAL" in ln]
+        log += f"\n[exit {r.returncode}] " + " | ".join(keys[-4:])
+    return r.returncode, log
 
 
 # a drop-in case (config "dropin:<WRF run directory>"): cppwrf-wrf in a copy of the run directory
