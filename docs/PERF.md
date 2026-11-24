@@ -1321,3 +1321,69 @@ one rank) and the RTX 2060 runs this domain's kernels long enough for their laun
 on small patches of a fast GPU, which has not been measured. Several ranks on one GPU are not the target layout (two
 GPUs: Kaggle, docs/MPI.md section 6; the G4 proof): the timing of one rank per GPU, with and without a GPU-aware MPI,
 is still to be done.
+
+## Halo exchanges overlapped with the acoustic steps; fewer exchanges (OVL1; measured on the workstation only)
+
+docs/MPI.md section 3.4 (OVL1) has the design and why the values cannot change. Workstation: RTX 2060 6 GB (sm_75),
+12 threads, MPICH 5.0.2 over shared memory (not GPU-aware: the pinned path), CUDA FP64, P8 (119 x 89 x 44, GF
+cumulus, YSU, Noah; n_sound 4), 30 steps, history off; stepping seconds of the log. Base = 7ad6e87 with the timers of
+`CPPWRF_HALO_STATS` only.
+
+**Measured first** (base; `CPPWRF_HALO_STATS=1`, per worker; nsys with `--cuda-graph-trace=node`):
+
+- 1957 exchanges in 30 steps (65 per step), 24 plans. MPI 1 x 2: 3.2 s of 3.36 s stepping are spent inside the
+  exchanges, of which 2.4 - 2.8 s waiting for the worker's stream (the GPU still computing the kernels before the
+  exchange: work, not loss), 0.41 / 0.78 s in the transfer (`MPI_Waitall`, the two ranks), 0.03 s launching the pack
+  and unpack. 2 x 2: 2.7 - 3.0 s waiting, 1.2 - 1.4 s transfer per rank of 4.45 s; tiles 2 x 2: 0.7 - 1.9 s transfer
+  (the mailboxes, tiles of one process wait for each other).
+- The largest exchanges by transfer time (1 x 2, rank 0, per exchange): the stage's opening fill u_2, v_2, ph_2,
+  t_save, u_save, v_save (3 per step) 1017 us; ph_2, p, al after each small step (7 per step) 709 us; u_2, v_2 after
+  advance_uv (8) 458 us; mu_2, mudf, muts after advance_mu_t (7) 435 us; p, al (7) 359 us. The other rank's times are
+  shorter (173, 158, 82, 109 us): the longer side waits for its peer, whose kernels still run on the shared GPU. The
+  physics tendencies' exchange (rublten, rvblten) waits 25 - 28 ms for the column physics before it: no transfer cost.
+- The fatal-flag collective (`MPI_Allgather`, 4 per step) costs 186 - 308 us each at 1 x 2 and 716 us at 2 x 2.
+- nsys, 1 x 2: the GPU (union of both ranks) is idle 0.94 s of a 3.53 s window (73 % busy); 0.33 s of the idle time
+  lies between a send buffer's copy to the host and the next receive buffer's copy to the device (1630 gaps, about
+  200 us each: the transfer with the device idle), most of the rest around the copies and pack launches of the
+  exchanges. One process (no exchanges, `CPPWRF_GRAPHS=0`): 2.47 s stepping.
+- The kernels after the largest exchanges, per launch on a 1 x 2 patch: advance_uv (KUV) 341 us; advance_w and
+  calc_p_rho (KWRhs 152, KWExpl 184, KWSolve 64, KWPost 155, KWPRho 91 us: 646 us), which read mu_2, mudf, muts only at
+  the point; KMuTDiv 110, KMuTCol 114, KMuTPoint 142 us after the u_2, v_2 exchange. So the mu exchange is not needed
+  until the next advance_uv (it can be merged, not only overlapped), and advance_uv's interior can cover the transfer
+  of the fill before it on this GPU.
+
+**Change**: fills merged in `SmallStep::run_stage` (16 fewer exchanges per step: 1493 instead of 1957 in 30 steps,
+547 instead of 569 MiB sent per rank at 1 x 2) and the fill before each advance_uv (7 per step) overlapped with
+advance_uv's interior points (docs/MPI.md 3.4). Stepping seconds, base and OVL1 alternated:
+
+| Layout | base | OVL1 | change |
+|---|---|---|---|
+| MPI 1 x 2 | 3.317, 3.268 | 3.180, 3.206 (`CPPWRF_HALO_OVERLAP=0`: 3.203) | -2.6 % |
+| MPI 2 x 2 | 4.329, 4.340 | 4.268, 4.262 | -1.6 % |
+| tiles 2 x 2 | 2.829, 2.813 | 2.801, 2.795 | -0.8 % (within the noise) |
+| one process (`CPPWRF_GRAPHS=0`) | 2.487 | 2.436 | none (the same launches) |
+
+nsys 1 x 2 after: GPU idle 0.86 s of a 3.43 s window (75 % busy; base 0.94 s, 73 %). `CPPWRF_HALO_STATS`: transfer
+per rank 0.69 / 0.35 s (base 0.78 / 0.41 s).
+
+What this shows: on one shared GPU the gain is the merged exchanges (fewer sync points and transfers); the overlap
+itself is not visible (`CPPWRF_HALO_OVERLAP=0`: 3.195 s), because while one rank waits in its transfer the other
+rank's kernels use the GPU anyway, and the overlapped transfers then take longer (rank 0: 1343 / 1033 us instead of
+1017 / 709 us) as the two ranks' interior launches compete. The target layout is one rank per GPU, where the device of
+a rank in its transfer has nothing else to run: there the interior of advance_uv (341 us here; on a G4-class GPU in
+FP64 roughly 10 times shorter) hides up to its own length of each of the 7 overlapped transfers per step. That
+measurement (Kaggle 2 x T4, G4) has not been made. The remaining exchanges are mostly behind their kernels (the wait
+for the stream); the next candidates are u_2, v_2 after advance_uv (8 per step; KMuTDiv / KMuTCol / KMuTPoint have
+interiors) and the fatal-flag collectives (4 per step; could ride on the next exchange's header).
+
+Aside: with CUDA graphs a one-process run's "stepping" in the log is the host's time to capture the steps (0.12 s
+here), not the device's; compare one-process runs with `CPPWRF_GRAPHS=0` or by wall time.
+
+Proof (local): P8 3 steps, every output file (wrfout per step, native files) byte-identical to the base one-process
+run: CUDA FP64 one process, MPI 1 x 2, 2 x 1, 2 x 2, 2 x 2 without graphs, tiles 2 x 2, tiles 2 x 2 over the
+device-buffer path; CPU FP64 one process, MPI 1 x 2, 2 x 2, tiles 2 x 2. em_quarter_ss (periodic x and y: wrap
+exchanges inside the finished fill) CUDA MPI 2 x 2 and CPU one process, em_squall2d_x (2-D) CUDA MPI 3 x 1: identical
+to the base one-process run. CPU tiles 2 x 2 of em_quarter_ss with `CPPWRF_TILE_CHECK=1` passes (the check now wraps
+a fill of more than 8 fields per launch's 8 fields, as the run with one patch fills them). ctest (CPU FP64 with MPI):
+37 passed, 9 skipped for data not on the workstation. A planted bug (the interior box one point wider, w = 0, so
+advance_uv's patch-edge points read the halo before the fill) changes the CPU MPI 2 x 2 files.

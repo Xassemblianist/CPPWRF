@@ -136,6 +136,7 @@ struct Graphs {
   std::vector<Poll> cur, pend;  // checks of the open segment; of the launched, unchecked ones
   gpuEvent_t ev = nullptr;
   bool ev_pending = false;
+  gpuEvent_t mark = nullptr;  // host_mark's marker
   long n_launch = 0, n_update = 0, n_inst = 0, n_seg_nodes = 0;
   void init() {
     if (slots) return;
@@ -143,6 +144,7 @@ struct Graphs {
        "gpuHostAlloc");
     done = slots + 2 * kSlots;
     ck(gpuEventCreateWithFlags(&ev, gpuEventDisableTiming), "gpuEventCreate");
+    ck(gpuEventCreateWithFlags(&mark, gpuEventDisableTiming), "gpuEventCreate");
   }
   void begin_capture() {
 #if defined(CPPWRF_USE_CUDA)
@@ -365,6 +367,7 @@ void release_thread_device() noexcept {
       for (cudaGraphExec_t e : v) cudaGraphExecDestroy(e);
 #endif
     if (gs->ev) (void)gpuEventDestroy(gs->ev);
+    if (gs->mark) (void)gpuEventDestroy(gs->mark);
     if (gs->slots) (void)gpuFreeHost(gs->slots);
     if (gs->done_one) (void)gpuFree(const_cast<int*>(gs->done_one));
     delete gs;
@@ -482,6 +485,30 @@ void host_section_begin() {
   ck(gpuStreamSynchronize(stream()), "sync");
 }
 void host_section_end() { sync_end(); }
+void host_mark() {
+  Graphs& gs = graphs();
+  gs.init();
+  sync_begin();  // the open segment launched (it waits for the segment before it, as every segment point)
+  ck(gpuEventRecord(gs.mark, stream()), "gpuEventRecord");
+  // the capture resumes at once: the launches queued next run while the host waits for the marker
+  if (gs.in_step && graphs_mode() != 0 && !gs.capturing) {
+    if (!gs.pend.empty()) gs.flush();  // a segment's fatal checks are never left unread behind a new capture
+    gs.begin_capture();
+  }
+}
+void host_section_begin_at_mark() {
+  Graphs& gs = graphs();
+  sync_begin();  // the launches since host_mark: launched, not waited for
+  ck(gpuEventSynchronize(gs.mark), "sync");
+}
+void host_section_end_running() {
+  Graphs& gs = graphs();
+  if (!gs.pend.empty()) {  // fatal checks of a launched segment: read as host_section_end reads them
+    sync_end();
+    return;
+  }
+  if (gs.in_step && graphs_mode() != 0 && !gs.capturing) gs.begin_capture();
+}
 namespace {
 thread_local bool stream_sync_only = false;  // set_thread_stream_sync
 }  // namespace
@@ -578,6 +605,9 @@ void copy_to_host_async(void* d, const void* s, std::size_t n) { std::memcpy(d, 
 void copy_to_dev_async(void* d, const void* s, std::size_t n) { std::memcpy(d, s, n); }
 void host_section_begin() {}
 void host_section_end() {}
+void host_mark() {}
+void host_section_begin_at_mark() {}
+void host_section_end_running() {}
 void dev_sync() {}
 void set_thread_stream_sync(bool) {}
 void discard_pending_checks() noexcept {}

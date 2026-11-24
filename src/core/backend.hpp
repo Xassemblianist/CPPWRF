@@ -420,6 +420,24 @@ class Whole {
  private:
   bool saved_;
 };
+// The launches in this scope are clipped further to the box [i0, i1) x [j0, j1) (with the worker's points: a part of
+// them). Without a decomposition: no effect (the launches cover their whole range). Used to launch one kernel as
+// parts that cover its points once each (tile::split_launch in core/halo.hpp): every point is computed by the same
+// operations from the same inputs as by the whole launch.
+class Region {
+ public:
+  Region(int i0, int i1, int j0, int j1) : saved_(ctx) {
+    if (!ctx.on) return;
+    ctx.i0 = ctx.i0 > i0 ? ctx.i0 : i0; ctx.i1 = ctx.i1 < i1 ? ctx.i1 : i1;
+    ctx.j0 = ctx.j0 > j0 ? ctx.j0 : j0; ctx.j1 = ctx.j1 < j1 ? ctx.j1 : j1;
+  }
+  ~Region() { ctx = saved_; }
+  Region(const Region&) = delete;
+  Region& operator=(const Region&) = delete;
+
+ private:
+  Ctx saved_;
+};
 // set by the decomposition (src/core/tiles.cpp); null without one
 struct Hooks {
   bool multi = false;                                   // several workers (tiles) in this process
@@ -427,6 +445,11 @@ struct Hooks {
   double (*max)(double v) = nullptr;                    // the maximum over the workers (collective)
   // halo exchange of registered fields (collective): their allocations, or (data) their views' data pointers
   void (*exchange)(const void* const* bases, int n, bool data) = nullptr;
+  // the same exchange in two calls (fields by their allocations): begin packs and queues the send buffer's copy and
+  // returns; finish moves the messages and unpacks. Between them the worker may only launch kernels that neither
+  // write the fields' points it sends nor read their halo (FillAsync, core/halo.hpp); one exchange at a time
+  void (*exchange_begin)(const void* const* bases, int n) = nullptr;
+  void (*exchange_finish)() = nullptr;
   // a periodic direction (axis 0: x, 1: y) of decomposition dom has several patches along it; then the halo of
   // that direction comes from the worker that owns the wrapped point (collective)
   bool (*wraps)(int dom, int axis) = nullptr;
@@ -519,6 +542,15 @@ void copy_to_host_async(void* dst, const void* src, std::size_t bytes);
 void copy_to_dev_async(void* dst, const void* src, std::size_t bytes);
 void host_section_begin();
 void host_section_end();
+// An exchange whose transfer overlaps later launches (core/tiles.cpp; FillAsync in core/halo.hpp): host_mark ends the open graph
+// segment (launches it, without waiting for it), records a marker on the stream behind the work queued so far and
+// resumes the capture. host_section_begin_at_mark launches what was queued since (the launches that overlap the
+// transfer) and waits for the marker only: the host may then make any MPI or device call while that work runs.
+// host_section_end_running ends that host section without waiting for the work queued after the marker (the capture
+// resumes behind it). CPU build: no-ops.
+void host_mark();
+void host_section_begin_at_mark();
+void host_section_end_running();
 // Ensemble members (cases/ensemble.hpp; one host thread each, all on one device): dev_sync of the calling thread
 // waits for the thread's own stream only, so the other members' work runs on. Off (the default): the whole device.
 // CPU build: no effect.

@@ -2,6 +2,7 @@
 #include "core/halo.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <initializer_list>
 #include <type_traits>
 #include <stdexcept>
@@ -157,21 +158,29 @@ void fill_impl(real* p, const Layout& L, const Grid& g, bool ux, bool vy, Parity
 }
 }  // namespace
 
-static void fill_many(const std::vector<HaloField>& v, const Grid& g) {
+// exchanged: the exchange was made already (FillAsync)
+static void fill_many(const std::vector<HaloField>& v, const Grid& g, bool exchanged = false) {
   if (v.empty()) return;
   std::vector<const void*> b;
   if (tile::ctx.patch) {
     b.reserve(v.size());
     for (const HaloField& f : v) b.push_back(f.p - f.L.offset);
-    exchange_bases(b.data(), int(b.size()));
+    if (!exchanged) exchange_bases(b.data(), int(b.size()));
   }
   const tile::Whole whole;
   const bool wrap_x = wraps(v[0].L, 0), wrap_y = !g.two_d() && wraps(v[0].L, 1);
   // each field's x pass before its y pass: every x pass, then every y pass (the fields are distinct)
   for (int pass = 0; pass < (g.two_d() ? 1 : 2); ++pass) {
     if (pass == 0 ? wrap_x : wrap_y) {
-      tile::hooks.wrap(b.data(), int(b.size()), pass);
-      for (std::size_t s0 = 0; s0 < v.size(); s0 += kMaxFields) tile::after_launch("halo wrap");  // as the launches below
+      if (!tile::hooks.check) {
+        tile::hooks.wrap(b.data(), int(b.size()), pass);
+        for (std::size_t s0 = 0; s0 < v.size(); s0 += kMaxFields) tile::after_launch("halo wrap");  // as the launches below
+      } else {  // CPPWRF_TILE_CHECK compares after each launch below: the fields of that launch, then the check
+        for (std::size_t s0 = 0; s0 < v.size(); s0 += kMaxFields) {
+          tile::hooks.wrap(b.data() + s0, int(std::min<std::size_t>(kMaxFields, v.size() - s0)), pass);
+          tile::after_launch("halo wrap");
+        }
+      }
       continue;
     }
     for (std::size_t s0 = 0; s0 < v.size(); s0 += kMaxFields) {
@@ -219,6 +228,45 @@ void fill_halos(const std::vector<Field3*>& fs, const Grid& g) { fill_ptrs(fs, g
 void fill_halos(std::initializer_list<Field2*> fs, const Grid& g) { fill_ptrs(std::vector<Field2*>(fs), g); }
 void fill_halos(std::initializer_list<HaloField> fs, const Grid& g) { fill_many(std::vector<HaloField>(fs), g); }
 void fill_halos(const std::vector<HaloField>& fs, const Grid& g) { fill_many(fs, g); }
+
+bool halo_overlap_on() {
+  static const bool env = [] {
+    const char* e = std::getenv("CPPWRF_HALO_OVERLAP");
+    return !(e && *e == '0');
+  }();
+  return env && tile::ctx.on && tile::hooks.exchange_begin && !tile::hooks.check;
+}
+
+FillAsync::~FillAsync() {
+  // an exception between begin and finish: the run is stopping (the exchange's state is the worker's, freed with it)
+}
+void FillAsync::begin(std::vector<HaloField> fs, const Grid& g) {
+  if (open_) throw std::logic_error("FillAsync: begun twice");
+  fs_ = std::move(fs);
+  g_ = &g;
+  open_ = true;
+  exchanged_ = halo_overlap_on();
+  if (!exchanged_) return;
+  std::vector<const void*> b;
+  b.reserve(fs_.size());
+  for (const HaloField& f : fs_) b.push_back(f.p - f.L.offset);
+  tile::hooks.exchange_begin(b.data(), int(b.size()));
+}
+void FillAsync::finish() {
+  if (!open_) throw std::logic_error("FillAsync: finish without begin");
+  open_ = false;
+  if (exchanged_) tile::hooks.exchange_finish();
+  fill_many(fs_, *g_, exchanged_);
+}
+
+InteriorBox interior_box(const Grid& g, int w) {
+  if (!halo_overlap_on()) return InteriorBox{false, 0, 0, 0, 0};
+  constexpr int lo = -(1 << 30), hi = 1 << 30;
+  const int i0 = g.pi0 + w, i1 = g.pi1 - w;
+  const int j0 = g.two_d() ? lo : g.pj0 + w, j1 = g.two_d() ? hi : g.pj1 - w;
+  if (i1 <= i0 || j1 <= j0) return InteriorBox{false, 0, 0, 0, 0};
+  return InteriorBox{true, i0, i1, j0, j1};
+}
 
 void fill_halo(Field3& f, const Grid& g, Parity px, Parity py) {
   fill_impl(f.data(), f.layout(), g, f.stagger() == Stagger::U, f.stagger() == Stagger::V, px, py);
