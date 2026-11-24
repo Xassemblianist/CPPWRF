@@ -56,6 +56,7 @@ int rank_device(const char* spec, int local, int count);
 int id();       // the calling worker's patch (0 without a decomposition, -1 for the check's reference run)
 int count();    // the workers (1 without a decomposition)
 bool tiled();   // the calling thread is a worker of a decomposed run
+bool checking();  // a CPPWRF_TILE_CHECK run (the reference run with one patch is compared after every launch)
 // the calling worker writes the output files and prints the log: no decomposition, patch 0, the reference run
 bool writer();
 

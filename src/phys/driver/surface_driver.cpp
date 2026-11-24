@@ -1746,8 +1746,9 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
         }
         tile::max_each(tab.data(), tab.size());
         // CPPWRF_TILE_CHECK compares the workers with a run with one patch after every launch: n_rclast and rs as
-        // that run's KNoahRcLast and KNoahRs leave them, the check counting each launch (nothing here reads n_rclast)
-        {
+        // that run's KNoahRcLast and KNoahRs leave them, the check counting each launch (nothing here reads n_rclast,
+        // so other runs skip the copies)
+        if (tile::checking()) {
           std::vector<int> hl;
           n_rclast.download(hl);
           const Layout& LL = n_rclast.layout();
