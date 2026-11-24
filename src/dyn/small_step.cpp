@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <cstdlib>
 #include "dyn/small_step.hpp"
 
 #include <cmath>
@@ -566,8 +567,9 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
   // The halo fills of this stage are merged where no launch between two of them reads the first one's halo or writes
   // its fields (WRF exchanges them one by one; the values are the same, docs/MPI.md section 3.4, OVL1), and the last
   // fill before advance_uv overlaps advance_uv's interior points (FillAsync). The vm dump (one patch only) keeps
-  // the fills where they were: it writes the halos between them.
-  const bool merge = !vmdump::on();
+  // the fills where they were: it writes the halos between them. vmdump::on() marks the dump's step whether or not a
+  // dump was asked for (CPPWRF_VM_DUMP), so only a real dump keeps them.
+  const bool merge = !(vmdump::on() && std::getenv("CPPWRF_VM_DUMP"));
   FillAsync pending;  // the fill before the next advance_uv
   if (!merge) {
     fill_halos({&s.u_2, &s.v_2, &s.ph_2, &t_save, &u_save, &v_save}, g);
