@@ -5,7 +5,7 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
-## 1.4.0 (2026-11-24)
+## Unreleased
 
 ### Added
 - Ensembles in one process (docs/ENSEMBLE.md, USER_GUIDE section 7): an `[ensemble]` section (`members`,
@@ -32,46 +32,6 @@ resumes across versions from WRF's wrfrst files.
   prints each worker's exchanges; `CPPWRF_TILE_DEVICE_BUFFERS=1` runs tiles over the device-buffer path (a check).
   tools/kaggle/kaggle_mpi.sh: layouts `L@on` / `L@off` force the transport, env.txt names whether Open MPI was built
   with CUDA.
-- CPPWRF's own restart file (`restart_<step>.nc`) no longer depends on the decomposition: a decomposed run (tiles,
-  MPI ranks) writes the halo points of its fields beyond the domain's edges (`HALO_<name>`, gathered from the edge
-  patches) as a run of one patch does, and a decomposed run resumed from the file sets them in every patch that holds
-  them. Before, a decomposed run's file had no `HALO_<name>` and a decomposed resume refilled those points from the
-  domain's values. WRF-format wrfrst files and every model output are unchanged. Suite: `real_p4_r8_fp64_cpu_rst_t2x2` and
-  `ideal_quarter_ss_k2_fp64_cpu_rst_t2x2` (every restart file of a 2 x 2 run identical to the one-patch run's, all
-  variables and attributes; quarter_ss periodic) and
-  `real_p4_r8_fp64_cpu_chain_t2x2` (P4's restart chain in 2 x 2 tiles).
-- docs/MPI.md section 6: the CUDA FP64 build with MPI on two T4 GPUs of one Kaggle node (`tools/kaggle/kaggle_mpi.sh`):
-  seven cuda_dp checks in seven layouts (one process, one rank, one rank per GPU, two ranks per GPU, tiles over the
-  GPUs) equal the WRF references at tolerance 0.
-- Verification: every suite check says what it compared (`[vs WRF tol 0]`, `[vs WRF rel L2]` or `[self only]`) and
-  requires complete coverage: every scheduled frame, stream, domain and restart file of the configuration, one time
-  window for compared and reference counts, no duplicate or clock-only records, integers compared exactly, variables
-  without a Time dimension and the metadata of every file compared; a check with zero comparisons fails. Restart
-  checks resume from WRF's own wrfrst file as WRF's resumed run was configured, and the P4, G2, P8, NMP1, SLAB1, N3
-  and D0 restart chains are compared with WRF's runs of their configurations at tolerance 0 (were self-consistency
-  checks). tools/gcp/suite_status.sh fails on any FAIL, SKIP or ERROR and reconciles the results with the cases
-  requested. Mutation tests of the comparator and the harness: tests/verify/test_exact_mutations.py,
-  test_harness_mutations.py, test_cdx9_mutations.py.
-- Suite: N3T, three domains (d03 at 1.67 km inside d02 inside d01, two-way feedback, smooth_option 2, P4 physics),
-  against WRF real*8 at tolerance 0 on every domain, CPU and CUDA FP64. straka_wrf / straka_wrf_cuda (an RMS check
-  against WRF real*4) leave the suite; WRF's em_grav2d_x real*8 run is ideal_grav2d_x_fp64_cpu / _cuda at tolerance 0.
-- Build: CMake refuses x87 arithmetic (-mfpmath=387, -m32, -mno-sse2, -fexcess-precision=fast) and, in the CUDA FP64
-  and FP32 identity builds, --fmad=true; precision.hpp asserts `__FLT_EVAL_METHOD__ == 0`.
-- GPU nests and stepping (results unchanged): history-only feedback runs when the parent next reads the fields,
-  smooth_option 2 without the field copies, the boundary slabs of a field in one launch, force and feedback as CUDA
-  graphs; a step segment's graph is launched before the wait for the previous one; host uploads through a reusable
-  per-thread buffer.
-- GPU RRTMG SW (results unchanged): the SW prep's inatm_sw / setcoef_sw and taumol_sw run per (column, layer)
-  (`KSwSetcoef`, `KSwLayer`), the layer of each band's solar source per column (`KSwSolfr`); docs/PERF.md PERF14.
-- sfclayrev / YSU: `phys.shalwater_z0`, `phys.scm_force_flux != 0` and a nonzero U_FRAME / V_FRAME in wrfinput are
-  refused (not ported; were ignored). The two options are checked with the model's options whichever schemes the
-  run has, and the error names the value given; the translator names WRF's group (`&physics.shalwater_z0`,
-  `&scm.scm_force_flux`). A run resumed from a wrfrst file refuses a nonzero U_FRAME / V_FRAME in that file too
-  (WRF's Registry `ir`: the resumed wrf.exe takes the file's frame); the errors name the file and the value.
-- CPPWRF's native restart format version is 7 (`sfc_var2d` / VAR and `HALO_<name>` in decomposed runs' files): a
-  file of version 6 or older is refused with a pointer to the run's wrfrst file (native restart files belong to the
-  sources that wrote them). Every `HALO_<name>` of a field the file has is required on reading. The file is written
-  as `restart_<step>.nc.partial` and renamed once complete (fields and halo points).
 - WRF-format output off the model's thread (files unchanged, byte for byte): the values of a wrfout / auxhist3 /
   wrfrst record are copied from the model's fields as before, then a writer thread makes the record's NetCDF calls
   (Times, the puts in order, nc_sync) while the model steps on. One NetCDF lock for the process: the model's thread
@@ -112,6 +72,52 @@ resumes across versions from WRF's wrfrst files.
 - NetCDF-4 output: the staged bytes of a variable belong to the record before their chunks are queued, and a chunk
   that cannot be queued or compressed is no longer counted, so an error between staging and writing waits for the
   queued compression and then frees the bytes.
+
+## 1.4.0 (2026-11-24)
+
+### Changed
+- CPPWRF's own restart file (`restart_<step>.nc`) no longer depends on the decomposition: a decomposed run (tiles,
+  MPI ranks) writes the halo points of its fields beyond the domain's edges (`HALO_<name>`, gathered from the edge
+  patches) as a run of one patch does, and a decomposed run resumed from the file sets them in every patch that holds
+  them. Before, a decomposed run's file had no `HALO_<name>` and a decomposed resume refilled those points from the
+  domain's values. WRF-format wrfrst files and every model output are unchanged. Suite: `real_p4_r8_fp64_cpu_rst_t2x2` and
+  `ideal_quarter_ss_k2_fp64_cpu_rst_t2x2` (every restart file of a 2 x 2 run identical to the one-patch run's, all
+  variables and attributes; quarter_ss periodic) and
+  `real_p4_r8_fp64_cpu_chain_t2x2` (P4's restart chain in 2 x 2 tiles).
+- docs/MPI.md section 6: the CUDA FP64 build with MPI on two T4 GPUs of one Kaggle node (`tools/kaggle/kaggle_mpi.sh`):
+  seven cuda_dp checks in seven layouts (one process, one rank, one rank per GPU, two ranks per GPU, tiles over the
+  GPUs) equal the WRF references at tolerance 0.
+- Verification: every suite check says what it compared (`[vs WRF tol 0]`, `[vs WRF rel L2]` or `[self only]`) and
+  requires complete coverage: every scheduled frame, stream, domain and restart file of the configuration, one time
+  window for compared and reference counts, no duplicate or clock-only records, integers compared exactly, variables
+  without a Time dimension and the metadata of every file compared; a check with zero comparisons fails. Restart
+  checks resume from WRF's own wrfrst file as WRF's resumed run was configured, and the P4, G2, P8, NMP1, SLAB1, N3
+  and D0 restart chains are compared with WRF's runs of their configurations at tolerance 0 (were self-consistency
+  checks). tools/gcp/suite_status.sh fails on any FAIL, SKIP or ERROR and reconciles the results with the cases
+  requested. Mutation tests of the comparator and the harness: tests/verify/test_exact_mutations.py,
+  test_harness_mutations.py, test_cdx9_mutations.py.
+- Suite: N3T, three domains (d03 at 1.67 km inside d02 inside d01, two-way feedback, smooth_option 2, P4 physics),
+  against WRF real*8 at tolerance 0 on every domain, CPU and CUDA FP64. straka_wrf / straka_wrf_cuda (an RMS check
+  against WRF real*4) leave the suite; WRF's em_grav2d_x real*8 run is ideal_grav2d_x_fp64_cpu / _cuda at tolerance 0.
+- Build: CMake refuses x87 arithmetic (-mfpmath=387, -m32, -mno-sse2, -fexcess-precision=fast) and, in the CUDA FP64
+  and FP32 identity builds, --fmad=true; precision.hpp asserts `__FLT_EVAL_METHOD__ == 0`.
+- GPU nests and stepping (results unchanged): history-only feedback runs when the parent next reads the fields,
+  smooth_option 2 without the field copies, the boundary slabs of a field in one launch, force and feedback as CUDA
+  graphs; a step segment's graph is launched before the wait for the previous one; host uploads through a reusable
+  per-thread buffer.
+- GPU RRTMG SW (results unchanged): the SW prep's inatm_sw / setcoef_sw and taumol_sw run per (column, layer)
+  (`KSwSetcoef`, `KSwLayer`), the layer of each band's solar source per column (`KSwSolfr`); docs/PERF.md PERF14.
+- sfclayrev / YSU: `phys.shalwater_z0`, `phys.scm_force_flux != 0` and a nonzero U_FRAME / V_FRAME in wrfinput are
+  refused (not ported; were ignored). The two options are checked with the model's options whichever schemes the
+  run has, and the error names the value given; the translator names WRF's group (`&physics.shalwater_z0`,
+  `&scm.scm_force_flux`). A run resumed from a wrfrst file refuses a nonzero U_FRAME / V_FRAME in that file too
+  (WRF's Registry `ir`: the resumed wrf.exe takes the file's frame); the errors name the file and the value.
+- CPPWRF's native restart format version is 7 (`sfc_var2d` / VAR and `HALO_<name>` in decomposed runs' files): a
+  file of version 6 or older is refused with a pointer to the run's wrfrst file (native restart files belong to the
+  sources that wrote them). Every `HALO_<name>` of a field the file has is required on reading. The file is written
+  as `restart_<step>.nc.partial` and renamed once complete (fields and halo points).
+
+### Fixed
 - sfclayrev with fractional_seaice = 1: USTM_SEA is 0 on entry to every open-water call (WRF's automatic array has
   no defined value; CPPWRF carried the last call's) and ch = chs only in the non-fractional branch, as
   module_surface_driver.F.
