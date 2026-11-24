@@ -44,11 +44,16 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files, for the 483 CPU FP64 checks of the suite at 318159a, version 1.3.0 (real-data
-  domains in the mid-latitudes, the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and
-  72 h forecasts, WRF's default namelist, WRF's idealized cases).
-- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build (all CUDA FP64 checks of the suite, 423 for v1.3.0, 422 run for v1.2.3, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1, on the RTX PRO 6000 Blackwell of a Colab G4, earlier
-  subsets on NVIDIA L4 and A100).
+  process, in every variable and output time of the wrfout and wrfrst files. For v1.4.0 at `fbded83`, CPU CI passed
+  487 FP64 checks and 44 FP32 checks, all 531 against WRF at tolerance 0. The same run passed 42 WRF output file
+  checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 42/42. For v1.3.0 at `318159a`, CPU CI reported
+  483 FP64 passes, including the legacy Straka RMS check. The suite covers real-data domains in the mid-latitudes,
+  the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and 72 h forecasts, WRF's default
+  namelist and WRF's idealized cases.
+- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build. For v1.4.0 at `a63ed9f`, all 423 CUDA FP64
+  checks passed against WRF at tolerance 0 on the RTX PRO 6000 Blackwell of a Colab G4. Earlier G4 runs reported
+  423 passes for v1.3.0, 422 for v1.2.3, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1. Earlier subsets ran on
+  NVIDIA L4 and A100.
 - **CPU and GPU, FP32** (`-DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default
   real*4 build) on 24 configurations, the 44 `cpu_sp` and 44 `cuda_sp_id` cases of the suite (P1-P4, P9, Noah-MP,
   Thompson, MYNN, WDM6, Morrison, the nests N1 / N3 and more). The CUDA FP32 build defaults to this identity mode

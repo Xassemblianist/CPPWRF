@@ -1,6 +1,6 @@
 # CPPWRF
 
-Version 1.3.0 ([release notes](docs/RELEASE_NOTES.md)). Archived on Zenodo: [doi:10.5281/zenodo.24442751](https://doi.org/10.5281/zenodo.24442751)
+Version 1.4.0 ([release notes](docs/RELEASE_NOTES.md)). Archived on Zenodo: [doi:10.5281/zenodo.24442751](https://doi.org/10.5281/zenodo.24442751)
 (all versions; 1.3.0 is [doi:10.5281/zenodo.24442752](https://doi.org/10.5281/zenodo.24442752)).
 
 CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static nesting,
@@ -11,11 +11,11 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** The v1.3.0 CUDA FP64 suite reported 423 passes on the Colab G4 (RTX PRO
-  6000 Blackwell, sm_120, CUDA 13.0), with the WRF real*8 comparisons at tolerance 0. The CUDA FP32 identity build
-  matched WRF real*4 in all 44 cases. Earlier G4 runs covered 422 checks for v1.2.3, 356 for v1.2.2 and 338 for
-  v1.2.0 and v1.2.1. The v1.1.0 G4 total of 338 included 319 cases, 18 restart checks and the legacy
-  `straka_wrf_cuda` RMS check against WRF real*4 at 1e-4 K. The WRF real*8 comparisons passed at tolerance 0.
+- **GPU, FP64: bit-identical to WRF too.** For v1.4.0, all 423 CUDA FP64 checks matched WRF real*8 at tolerance 0
+  on the Colab G4 at `a63ed9f` (RTX PRO 6000 Blackwell, sm_120, CUDA 13.0). The CUDA FP32 identity build matched
+  WRF real*4 at tolerance 0 in all 44 cases. Earlier G4 runs reported 423 passes for v1.3.0, 422 for v1.2.3,
+  356 for v1.2.2 and 338 for v1.2.0 and v1.2.1. The v1.1.0 G4 total of 338 included 319 cases, 18 restart checks
+  and the legacy `straka_wrf_cuda` RMS check against WRF real*4 at 1e-4 K. The WRF real*8 comparisons passed at tolerance 0.
   Earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
 - **CPU and GPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations,
   among them P1-P4, Thompson, MYNN, WDM6, Morrison, Noah-MP and the nests N1 / N3. The CUDA FP32 build defaults to
@@ -24,7 +24,8 @@ The port follows WRF statement by statement, and every result is checked against
 - **GPU, FP32 (fast mode):** opt-in (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, FMA contraction and CUDA's math library).
   In the [v1.3.0 paper benchmark](#performance), the identity build takes 2.1 to 18.0 % longer in steady stepping
   than the fast build (identity time / fast time - 1). The fast build is compared with WRF by relative L2 error.
-  Its 44 suite runs are within their measured tolerances ([docs/FP32_ACCURACY.md](docs/FP32_ACCURACY.md)).
+  The v1.4.0 G4 run passed 43 of 44 checks. The remaining case passed on an RTX 2060 after the comparator fix
+  ([release notes](docs/RELEASE_NOTES.md)).
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
 
@@ -70,15 +71,15 @@ without a port is reported as an error and never silently ignored. Still missing
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
-- **Model runs and restart checks** (`tests/verify/wrf_suite.py`): CPU CI runs these checks on every push. At
-  318159a (version 1.3.0), CPU CI reported 483 FP64 passes (464 cases, 18 restart checks and the legacy
-  `straka_wrf` RMS check) and 44 FP32 passes. The WRF real*8 and
-  CPU FP32 real*4 comparisons passed at tolerance 0. The `ideal_grav2d_x` cases verify the Straka density current
-  against WRF real*8 at tolerance 0 on CPU and CUDA. Another 154 cases run with `--slow`. The CUDA FP64 checks and the
-  CUDA FP32 identity cases run once per release on a GPU. The cases cover
-  real-data domains in the mid-latitudes, the tropics (Bay of Bengal), the Arctic (Svalbard) and the Alps
-  at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS namelist. CPPWRF's wrfout files are
-  compared with WRF's in every variable and output time.
+- **Model runs and restart checks** (`tests/verify/wrf_suite.py`): CPU CI runs these checks on every push. For
+  v1.4.0 at `fbded83`, all 531 suite checks passed against WRF at tolerance 0 (487 FP64 and 44 FP32). CPU CI also
+  passed 42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 42/42. For v1.3.0 at
+  `318159a`, the suite reported 483 FP64 passes (464 cases, 18 restart checks and the legacy `straka_wrf` RMS check)
+  and 44 FP32 passes. The `ideal_grav2d_x` cases verify the Straka density current against WRF real*8 at tolerance 0
+  on CPU and CUDA. Another 154 CPU FP64 cases run with `--slow`. The CUDA FP64 checks and the CUDA FP32 identity
+  cases run once per release on a GPU. The cases cover real-data domains in the mid-latitudes, the tropics (Bay of
+  Bengal), the Arctic (Svalbard) and the Alps at 3 km. They include 24 h and 72 h forecasts and WRF's default CONUS
+  namelist. CPPWRF's wrfout files are compared with WRF's in every variable and output time.
 - **WRF output files:** wrfout and wrfrst match WRF's files in values, attributes and metadata. Runs resumed
   from WRF's restart files match too.
 
@@ -188,7 +189,7 @@ with WRF's `input_sounding`) and the suite's real-data cases, which read the WRF
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): building, the way from WPS to wrfout, the translator, every supported
   and rejected option, nests, GPU runs, restarts, output streams, configuration keys
 - [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md): versions and the verified scope of
-  v1.3.0 (and of the earlier releases)
+  v1.4.0 (and of the earlier releases)
 - [docs/STATUS.md](docs/STATUS.md): what is ported, how it is verified, every case and result
 - [docs/PERF.md](docs/PERF.md): the benchmark against WRF, the GPU profile and the performance roadmap
 - [docs/FP32_IDENTITY.md](docs/FP32_IDENTITY.md): the FP32 builds that are bit-identical to WRF real*4

@@ -6,10 +6,12 @@ Yes, in FP64, for the configurations CPPWRF verifies. `cpu-fp64` and `gpu-fp64` 
 at every output time exactly as WRF v4.8.0 real*8 does, at tolerance 0. NaN must equal NaN, and -0 must differ from
 +0.
 
-- **What was compared.** At 318159a (version 1.3.0), the CPU FP64 CI run reported 483 passes (464 cases, 18 restart
-  checks and the legacy `straka_wrf` RMS check). Another 154 cases run with `--slow`. The CUDA FP64 release run
-  reported 423 passes. The Straka density current is verified on CPU and CUDA by `ideal_grav2d_x` against WRF real*8
-  at tolerance 0. The suite runs CPU checks on each push and GPU checks for each release.
+- **What was compared.** For v1.4.0 at `fbded83`, CPU CI passed 531 suite checks against WRF at tolerance 0
+  (487 FP64 and 44 FP32), 42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 42/42.
+  Another 154 CPU FP64 cases run with `--slow`. The v1.4.0 Colab G4 run at `a63ed9f` passed all 423 CUDA FP64
+  checks against WRF at tolerance 0. The v1.3.0 runs at `318159a` reported 483 CPU FP64 and 423 CUDA FP64 passes,
+  including the legacy Straka RMS checks. The `ideal_grav2d_x` cases verify the Straka density current on CPU and
+  CUDA against WRF real*8 at tolerance 0. The suite runs CPU checks on each push and GPU checks for each release.
   - real-data domains in the mid-latitudes, the tropics, the Arctic and the Alps;
   - 24 h and 72 h forecasts;
   - nests, restarts, and WRF's idealized cases;

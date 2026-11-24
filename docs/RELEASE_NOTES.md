@@ -1,3 +1,60 @@
+# CPPWRF 1.4.0 release notes
+
+CPPWRF 1.4.0 makes native restart files independent of the tile or MPI layout and expands exact verification
+against WRF v4.8.0. The suite checks a three-domain nest and compares restart chains with WRF. This release
+also improves CUDA nest stepping and RRTMG shortwave preparation. The 1.3.0 notes follow below.
+
+## Changed
+
+- **Native restarts.** Native restart files carry halo points across tile and MPI layouts. Format version 7
+  requires the halo fields and carries orographic variance. The reader directs users with an older native restart
+  file to resume from the run's WRF `wrfrst` file.
+- **Verification.** Checks report which comparisons they made and require complete coverage of scheduled frames,
+  streams, domains and restart files. Restart checks use WRF's `wrfrst` files and the suite compares the covered
+  restart chains against WRF at tolerance 0. The N3T case checks every domain of a three-domain, two-way nest on
+  CPU and CUDA FP64. The `ideal_grav2d_x` cases now provide the suite's Straka density-current check against WRF
+  real*8 at tolerance 0.
+- **CUDA.** The CUDA FP64 build with MPI matched WRF at tolerance 0 for seven cases in each of seven layouts on a
+  Kaggle node with two T4 GPUs. CUDA nests use graphs for forcing and feedback, reduce field copies and reuse a
+  host upload buffer. RRTMG shortwave preparation runs per column and layer. See [MPI.md](MPI.md) and
+  [PERF.md](PERF.md).
+- **Build and configuration checks.** CMake rejects x87 arithmetic and rejects forced FMA contraction in CUDA
+  FP64 and FP32 identity builds. The model rejects nonzero frame velocities and unsupported `shalwater_z0` and
+  `scm_force_flux` options.
+
+## Fixed
+
+- **Surface physics.** The revised MM5 surface layer initializes `USTM_SEA` on each fractional-sea-ice open-water
+  call and sets `ch` from `chs` only in the non-fractional branch. The revised surface layer and YSU use Fortran's
+  `MIN` and `MAX` ordering, and YSU defaults `ysu_topdown_pblmix` to WRF's value.
+- **Input and restart readers.** Cold starts read ocean currents, and WRF restarts supply orographic variance.
+  The readers validate NetCDF rank, dimensions and extents before reading. The writer publishes the native restart
+  file after all fields and halos are written.
+- **CUDA errors and CTest.** GPU step segments report the earlier fatal flag first when a later error occurs. Tile
+  workers release their upload buffer at exit. The `real_vs_wrf` and `real_vs_wrf_runs` tests use separate work
+  directories.
+
+## Verification
+
+| Where | Result |
+|---|---|
+| CPU CI at `fbded83` (GitHub-hosted runners, run 45255814974) | Suite PASS 531 FAIL 0 SKIP 0, all against WRF at tolerance 0. WRF output files 42, ideal files 14, `ctest -L diff` 32/32, CTest 42/42. |
+| Colab G4 at `a63ed9f` (NVIDIA RTX PRO 6000 Blackwell Server Edition, sm_120), 2026-11-23 | CUDA FP64 PASS 423 FAIL 0 SKIP 0, all against WRF at tolerance 0. CUDA FP32 identity 44/44 against WRF real\*4 at tolerance 0. Fast CUDA FP32 43/44, with 42 relative L2 comparisons against WRF and one restart self-check passing. CTest recorded results for 43/43 FP64 tests and 44/44 FP32 tests with zero failures. Each build skipped `test_wrf_readers`. |
+| RTX 2060 (sm_75) at `fbded83` | The fast CUDA FP32 case `ideal_squall2d_x_fp32` passed on rerun, with U relative L2 error 6.6e-5 within the 3e-4 tolerance. |
+
+On the G4, the stricter comparator refused `ideal_squall2d_x_fp32` because the WRF reference has two identical
+y rows (`e_sn = 3`) and CPPWRF has one. At `fbded83`, `compare_real.py --y-slab` checks that the WRF rows agree
+and compares the first row with CPPWRF's. The `a63ed9f..fbded83` changes are confined to the verification harness
+under `tests/verify`.
+
+The suite defines 1159 cases (623 CPU FP64, 405 CUDA FP64, 43 fast CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`).
+The CPU CI suite includes 469 CPU FP64 cases outside `--slow`, 18 restart checks and the 44 `cpu_sp` cases.
+The G4 CUDA FP64 suite includes the 405 CUDA FP64 cases and 18 GPU restart checks.
+
+## Known limitations
+
+See [STATUS.md](STATUS.md) for the verified configurations and current limitations.
+
 # CPPWRF 1.3.0 release notes
 
 CPPWRF 1.3.0 makes WRF real*4's arithmetic the default of the GPU FP32 builds. `-DCPPWRF_ENABLE_CUDA=ON

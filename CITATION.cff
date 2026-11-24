@@ -5,8 +5,8 @@ type: software
 authors:
   - family-names: "Yılmaz"
     given-names: "Ömer Kaan"
-version: "1.3.0"
-date-released: "2026-11-22"
+version: "1.4.0"
+date-released: "2026-11-24"
 license: GPL-3.0-or-later
 repository-code: "https://github.com/Xassemblianist/CPPWRF"
 doi: "10.5281/zenodo.24442751"

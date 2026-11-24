@@ -161,8 +161,8 @@ NetCDF file, so it does not depend on the NetCDF or HDF5 version.
 
 ## 6. Release tarballs
 
-A release has one tarball per flavour, for example `cppwrf-1.3.0-cpu-fp64-linux-x86_64.tar.gz` and
-`cppwrf-1.3.0-gpu-fp32-sm80-86-89-90-120-linux-x86_64.tar.gz`. Unpack one anywhere and use its `bin/`; it has the
+A release has one tarball per flavour, for example `cppwrf-1.4.0-cpu-fp64-linux-x86_64.tar.gz` and
+`cppwrf-1.4.0-gpu-fp32-sm80-86-89-90-120-linux-x86_64.tar.gz`. Unpack one anywhere and use its `bin/`; it has the
 layout of section 4. The binaries are built portably (`CPPWRF_NATIVE=OFF`) on Debian 13 and need:
 
 - **glibc 2.38 or later** and the **libstdc++ of GCC 13.2 or later** (`GLIBCXX_3.4.32`). Debian 13 and Ubuntu 24.04
