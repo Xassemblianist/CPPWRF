@@ -1,3 +1,64 @@
+# CPPWRF 1.5.0 release notes
+
+CPPWRF 1.5.0 runs single-domain ensembles in one process, reduces the cost of halo exchanges in decomposed runs,
+and writes WRF-format NetCDF output asynchronously in runs without tiling or MPI.
+
+## Added
+
+- **Ensembles.** The `[ensemble]` section runs members sequentially or on separate host threads. Threaded CUDA
+  members have their own streams, graphs and fields on one GPU. Each member's output files match its standalone
+  run byte for byte. See [ENSEMBLE.md](ENSEMBLE.md).
+
+## Changed
+
+- **Halo exchange and MPI.** Persistent plans reuse buffer layouts and pack and unpack each exchange with one
+  launch each. CUDA-aware MPI can use device buffers directly. The staged path uses pinned host buffers, and
+  CUDA runs under MPI use graphs between exchanges and fatal checks. See [MPI.md](MPI.md).
+- **Acoustic steps (OVL1).** The decomposed path merges halo fills where their dependencies allow it and overlaps
+  the exchange before `advance_uv` with computation on the patch interior. P8 with `n_sound = 4` uses 49 exchanges
+  per time step, down from 65. See [PERF.md](PERF.md).
+- **NetCDF output.** A writer thread writes `wrfout`, `auxhist3` and `wrfrst` records while stepping continues.
+  `output.write_queue_mb` bounds queued records in memory and can select synchronous output. Decomposed runs
+  write synchronously. The file bytes are unchanged.
+
+## Fixed
+
+- **Audit fixes.** Ensembles isolate averaging counters, output paths and writer errors. CPU and CUDA members
+  have their own fatal flags. HIP reads fatal flags from the slot its kernels write. The NetCDF writer keeps
+  compression chunks with their records and waits before reopening a path. Halo messages validate their box
+  fingerprints before unpacking, and fatal flag transfers report errors.
+- **CPU tile checking.** Host copies for Noah's land-ice points and Tiedtke's row flag count as the launches
+  they replace, keeping later comparisons aligned with the one-patch run. Two `*_chk` suite cases exercise this path.
+- **MPI diagnostics.** MPI runs report the rank and operation on failure. Startup refuses `run.gpu_aware_mpi = on`
+  when any rank's MPI library reports that it cannot accept device memory.
+- **Verification harness.** Failed runs keep their full logs, and the Kaggle launcher supports repeated layouts.
+  The fast FP32 comparator can check the periodic-y slab against a packed WRF reference without `namelist.input`
+  at `091ffae`. It still requires WRF's rows to match bit for bit before comparing the slab.
+
+## Verification
+
+| Where | Result |
+|---|---|
+| CPU CI at `ac13ebe` (run `45344364696` and run `45361018450`, which reran the 16 cases from a runner that died) | Suite PASS 533 FAIL 0, all against WRF at tolerance 0. WRF output files 42, ideal files 14, `ctest -L diff` 32/32, CTest 44/44. |
+| Final CPU CI at `091ffae` (run `45431693575`) | Suite PASS 533 FAIL 0 SKIP 0, all against WRF at tolerance 0. WRF output files 42, ideal files 14, `ctest -L diff` 32/32, CTest 44/44. |
+| Colab G4 at `40628eb` (RTX PRO 6000 Blackwell, sm_120), 2026-11-24 | CUDA FP64 423/423 against WRF real\*8 at tolerance 0. CUDA FP32 identity 44/44 against WRF real\*4 at tolerance 0. CTest recorded 45/45 (FP64 build) and 46/46 (FP32 build) with zero failures and one `test_wrf_readers` skip in each build. Fast CUDA FP32 43/44. The comparator refused `ideal_squall2d_x_fp32` because its packed reference lacks `namelist.input`. |
+| RTX 2060 (sm_75) at `091ffae` | `ideal_squall2d_x_fp32` passed with the harness fix and the reference without `namelist.input`. U relative L2 error was 6.6e-5 ≤ 3e-4. |
+| Kaggle at `ac13ebe` (two Tesla T4 GPUs, CUDA FP64 + MPI, Open MPI 4.1.6 without CUDA support) | 7 cases × 9 layouts (`plain`, `1`, `1x2`, `2x1`, `2x2`, `1x2@off`, `t1x2`, `t1x2@on`, `t2x1`) all passed against WRF at tolerance 0. Each layout's 56 files were byte-identical to `plain`. `1x2@on` was refused at startup with a message explaining that the MPI library could not accept device memory. |
+| Kaggle at `40628eb` (same setup) | `restart_acm7_fp64_cuda` and `real_acmn_r8_fp64_cuda_1h` ran 10 times at `1x2@off` and 4 times at `2x2@off`. All runs passed, with 21 files byte-identical to `plain` in each repetition. |
+
+The changes from `ac13ebe` to `40628eb` affect only the Kaggle launcher. The change from `40628eb` to `091ffae`
+affects only the verification harness.
+
+The suite defines 1161 cases (625 CPU FP64, 405 CUDA FP64, 43 fast CUDA FP32, 44 `cpu_sp` and 44 `cuda_sp_id`).
+The CPU CI suite includes 471 CPU FP64 cases outside `--slow`, 18 restart checks and the 44 `cpu_sp` cases.
+The G4 CUDA FP64 suite includes the 405 CUDA FP64 cases and 18 GPU restart checks.
+
+## Known issues and limitations
+
+`restart_acm7_fp64_cuda` aborted once at `1x2@off` in an earlier Kaggle job before the FIX16 changes. The cause
+remains unexplained. All 14 subsequent repetitions passed. MPI runs now report the failing rank and operation.
+See [STATUS.md](STATUS.md) for the verified configurations and current limitations.
+
 # CPPWRF 1.4.0 release notes
 
 CPPWRF 1.4.0 makes native restart files independent of the tile or MPI layout and expands exact verification

@@ -127,7 +127,7 @@ sürümünden etkilenmez.
 
 ## Hazır paketler ve kapsayıcılar
 
-- **Sürüm paketleri.** Her derleme için bir `.tar.gz` vardır, ör. `cppwrf-1.4.0-cpu-fp64-linux-x86_64.tar.gz`.
+- **Sürüm paketleri.** Her derleme için bir `.tar.gz` vardır, ör. `cppwrf-1.5.0-cpu-fp64-linux-x86_64.tar.gz`.
   Açıp `bin/` dizinini kullanmanız yeterli. Debian 13'te derlendikleri için glibc 2.38+, GCC 13.2+ libstdc++ ve
   Debian 13'ün NetCDF kitaplığı (`libnetcdf22`) gerekir. GPU paketleri ayrıca uygun bir NVIDIA sürücüsü (CUDA 12.8
   için 570+) ve CUDA çalışma kitaplığı (`libcudart`) ister.
