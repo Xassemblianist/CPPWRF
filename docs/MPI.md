@@ -120,6 +120,26 @@ whole device twice (`gpuDeviceSynchronize` before the pack and after the unpack)
 peer) box in each direction, staged through pageable `std::vector`s (copied once more per message) and received
 with a blocking `MPI_Probe` / `MPI_Recv` per peer in rank order.
 
+Fewer exchanges and overlap with the acoustic steps (OVL1). `SmallStep::run_stage` merges fills where no launch
+between two of them reads the first one's halo or writes its fields: the stage's three opening fills (u_2, v_2,
+ph_2, t_save, u_save, v_save; mu_2, muts; p, al) become one after calc_p_rho (which reads only its column), without
+u_2 and v_2 (advance_uv reads and writes them only at the point, and the fill after advance_uv refreshes their halos
+before any other launch reads them: the halos read are the same values); each small
+step's mu_2 / mudf / muts goes with ph_2 / p / al after calc_p_rho (advance_w, its boundary update and calc_p_rho read
+those three only at the point and write none of them); the last small step's goes with the stage's muts / ru_m /
+rv_m / ww_m. A field's halo then gets the same values later, before its first reader (P8 with n_sound 4: 49
+exchanges per time step instead of 65). The fill before each advance_uv is a `FillAsync` (core/halo.hpp): `begin`
+packs and queues the send buffer's copy, marks the stream (`host_mark`: under CUDA graphs the open segment is
+launched there) and returns; advance_uv is launched for the patch's points at least one point from its edges
+(`launch_interior`: it reads its fields at (i - 1, j), (i, j - 1) and the point, so those points read no halo point of
+the fill); `finish` waits for the marker only (`host_section_begin_at_mark`: the interior launch runs on during the
+transfer), moves the messages, unpacks behind the interior launch and makes the boundary fill; `launch_rest`
+launches the other points (four strips, `tile::Region`). Every point of advance_uv is computed once by the same
+operations from the same inputs; the launches between `begin` and `finish` write no point of the fields and read
+none of their halos; no other collective may run in between (checked). Without a decomposition, with
+`CPPWRF_TILE_CHECK` (whose launch sequence is the one-patch run's) or with `CPPWRF_HALO_OVERLAP=0` advance_uv is one
+launch after the fill, as before. The vm dump (one patch) keeps the fills one by one.
+
 Rejected: one-sided pulls from the neighbours' arrays (P03's `cudaMemcpy3D` between tiles' copies): needs every
 worker's memory in one address space. Not done: CUDA IPC between the ranks of a node (a neighbour's device buffer
 mapped once), which a GPU-aware MPI does itself over NVLink / PCIe where it can.
@@ -242,7 +262,10 @@ CPPWRF_TILES=2x2 build/cppwrf CONFIG.ini
 - GPU builds: an MPI rank runs its time steps as CUDA graphs, as one process does (the segments between its halo
   exchanges and fatal checks; `CPPWRF_GRAPHS=0` launches without them), and prepares the next step while the device
   runs the last one. Tiles (several workers in one process) launch without graphs.
-- `CPPWRF_HALO_STATS=1`: each worker prints its exchanges, plans, messages and bytes sent at its end.
+- `CPPWRF_HALO_STATS=1`: each worker prints its exchanges, plans, messages and bytes sent at its end, and the wall
+  time of every plan's exchanges in four parts (pack launch, wait for the stream, transfer, unpack launch; the
+  overlapped ones marked) and of the other collectives by kind (3 maximum, 5 fatal codes). `CPPWRF_HALO_OVERLAP=0`:
+  advance_uv waits for the fill before it (section 3.4, OVL1).
   `CPPWRF_TILE_DEVICE_BUFFERS=1` (tiles, GPU builds; a check): the exchanges take the device-buffer path that a
   GPU-aware MPI takes, the bytes copied through the mailboxes.
 - The MPI binary without `mpirun`, or with one rank, is the one-process program.

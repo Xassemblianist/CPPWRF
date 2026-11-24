@@ -32,6 +32,17 @@ resumes across versions from WRF's wrfrst files.
   prints each worker's exchanges; `CPPWRF_TILE_DEVICE_BUFFERS=1` runs tiles over the device-buffer path (a check).
   tools/kaggle/kaggle_mpi.sh: layouts `L@on` / `L@off` force the transport, env.txt names whether Open MPI was built
   with CUDA.
+- Acoustic steps of a decomposed run (docs/MPI.md section 3.4, docs/PERF.md OVL1): the halo fills of a Runge-Kutta
+  stage are merged where no launch between two of them reads the first one's halo or writes its fields (the start of
+  the stage: three fills as one after calc_p_rho, without u_2 / v_2, whose halos the fill after advance_uv refreshes
+  before any reader; each small step's mu_2 / mudf / muts with ph_2 / p / al; the last small step's with the stage's
+  ru_m / rv_m / ww_m), 49 exchanges per time step instead of 65 on P8 (n_sound 4); the fill before each advance_uv is
+  begun before advance_uv's interior points (those one point inside the patch) and finished after them, so the
+  transfer runs while the GPU computes them (`FillAsync`, `launch_interior` / `launch_rest`; the wait is for a marker
+  behind the pack, not for the stream; under CUDA graphs a segment ends at the marker). Every launch reads the
+  values it read before: outputs unchanged in every layout and build. `CPPWRF_HALO_OVERLAP=0` launches
+  advance_uv at once after the fill; `CPPWRF_HALO_STATS=1` now also prints the time of every exchange's parts (pack,
+  wait for the stream, transfer, unpack) per plan and of the other collectives.
 - WRF-format output off the model's thread (files unchanged, byte for byte): the values of a wrfout / auxhist3 /
   wrfrst record are copied from the model's fields as before, then a writer thread makes the record's NetCDF calls
   (Times, the puts in order, nc_sync) while the model steps on. One NetCDF lock for the process: the model's thread

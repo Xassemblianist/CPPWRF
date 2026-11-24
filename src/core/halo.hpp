@@ -47,4 +47,71 @@ struct HaloField {
 void fill_halos(std::initializer_list<HaloField> fs, const Grid& g);
 void fill_halos(const std::vector<HaloField>& fs, const Grid& g);
 
+// A fill whose transfer overlaps launches that do not need it (a decomposed GPU run, docs/MPI.md section 3.4):
+//   FillAsync f;  f.begin({...}, g);       // the exchange packed and its copy queued; nothing waits
+//   launch_interior(g, w, [&] { ... });   // the patch's interior points: run during the transfer
+//   f.finish();                            // the transfer, the unpack, the boundary fill (as fill_halos)
+//   launch_rest(g, w, [&] { ... });        // the other points, after the fill
+// The kernels launched between begin and finish must not read the fields' halo points nor write any point of the
+// fields; the same launch given to launch_interior and launch_rest computes each point once, with the operations and
+// inputs of the one launch over all points, when no point of the interior box (the patch's points at least w from
+// its edges) reads a halo point of the fields within the launch's stencil. Without a decomposition, with
+// CPPWRF_TILE_CHECK, or with CPPWRF_HALO_OVERLAP=0: begin does nothing, finish is fill_halos, launch_interior
+// launches nothing and launch_rest launches all points at once (the launches of a run without it). Other collectives
+// (fills, exchanges, fatal checks) must not be called between begin and finish.
+bool halo_overlap_on();
+class FillAsync {
+ public:
+  FillAsync() = default;
+  ~FillAsync();
+  FillAsync(const FillAsync&) = delete;
+  FillAsync& operator=(const FillAsync&) = delete;
+  void begin(std::vector<HaloField> fs, const Grid& g);
+  void finish();
+  bool open() const { return open_; }
+
+ private:
+  std::vector<HaloField> fs_;
+  const Grid* g_ = nullptr;
+  bool open_ = false, exchanged_ = false;
+};
+// the interior box of the calling worker's patch shrunk by w on every side (empty: no split)
+struct InteriorBox {
+  bool on;
+  int i0, i1, j0, j1;
+};
+InteriorBox interior_box(const Grid& g, int w);
+template <class F>
+void launch_interior(const Grid& g, int w, F&& launch) {
+  const InteriorBox b = interior_box(g, w);
+  if (!b.on) return;
+  const tile::Region r(b.i0, b.i1, b.j0, b.j1);
+  launch();
+}
+template <class F>
+void launch_rest(const Grid& g, int w, F&& launch) {
+  const InteriorBox b = interior_box(g, w);
+  if (!b.on) {
+    launch();
+    return;
+  }
+  constexpr int lo = -(1 << 30), hi = 1 << 30;  // (the worker's own bounds clip these)
+  {
+    const tile::Region r(lo, hi, lo, b.j0);  // south strip, every column
+    launch();
+  }
+  {
+    const tile::Region r(lo, hi, b.j1, hi);  // north strip
+    launch();
+  }
+  {
+    const tile::Region r(lo, b.i0, b.j0, b.j1);  // west strip, the rows between
+    launch();
+  }
+  {
+    const tile::Region r(b.i1, hi, b.j0, b.j1);  // east strip
+    launch();
+  }
+}
+
 }  // namespace cppwrf

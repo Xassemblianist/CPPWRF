@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#include <cstdlib>
 #include "dyn/small_step.hpp"
 
 #include <cmath>
@@ -563,12 +564,27 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
                      s.muvs.view(), s.mu_1.cview(), s.mut.cview(), s.muu.cview(), s.muv.cview(), b.mub.view(),
                      b.pb.view(), c, nx, ny, nyv, nz, b.msfuy.view(), b.msfvx_inv.view(), b.msfty.view(),
                      stage_ == 1});
-  fill_halos({&s.u_2, &s.v_2, &s.ph_2, &t_save, &u_save, &v_save}, g);
-  fill_halos({&s.mu_2, &s.muts}, g);
-
+  // The halo fills of this stage are merged where no launch between two of them reads the first one's halo or writes
+  // its fields (WRF exchanges them one by one; the values are the same, docs/MPI.md section 3.4, OVL1), and the last
+  // fill before advance_uv overlaps advance_uv's interior points (FillAsync). The vm dump (one patch only) keeps
+  // the fills where they were: it writes the halos between them. vmdump::on() marks the dump's step whether or not a
+  // dump was asked for (CPPWRF_VM_DUMP), so only a real dump keeps them.
+  const bool merge = !(vmdump::on() && std::getenv("CPPWRF_VM_DUMP"));
+  FillAsync pending;  // the fill before the next advance_uv
+  if (!merge) {
+    fill_halos({&s.u_2, &s.v_2, &s.ph_2, &t_save, &u_save, &v_save}, g);
+    fill_halos({&s.mu_2, &s.muts}, g);
+  }
+  // calc_p_rho reads only the point's column: not the halos above
   parallel_for(g.mass_cells(), KPRho{s.al.view(), s.p.view(), pm1.view(), s.ph_2.cview(), s.alt.cview(),
                                      s.t_2.cview(), t_save.cview(), c2a.cview(), s.mu_2.cview(), s.muts.cview(), c});
-  fill_halos({&s.p, &s.al}, g);
+  // Merged: overlaps calc_coef_w (columns: c2a, mut) and advance_uv's interior points, which write no field of the
+  // fill. u_2 and v_2 leave it: advance_uv reads them only at the point and writes them, and the fill after
+  // advance_uv refreshes their halos before any other launch reads them.
+  if (merge)
+    pending.begin({s.ph_2, t_save, u_save, v_save, s.mu_2, s.muts, s.p, s.al}, g);
+  else
+    fill_halos({&s.p, &s.al}, g);
 
   // cof(i) = (.5*dts*g*(1.+epssm))**2: REAL in WRF (x*x); the FP64 builds as before
   real cof;
@@ -585,13 +601,23 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
                {&s.muu, &s.mu_2}, {&b.pb});
 
   const Range3D uv_range{0, nx + (ed.ox ? 1 : 0), 0, ny + (ed.oy ? 1 : 0), 0, nz};
+  const KUV kuv{s.u_2.view(), s.v_2.view(), tend.ru_tend.cview(), tend.rv_tend.cview(), s.p.cview(),
+                s.al.cview(), s.alt.cview(), s.ph_2.cview(), s.php.cview(), s.mu_2.cview(),
+                s.muu.cview(), s.muv.cview(), mudf.cview(), b.pb.view(), c, mc, dts, real(b.rdx),
+                real(b.rdy), p_.emdiv * (real(1.) / real(b.rdx)), do_y ? p_.emdiv * (real(1.) / real(b.rdy)) : real(0), nz,
+                g.u_i0(), g.u_i1(), g.v_j0(), g.v_j1(), do_y, p_.top_lid, b.msfux.view(),
+                b.msfuy.view(), b.msfvx.view(), b.msfvy.view(), b.msfvx_inv.view(), ed};
+  const auto advance_uv = [&] { parallel_for(uv_range, kuv); };
   for (int it = 1; it <= n_small; ++it) {
-    parallel_for(uv_range, KUV{s.u_2.view(), s.v_2.view(), tend.ru_tend.cview(), tend.rv_tend.cview(), s.p.cview(),
-                               s.al.cview(), s.alt.cview(), s.ph_2.cview(), s.php.cview(), s.mu_2.cview(),
-                               s.muu.cview(), s.muv.cview(), mudf.cview(), b.pb.view(), c, mc, dts, real(b.rdx),
-                               real(b.rdy), p_.emdiv * (real(1.) / real(b.rdx)), do_y ? p_.emdiv * (real(1.) / real(b.rdy)) : real(0), nz,
-                               g.u_i0(), g.u_i1(), g.v_j0(), g.v_j1(), do_y, p_.top_lid, b.msfux.view(),
-                               b.msfuy.view(), b.msfvx.view(), b.msfvy.view(), b.msfvx_inv.view(), ed});
+    if (pending.open()) {
+      // advance_uv reads its fields at (i - 1, j) and (i, j - 1) besides the point: the points at least one point
+      // inside the patch read none of the fill's halo points, the others run after the fill
+      launch_interior(g, 1, advance_uv);
+      pending.finish();
+      launch_rest(g, 1, advance_uv);
+    } else {
+      advance_uv();
+    }
     if (bc_) bc_->update_uv(s, tend, dts);  // spec_bdyupdate u, v
     if (do_y) fill_halos({&s.u_2, &s.v_2}, g);
     else fill_halo(s.u_2, g);
@@ -625,7 +651,9 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
       edge.run();
     }
     if (bc_) bc_->update_mu_t(s, tend, dts);  // spec_bdyupdate t, mu, muts
-    fill_halos({&s.mu_2, &mudf, &s.muts}, g);
+    // merged: exchanged with ph_2, p, al below (advance_w, its boundary update and calc_p_rho read mu_2, mudf and
+    // muts only at the point and write none of them)
+    if (!merge) fill_halos({&s.mu_2, &mudf, &s.muts}, g);
     if (it == 1) vmdump::dump("vm_s2_rk", stage_, {&s.t_2, &s.ww}, {&s.mu_2, &s.muts});
 
     {
@@ -654,11 +682,18 @@ void SmallStep::run_stage(State& s, const Tendencies& tend, const BaseState& b, 
                                           s.t_2.cview(), t_save.cview(), c2a.cview(), s.mu_2.cview(), s.muts.cview(),
                                           c, p_.smdiv});
     }
-    fill_halos({&s.ph_2, &s.p, &s.al}, g);
+    if (!merge) {
+      fill_halos({&s.ph_2, &s.p, &s.al}, g);
+    } else if (it < n_small) {  // overlaps the next advance_uv's interior points
+      pending.begin({s.mu_2, mudf, s.muts, s.ph_2, s.p, s.al}, g);
+    } else {  // the last iteration: with the stage's end (sumflux's ru_m, rv_m, ww_m are written above)
+      fill_halos({s.mu_2, mudf, s.muts, s.ph_2, s.p, s.al, s.ru_m, s.rv_m, s.ww_m}, g);
+    }
     if (it == 1) vmdump::dump("vm_s3_rk", stage_, {&s.w_2, &s.ph_2, &s.p, &s.al});
   }
+  if (pending.open()) pending.finish();  // (n_small 0: no advance_uv)
 
-  fill_halos({s.muts, s.ru_m, s.rv_m, s.ww_m}, g);
+  if (!merge) fill_halos({s.muts, s.ru_m, s.rv_m, s.ww_m}, g);
   parallel_for(Range3D{0, nx + 1, 0, nyv, 0, nz + 1},
                KFinish{s.u_2.view(), s.v_2.view(), s.w_2.view(), s.t_2.view(), s.ph_2.view(), s.ww.view(),
                        u_save.cview(), v_save.cview(), w_save.cview(), t_save.cview(), ph_save.cview(), ww1.cview(),

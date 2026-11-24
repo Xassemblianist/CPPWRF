@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <climits>
 #include <condition_variable>
 #include <cstdint>
@@ -401,8 +402,21 @@ __global__ void kpieces(const DevPiece* ps, int n, char* buf, int put) {
 }
 #endif
 
+// CPPWRF_HALO_STATS=1: the wall time of every exchange's parts, per plan (printed at the worker's end)
+struct PlanTimes {
+  long n = 0, overlapped = 0;  // exchanges; those begun before the launches that overlap them (FillAsync, core/halo.hpp)
+  double between = 0;  // the host's time between begin and finish of the overlapped ones
+  double pack = 0, wait = 0, xfer = 0, unpack = 0;  // seconds: pack launch (+ copy queued), the wait for the stream,
+                                                    // the transport, the unpack (+ copy) queued
+};
+double now_s() {
+  return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
 struct Plan {
   Kind kind = kExchange;
+  std::string label;  // the fields (CPPWRF_HALO_STATS)
+  mutable PlanTimes times;
   std::vector<Piece> snd, rcv;            // offsets in the send / receive buffer
   std::vector<Piece> self_src, self_dst;  // a wrap's points the worker sends itself: in the send buffer after smsg
   std::vector<Seg> out, in;
@@ -435,6 +449,13 @@ struct Halo {
 #endif
   long exchanges = 0, messages = 0, plans_made = 0;
   double sent = 0;
+  // CPPWRF_HALO_STATS: the plans' times (kept when a plan is dropped) and the other collectives' (by kind)
+  std::map<std::string, PlanTimes> dropped;
+  std::map<unsigned, PlanTimes> others;
+  bool timed = false;
+  double tm[5] = {0, 0, 0, 0, 0};  // the open exchange's times
+  const Plan* pending = nullptr;     // an exchange begun (exchange_begin) and not finished
+  std::unique_ptr<Plan> pending_own;  // its plan when it is not kept
   static void release(HostBuf& b) {
     if (!b.p) return;
 #if defined(CPPWRF_USE_GPU)
@@ -615,14 +636,18 @@ std::unique_ptr<Plan> make_plan(Kind kind, std::vector<std::vector<Piece>>& snd,
   return P;
 }
 
-// one exchange of the plan P (a collective)
-void run_plan(const Plan& P) {
+// One exchange of the plan P (a collective) in two calls. begin_plan packs every box sent (and, staged, queues the
+// copy of the send buffer to the host); with `mark` it then marks the stream (host_mark) and returns: the worker may
+// launch kernels that neither write the points sent nor read the points received before it calls finish_plan, which
+// waits for the marker only (those kernels run on during the transfer), moves the messages and queues the unpack.
+// Without `mark` finish_plan waits for the stream, as one call run_plan does.
+bool plan_empty(const Plan& P) { return P.out.empty() && P.in.empty() && P.self_src.empty(); }
+void begin_plan(const Plan& P, bool mark) {
   Halo& H = halo();
   ++H.exchanges;
-  if (P.out.empty() && P.in.empty() && P.self_src.empty()) {  // nothing of this worker's
-    end_collective();
-    return;
-  }
+  if (plan_empty(P)) return;  // nothing of this worker's
+  H.timed = halo_stats();
+  if (H.timed) H.tm[0] = now_s();
 #if defined(CPPWRF_USE_GPU)
   const bool dev = W->comm->device_buffers();
   grow_dev(H.ds, H.dscap, P.sbytes);
@@ -636,18 +661,39 @@ void run_plan(const Plan& P) {
     if (H.hs.pinned) copy_to_host_async(H.hs.p, H.ds, P.smsg);
     else copy_to_host(H.hs.p, H.ds, P.smsg);
   }
-  host_section_begin();  // the boxes are in the send buffer; the previous exchange's unpack has ended
-  char* sb = dev ? H.ds : H.hs.p;
-  char* rb = dev ? H.dr : H.hr.p;
+  if (mark) host_mark();
 #else
-  const bool dev = false;
+  (void)mark;
   grow(H.hs, P.sbytes);
   grow(H.hr, P.rbytes);
   move_pieces(P.snd, H.hs.p, P.smsg, false);
   move_pieces(P.self_src, H.hs.p, P.sbytes, false);
+#endif
+  if (H.timed) H.tm[1] = now_s();
+}
+void finish_plan(const Plan& P, bool marked) {
+  Halo& H = halo();
+  if (plan_empty(P)) {
+    end_collective();
+    return;
+  }
+  const bool timed = H.timed;
+  double* tm = H.tm;
+  if (timed) tm[4] = now_s();  // the end of the launches between begin_plan and finish_plan
+#if defined(CPPWRF_USE_GPU)
+  const bool dev = W->comm->device_buffers();
+  // the boxes are in the send buffer; the previous exchange's unpack has ended
+  if (marked) host_section_begin_at_mark();
+  else host_section_begin();
+  char* sb = dev ? H.ds : H.hs.p;
+  char* rb = dev ? H.dr : H.hr.p;
+#else
+  (void)marked;
+  const bool dev = false;
   char* sb = H.hs.p;
   char* rb = H.hr.p;
 #endif
+  if (timed) tm[2] = now_s();
   // each message's header (the collective, its kind, its bytes, its boxes' fingerprint) in front of its boxes:
   // staged, in the host buffer; with device buffers, a host header of its own sent before the message (the same
   // pair of workers and tag: MPI keeps their order)
@@ -684,6 +730,7 @@ void run_plan(const Plan& P) {
     }
   }
   W->comm->exchange(out, in, dev);
+  if (timed) tm[3] = now_s();
   H.messages += long(P.out.size());
   for (const Seg& m : P.out) H.sent += double(m.bytes);
   for (std::size_t q = 0; q < P.in.size(); ++q) {  // before a byte of the messages is unpacked
@@ -703,7 +750,9 @@ void run_plan(const Plan& P) {
     }
   }
 #if defined(CPPWRF_USE_GPU)
-  host_section_end();
+  // marked: the kernels launched since the marker may still run; the unpack is queued behind them
+  if (marked) host_section_end_running();
+  else host_section_end();
   if (!dev && P.rbytes) {
     if (H.hr.pinned) copy_to_dev_async(H.dr, H.hr.p, P.rbytes);
     else copy_to_dev(H.dr, H.hr.p, P.rbytes);
@@ -715,24 +764,113 @@ void run_plan(const Plan& P) {
   move_pieces(P.self_dst, H.hs.p, P.sbytes, true);
 #endif
   end_collective();
+  if (timed) {
+    const double t5 = now_s();
+    PlanTimes& T = P.times;
+    ++T.n;
+    T.pack += tm[1] - tm[0];
+    T.wait += tm[2] - tm[4];
+    T.xfer += tm[3] - tm[2];
+    T.unpack += t5 - tm[3];
+    if (marked) {
+      ++T.overlapped;
+      T.between += tm[4] - tm[1];
+    }
+  }
+}
+void run_plan(const Plan& P) {
+  begin_plan(P, false);
+  finish_plan(P, false);
 }
 
+// CPPWRF_HALO_STATS: the plan's kind and fields
+void label_plan(Plan& P) {
+  if (!halo_stats()) return;
+  P.label = P.kind == kExchange ? "halo" : P.kind == kWrap ? "wrap" : P.kind == kLine ? "line" : "other";
+  std::vector<int> seen;
+  for (const std::vector<Piece>* v : {&P.snd, &P.rcv, &P.self_src})
+    for (const Piece& p : *v)
+      if (std::find(seen.begin(), seen.end(), p.entry) == seen.end()) {
+        seen.push_back(p.entry);
+        P.label += (seen.size() == 1 ? " " : ",") + W->reg.e[std::size_t(p.entry)].name;
+      }
+}
+void keep_times(Halo& H, const Plan& P) {
+  if (!halo_stats() || P.times.n == 0) return;
+  PlanTimes& T = H.dropped[P.label];
+  T.n += P.times.n;
+  T.pack += P.times.pack;
+  T.wait += P.times.wait;
+  T.xfer += P.times.xfer;
+  T.unpack += P.times.unpack;
+  T.overlapped += P.times.overlapped;
+  T.between += P.times.between;
+}
 // the plan of `key` (made by make() at its first use and kept; keep false: made, run and dropped), run
-void exchange_planned(std::vector<long long>&& key, const std::function<std::unique_ptr<Plan>()>& make, bool keep = true) {
+std::unique_ptr<Plan> labelled(const std::function<std::unique_ptr<Plan>()>& make) {
+  std::unique_ptr<Plan> P = make();
+  label_plan(*P);
+  return P;
+}
+// the plan of `key` (made at its first use and kept), or with keep false a plan made for this exchange only (`own`)
+const Plan& plan_of(std::vector<long long>&& key, const std::function<std::unique_ptr<Plan>()>& make, bool keep,
+                    std::unique_ptr<Plan>& own) {
   Halo& H = halo();
   if (!keep) {
-    const std::unique_ptr<Plan> P = make();
+    own = labelled(make);
     ++H.plans_made;
-    run_plan(*P);
-    return;
+    return *own;
   }
   auto it = H.plans.find(key);
   if (it == H.plans.end()) {
-    if (H.plans.size() >= 4096) H.plans.clear();  // fields allocated and freed again and again: no unbounded growth
-    it = H.plans.emplace(std::move(key), make()).first;
+    if (H.plans.size() >= 4096) {  // fields allocated and freed again and again: no unbounded growth
+      for (const auto& kv : H.plans) keep_times(H, *kv.second);
+      H.plans.clear();
+    }
+    it = H.plans.emplace(std::move(key), labelled(make)).first;
     ++H.plans_made;
   }
-  run_plan(*it->second);
+  return *it->second;
+}
+void exchange_planned(std::vector<long long>&& key, const std::function<std::unique_ptr<Plan>()>& make, bool keep = true) {
+  Halo& H = halo();
+  if (H.pending) throw std::logic_error("decomposition: a collective while a halo exchange is open (FillAsync, core/halo.hpp)");
+  std::unique_ptr<Plan> own;
+  const Plan& P = plan_of(std::move(key), make, keep, own);
+  run_plan(P);
+  if (own) keep_times(H, *own);
+}
+
+// CPPWRF_HALO_STATS: the exchanges' times per plan (the largest first) and the other collectives' (stderr)
+void print_times(int id, Halo& H) {
+  for (const auto& kv : H.plans) keep_times(H, *kv.second);
+  std::vector<std::pair<std::string, PlanTimes>> v(H.dropped.begin(), H.dropped.end());
+  std::sort(v.begin(), v.end(), [](const auto& a, const auto& b) {
+    return a.second.pack + a.second.wait + a.second.xfer + a.second.unpack >
+           b.second.pack + b.second.wait + b.second.xfer + b.second.unpack;
+  });
+  PlanTimes all;
+  for (const auto& [l, T] : v) {
+    all.n += T.n; all.pack += T.pack; all.wait += T.wait; all.xfer += T.xfer; all.unpack += T.unpack;
+    all.overlapped += T.overlapped; all.between += T.between;
+  }
+  std::fprintf(stderr,
+               "cppwrf halo: worker %d: exchanges %ld: %.3f s in all: pack %.3f s, wait for the stream %.3f s, transfer "
+               "%.3f s, unpack %.3f s\n",
+               id, all.n, all.pack + all.wait + all.xfer + all.unpack, all.pack, all.wait, all.xfer, all.unpack);
+  if (all.overlapped)
+    std::fprintf(stderr, "cppwrf halo: worker %d: %ld exchanges overlapped by launches (%.3f s of launching between)\n",
+                 id, all.overlapped, all.between);
+  std::fprintf(stderr, "cppwrf halo: worker %d:   count   total ms  pack us  wait us  xfer us unpack us  plan\n", id);
+  for (const auto& [l, T] : v) {
+    const double us = 1e6 / double(T.n);
+    std::fprintf(stderr, "cppwrf halo: worker %d: %7ld %10.2f %8.1f %8.1f %8.1f %9.1f  %s%s\n", id, T.n,
+                 1e3 * (T.pack + T.wait + T.xfer + T.unpack), T.pack * us, T.wait * us, T.xfer * us, T.unpack * us,
+                 l.c_str(), T.overlapped ? " (overlapped)" : "");
+  }
+  for (const auto& [k, T] : H.others)
+    std::fprintf(stderr, "cppwrf halo: worker %d: collective kind %u: %ld calls, %.2f ms (%.1f us each)\n", id, k, T.n,
+                 1e3 * T.xfer, 1e6 * T.xfer / double(T.n));
 }
 
 // the field with the allocation `p` (data false) or with the element (0, 0, 0) at `p` (a view's data pointer; with
@@ -792,6 +930,30 @@ void exchange_entries(const std::vector<int>& idx, bool keep = true) {
 void exchange_hook(const void* const* bases, int n, bool data) {
   if (!W) return;
   exchange_entries(entries_of(bases, n, data));
+}
+// the exchange of these fields begun (hooks.exchange_begin): packed, the stream marked; finished by exchange_finish
+void exchange_begin_hook(const void* const* bases, int n) {
+  if (!W) return;
+  Halo& H = halo();
+  if (H.pending) throw std::logic_error("decomposition: a halo exchange begun while another is open");
+  const std::vector<int> idx = entries_of(bases, n);
+  std::vector<long long> key{0};
+  key.insert(key.end(), idx.begin(), idx.end());
+  const Plan& P = plan_of(std::move(key), [&] { return exchange_plan(idx); }, true, H.pending_own);
+  begin_plan(P, true);
+  H.pending = &P;
+}
+void exchange_finish_hook() {
+  if (!W) return;
+  Halo& H = halo();
+  if (!H.pending) throw std::logic_error("decomposition: no halo exchange to finish");
+  const Plan* P = H.pending;
+  H.pending = nullptr;
+  finish_plan(*P, true);
+  if (H.pending_own) {
+    keep_times(H, *H.pending_own);
+    H.pending_own.reset();
+  }
 }
 
 bool wraps_hook(int dom, int axis) {
@@ -886,7 +1048,22 @@ bool line_hook(const void* data, int axis, int dst, int src, int t0, int t1) {
 
 // every worker's n bytes at v, in worker order (a collective): one allgather of the transport (MPI_Allgather), each
 // worker's value behind a header that names the collective; else (tiles) a message to every worker
+std::vector<char> all_values_impl(Kind kind, const void* v, std::size_t n);
+void no_open_exchange() {
+  if (W && W->halo && W->halo->pending)
+    throw std::logic_error("decomposition: a collective while a halo exchange is open (FillAsync, core/halo.hpp)");
+}
 std::vector<char> all_values(Kind kind, const void* v, std::size_t n) {
+  no_open_exchange();
+  if (!halo_stats()) return all_values_impl(kind, v, n);
+  const double t0 = now_s();
+  std::vector<char> r = all_values_impl(kind, v, n);
+  PlanTimes& T = halo().others[unsigned(kind)];
+  ++T.n;
+  T.xfer += now_s() - t0;
+  return r;
+}
+std::vector<char> all_values_impl(Kind kind, const void* v, std::size_t n) {
   std::vector<char> all(std::size_t(W->n) * n);
   if (n) std::memcpy(all.data() + std::size_t(W->id) * n, v, n);
   {
@@ -1287,6 +1464,8 @@ void set_hooks(bool multi) {
   hooks.multi = multi;
   hooks.max = &max_hook;
   hooks.exchange = &exchange_hook;
+  hooks.exchange_begin = &exchange_begin_hook;
+  hooks.exchange_finish = &exchange_finish_hook;
   hooks.wraps = &wraps_hook;
   hooks.wrap = &wrap_hook;
   hooks.sum = &sum_hook;
@@ -1311,8 +1490,11 @@ int run_worker(Comm& c, int id, const Options& o, const std::function<int(int)>&
     ~Reset() {
       if (W && W->halo) {
         if (halo_stats())
+        {
           std::fprintf(stderr, "cppwrf halo: worker %d: %ld exchanges, %ld plans, %ld messages sent, %.1f MiB sent\n",
                        W->id, W->halo->exchanges, W->halo->plans_made, W->halo->messages, W->halo->sent / 1048576.0);
+          print_times(W->id, *W->halo);
+        }
         delete W->halo;
         W->halo = nullptr;
       }
