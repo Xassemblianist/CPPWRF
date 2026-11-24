@@ -21,10 +21,10 @@ namespace cppwrf::nest {
 // the FP64 builds).
 using nreal = ::cppwrf::real;
 
-CPPWRF_HD inline double sint_max(double a, double b) { return fmax(a, b); }
-CPPWRF_HD inline double sint_min(double a, double b) { return fmin(a, b); }
-CPPWRF_HD inline float sint_max(float a, float b) { return fmaxf(a, b); }
-CPPWRF_HD inline float sint_min(float a, float b) { return fminf(a, b); }
+CPPWRF_HD inline double sint_max(double a, double b) { return fmax_x86(a, b); }
+CPPWRF_HD inline double sint_min(double a, double b) { return fmin_x86(a, b); }
+CPPWRF_HD inline float sint_max(float a, float b) { return fmax_x86(a, b); }
+CPPWRF_HD inline float sint_min(float a, float b) { return fmin_x86(a, b); }
 
 // 1D Donor-cell advection flux
 template <class T>

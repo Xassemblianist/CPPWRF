@@ -52,8 +52,8 @@ inline NtConst<T> make_ntconst(T con_cp, T con_rd, T con_rv, T con_xlv, T con_xl
 template <typename T>
 CPPWRF_HD inline T foealfa(T tt) {
   using C = NtConst<T>;
-  const T x = (std::fmax(T(C::rtice), std::fmin(T(C::rtwat), tt)) - T(C::rtice)) / (T(C::rtwat) - T(C::rtice));
-  return std::fmin(T(1.), x * x);
+  const T x = (fmax_x86(T(C::rtice), fmin_x86(T(C::rtwat), tt)) - T(C::rtice)) / (T(C::rtwat) - T(C::rtice));
+  return fmin_x86(T(1.), x * x);
 }
 template <typename T>
 CPPWRF_HD inline T foelhm(const NtConst<T>& c, T tt) {
@@ -89,7 +89,7 @@ CPPWRF_HD inline void cuadjtqn(const NtConst<T>& c, int kk, T psp, ColPtr<T> pt,
       T zqsat = c.c2es * (foealfa(pt[kk]) * libm::exp(c3les * (pt[kk] - tmelt) * zl) +
                           (T(1.) - foealfa(pt[kk])) * libm::exp(c3ies * (pt[kk] - tmelt) * zi));
       zqsat = zqsat * zqp;
-      zqsat = std::fmin(T(0.5), zqsat);
+      zqsat = fmin_x86(T(0.5), zqsat);
       T zcor = T(1.) - c.vtmpc1 * zqsat;
       T zf = foealfa(pt[kk]) * c.r5alvcp * (zl * zl) + (T(1.) - foealfa(pt[kk])) * c.r5alscp * (zi * zi);
       const T zcond = (pq[kk] * (zcor * zcor) - zqsat * zcor) / ((zcor * zcor) + zqsat * zf);
@@ -101,7 +101,7 @@ CPPWRF_HD inline void cuadjtqn(const NtConst<T>& c, int kk, T psp, ColPtr<T> pt,
         zqsat = c.c2es * (foealfa(pt[kk]) * libm::exp(c3les * (pt[kk] - tmelt) * zl) +
                           (T(1.) - foealfa(pt[kk])) * libm::exp(c3ies * (pt[kk] - tmelt) * zi));
         zqsat = zqsat * zqp;
-        zqsat = std::fmin(T(0.5), zqsat);
+        zqsat = fmin_x86(T(0.5), zqsat);
         zcor = T(1.) - c.vtmpc1 * zqsat;
         zf = foealfa(pt[kk]) * c.r5alvcp * (zl * zl) + (T(1.) - foealfa(pt[kk])) * c.r5alscp * (zi * zi);
         T zcond1 = (pq[kk] * (zcor * zcor) - zqsat * zcor) / ((zcor * zcor) + zqsat * zf);
@@ -114,33 +114,33 @@ CPPWRF_HD inline void cuadjtqn(const NtConst<T>& c, int kk, T psp, ColPtr<T> pt,
     if (ldflag) {
       const T zqp = T(1.) / psp;
       T zqsat = foeewm(c, pt[kk]) * zqp;
-      zqsat = std::fmin(T(0.5), zqsat);
+      zqsat = fmin_x86(T(0.5), zqsat);
       T zcor = T(1.) / (T(1.) - c.vtmpc1 * zqsat);
       zqsat = zqsat * zcor;
       T zcond = (pq[kk] - zqsat) / (T(1.) + zqsat * zcor * foedem(c, pt[kk]));
-      zcond = std::fmin(zcond, T(0.));
+      zcond = fmin_x86(zcond, T(0.));
       pt[kk] = pt[kk] + foeldcpm(c, pt[kk]) * zcond;
       pq[kk] = pq[kk] - zcond;
       zqsat = foeewm(c, pt[kk]) * zqp;
-      zqsat = std::fmin(T(0.5), zqsat);
+      zqsat = fmin_x86(T(0.5), zqsat);
       zcor = T(1.) / (T(1.) - c.vtmpc1 * zqsat);
       zqsat = zqsat * zcor;
       T zcond1 = (pq[kk] - zqsat) / (T(1.) + zqsat * zcor * foedem(c, pt[kk]));
-      if (std::fabs(zcond) < T(1.e-20)) zcond1 = std::fmin(zcond1, T(0.));
+      if (std::fabs(zcond) < T(1.e-20)) zcond1 = fmin_x86(zcond1, T(0.));
       pt[kk] = pt[kk] + foeldcpm(c, pt[kk]) * zcond1;
       pq[kk] = pq[kk] - zcond1;
     }
   } else if (kcall == 0) {
     const T zqp = T(1.) / psp;
     T zqsat = foeewm(c, pt[kk]) * zqp;
-    zqsat = std::fmin(T(0.5), zqsat);
+    zqsat = fmin_x86(T(0.5), zqsat);
     T zcor = T(1.) / (T(1.) - c.vtmpc1 * zqsat);
     zqsat = zqsat * zcor;
     T zcond1 = (pq[kk] - zqsat) / (T(1.) + zqsat * zcor * foedem(c, pt[kk]));
     pt[kk] = pt[kk] + foeldcpm(c, pt[kk]) * zcond1;
     pq[kk] = pq[kk] - zcond1;
     zqsat = foeewm(c, pt[kk]) * zqp;
-    zqsat = std::fmin(T(0.5), zqsat);
+    zqsat = fmin_x86(T(0.5), zqsat);
     zcor = T(1.) / (T(1.) - c.vtmpc1 * zqsat);
     zqsat = zqsat * zcor;
     zcond1 = (pq[kk] - zqsat) / (T(1.) + zqsat * zcor * foedem(c, pt[kk]));
@@ -159,14 +159,14 @@ CPPWRF_HD inline void cuinin(const NtConst<T>& c, int klev, ColCPtr<T> pten, Col
   (void)pmfu; (void)pmfd; (void)pmfus; (void)pmfds; (void)pmfuq; (void)pmfdq; (void)pdmfup; (void)pdmfdp;
   (void)pdpmel; (void)plude;
   for (int jk = 2; jk <= klev; ++jk) {
-    ptenh[jk] = (std::fmax(c.cpd * pten[jk - 1] + pgeo[jk - 1], c.cpd * pten[jk] + pgeo[jk]) - pgeoh[jk]) * c.rcpd;
+    ptenh[jk] = (fmax_x86(c.cpd * pten[jk - 1] + pgeo[jk - 1], c.cpd * pten[jk] + pgeo[jk]) - pgeoh[jk]) * c.rcpd;
     pqenh[jk] = pqen[jk - 1];
     pqsenh[jk] = pqsen[jk - 1];
     const T zph = paph[jk];
     if (jk >= klev - 1 || jk < 2) continue;
     cuadjtqn(c, jk, zph, ptenh, pqsenh, true, 0);
-    pqenh[jk] = std::fmin(pqen[jk - 1], pqsen[jk - 1]) + (pqsenh[jk] - pqsen[jk - 1]);
-    pqenh[jk] = std::fmax(pqenh[jk], T(0.));
+    pqenh[jk] = fmin_x86(pqen[jk - 1], pqsen[jk - 1]) + (pqsenh[jk] - pqsen[jk - 1]);
+    pqenh[jk] = fmax_x86(pqenh[jk], T(0.));
   }
   ptenh[klev] = (c.cpd * pten[klev] + pgeo[klev] - pgeoh[klev]) * c.rcpd;
   pqenh[klev] = pqen[klev];
@@ -175,7 +175,7 @@ CPPWRF_HD inline void cuinin(const NtConst<T>& c, int klev, ColCPtr<T> pten, Col
   klwmin = klev;
   T zwmax = T(0.);
   for (int jk = klev - 1; jk >= 2; --jk) {
-    const T zzs = std::fmax(c.cpd * ptenh[jk] + pgeoh[jk], c.cpd * ptenh[jk + 1] + pgeoh[jk + 1]);
+    const T zzs = fmax_x86(c.cpd * ptenh[jk] + pgeoh[jk], c.cpd * ptenh[jk + 1] + pgeoh[jk + 1]);
     ptenh[jk] = (zzs - pgeoh[jk]) * c.rcpd;
   }
   for (int jk = klev; jk >= 3; --jk) {
@@ -212,8 +212,8 @@ CPPWRF_HD inline void cubasmcn(const NtConst<T>& c, int kk, ColCPtr<T> pten, Col
       ptu[kk + 1] = (c.cpd * pten[kk] + pgeo[kk] - pgeoh[kk + 1]) * c.rcpd;
       pqu[kk + 1] = pqen[kk];
       plu[kk + 1] = T(0.);
-      T zzzmb = std::fmax(T(C::cmfcmin), -pverv[kk] * c.zrg);
-      zzzmb = std::fmin(zzzmb, T(C::cmfcmax));
+      T zzzmb = fmax_x86(T(C::cmfcmin), -pverv[kk] * c.zrg);
+      zzzmb = fmin_x86(zzzmb, T(C::cmfcmax));
       pmfub = zzzmb;
       pmfu[kk + 1] = pmfub;
       pmfus[kk + 1] = pmfub * (c.cpd * ptu[kk + 1] + pgeoh[kk + 1]);
@@ -291,11 +291,11 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, ColCPtr<T> pqen, Co
   // test parcel shared by the column: depth-dependent entrainment, saturation adjustment, kinetic energy
   auto parcel_step = [&](int jk, bool deep) {
     if (loflag) {
-      T zdq = std::fmax((zqold - pqu[jk]), T(0.));
+      T zdq = fmax_x86((zqold - pqu[jk]), T(0.));
       plu[jk] = plu[jk + 1] + zdq;
       const T zlglac = zdq * ((T(1.) - foealfa(ptu[jk])) - (T(1.) - foealfa(ptu[jk + 1])));
       if (deep) plu[jk] = T(0.5) * plu[jk];
-      else plu[jk] = std::fmin(plu[jk], T(5.e-3));
+      else plu[jk] = fmin_x86(plu[jk], T(5.e-3));
       dh[jk] = pgeoh[jk] + c.cpd * (ptu[jk] + c.ralfdcp * zlglac);
       vptu[jk] = ptu[jk] * (T(1.) + c.vtmpc1 * pqu[jk] - plu[jk]) + c.ralfdcp * zlglac;
       vten[jk] = ptenh[jk] * (T(1.) + c.vtmpc1 * pqenh[jk]);
@@ -308,10 +308,10 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, ColCPtr<T> pqen, Co
       if (plu[jk] > T(0.) && klab[jk + 1] == 1) {
         const int ik = jk + 1;
         T zqsu = foeewm(c, ptu[ik]) / paph[ik];
-        zqsu = std::fmin(T(0.5), zqsu);
+        zqsu = fmin_x86(T(0.5), zqsu);
         T zcor = T(1.) / (T(1.) - c.vtmpc1 * zqsu);
         zqsu = zqsu * zcor;
-        zdq = std::fmin(T(0.), pqu[ik] - zqsu);
+        zdq = fmin_x86(T(0.), pqu[ik] - zqsu);
         const T zalfaw = foealfa(ptu[ik]);
         const T aw = ptu[ik] - c4les, ai = ptu[ik] - c4ies;
         const T zfacw = c.c5les / (aw * aw);
@@ -360,8 +360,8 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, ColCPtr<T> pqen, Co
       const T root = T(0.001) - part1 * part2;
       if (part2 < T(0.)) {
         const T conw = T(1.2) * libm::pow(root, T(C::t13));
-        const T deltt = std::fmax(T(1.5) * hfx / (rho * c.cpd * conw), T(0.));
-        const T deltq = std::fmax(T(1.5) * qfx / (rho * conw), T(0.));
+        const T deltt = fmax_x86(T(1.5) * hfx / (rho * c.cpd * conw), T(0.));
+        const T deltq = fmax_x86(T(1.5) * qfx / (rho * conw), T(0.));
         kup[klev] = T(0.5) * (conw * conw);
         pqu[klev] = pqenh[klev] + deltq;
         dhen[klev] = pgeoh[klev] + ptenh[klev] * c.cpd;
@@ -396,7 +396,7 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, ColCPtr<T> pqen, Co
     if (lldcum) {
       ktype = 2;
       ldcum = true;
-      wbase = std::sqrt(std::fmax(T(2.) * kup[ikb], T(0.)));
+      wbase = std::sqrt(fmax_x86(T(2.) * kup[ikb], T(0.)));
       cubot = ikb;
       cutop = ikt;
       kdpl = klev;
@@ -485,7 +485,7 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, ColCPtr<T> pqen, Co
       }
       if (loflag) {
         const T r = pqsen[jk] / pqsen[levels];
-        const T fscale = std::fmin(T(1.), (r * r) * r);
+        const T fscale = fmin_x86(T(1.), (r * r) * r);
         eta = T(1.75e-3) * fscale;
         dz = (pgeoh[jk] - pgeoh[jk + 1]) * c.zrg;
         coef = T(0.5) * eta * dz;
@@ -506,7 +506,7 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, ColCPtr<T> pqen, Co
         ktype = 1;
         ldcum = true;
         deepflag = true;
-        wbase = std::sqrt(std::fmax(T(2.) * kup[ikb], T(0.)));
+        wbase = std::sqrt(fmax_x86(T(2.) * kup[ikb], T(0.)));
         cubot = ikb;
         cutop = ikt;
         kdpl = levels + 1;
@@ -615,21 +615,21 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
         pmfuq[jk + 1] = pmfuq[jk + 1] * zfac;
         pmfub = zmfmax;
       }
-      pmfub = std::fmin(pmfub, zmfmax);
+      pmfub = fmin_x86(pmfub, zmfmax);
     }
     if (is > 0) llo3 = true;
     cuentrn(c, jk, kcbot, ldcum, llo3, pgeoh, pmfu, zdmfen, zdmfde);
     if (llo3) {
       zqold = T(0.);
       if (loflag) {
-        zdmfde = std::fmin(zdmfde, T(0.75) * pmfu[jk + 1]);
+        zdmfde = fmin_x86(zdmfde, T(0.75) * pmfu[jk + 1]);
         if (jk == kcbot) {
-          zoentr = -T(1.75e-3) * (std::fmin(T(1.), pqen[jk] / pqsen[jk]) - T(1.)) * (pgeoh[jk] - pgeoh[jk + 1]) * c.zrg;
-          zoentr = std::fmin(T(0.4), zoentr) * pmfu[jk + 1];
+          zoentr = -T(1.75e-3) * (fmin_x86(T(1.), pqen[jk] / pqsen[jk]) - T(1.)) * (pgeoh[jk] - pgeoh[jk + 1]) * c.zrg;
+          zoentr = fmin_x86(T(0.4), zoentr) * pmfu[jk + 1];
         }
         if (jk < kcbot) {
           const T zmfmax = (paph[jk] - paph[jk - 1]) * zcons2;
-          const T zxs = std::fmax(pmfu[jk + 1] - zmfmax, T(0.));
+          const T zxs = fmax_x86(pmfu[jk + 1] - zmfmax, T(0.));
           wup = wup + kup[jk + 1] * (pap[jk + 1] - pap[jk]);
           zdpmean = zdpmean + pap[jk + 1] - pap[jk];
           zdmfen = zoentr;
@@ -637,10 +637,10 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
             zdmfen = T(2.0) * zdmfen;
             zdmfde = zdmfen;
           }
-          zdmfde = zdmfde * (T(1.6) - std::fmin(T(1.), pqen[jk] / pqsen[jk]));
+          zdmfde = zdmfde * (T(1.6) - fmin_x86(T(1.), pqen[jk] / pqsen[jk]));
           const T zmftest = pmfu[jk + 1] + zdmfen - zdmfde;
-          T zchange = std::fmax(zmftest - zmfmax, T(0.));
-          const T zxe = std::fmax(zchange - zxs, T(0.));
+          T zchange = fmax_x86(zmftest - zmfmax, T(0.));
+          const T zxe = fmax_x86(zchange - zxs, T(0.));
           zdmfen = zdmfen - zxe;
           zchange = zchange - zxe;
           zdmfde = zdmfde + zchange;
@@ -655,13 +655,13 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
         const T zmfusk = pmfus[jk + 1] + zseen - zscde;
         const T zmfuqk = pmfuq[jk + 1] + zqeen - zqude;
         const T zmfulk = pmful[jk + 1] - plude[jk];
-        plu[jk] = zmfulk * (T(1.) / std::fmax(cmfcmin, pmfu[jk]));
-        pqu[jk] = zmfuqk * (T(1.) / std::fmax(cmfcmin, pmfu[jk]));
-        ptu[jk] = (zmfusk * (T(1.) / std::fmax(cmfcmin, pmfu[jk])) - pgeoh[jk]) * c.rcpd;
-        ptu[jk] = std::fmax(T(100.), ptu[jk]);
-        ptu[jk] = std::fmin(T(400.), ptu[jk]);
+        plu[jk] = zmfulk * (T(1.) / fmax_x86(cmfcmin, pmfu[jk]));
+        pqu[jk] = zmfuqk * (T(1.) / fmax_x86(cmfcmin, pmfu[jk]));
+        ptu[jk] = (zmfusk * (T(1.) / fmax_x86(cmfcmin, pmfu[jk])) - pgeoh[jk]) * c.rcpd;
+        ptu[jk] = fmax_x86(T(100.), ptu[jk]);
+        ptu[jk] = fmin_x86(T(400.), ptu[jk]);
         zqold = pqu[jk];
-        zlrain[jk] = zlrain[jk + 1] * (pmfu[jk + 1] - zdmfde) * (T(1.) / std::fmax(cmfcmin, pmfu[jk]));
+        zlrain[jk] = zlrain[jk + 1] * (pmfu[jk + 1] - zdmfde) * (T(1.) / fmax_x86(cmfcmin, pmfu[jk]));
         zluold = plu[jk];
       }
       if (jk > kdpl) {
@@ -708,25 +708,25 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
             const T zdkbuo = (pgeoh[jk] - pgeoh[jk + 1]) * zfacbuo * zbuoc;
             T zdken;
             if (zdmfen > T(0.)) {
-              zdken = std::fmin(T(1.), (T(1.) + z_cwdrag) * zdmfen / std::fmax(cmfcmin, pmfu[jk + 1]));
+              zdken = fmin_x86(T(1.), (T(1.) + z_cwdrag) * zdmfen / fmax_x86(cmfcmin, pmfu[jk + 1]));
             } else {
-              zdken = std::fmin(T(1.), (T(1.) + z_cwdrag) * zdmfde / std::fmax(cmfcmin, pmfu[jk + 1]));
+              zdken = fmin_x86(T(1.), (T(1.) + z_cwdrag) * zdmfde / fmax_x86(cmfcmin, pmfu[jk + 1]));
             }
             kup[jk] = (kup[jk + 1] * (T(1.) - zdken) + zdkbuo) / (T(1.) + zdken);
             if (zbuo[jk] < T(0.)) {
-              T zkedke = kup[jk] / std::fmax(T(1.e-10), kup[jk + 1]);
-              zkedke = std::fmax(T(0.), std::fmin(T(1.), zkedke));
+              T zkedke = kup[jk] / fmax_x86(T(1.e-10), kup[jk + 1]);
+              zkedke = fmax_x86(T(0.), fmin_x86(T(1.), zkedke));
               const T zmfun = std::sqrt(zkedke) * pmfu[jk + 1];
-              zdmfde = std::fmax(zdmfde, pmfu[jk + 1] - zmfun);
+              zdmfde = fmax_x86(zdmfde, pmfu[jk + 1] - zmfun);
               plude[jk] = plu[jk + 1] * zdmfde;
               pmfu[jk] = pmfu[jk + 1] + zdmfen - zdmfde;
             }
             if (zbuo[jk] > -T(0.2)) {
               const int ikb = kcbot;
-              const T m = std::fmin(T(1.), pqsen[jk] / pqsen[ikb]);
-              zoentr = T(1.75e-3) * (T(0.3) - (std::fmin(T(1.), pqen[jk - 1] / pqsen[jk - 1]) - T(1.))) *
+              const T m = fmin_x86(T(1.), pqsen[jk] / pqsen[ikb]);
+              zoentr = T(1.75e-3) * (T(0.3) - (fmin_x86(T(1.), pqen[jk - 1] / pqsen[jk - 1]) - T(1.))) *
                        (pgeoh[jk - 1] - pgeoh[jk]) * c.zrg * ((m * m) * m);
-              zoentr = std::fmin(T(0.4), zoentr) * pmfu[jk];
+              zoentr = fmin_x86(T(0.4), zoentr) * pmfu[jk];
             } else {
               zoentr = T(0.);
             }
@@ -760,9 +760,9 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
         if (lndj == 1) zdshrd = T(5.e-4);
         else zdshrd = T(3.e-4);
         if (plu[jk] > zdshrd) {
-          const T zwu = std::fmin(T(15.0), std::sqrt(T(2.) * std::fmax(T(0.1), kup[jk + 1])));
+          const T zwu = fmin_x86(T(15.0), std::sqrt(T(2.) * fmax_x86(T(0.1), kup[jk + 1])));
           const T zprcon = zprcdgw / (T(0.75) * zwu);
-          const T zdt = std::fmin(T(C::rtber) - T(C::rtice), std::fmax(T(C::rtber) - ptu[jk], T(0.)));
+          const T zdt = fmin_x86(T(C::rtber) - T(C::rtice), fmax_x86(T(C::rtber) - ptu[jk], T(0.)));
           const T zcbf = T(1.) + z_cprc2 * std::sqrt(zdt);
           const T zzco = zprcon * zcbf;
           const T zlcrit = zdshrd / zcbf;
@@ -775,9 +775,9 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
           else zd = zzco * zdfi;
           const T zint = libm::exp(-zd);
           T zlnew = zluold * zint + zc / zd * (T(1.) - zint);
-          zlnew = std::fmax(T(0.), std::fmin(plu[jk], zlnew));
-          zlnew = std::fmin(z_cldmax, zlnew);
-          zprecip = std::fmax(T(0.), zluold + zc - zlnew);
+          zlnew = fmax_x86(T(0.), fmin_x86(plu[jk], zlnew));
+          zlnew = fmin_x86(z_cldmax, zlnew);
+          zprecip = fmax_x86(T(0.), zluold + zc - zlnew);
           pdmfup[jk] = zprecip * pmfu[jk];
           zlrain[jk] = zlrain[jk] + zprecip;
           plu[jk] = zlnew;
@@ -791,11 +791,11 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
           const T zvv = zalfaw * zvw + (T(1.) - zalfaw) * zvi;
           const T zrold = zlrain[jk] - zprecip;
           const T zc = zprecip;
-          const T zwu = std::fmin(T(15.0), std::sqrt(T(2.) * std::fmax(T(0.1), kup[jk])));
+          const T zwu = fmin_x86(T(15.0), std::sqrt(T(2.) * fmax_x86(T(0.1), kup[jk])));
           const T zd = zvv / zwu;
           const T zint = libm::exp(-zd);
           T zrnew = zrold * zint + zc / zd * (T(1.) - zint);
-          zrnew = std::fmax(T(0.), std::fmin(zlrain[jk], zrnew));
+          zrnew = fmax_x86(T(0.), fmin_x86(zlrain[jk], zrnew));
           zlrain[jk] = zrnew;
         }
       }
@@ -809,7 +809,7 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
   if (kctop == -1) ldcum = false;
   kcbot = kcbot > kctop ? kcbot : kctop;
   if (ldcum) {
-    wup = std::fmax(T(1.e-2), wup / std::fmax(T(1.), zdpmean));
+    wup = fmax_x86(T(1.e-2), wup / fmax_x86(T(1.), zdpmean));
     wup = std::sqrt(T(2.) * wup);
   }
 }
@@ -896,9 +896,9 @@ CPPWRF_HD inline void cuddrafn(const NtConst<T>& c, int klev, bool lddraf, ColCP
       const T zdz = -(pgeoh[jk - 1] - pgeoh[jk]) * c.zrg;
       const T zzentr = zoentr * zdz * pmfd[jk - 1];
       zdmfen = zdmfen + zzentr;
-      zdmfen = std::fmax(zdmfen, T(0.3) * pmfd[jk - 1]);
-      zdmfen = std::fmax(zdmfen, -T(0.75) * pmfu[jk] - (pmfd[jk - 1] - zdmfde));
-      zdmfen = std::fmin(zdmfen, T(0.));
+      zdmfen = fmax_x86(zdmfen, T(0.3) * pmfd[jk - 1]);
+      zdmfen = fmax_x86(zdmfen, -T(0.75) * pmfu[jk] - (pmfd[jk - 1] - zdmfde));
+      zdmfen = fmin_x86(zdmfen, T(0.));
     }
     pmfd[jk] = pmfd[jk - 1] + zdmfen - zdmfde;
     const T zseen = (c.cpd * ptenh[jk - 1] + pgeoh[jk - 1]) * zdmfen;
@@ -907,10 +907,10 @@ CPPWRF_HD inline void cuddrafn(const NtConst<T>& c, int klev, bool lddraf, ColCP
     const T zqdde = pqd[jk - 1] * zdmfde;
     const T zmfdsk = pmfds[jk - 1] + zseen - zsdde;
     const T zmfdqk = pmfdq[jk - 1] + zqeen - zqdde;
-    pqd[jk] = zmfdqk * (T(1.) / std::fmin(-T(C::cmfcmin), pmfd[jk]));
-    ptd[jk] = (zmfdsk * (T(1.) / std::fmin(-T(C::cmfcmin), pmfd[jk])) - pgeoh[jk]) * c.rcpd;
-    ptd[jk] = std::fmin(T(400.), ptd[jk]);
-    ptd[jk] = std::fmax(T(100.), ptd[jk]);
+    pqd[jk] = zmfdqk * (T(1.) / fmin_x86(-T(C::cmfcmin), pmfd[jk]));
+    ptd[jk] = (zmfdsk * (T(1.) / fmin_x86(-T(C::cmfcmin), pmfd[jk])) - pgeoh[jk]) * c.rcpd;
+    ptd[jk] = fmin_x86(T(400.), ptd[jk]);
+    ptd[jk] = fmax_x86(T(100.), ptd[jk]);
     T zcond = pqd[jk];
     cuadjtqn(c, jk, zph, ptd, pqd, llo2, 2);
     zcond = zcond - pqd[jk];
@@ -929,7 +929,7 @@ CPPWRF_HD inline void cuddrafn(const NtConst<T>& c, int klev, bool lddraf, ColCP
     pdmfdp[jk - 1] = zdmfdp;
     prfl = prfl + zdmfdp;
     T zbuoyz = zbuo / ptenh[jk];
-    zbuoyz = std::fmin(zbuoyz, T(0.0));
+    zbuoyz = fmin_x86(zbuoyz, T(0.0));
     const T zdz = -(pgeo[jk - 1] - pgeo[jk]);
     zbuoy = zbuoy + zbuoyz * zdz;
     zoentr = c.g * zbuoyz * T(0.5) / (T(1.) + zbuoy);
@@ -1034,7 +1034,7 @@ CPPWRF_HD inline void cuflxn(const NtConst<T>& c, int klev, T ztmst, ColCPtr<T> 
       if (pmflxs[jk] > T(0.) && pten[jk] > tmelt) {
         const T zcons1 = zcons1a * (T(1.) + T(0.5) * (pten[jk] - tmelt));
         const T zfac = zcons1 * (paph[jk + 1] - paph[jk]);
-        const T zsnmlt = std::fmin(pmflxs[jk], zfac * (pten[jk] - tmelt));
+        const T zsnmlt = fmin_x86(pmflxs[jk], zfac * (pten[jk] - tmelt));
         pdpmel[jk] = zsnmlt;
         pqsen[jk] = foeewm(c, pten[jk] - zsnmlt / zfac) / pap[jk];
       }
@@ -1063,16 +1063,16 @@ CPPWRF_HD inline void cuflxn(const NtConst<T>& c, int klev, T ztmst, ColCPtr<T> 
     if (ldcum && jk >= kcbot) {
       const T zrfl = pmflxr[jk] + pmflxs[jk];
       if (zrfl > T(1.e-20)) {
-        const T zdrfl1 = zcpecons * std::fmax(T(0.), pqsen[jk] - pqen[jk]) * zcucov *
+        const T zdrfl1 = zcpecons * fmax_x86(T(0.), pqsen[jk] - pqen[jk]) * zcucov *
                          libm::pow(std::sqrt(paph[jk] / paph[klev + 1]) / T(5.09e-3) * zrfl / zcucov, T(0.5777)) *
                          (paph[jk + 1] - paph[jk]);
         T zrnew = zrfl - zdrfl1;
-        const T zrmin = zrfl - zcucov * std::fmax(T(0.), rhevap * pqsen[jk] - pqen[jk]) * zcons2 *
+        const T zrmin = zrfl - zcucov * fmax_x86(T(0.), rhevap * pqsen[jk] - pqen[jk]) * zcons2 *
                                    (paph[jk + 1] - paph[jk]);
-        zrnew = std::fmax(zrnew, zrmin);
-        const T zrfln = std::fmax(zrnew, T(0.));
-        const T zdrfl = std::fmin(T(0.), zrfln - zrfl);
-        const T zdenom = T(1.) / std::fmax(T(1.e-20), pmflxr[jk] + pmflxs[jk]);
+        zrnew = fmax_x86(zrnew, zrmin);
+        const T zrfln = fmax_x86(zrnew, T(0.));
+        const T zdrfl = fmin_x86(T(0.), zrfln - zrfl);
+        const T zdenom = T(1.) / fmax_x86(T(1.e-20), pmflxr[jk] + pmflxs[jk]);
         T zalfaw = foealfa(pten[jk]);
         if (pten[jk] < tmelt) zalfaw = T(0.);
         const T zpdr = zalfaw * pdmfdp[jk];
@@ -1239,12 +1239,12 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
       zmfub = T(0.1) * zmfmax;
     } else if (ktype == 2) {
       const T zqumqe = pqu[ikb] + plu[ikb] - zqenh[ikb];
-      const T zdqmin = std::fmax(T(0.01) * zqenh[ikb], T(1.e-10));
+      const T zdqmin = fmax_x86(T(0.01) * zqenh[ikb], T(1.e-10));
       T zdh = c.cpd * (ptu[ikb] - ztenh[ikb]) + c.alv * zqumqe;
-      zdh = c.g * std::fmax(zdh, T(1.e5) * zdqmin);
+      zdh = c.g * fmax_x86(zdh, T(1.e5) * zdqmin);
       if (zdhpbl > T(0.)) {
         zmfub = zdhpbl / zdh;
-        zmfub = std::fmin(zmfub, zmfmax);
+        zmfub = fmin_x86(zmfub, zmfmax);
       } else {
         zmfub = T(0.1) * zmfmax;
         ldcum = false;
@@ -1288,11 +1288,11 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
     zcape1 = T(0.0);
     zcape2 = T(0.0);
     zmfub1 = zmfub;
-    ztauc = (zgeoh[ikt] - zgeoh[ikb]) / ((T(2.) + std::fmin(T(15.0), wup)) * c.g);
+    ztauc = (zgeoh[ikt] - zgeoh[ikb]) / ((T(2.) + fmin_x86(T(15.0), wup)) * c.g);
     if (lndj == 0) {
       upbl = T(2.) + upbl / (paph[klev + 1] - paph[ikb]);
       ztaubl = (zgeoh[ikb] - zgeoh[klev + 1]) / (c.g * upbl);
-      ztaubl = std::fmin(T(300.), ztaubl);
+      ztaubl = fmin_x86(T(300.), ztaubl);
     } else {
       ztaubl = ztauc;
     }
@@ -1315,40 +1315,40 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
   }
   if (ldcum && ktype == 1) {
     const int ikb = kcbot;
-    ztauc = std::fmax(ztmst, ztauc);
-    ztauc = std::fmax(T(360.), ztauc);
-    ztauc = std::fmin(T(10800.), ztauc);
+    ztauc = fmax_x86(ztmst, ztauc);
+    ztauc = fmax_x86(T(360.), ztauc);
+    ztauc = fmin_x86(T(10800.), ztauc);
     const T ztau = ztauc * scale_fac;
     if (C::nonequil) {
-      zcape2 = std::fmax(T(0.), zcape2);
-      zcape = std::fmax(T(0.), std::fmin(zcape1 - zcape2, T(5000.)));
+      zcape2 = fmax_x86(T(0.), zcape2);
+      zcape = fmax_x86(T(0.), fmin_x86(zcape1 - zcape2, T(5000.)));
     } else {
-      zcape = std::fmax(T(0.), std::fmin(zcape1, T(5000.)));
+      zcape = fmax_x86(T(0.), fmin_x86(zcape1, T(5000.)));
     }
-    zheat = std::fmax(T(1.e-4), zheat);
+    zheat = fmax_x86(T(1.e-4), zheat);
     zmfub1 = (zcape * zmfub) / (zheat * ztau);
-    zmfub1 = std::fmax(zmfub1, T(0.001));
+    zmfub1 = fmax_x86(zmfub1, T(0.001));
     const T zmfmax = (paph[ikb] - paph[ikb - 1]) * zcons2;
-    zmfub1 = std::fmin(zmfub1, zmfmax);
+    zmfub1 = fmin_x86(zmfub1, zmfmax);
   }
   if (ldcum && ktype == 2) {
     const int ikb = kcbot;
     T zeps;
-    if (pmfd[ikb] < T(0.0) && loddraf) zeps = -pmfd[ikb] / std::fmax(zmfub, cmfcmin);
+    if (pmfd[ikb] < T(0.0) && loddraf) zeps = -pmfd[ikb] / fmax_x86(zmfub, cmfcmin);
     else zeps = T(0.);
     const T zqumqe = pqu[ikb] + plu[ikb] - zeps * zqd[ikb] - (T(1.) - zeps) * zqenh[ikb];
-    const T zdqmin = std::fmax(T(0.01) * zqenh[ikb], cmfcmin);
+    const T zdqmin = fmax_x86(T(0.01) * zqenh[ikb], cmfcmin);
     const T zmfmax = (paph[ikb] - paph[ikb - 1]) * zcons2;
     T zdh = c.cpd * (ptu[ikb] - zeps * ztd[ikb] - (T(1.) - zeps) * ztenh[ikb]) + c.alv * zqumqe;
-    zdh = c.g * std::fmax(zdh, T(1.e5) * zdqmin);
+    zdh = c.g * fmax_x86(zdh, T(1.e5) * zdqmin);
     if (zdhpbl > T(0.)) zmfub1 = zdhpbl / zdh;
     else zmfub1 = zmfub;
     zmfub1 = zmfub1 / scale_fac2;
-    zmfub1 = std::fmin(zmfub1, zmfmax);
+    zmfub1 = fmin_x86(zmfub1, zmfmax);
   }
   if (ldcum && ktype == 3) zmfub1 = zmfub;
   if (ldcum) {
-    const T zfac = zmfub1 / std::fmax(zmfub, cmfcmin);
+    const T zfac = zmfub1 / fmax_x86(zmfub, cmfcmin);
     for (int jk = 1; jk <= klev; ++jk) {
       pmfd[jk] = pmfd[jk] * zfac;
       zmfds[jk] = zmfds[jk] * zfac;
@@ -1357,7 +1357,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
       pmfdde_rate[jk] = pmfdde_rate[jk] * zfac;
     }
   }
-  if (ldcum) zmfs = zmfub1 / std::fmax(cmfcmin, zmfub);
+  if (ldcum) zmfs = zmfub1 / fmax_x86(cmfcmin, zmfub);
   for (int jk = 2; jk <= klev; ++jk) {
     if (ldcum && jk >= kctop - 1) {
       const int ikb = kcbot;
@@ -1366,7 +1366,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
         pmfu[jk] = pmfu[ikb] * zdz;
       }
       const T zmfmax = (paph[jk] - paph[jk - 1]) * zcons2;
-      if (pmfu[jk] * zmfs > zmfmax) zmfs = std::fmin(zmfs, zmfmax / pmfu[jk]);
+      if (pmfu[jk] * zmfs > zmfmax) zmfs = fmin_x86(zmfs, zmfmax / pmfu[jk]);
     }
   }
   for (int jk = 2; jk <= klev; ++jk) {
@@ -1415,7 +1415,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
   for (int jk = 2; jk <= klev; ++jk) {
     if (loddraf && jk >= idtop - 1) {
       const T zmfmax = pmfu[jk] * T(0.98);
-      if (pmfd[jk] + zmfmax + T(1.e-15) < T(0.)) zmfs = std::fmin(zmfs, -zmfmax / pmfd[jk]);
+      if (pmfd[jk] + zmfmax + T(1.e-15) < T(0.)) zmfs = fmin_x86(zmfs, -zmfmax / pmfd[jk]);
     }
   }
   for (int jk = 2; jk <= klev; ++jk) {
@@ -1482,7 +1482,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
             if (ktype == 1 && jk <= kctop + 2) zfac = T(3.);
             const T zerate = pmfu[jk] - pmfu[ik] + (T(1.) + zfac) * pmfude_rate[jk];
             const T zderate = (T(1.) + zfac) * pmfude_rate[jk];
-            const T zmfa = T(1.) / std::fmax(cmfcmin, pmfu[jk]);
+            const T zmfa = T(1.) / fmax_x86(cmfcmin, pmfu[jk]);
             zuu[jk] = (zuu[ik] * pmfu[ik] + zerate * puen[jk] - zderate * zuu[ik]) * zmfa;
             zvu[jk] = (zvu[ik] * pmfu[ik] + zerate * pven[jk] - zderate * zvu[ik]) * zmfa;
           } else {
@@ -1492,7 +1492,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
                             (pmfu[ik] * (pven[ik] - pven[jk]) + pmfu[jk] * (pven[jk] - pven[jk - 1]));
             const T zerate = pmfu[jk] - pmfu[ik] + pmfude_rate[jk];
             const T zderate = pmfude_rate[jk];
-            const T zmfa = T(1.) / std::fmax(cmfcmin, pmfu[jk]);
+            const T zmfa = T(1.) / fmax_x86(cmfcmin, pmfu[jk]);
             zuu[jk] = (zuu[ik] * pmfu[ik] + zerate * puen[jk] - zderate * zuu[ik] + pgf_u) * zmfa;
             zvu[jk] = (zvu[ik] * pmfu[ik] + zerate * pven[jk] - zderate * zvu[ik] + pgf_v) * zmfa;
           }
@@ -1508,7 +1508,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
             zvd[jk] = T(0.5) * (zvu[jk] + pven[ik]);
           } else if (jk > idtop) {
             const T zerate = -pmfd[jk] + pmfd[ik] + pmfdde_rate[jk];
-            const T zmfa = T(1.) / std::fmin(-cmfcmin, pmfd[jk]);
+            const T zmfa = T(1.) / fmin_x86(-cmfcmin, pmfd[jk]);
             zud[jk] = (zud[ik] * pmfd[ik] - zerate * puen[ik] + pmfdde_rate[jk] * zud[ik]) * zmfa;
             zvd[jk] = (zvd[ik] * pmfd[ik] - zerate * pven[ik] + pmfdde_rate[jk] * zvd[ik]) * zmfa;
           }
@@ -1519,7 +1519,7 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
     for (int jk = 2; jk <= klev; ++jk) {
       if (ldcum && jk >= kctop - 1) {
         const T zmfmax = (paph[jk] - paph[jk - 1]) * zcons;
-        if (pmfu[jk] > zmfmax && jk >= kctop) zmfs = std::fmin(zmfs, zmfmax / pmfu[jk]);
+        if (pmfu[jk] > zmfmax && jk >= kctop) zmfs = fmin_x86(zmfs, zmfmax / pmfu[jk]);
       }
     }
     for (int jk = 1; jk <= klev; ++jk) {
@@ -1551,7 +1551,7 @@ cppwrf_cw_);
     }
     for (int jk = 1; jk <= klev; ++jk) {
       if (ldcum && jk >= kctop - 1) {
-        const T ztdis = c.rcpd * zsum12 * zuv2[jk] / std::fmax(T(1.e-15), zsum22);
+        const T ztdis = c.rcpd * zsum12 * zuv2[jk] / fmax_x86(T(1.e-15), zsum22);
         ptte[jk] = ptte[jk] + ztdis;
       }
     }
@@ -1615,7 +1615,7 @@ CPPWRF_HD inline void cu_ntiedtke_run(const NtConst<T>& c, int km, ColPtr<T> pu,
     const T tt = ztp1[k];
     const T zew = foeewm(c, tt);
     T zqs = zew / pap[k];
-    zqs = std::fmin(T(0.5), zqs);
+    zqs = fmin_x86(T(0.5), zqs);
     const T zcor = T(1.) / (T(1.) - c.vtmpc1 * zqs);
     zqsat[k] = zqs * zcor;
     pqte[k] = pqvf[k];
@@ -1640,7 +1640,7 @@ CPPWRF_HD inline void cu_ntiedtke_run(const NtConst<T>& c, int km, ColPtr<T> pu,
     zqp1[k] = zqp1[k] + (pqte[k] - zqq[k]) * ztmst;
     pqv[k] = zqp1[k] / (T(1.0) - zqp1[k]);
   }
-  zprecc = std::fmax(T(0.0), (prsfc + pssfc) * ztmst);
+  zprecc = fmax_x86(T(0.0), (prsfc + pssfc) * ztmst);
   if (NtConst<T>::lmfdudv) {
     for (int k = 1; k <= km; ++k) {
       pu[k] = pu[k] + pvom[k] * ztmst;

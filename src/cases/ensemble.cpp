@@ -345,13 +345,6 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
   std::printf("cppwrf: ensemble of %d members, %s%s\n", n, threads ? "one host thread each" : "one after the other",
               threads ? (", " + std::to_string(per) + " OpenMP threads each").c_str() : "");
   for (int i = 1; i <= n; ++i) std::printf("cppwrf: ensemble member %d: %s\n", i, dirs[std::size_t(i - 1)].c_str());
-#if defined(CPPWRF_USE_HIP)
-  // (core/backend.hpp, set_fatal_slot) the device's fatal flag has one word on HIP
-  if (threads)
-    std::printf("cppwrf: note: HIP: the members share the device's fatal flag: a WRF stop raised in a device kernel "
-                "stops the ensemble, but the member named as failing first can be another one than the one that "
-                "raised it (ensemble.mode = sequential or ensemble.member = I to name it)\n");
-#endif
   std::fflush(stdout);
 
   Shared sh;
