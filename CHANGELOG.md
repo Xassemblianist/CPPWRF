@@ -72,6 +72,13 @@ resumes across versions from WRF's wrfrst files.
 - NetCDF-4 output: the staged bytes of a variable belong to the record before their chunks are queued, and a chunk
   that cannot be queued or compressed is no longer counted, so an error between staging and writing waits for the
   queued compression and then frees the bytes.
+- CPPWRF_TILE_CHECK (CPU tiles): a decomposed run's host copies of Noah's RC at the land-ice points and of
+  Tiedtke's row flag now count as the launches of the one-patch run they stand for (KNoahRcLast, KNoahRs, KRowAny),
+  and leave n_rclast and the row flag as those launches do (the row flag at every point of the row, Tiedtke reading
+  its own point's); the check had compared each later launch with the reference run's launch two (Noah) or one
+  (Tiedtke) before and stopped at the first land-ice point (P8, D0V) or Tiedtke row with convection. A false alarm:
+  the values were the same, every output is unchanged. New suite cases real_p8_r8_fp64_cpu_t2x2_chk and
+  real_d0v_r8_fp64_cpu_10min_t2x2_chk run tiles with the check (suite.tile_check).
 
 ## 1.4.0 (2026-11-24)
 

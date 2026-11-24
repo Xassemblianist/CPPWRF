@@ -248,7 +248,9 @@ CPPWRF_TILES=2x2 build/cppwrf CONFIG.ini
 - The MPI binary without `mpirun`, or with one rank, is the one-process program.
 - Debugging: `CPPWRF_TILE_TRACE=1` prints every message of the collectives; `CPPWRF_TILE_CHECK=1` (tiles, CPU
   build, no nests) compares every launch of every step with a run with one patch and names the first field and
-  point that differ.
+  point that differ. Host code of a decomposed run that stands for launches of the one-patch run calls
+  `tile::after_launch` once per launch it replaces, leaving their fields as they do (Noah's RC at the land-ice
+  points, Tiedtke's row flag). The suite cases `*_chk` (tests/verify/cases/85_tiles.py, `suite.tile_check`) run it.
 
 ## 5. What has been proved
 

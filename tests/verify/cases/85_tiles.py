@@ -76,6 +76,16 @@ _CUDA_NAME = {n: n.replace("_fp64_cpu", "_fp64_cuda") for n, _ in _TILED_CUDA}
 CASES += [(f"{_CUDA_NAME[n]}_t{lay}", "cuda_dp", c[2], list(c[3]) + [f"run.tiles={lay}"], c[4], c[5], dict(c[6]))
           for n, lay in _TILED_CUDA for c in [_BASE[n]]]
 
+# CPU tiles with CPPWRF_TILE_CHECK=1 (suite.tile_check: every launch of every step of the tiles against the check's
+# run with one patch, then the output against WRF): (name, case NAME, LAYOUT, TIME): NAME's configuration for TIME s.
+# The drivers' host copies of a decomposed run stand for the one-patch run's launches (Noah's RC at the land-ice
+# points: P8 and D0V; Tiedtke's row flag: D0V)
+_CHECKED = [("real_p8_r8_fp64_cpu_t2x2_chk", "real_p8_r8_fp64_cpu_10min", "2x2", 180),
+            ("real_d0v_r8_fp64_cpu_10min_t2x2_chk", "real_d0v_r8_fp64_cpu", "2x2", 600)]
+CASES += [(name, c[1], c[2], [x for x in c[3] if not x.startswith("run.run_time=")]
+           + [f"run.run_time={t:g}", f"run.tiles={lay}", "suite.tile_check"], c[4], t, dict(c[6]))
+          for name, n, lay, t in _CHECKED for c in [_BASE[n]]]
+
 # Cases for the layout comparisons of tools/colab/colab_mpi.sh (every output file of a layout against one rank's):
 # NAME_wrst is NAME with wrfrst files written, which hold fields no wrfout file has (RS at the land-ice points of
 # the D0V domain: Noah's RC carried from the last SFLX point, across the patches in a decomposed run).
@@ -99,5 +109,6 @@ DATA = {f"{n}_t{lay}": _BASE_DATA[n] for n, lay in _TILED}
 DATA.update({f"{_CUDA_NAME[n]}_t{lay}": _BASE_DATA[n] for n, lay in _TILED_CUDA})
 DATA.update({f"{n}_wrst": _BASE_DATA[n] for n, _ in _WRST})
 DATA.update({_RST_NAME[n]: _BASE_DATA[n] for n, _, _ in _LAYOUT_RST})
+DATA.update({name: _BASE_DATA[n] for name, n, _, _ in _CHECKED})
 # the GPU runs take run_KESSKF_r8 from kesskf_data.tar (v05_files_data.tar's absolute links are for the CPU suite)
 DATA["real_kesskf_r8_fp64_cuda_t3x1"] = "kesskf_data.tar,v05_iofields.tar"
