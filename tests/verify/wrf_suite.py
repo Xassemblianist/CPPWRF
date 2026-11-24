@@ -1237,8 +1237,13 @@ def compare_dumps(a, b):
 def y_slab(wrfout):
     """WRF's run of wrfout is a periodic-y slab with e_sn = 3 (namelist.input next to it): compare_real.py --y-slab."""
     nl = os.path.join(os.path.dirname(wrfout), "namelist.input")
-    if not os.path.exists(nl):
-        return False
+    if not os.path.exists(nl):  # a packed reference without its namelist: WRF's two mass rows (e_sn = 3); compare_real.py
+        try:                    # still requires every WRF row to equal the first bit for bit
+            import netCDF4
+            with netCDF4.Dataset(wrfout) as ds:
+                return ds.dimensions["south_north"].size == 2
+        except (OSError, KeyError, ImportError):
+            return False
     txt = open(nl).read().lower()
     per = re.search(r"^\s*periodic_y\s*=\s*\.true\.", txt, re.M)
     esn = re.search(r"^\s*e_sn\s*=\s*3\s*,", txt, re.M)
