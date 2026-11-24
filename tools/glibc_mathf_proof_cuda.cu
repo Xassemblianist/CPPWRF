@@ -17,6 +17,7 @@
 
 #include "core/glibc_mathf.hpp"
 #include "core/libmvec_f4.hpp"
+#include "proof_gpu_runtime.hpp"  // <cuda_runtime.h>, or HIP's (hipcc -x hip)
 
 namespace {
 constexpr long long kBatch = 1ll << 26;

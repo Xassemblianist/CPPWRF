@@ -18,6 +18,9 @@ PKG = os.path.dirname(os.path.abspath(__file__))
 # the run modes and the (backend, precision) of the binary that runs them
 MODES = {"gpu-fp32": ("cuda", "float32"), "gpu-fp64": ("cuda", "float64"), "cpu-fp64": ("cpu", "float64"),
          "cpu-fp32": ("cpu", "float32")}
+# the GPU modes' binaries of the AMD HIP build (backend "hip", installed as cppwrf-hip-fp64 / cppwrf-hip-fp32)
+GPU_BACKENDS = ("cuda", "hip")
+HIP_NAMES = ("cppwrf-hip-fp64", "cppwrf-hip-fp32")
 
 
 class NotFound(RuntimeError):
@@ -31,7 +34,7 @@ def _homes() -> List[str]:
         h = os.environ["CPPWRF_HOME"]
         out += [h, os.path.join(h, "share", "cppwrf")]
     out.append(os.path.normpath(os.path.join(PKG, "..", "..")))  # source tree, or share/cppwrf/python/cppwrf
-    for exe in ("cppwrf", "cppwrf-cpu-fp64", "cppwrf-gpu-fp32", "cppwrf-gpu-fp64"):
+    for exe in ("cppwrf", "cppwrf-cpu-fp64", "cppwrf-gpu-fp32", "cppwrf-gpu-fp64") + HIP_NAMES:
         p = shutil.which(exe)
         if p:
             out.append(os.path.join(os.path.dirname(os.path.realpath(p)), "..", "share", "cppwrf"))
@@ -90,7 +93,8 @@ def mode_of(exe: str) -> Optional[str]:
     d = describe(exe)
     if not d:
         return None
-    return next((m for m, bp in MODES.items() if bp == (d["backend"], d["precision"])), None)
+    backend = "cuda" if d["backend"] in GPU_BACKENDS else d["backend"]
+    return next((m for m, bp in MODES.items() if bp == (backend, d["precision"])), None)
 
 
 def model_binaries() -> List[str]:
@@ -98,7 +102,7 @@ def model_binaries() -> List[str]:
     found = []
     if os.environ.get("CPPWRF_EXE"):
         found.append(os.environ["CPPWRF_EXE"])
-    names = ["cppwrf-" + m for m in MODES] + ["cppwrf"]
+    names = ["cppwrf-" + m for m in MODES] + list(HIP_NAMES) + ["cppwrf"]
     for d in _bin_dirs():
         for n in names:
             p = os.path.join(d, n)

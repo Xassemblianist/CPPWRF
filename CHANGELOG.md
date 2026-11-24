@@ -14,6 +14,14 @@ resumes across versions from WRF's wrfrst files.
   sharing the stack reserve and the device tables; the members' host work runs one member at a time. Every member's
   files are byte-identical to its single run (ctest `ensemble`; `--set ensemble.member=I` runs member I alone).
   Single runs are unchanged.
+- The first AMD GPU run in one command (docs/HIP.md "First run on AMD hardware"): tools/amd/amd_run.sh builds HIP FP64,
+  HIP FP32 identity, fast HIP FP32 and CPU FP64 on a ROCm node, fetches the suite's data from the public cppwrf-data
+  releases, runs ctest, the device math proofs (tools/glibc_math*_proof_cuda.cu now compile for HIP too) and every
+  GPU suite check of the CUDA proofs over the node's GPUs, and writes a summary; resumable. wrf_suite.py takes the
+  HIP binaries as --hip-dp / --hip-sp-id / --hip (the cuda_dp / cuda_sp_id / cuda checks); the Python package counts
+  HIP binaries as the GPU modes. New ctest test_device_ieee: the device's IEEE arithmetic (+ - * /, sqrt, fma,
+  conversions, rounding functions, fmod, ldexp, fmax / fmin, lround) against the host's, bit for bit, edge values and
+  subnormal results included (CPU and CUDA builds: unchanged results).
 
 ### Changed
 - Halo exchanges of a decomposed run (tiles, MPI ranks; docs/MPI.md section 3.4): each exchange is planned once and
@@ -54,6 +62,14 @@ resumes across versions from WRF's wrfrst files.
   only with HDF5 1.10 to 1.14 (another version keeps HDF5's own filter: the same bytes); docs/PERF.md IO2.
 
 ### Fixed
+- HIP builds (no CUDA or CPU change of any result; docs/HIP.md "Bit-identity review"): a launch carries its ensemble
+  member's fatal slot as a kernel argument (HIP kernels cannot read their dynamic shared memory size, CUDA's carrier),
+  so HIP threads ensembles have per-member device flags as on CUDA; fmax / fmin on the HIP device as glibc's for two
+  zeros of opposite sign (fmax_x86 / fmin_x86: New Tiedtke, the nest interpolation); lround_x86 on the HIP device
+  returns LONG_MIN below -2^63 as x86 does; correctly rounded float division and square root made explicit, clang's
+  host pass kept from turning pow(2, x) into exp2(x), more value-changing HIP flags refused and ROCm 6.0 required
+  (correctly rounded double square root); HIP batch and fused launches above 4 KiB of parameters launch their parts
+  one by one.
 - Ensembles and the output writer, second audit: HIP builds read the device fatal flag where HIP kernels raise it
   (one word for every launch; was a member's own slot, never written: a HIP threads ensemble missed every device
   stop); every directory a member writes to is its own in every `output.format` (`wrfout` members' run.json,

@@ -19,6 +19,8 @@ Binaries: --cpu-dp the CPU FP64 build (cases cpu_dp, against WRF's real*8 build)
 build (-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF; cases cuda, compared by relative L2), --cuda-dp the CUDA
 FP64 build, --cuda-sp-id the default CUDA FP32 identity build (-DCPPWRF_DOUBLE=OFF, CPPWRF_CUDA_FP32_IDENTITY=ON by
 default; cases cuda_sp_id: the cpu_sp cases on the GPU, against the same WRF real*4 references at tolerance 0).
+The AMD HIP builds run the GPU cases under the same names: --hip-dp is --cuda-dp, --hip-sp-id is --cuda-sp-id and
+--hip is --cuda (docs/HIP.md; tools/amd/amd_run.sh).
 Cases with tolerance 0 (CPU FP64, CPU FP32) run with WRF history output and their wrfout files are compared with WRF's at
 tolerance 0 (exact.py: NaN equals only NaN, -0 differs from +0, integers in their own types): every variable of
 the reference file (those without a Time dimension too), every reference frame up to the case's time (the final one
@@ -1551,10 +1553,11 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cpu-dp")
     ap.add_argument("--cpu-sp", help="the CPU FP32 build (-DCPPWRF_DOUBLE=OFF): the cpu_sp cases")
-    ap.add_argument("--cuda-sp-id", help="the default CUDA FP32 identity build (CPPWRF_CUDA_FP32_IDENTITY=ON, "
-                    "default): the cuda_sp_id cases (the cpu_sp cases on the GPU)")
-    ap.add_argument("--cuda", help="the fast CUDA FP32 build (-DCPPWRF_CUDA_FP32_IDENTITY=OFF): the cuda cases")
-    ap.add_argument("--cuda-dp")
+    ap.add_argument("--cuda-sp-id", "--hip-sp-id", help="the default CUDA (or HIP) FP32 identity build "
+                    "(CPPWRF_CUDA_FP32_IDENTITY=ON, default): the cuda_sp_id cases (the cpu_sp cases on the GPU)")
+    ap.add_argument("--cuda", "--hip", help="the fast CUDA (or HIP) FP32 build (-DCPPWRF_CUDA_FP32_IDENTITY=OFF): "
+                    "the cuda cases")
+    ap.add_argument("--cuda-dp", "--hip-dp", help="the CUDA (or HIP) FP64 build: the cuda_dp cases")
     ap.add_argument("--out", default=os.path.expanduser("~/cppwrf_scratch/wrf_suite"))
     ap.add_argument("--only", help="comma-separated substrings of case names")
     ap.add_argument("--exact", action="store_true", help="--only names are exact case names")
