@@ -79,12 +79,50 @@ Proof that this equals the serial fill: the serial fill is `value(i, j) = s_x s_
 maps `m` and signs `s` per direction (the wall face keeps its value). The exchange delivers every interior point of
 the window; each pass then applies one direction's map to rows/columns that already hold the serial values.
 
-GPU: pack and unpack are kernels. The bytes are staged through ordinary (pageable) host buffers, which works with
-any MPI. Pinned staging buffers and handing device buffers to a CUDA-aware MPI are not implemented yet; two GPUs of
-one node have run (section 6).
+Transport (HALO1). An exchange of a set of fields (a fill's exchange, a wrap exchange, a line of a periodic
+direction) is *planned* at its first call and the plan is kept (per worker, keyed by the kind and the fields'
+registry entries; a field freed and allocated again is a new entry, so a plan never names a freed field): the boxes
+each worker sends and receives, their offsets in one send buffer and one receive buffer (a message per peer:
+a 24-byte header naming the collective, its kind, its bytes and a fingerprint of its boxes, then its boxes, each
+8-byte aligned, alignment padding sent as zeros), and on the GPU the boxes as a table
+in device memory. Every later exchange with that plan:
+
+1. packs every box it sends with **one** kernel launch on the worker's stream (`kpieces`: a block belongs to one box,
+   a thread copies one 4- or 8-byte element), behind the kernels that wrote the fields;
+2. moves the messages:
+   - GPU-aware MPI (`run.gpu_aware_mpi`, below): waits for its stream (not the device), posts every receive
+     (`MPI_Irecv`) into the device receive buffer, every send (`MPI_Isend`) from the device send buffer, one
+     `MPI_Waitall`;
+   - otherwise (any MPI, and tiles): one asynchronous copy of the whole send buffer into a pinned host buffer behind
+     the pack, the wait for its stream, the same `MPI_Irecv` / `MPI_Isend` / `MPI_Waitall` over the pinned buffers
+     (tiles: the in-process mailboxes), one asynchronous copy of the receive buffer to the device;
+3. unpacks every box received with **one** launch on the stream. Nothing waits for it: the worker's next kernels
+   are behind it on the same stream.
+
+The buffers (device, pinned host) are the worker's, grown to the largest exchange and kept for the run. The CPU
+build packs and unpacks with `memcpy` into the same buffers. MPI messages of the exchanges travel on a duplicate of
+`MPI_COMM_WORLD` with a tag of their own (freed after a successful run); the received size is checked, and the
+header (the collective's number and kind, the bytes, the fingerprint of the boxes: each box's field name, element
+size, levels and extents in their order) before a byte is unpacked: workers whose calls differ in their kind,
+their fields or their order stop with a message instead of unpacking another exchange's bytes. With device buffers
+the header is a host message of its own posted just before each message (the same pair and tag: MPI keeps their
+order). Every count is checked and the request storage allocated before the first post; a failed post or wait
+calls `MPI_Abort` with the buffers alive. Periodic lines and per-level maxima have kinds of their own. A field
+given twice to one exchange is exchanged once.
+
+Why the bits cannot change: the plan's boxes are the ones the previous code computed per call (the same functions of
+the patch table); pack and unpack copy raw 4- or 8-byte patterns, no arithmetic; the boxes a worker receives are
+points other workers own and the boxes it sends points it owns, so no box read is written in the same exchange, and
+the boxes received are disjoint (each point has one owner): neither the order in which messages arrive nor the
+scheduling of the launch's blocks can change what a point holds. The receive buffer is unpacked only after
+`MPI_Waitall` (and, staged, after its copy to the device, on the same stream). Before, every exchange waited for the
+whole device twice (`gpuDeviceSynchronize` before the pack and after the unpack), launched one kernel per (field,
+peer) box in each direction, staged through pageable `std::vector`s (copied once more per message) and received
+with a blocking `MPI_Probe` / `MPI_Recv` per peer in rank order.
 
 Rejected: one-sided pulls from the neighbours' arrays (P03's `cudaMemcpy3D` between tiles' copies): needs every
-worker's memory in one address space.
+worker's memory in one address space. Not done: CUDA IPC between the ranks of a node (a neighbour's device buffer
+mapped once), which a GPU-aware MPI does itself over NVLink / PCIe where it can.
 
 ### 3.5 Domain-wide operations
 
@@ -95,6 +133,12 @@ worker's memory in one address space.
 | "any point in the row" / scans in WRF's loop order (Tiedtke rows, Noah's carried RC) | a collective per-row reduction / west-to-east hand-over |
 | a value at one point (ideal `u_base` = column (0, 0)) | the owner sends it to all |
 | fatal stops | each worker's code; the smallest non-zero code wins everywhere (WRF's first stop) |
+
+The maxima, the fatal codes, the per-row reductions and the owner's value reach every worker in one `MPI_Allgather`
+(each value behind the header that names the collective, checked on arrival); every worker then combines them in
+worker order, as it combined the messages it received from each worker in turn before (HALO1; before: a message
+from every rank to every other rank). Tiles keep the messages. `CPPWRF_TILE_TRACE=1` only prints: a rank-local
+setting cannot make the ranks' calls differ (it selected the messages before, which could hang an MPI run).
 
 ### 3.6 Input and output
 
@@ -184,6 +228,23 @@ CPPWRF_TILES=2x2 build/cppwrf CONFIG.ini
   and every rank sizes the column work buffer for its own patch's columns. Both only change how many columns a launch
   takes; every column is computed by itself, so the values do not change.
 - The run prints `cppwrf: peak host memory: ... MiB the writer (rank 0), ... MiB the largest other rank, ... MiB in all`.
+- GPU builds, the halo transport (section 3.4): `run.gpu_aware_mpi = auto | on | off` (the environment
+  `CPPWRF_GPU_AWARE_MPI` overrides it; rank 0's mode holds for every rank). `auto` (default): device buffers to MPI
+  when the library of every rank reports at run time that it takes device memory (one rank that does not, or cannot
+  say, gives pinned host buffers for all) (Open MPI: `MPIX_Query_cuda_support()`, built
+  with CUDA; MPICH 4 or later: `MPIX_GPU_query_support`, which MPICH enables with `MPIR_CVAR_ENABLE_GPU=1` when it
+  was built for the GPU; ROCm: the `rocm` equivalents), else pinned host buffers. `on`: device buffers whatever the
+  library says (one that does not take device memory then fails or crashes). `off`: pinned host buffers. Rank 0 prints
+  the choice: `cppwrf: halo exchanges from and into device buffers (GPU-aware MPI)` or `... through pinned host
+  buffers`, with what the library reported. To see what an installation offers: `ompi_info --parsable --all | grep
+  mpi_built_with_cuda_support:value` (Open MPI), `mpichversion` / `MPIR_CVAR_ENABLE_GPU` (MPICH). The values do not
+  depend on the choice.
+- GPU builds: an MPI rank runs its time steps as CUDA graphs, as one process does (the segments between its halo
+  exchanges and fatal checks; `CPPWRF_GRAPHS=0` launches without them), and prepares the next step while the device
+  runs the last one. Tiles (several workers in one process) launch without graphs.
+- `CPPWRF_HALO_STATS=1`: each worker prints its exchanges, plans, messages and bytes sent at its end.
+  `CPPWRF_TILE_DEVICE_BUFFERS=1` (tiles, GPU builds; a check): the exchanges take the device-buffer path that a
+  GPU-aware MPI takes, the bytes copied through the mailboxes.
 - The MPI binary without `mpirun`, or with one rank, is the one-process program.
 - Debugging: `CPPWRF_TILE_TRACE=1` prints every message of the collectives; `CPPWRF_TILE_CHECK=1` (tiles, CPU
   build, no nests) compares every launch of every step with a run with one patch and names the first field and
@@ -323,8 +384,8 @@ T4, section 6), with Open MPI 4.1.6; a CUDA build has run as several MPI ranks o
 The design should hold across nodes because (a) a rank's GPU is its own CUDA context and stream as a tile's is
 (`CPPWRF_RANK_DEVICES` only changes which device the context is on), (b) the transport
 carries bytes and nothing in the numerical path depends on where a rank runs, (c) the result is independent of
-message timing: every exchange is a fixed sequence of blocking receives of fully determined boxes. Not run:
+message timing: every exchange unpacks fully determined, disjoint boxes only after all its messages have arrived (section 3.4). Not run:
 `CPPWRF_RANK_DEVICES` with more than one device (the runs of section 6 used the node-local default), more than two
-GPUs, CUDA-aware MPI (the transport stages through host buffers), an MPI run across nodes (a network transport, a file
+GPUs, a GPU-aware MPI (`run.gpu_aware_mpi`: device buffers handed to MPI; section 3.4), an MPI run across nodes (a network transport, a file
 system shared by the ranks at the start), Open MPI on CPU-only runs (the CPU runs of section 5 used MPICH 4.2), more
 than 48 ranks.

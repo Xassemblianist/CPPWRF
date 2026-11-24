@@ -10,13 +10,17 @@
 //  (c) a physical snowpack raises nothing, and fatal_check clears the flag after a stop;
 //  (d) of several codes raised in one call the smallest stops the run, whatever the threads' order (an atomic
 //      minimum): a large domain whose last column raises the smallest code; a decomposed run (tiles in this process)
-//      stops every worker with the smallest code any worker raised (tile::hooks.first_code), as one patch does.
+//      stops every worker with the smallest code any worker raised (tile::hooks.first_code), as one patch does;
+//  (e) the fatal slots of ensemble members (set_fatal_slot): a code raised by a kernel of a thread with slot 3
+//      (CUDA: the launch carries the slot) stops that thread only; a thread with slot 0 and one with slot 5 that
+//      raise nothing see no code, also while the other thread raises.
 // The kernels run on the backend of the build (CPU or CUDA device flag).
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <unistd.h>
@@ -221,6 +225,32 @@ int main() {
     }
   }
   CHECK(stop_code([] {}) == 0, "flag cleared after the tiles");
+  // (e) per-thread slots
+  for (int rep = 0; rep < 5; ++rep) {
+    int a = -1, b = -1, c = -1;
+    std::thread ta([&] {
+      set_fatal_slot(3);
+      a = stop_code([] { column_for(Range2D{0, 40, 0, 30}, KRaise{kFatalKfIstop}); });
+      dev_sync();
+    });
+    std::thread tb([&] {
+      set_fatal_slot(5);
+      b = stop_code([] { column_for(Range2D{0, 40, 0, 30}, KRaise{0x7fffffff}); column_for(one, KGlacial{real(0.2), real(0.8)}); });
+    });
+    ta.join();
+    tb.join();
+    // (KRaise{INT_MAX} raises the largest code: a slot shared with ta would read 3)
+    CHECK(a == kFatalKfIstop, "slot 3 stopped with %d (rep %d)", a, rep);
+    CHECK(b == 0x7fffffff, "slot 5 stopped with %d, its own code expected (rep %d)", b, rep);
+    c = stop_code([] {});
+    CHECK(c == 0, "slot 0 saw %d (rep %d)", c, rep);
+    std::thread td([&] {
+      set_fatal_slot(3);
+      c = stop_code([] {});
+    });
+    td.join();
+    CHECK(c == 0, "slot 3 cleared after its stop: %d (rep %d)", c, rep);
+  }
   std::printf("%s (%d failures)\n", fails ? "FAILED" : "OK", fails);
   return fails ? 1 : 0;
 }

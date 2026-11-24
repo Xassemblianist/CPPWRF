@@ -355,6 +355,8 @@ does not know is an error at start-up (`unknown configuration key ...`), so a ty
 | `CPPWRF_TILES=PxQ` | run the domain as P x Q tiles (overrides `run.tiles`; section 7, "Tiles and MPI ranks") |
 | `CPPWRF_RANKS=PxQ` | an MPI run's layout: P patches along x times Q along y, P Q = the rank count (overrides `run.ranks`; default: the most square layout with P <= Q) |
 | `CPPWRF_RANK_DEVICES=d0,d1,...` | GPU builds under MPI: the device of rank r is `d[r % n]` (default: every rank on the current GPU) |
+| `CPPWRF_GPU_AWARE_MPI=auto\|on\|off` | GPU builds under MPI: the halo exchanges hand device buffers to MPI (`on`), stage through pinned host buffers (`off`), or `auto` (default): device buffers when the MPI library reports that it takes device memory (overrides `run.gpu_aware_mpi`; docs/MPI.md section 4) |
+| `CPPWRF_HALO_STATS=1` | decomposed runs: each worker's halo exchanges, plans, messages and bytes sent at its end |
 | `CPPWRF_TILE_DEVICES=d0,d1,...` | GPU builds: the device of tile t is `d[t % n]` (default: all tiles on the current GPU) |
 | `CPPWRF_TILE_CHECK=1` | CPU builds: compare every launch of every time step of the tiles with a run without tiles (slow; the first point that differs names the launch, the field and the stale fields) |
 | `CPPWRF_WRF_RUNS`, `CPPWRF_WRF_REF` | the WRF run and reference directories that `configs/real_*.ini` and the tests name |
@@ -563,7 +565,9 @@ CPPWRF_RANK_DEVICES=0,1 mpirun -np 2 build-cuda-mpi/cppwrf CONFIG.ini
   The layout is `run.ranks = PxQ` (or `CPPWRF_RANKS`), P patches along x times Q along y with P Q = the rank count;
   without it the most square layout with P <= Q, as WRF's. Each rank uses `OMP_NUM_THREADS` threads (CPU build), so
   ranks times threads should not exceed the cores. The same binary without `mpirun` (or with one rank) runs as one
-  process. `run.tiles` in an MPI run is an error. At the end the run prints the ranks' peak host memory.
+  process. `run.tiles` in an MPI run is an error. At the end the run prints the ranks' peak host memory. GPU
+  builds: `run.gpu_aware_mpi = auto | on | off` (default auto) chooses whether the halo exchanges hand device buffers
+  to a GPU-aware MPI or stage through pinned host buffers; rank 0 prints the choice. The results do not depend on it.
 
 Inside a time step a worker computes only the points it owns (the edge patches also own the last faces and the
 lateral halos). The workers meet in halo exchanges (every halo fill first receives, from the neighbouring workers,
@@ -591,6 +595,28 @@ references; `tools/colab/colab_tiles.sh` runs suite cases with several tile layo
 runtime, `tools/colab/colab_mpi.sh` runs suite cases under `mpirun` with several rank layouts (CPU, and
 `--gpu-cases` with several ranks on the runtime's GPU), each against the WRF references and byte for byte against
 the run with one rank; `tools/bench/colab_bench.sh --scaling` measures the strong scaling next to WRF dmpar.
+
+### Ensembles (several members in one process)
+
+An `[ensemble]` section runs several members, each a whole single-domain run of the configuration with its own
+overrides, in one process (docs/ENSEMBLE.md):
+
+```ini
+[ensemble]
+members = 3
+member1 =                                    ; the configuration as it is
+member2 = phys.mp_physics=6 | moist.species=qv,qc,qr,qi,qs,qg
+member3 = real.dir=/data/run_perturbed_b
+mode = threads                               ; threads (default) | sequential
+```
+
+`memberI` lists `section.key=value` overrides separated by `|`, applied after the command line's `--set`. Member I
+writes to `<output.dir>/memberI` unless its overrides set `output.dir`. With `mode = threads` every member runs on
+its own host thread, with its own CUDA stream, CUDA graphs and fields on the one GPU (one stack reserve and one copy
+of the shared tables for all); the members' host work (input, output, boundaries) runs one member at a time, their
+time steps at the same time. Every member's files are byte-identical to the member run alone
+(`cppwrf ens.ini --set ensemble.member=I` runs member I alone into the same directory). Not yet: nested members,
+tiles or MPI ranks in an ensemble.
 
 ---
 
@@ -708,6 +734,7 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[restart]` | `end` | double | `0.0` | No restart files after this time in seconds (0 = no end) | - |
 | `[restart]` | `native` | bool | `true` | Also write CPPWRF's own `restart_<step>.nc` files next to the WRF `wrfrst` files (`cppwrf-wrf` sets false) | - |
 | `[output]` | `wrf_dir` | string | `output.dir` (per domain) | Directory of the WRF files (wrfout, wrfrst, auxhist3) of every domain; `cppwrf-wrf` sets the run directory | the run directory |
+| `[output]` | `write_queue_mb` | integer | `1024` | The WRF-format files (wrfout, auxhist3, wrfrst) are written by a writer thread while the model steps on: the values of a record are copied from the model's fields first, then its NetCDF calls run in the background. At most this many MB of records (their values and precompressed chunks) wait; a new record waits for room (one record always goes). `0`: written in the model's thread, as before. The files are byte-identical either way; a writer error stops the run at the next step (or at the end) with the same message. A decomposed run (`run.tiles`, MPI ranks) writes in the model's thread (docs/PERF.md, IO2). One value for the whole run: a nest or ensemble member with another value is refused | - |
 | `[output]` | `wrf_timing` | bool | `false` | Print WRF's `Timing for main` / `Timing for Writing` lines (the rsl logs of `cppwrf-wrf`) | - |
 | `[tracers]` | `names` | string list | `""` | Comma-separated names of passive scalar tracers | Tracer variables |
 | `[domains]` | `max_dom`, `feedback`, `smooth_option`, `save_topo_from_real`, `blend_width`, `spec_bdy_width` | integer | `1`, `1`, `2`, `1`, `5`, `5` | Multi-domain nesting count, two-way feedback (`0, 1`), feedback smoother (`0..2`), terrain blending | `&domains` / `&bdy_control` |

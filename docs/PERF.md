@@ -952,6 +952,103 @@ be byte-identical, and every chunk must come from the pool. It passes with HDF5 
 Open: the remaining output time (L FP64 1.15 s per frame) is HDF5's own work in the model's thread: the shuffle,
 the copy of the precompressed chunk and the write. It could move to a background thread while the GPU steps, but
 NetCDF is not thread-safe, and the model reads NetCDF files during the run (boundaries, wrfinput fields, sst_update).
+Done in IO2 (below: one NetCDF lock, a writer thread).
+
+## NetCDF output off the model's thread (IO2; measured, RTX 2060)
+
+After IO1 the rest of a record's output time was HDF5's own work in the model's thread (the puts: shuffle, the copy
+of the precompressed chunk, the write; nc_sync). It now runs on a writer thread while the model steps on.
+
+**Change** (src/wrf_io/output_queue.cpp, nc_out.cpp, stream_file.cpp, nc_deflate.cpp; main.cpp, nest_driver.cpp,
+domain_runner.cpp):
+- `StreamFile::write` (wrfout, auxhist3, wrfrst) gathers the record's values in the model's thread as before (the
+  device-to-host copies, the unstaggering, the conversion to the file's type) into a batch the writer owns
+  (`NcOut::Batch`: the staged values and the record's precompressed chunks, `deflate::Group`), and queues a job:
+  `put_text("Times")`, the puts of the record in order, `nc_sync`. One writer thread runs the jobs in the order
+  queued. A file is closed when its last record is written and the model dropped it (shared ownership of `NcOut`).
+- NetCDF is not thread-safe. The process has one NetCDF lock: every `NcOut` call takes it (`NcCall`), and the model's
+  thread holds it from its first queued record on, outside its time steps (`nc_hold`): its own NetCDF calls (wrfinput,
+  wrflowinp, wrffdda, restart files, the native restart writer) need no change. It lets go during
+  `m.rk->step` (+ `dev_sync`; main.cpp, and each domain's step in nest_driver.cpp: `NcReleased`), which makes no NetCDF
+  call, and while it waits for the writer. The writer takes the lock per call (one put at a time), so a long frame
+  does not hold the model at the end of its step for more than one put. This follows port/ENS1's design (the host
+  work between the steps under one lock) for a single run. An ensemble's members take this lock as their host-work
+  lock (docs/ENSEMBLE.md section 2: one lock, no second one to order), so ensembles run with the queue on. The lock's
+  owner state is one per thread (`owns == held || depth > 0`): `nc_hold`, `nc_unhold` and `NcCall` nest in any order,
+  and a wait for the writer inside an `NcCall` scope (`NcReleased` there) stops the process at once instead of
+  deadlocking.
+- `output.write_queue_mb` (default 1024): the queued records' memory (twice the staged values: the values and the
+  copies in the precompressed chunks). A record waits for room without the lock; one record always goes. `0` writes
+  in the model's thread as before. A writer error is kept and rethrown in the model's thread at the next step
+  (`DomainRunner::before_step`), at the next record or at the end (`DomainRunner::finish`, main.cpp), with the same
+  message (`cppwrf: error: netcdf: put T: ...`); the records queued after it are not written, as the synchronous
+  writer would have stopped there. No new file (a stream file, a restart file) is created once an error is known. At
+  the process's end (also after an error) the queue is drained; an error that surfaces only there (a run that stopped
+  on non-finite values, exit 3, before its end) makes the exit status 2. The first domain configures the queue for the
+  process: a domain or ensemble member with another `write_queue_mb` is refused (a change with records queued would
+  reorder their writes); a synchronous record (queue off) waits for the records still queued.
+- A file whose name repeats (a `history_outname` without `<date>` and `frames_per_outfile = 1`, a whole-second date
+  that repeats with a sub-second step): `NcOut` keeps the set of open paths, and a new file of a path still open on
+  the writer thread waits for the queued records first, so that the previous file is closed before `nc_create`
+  clobbers it (it failed before with `create ...: Permission denied` from HDF5; ctest `ensemble`, same-path check).
+- Decomposed runs (`run.tiles`, MPI ranks) write in the model's thread (`output_queue::forbid`): their host work holds
+  `tile::Serial`, and their gathers are collectives of the writing patch.
+- The precomputed chunks are kept per record (`deflate::Group`, waited for and dropped together; before: one pool
+  wait and one `clear` for the process). The filter takes the writing record's own chunks first (`UseGroup`): a wrfrst
+  record staged while the history frame of the same time is written has the same chunks, and took them before
+  (P4: 572 of wrfrst's 1932 chunks compressed by the filter itself, now none).
+- The last batch's buffers are kept for the next record (at most two sets, as one before).
+
+**Why the bytes are identical.** Each file gets the calls of the synchronous writer in the same order: nc_create, the
+definitions and enddef (in the model's thread, as before), then per record put_text, the puts in the variables'
+order with the same values, nc_sync, and nc_close at the end; the same chunking and deflate calls (`NcOut::var` is
+unchanged) and nc_sync after every record. Only the thread and the interleaving with the calls of other files change,
+never two calls at once. HDF5 places a file's chunks and metadata from that file's own calls (its free-space manager,
+metadata cache and chunk cache are per file), and a precomputed chunk is taken only when its input equals HDF5's
+chunk byte for byte, else the filter compresses it as HDF5 does. ctest `test_nc_deflate` now also writes the file
+from the writer thread while the test's thread reads another NetCDF file between the records (with the pool and with
+HDF5's own filter): byte-identical to HDF5's own filter. It also checks a writer error: rethrown once with its message,
+the later record not written.
+
+**HDF5's deflate filter: no public API keeps the bytes.** `H5Zregister` and `H5Zunregister` refuse the predefined ids
+(HDF5 1.14.5: both return -1 for `H5Z_FILTER_DEFLATE`, "unable to modify predefined filters"). A filter of another id
+(a plugin through `nc_def_var_filter`) writes that id into every variable's filter pipeline message, and readers
+would need the plugin. `H5Dwrite_chunk` (direct chunk write) needs the HDF5 dataset, which NetCDF-C does not expose
+(only its private nc4internal.h / hdf5internal.h), and would bypass `nc_put_vara`, so the chunk cache's order of
+writes and the file's layout could differ. So `H5Z_register` stays, now only for HDF5 1.10 to 1.14 (`H5get_libversion`:
+the versions whose `H5Z_register` and `H5Z__filter_deflate` the filter follows); another version, a library without
+the exported symbol (a static build) or a failed registration keeps HDF5's own filter: the same bytes, compressed in
+the writing thread (`CPPWRF_IO_TIMING=1` shows "compressed by the filter").
+
+**Measured** (RTX 2060 laptop, i7 with 12 hardware threads, `OMP_NUM_THREADS=6`; P4 FP64 119 x 89 x 44, 30 min =
+30 steps, a history frame every 3 steps (11 frames, `frames_per_outfile = 4`: three files), wrfrst at 15 and 30 min,
+`restart.native = false`; base = a63ed9f; wall time of the process):
+
+| Run | base (s) | new, queue (s) | new, `write_queue_mb = 0` (s) | history off (out_interval 1000, no wrfrst): base / new (s) |
+|---|---|---|---|---|
+| P4 CUDA FP64 | 13.71, 13.53 | 11.24, 11.42 | 13.38, 14.11 | 9.00 / 8.92 |
+| N1 CUDA FP64 (two domains, no physics, 10 min, wrfout + 2 wrfrst per domain) | 12.46 | 9.96 | 12.15 | |
+| P4 CPU FP64 | 40.7, 37.9 | 41.7, 37.2 | 40.5, 39.8 | 33.7 / 36.0 |
+
+On the GPU the output's share of the run (on - off) goes from 4.6 s to 2.4 s. What stays in the model's thread is
+the gathering (`CPPWRF_IO_TIMING=1`: "values" 0.3 s per frame, of which "device copies" 0.27 s is mostly the wait for
+the step's device work, which every output has) and the staging (0.01 s per frame, wrfrst 0.1 to 0.2 s); the writer's
+puts and sync (0.2 to 0.8 s per frame) overlap the next steps. On the CPU build the writer and the compression pool
+share the cores with the OpenMP stepping: no gain beyond the noise of this machine (the differences between repeats are
+larger than the output time), which is why the queue's memory cap, not a CPU / GPU switch, is the only setting.
+
+**Proof** (local, `cmp` of every wrfout and wrfrst file): P4 CPU FP64 and CUDA FP64 against base a63ed9f, each with
+the queue, with `write_queue_mb = 0` and with `write_queue_mb = 1` (every record waits for the previous one);
+the base GPU files equal the base CPU files. With `restart.native = true` and P4's own namelist
+(`frames_per_outfile = 15`, 15 min: wrfout, wrfrst and restart_000015.nc): new CPU and CUDA FP64 against base
+CPU. N1 (nests: d01 and d02,
+wrfout and wrfrst) CPU and CUDA FP64 likewise. P4 in 2 x 1 tiles (the queue off): identical to base.
+
+Open: the queue for decomposed runs (the writer would need `tile::Serial` as its lock, or tile 0 alone holding the
+NetCDF lock with the other tiles' readers under it); the device copies of an output frame on a second stream into
+pinned buffers (they wait for the step now); the GPU pack of the interior (the unstaggering and type conversion on
+the device: 0.01 s per frame on P4, more on L); the G4 measurement of L (L FP64: 1.15 s per frame after IO1, of which
+about 0.8 s were the puts and sync now on the writer).
 
 ## Tiles: one domain as several tiles (P03 phase 1; measured, Colab G4)
 
@@ -1153,8 +1250,8 @@ reduction order); the timing on Colab G4 is still to be done.
 
 Not done, with the reason: dropping the per-frame `nc_sync` (HDF5 writes the chunk cache at the sync, which places
 the chunks in the file and uses the precompressed chunks before they are cleared: the file's bytes may change); an
-asynchronous writer thread and a GPU pack of the interior (NetCDF calls from a second thread, larger change; next
-step); no synchronisation in `dev_alloc` (tiles allocate and use fields on different streams; a few ms per run);
+asynchronous writer thread (done: IO2) and a GPU pack of the interior; no synchronisation in `dev_alloc` (tiles
+allocate and use fields on different streams; a few ms per run);
 selective `wrfinput` reads (the reader is shared with the nests and the initialisation; every reader of the skipped
 fields would need proof); `__constant__` tables for the device's glibc float math (the indices differ between the
 threads of a warp, which the constant cache serialises: likely slower).
@@ -1195,3 +1292,32 @@ prep 2360 ms (KSwPrep) -> 1210 ms (KSwPrep 723, KSwLayer 410, KSwSetcoef 54, KSw
 another GPU, not the G4 measurement. The CPU suite cases of the radiation options against WRF: ci_submit --affected.
 To do on the G4: every cuda_dp case against WRF at tolerance 0, the FP32 (identity and fast) cases base against new
 byte-identical, KTIME and stepping times of V1 and P4.
+
+## Halo exchanges of decomposed runs: plans, one pack and one unpack launch, pinned or device buffers, graphs under MPI (HALO1; measured on the workstation only)
+
+docs/MPI.md section 3.4 has the design and the reason the bits cannot change. Counted with `CPPWRF_HALO_STATS=1` on
+P4 (KF, WSM6, YSU, Noah, RRTMG; n_sound 4) in 2 x 2 ranks: 74 exchanges per time step (2082 in 30 steps and the
+start, 81 in the start and the first 3 steps; the architecture review's count for a similar configuration was 69),
+34 distinct plans for the whole run, three messages per exchange and rank. Each exchange waited for the whole device
+twice before (`gpuDeviceSynchronize` before the pack and after the unpack: about 150 device-wide waits per step) and
+twice more for the stream (the pageable copies); it now waits once for its own stream (before the transfer) and never
+for the device. The pack and unpack were one launch per (field, peer) box (an exchange of 6 fields with 3 peers: 18
+launches each way); they are one launch each way.
+
+Workstation (RTX 2060 6 GB, 12 threads; MPICH 5.0.2 over shared memory, not GPU-aware: the pinned path), CUDA FP64,
+P4 30 steps (119 x 89 x 44), history off, stepping seconds of the log, two runs each, base = a63ed9f:
+
+| Layout | base | HALO1 | change |
+|---|---|---|---|
+| one process | 7.95 / 7.72 | 7.86 / 7.84 | none |
+| 2 MPI ranks on the GPU (1 x 2) | 11.01 / 10.78 | 9.67 / 9.70 | -11 % |
+| 4 MPI ranks on the GPU (2 x 2) | 13.87 / 13.82 | 11.74 / 11.62 | -15 % |
+| 4 tiles on the GPU (2 x 2) | 8.93 / ... | 7.81 / ... | -12 % |
+
+Every run's snapshots equal the one-process run's byte for byte. Graphs under MPI (now on by default) gained
+nothing here: 1 x 2 9.70 s with graphs, 9.73 / 9.48 s with `CPPWRF_GRAPHS=0`; 2 x 2 11.27 s without (3 % faster than
+with). The segments between exchanges and fatal checks hold about 10 launches (2245 graph launches in 30 steps of
+one rank) and the RTX 2060 runs this domain's kernels long enough for their launches to hide; graphs should matter
+on small patches of a fast GPU, which has not been measured. Several ranks on one GPU are not the target layout (two
+GPUs: Kaggle, docs/MPI.md section 6; the G4 proof): the timing of one rank per GPU, with and without a GPU-aware MPI,
+is still to be done.

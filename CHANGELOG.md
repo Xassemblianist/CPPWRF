@@ -7,7 +7,31 @@ resumes across versions from WRF's wrfrst files.
 
 ## 1.4.0 (2026-11-24)
 
+### Added
+- Ensembles in one process (docs/ENSEMBLE.md, USER_GUIDE section 7): an `[ensemble]` section (`members`,
+  `memberI` = '|'-separated overrides, `mode` = threads | sequential) runs every member of a single-domain
+  configuration; with threads each member has its own host thread, CUDA stream, graphs and fields on the one GPU,
+  sharing the stack reserve and the device tables; the members' host work runs one member at a time. Every member's
+  files are byte-identical to its single run (ctest `ensemble`; `--set ensemble.member=I` runs member I alone).
+  Single runs are unchanged.
+
 ### Changed
+- Halo exchanges of a decomposed run (tiles, MPI ranks; docs/MPI.md section 3.4): each exchange is planned once and
+  the plan kept (the boxes, their offsets in one send and one receive buffer, on the GPU a device table of them); the
+  boxes go out with one pack launch and come in with one unpack launch on the worker's stream (were one launch per
+  field and peer) and no device-wide wait (were two per exchange); MPI ranks post every receive before the sends and
+  wait once (`MPI_Irecv` / `MPI_Isend` / `MPI_Waitall` on a duplicate of `MPI_COMM_WORLD`; were a blocking
+  `MPI_Probe` / `MPI_Recv` per peer), from and into persistent buffers: device buffers handed to a GPU-aware MPI
+  (`run.gpu_aware_mpi = auto | on | off`, `CPPWRF_GPU_AWARE_MPI`; auto: when the library reports at run time that it
+  takes device memory) or pinned host buffers with one asynchronous copy per direction (were pageable buffers copied
+  per message). The maxima, fatal codes, per-row reductions and owner broadcasts of MPI ranks are one `MPI_Allgather`
+  each (were a message from every rank to every other), combined in worker order as before. An MPI rank of a GPU
+  build runs its time steps as CUDA graphs (segments between its exchanges and fatal checks) and prepares the next
+  step while the device runs the last, as one process does (`CPPWRF_GRAPHS=0`: without). The values are bytes copied
+  between the same points as before: every output is unchanged in every layout and build. `CPPWRF_HALO_STATS=1`
+  prints each worker's exchanges; `CPPWRF_TILE_DEVICE_BUFFERS=1` runs tiles over the device-buffer path (a check).
+  tools/kaggle/kaggle_mpi.sh: layouts `L@on` / `L@off` force the transport, env.txt names whether Open MPI was built
+  with CUDA.
 - CPPWRF's own restart file (`restart_<step>.nc`) no longer depends on the decomposition: a decomposed run (tiles,
   MPI ranks) writes the halo points of its fields beyond the domain's edges (`HALO_<name>`, gathered from the edge
   patches) as a run of one patch does, and a decomposed run resumed from the file sets them in every patch that holds
@@ -48,8 +72,46 @@ resumes across versions from WRF's wrfrst files.
   file of version 6 or older is refused with a pointer to the run's wrfrst file (native restart files belong to the
   sources that wrote them). Every `HALO_<name>` of a field the file has is required on reading. The file is written
   as `restart_<step>.nc.partial` and renamed once complete (fields and halo points).
+- WRF-format output off the model's thread (files unchanged, byte for byte): the values of a wrfout / auxhist3 /
+  wrfrst record are copied from the model's fields as before, then a writer thread makes the record's NetCDF calls
+  (Times, the puts in order, nc_sync) while the model steps on. One NetCDF lock for the process: the model's thread
+  holds it outside its time steps (its readers of wrfinput, wrflowinp, wrffdda, restart files), the writer takes it per
+  call. New key `output.write_queue_mb` (default 1024: the memory of the records waiting; 0 writes in the model's
+  thread as before); a writer error stops the run at the next step or at the end with the same message. Decomposed runs
+  (tiles, MPI ranks) write in the model's thread. The precomputed chunks are kept per record (a wrfrst file and the
+  history frame of the same time no longer take each other's), and the replacement of HDF5's deflate filter is used
+  only with HDF5 1.10 to 1.14 (another version keeps HDF5's own filter: the same bytes); docs/PERF.md IO2.
 
 ### Fixed
+- Ensembles: convtrans_prep's averaging counter (WRF's SAVE `stepave_count`) is each run's own (one per run, shared
+  by its domains) instead of one per host thread, so a sequential member no longer inherits the previous member's
+  count (in its restart file, or as a divisor after a WRF restart). WRF fatal flags are per member (a slot per member
+  thread; on CUDA the slot travels with each launch): one member's fatal code no longer stops another member, and a
+  stopping member reads its pending checks before its destructors. `output.wrf_dir` is a per-member root as
+  `output.dir`; member directories are compared as resolved paths; stream names that leave the WRF directory and
+  debugging dumps are refused. Members run with the output writer thread (one NetCDF lock for the members' host work
+  and the writer). A member thread that cannot be started stops the ensemble cleanly; a member thread frees its
+  stream, graphs, flag slots and work buffer at its end.
+- Decomposed runs: CPPWRF_TILE_TRACE only prints (a rank-local setting changed the transport of the collectives and
+  could hang an MPI run); halo messages carry a fingerprint of their boxes (fields, element sizes, extents; device
+  buffers: a host header beside each message) checked before any byte is unpacked, and periodic lines and per-level
+  maxima have kinds of their own; `run.gpu_aware_mpi = auto` hands device buffers to MPI only when every rank's
+  library takes them (rank 0's mode for all); counts and request storage are checked before the first post and a
+  failed post or wait aborts with the buffers alive; a field given twice to one exchange is exchanged once; alignment
+  padding is sent as zeros; the duplicated communicator is freed after a successful run.
+- Fatal checks: every flag copy, reset and wait is checked (a failed transfer stops the run instead of reading 0);
+  a pinned slot is cleared before its copy; the flag of Noah's land preprocessing (urban LAI) is checked right after
+  it, before land SFLX and the dumps use its columns.
+- Output writer thread (output.write_queue_mb): a file whose path is still open on the writer thread (a fixed
+  history_outname with frames_per_outfile = 1) waits for the queued records before it is created (HDF5 refused it);
+  the queue is configured once per process (a nest or member with another value is refused; a synchronous record
+  waits for the queued ones); a writer error that surfaces only at the end of a run stopped by non-finite values
+  gives exit status 2; no new stream or restart file after a known writer error; the NetCDF lock's ownership is one
+  state per thread; the end of the process joins the writer whatever it threw; an oversized write_queue_mb is
+  refused instead of wrapping.
+- NetCDF-4 output: the staged bytes of a variable belong to the record before their chunks are queued, and a chunk
+  that cannot be queued or compressed is no longer counted, so an error between staging and writing waits for the
+  queued compression and then frees the bytes.
 - sfclayrev with fractional_seaice = 1: USTM_SEA is 0 on entry to every open-water call (WRF's automatic array has
   no defined value; CPPWRF carried the last call's) and ch = chs only in the non-fractional branch, as
   module_surface_driver.F.

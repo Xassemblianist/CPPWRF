@@ -862,18 +862,14 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
   cu_kf::run_kf(kf, g_.columns());
 }
 
-namespace {
 // module_convtrans_prep.F's INTEGER, SAVE :: stepave_count: one counter for all domains, not in the restart
 // file (0 in a new process), reset by any domain's first step (ktau <= 1). WRF calls convtrans_prep once per tile
 // (first_rk_step_part1's tile loop), so with numtiles > 1 the counter counts tiles x steps and the tiles after the
-// first take another averaging divisor (with OpenMP the tiles race on it); the references run one tile. One counter
-// per host thread: each tile thread of run.tiles (src/core/tiles.cpp) runs every domain's steps in order, so its
-// counter is that of the run without tiles (MPI ranks are processes).
-thread_local int stepave_count = 0;
-}  // namespace
-
-int PhysicsSuite::convtrans_stepave_count() { return stepave_count; }
-void PhysicsSuite::set_convtrans_stepave_count(int n) { stepave_count = n; }
+// first take another averaging divisor (with OpenMP the tiles race on it); the references run one tile. Here it is
+// the run's (stepave_count_, suite.hpp): the domains of one run share it, a new run (a new process in WRF: an
+// ensemble member, the next run in the same process) starts at 0; each tile thread of run.tiles (src/core/tiles.cpp)
+// builds its own run and runs every domain's steps in order, so its counter is that of the run without tiles (MPI
+// ranks are processes).
 
 // dyn_em/module_convtrans_prep.F convtrans_prep (called in first_rk_step_part1 when cu_diag == 1)
 void PhysicsSuite::convtrans_prep(const dyn::State& s) {
@@ -891,6 +887,7 @@ void PhysicsSuite::convtrans_prep(const dyn::State& s) {
     avg_end_flag = (ktau % stepave == 0);
     first_period_flag = (ktau <= stepave);
   }
+  int& stepave_count = *stepave_count_;
   if (ktau <= 1) stepave_count = 0;
   stepave_count = stepave_count + 1;
   KConvtransPrep k{};

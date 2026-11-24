@@ -11,7 +11,8 @@
 # verification enables a GPU with internet. The job's source (git archive REV), kg_body.sh and job.env go up as the
 # private dataset USER/cppwrf-NAME-src (created, else a new version); the private script kernel USER/cppwrf-NAME
 # (machine NvidiaTeslaT4: 2 x T4) runs them, and its output is downloaded to OUT/output when it ends (--no-wait:
-# push only; later `kaggle kernels output USER/cppwrf-NAME -p OUT/output`). Layouts: kg_body.sh. Data: the cases'
+# push only; later `kaggle kernels output USER/cppwrf-NAME -p OUT/output`). Layouts: kg_body.sh (L@on / L@off: the halo
+# transport forced, docs/MPI.md section 4; env.txt says whether the node's Open MPI takes device memory). Data: the cases'
 # tars (wrf_suite.py --data-for) from the public release Xassemblianist/cppwrf-data data-v1 unless --data. --hours: the
 # job's own limit for its suite runs (the GPU quota counts the whole session, build and data included).
 # Exit 0 when every layout's suite ends with exit 0 and every layout's files are those of the first layout.

@@ -24,6 +24,7 @@
 
 #ifdef CPPWRF_HAVE_NETCDF
 #include "io_netcdf/wrf_readers.hpp"
+#include "wrf_io/output_queue.hpp"
 #include <netcdf.h>
 #endif
 
@@ -896,6 +897,12 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   for (int i = 0; i < max_dom; ++i) {
     doms[i].model = Model::build(doms[i].spec.cfg);
   }
+  // module_convtrans_prep.F's SAVE stepave_count: one counter for every domain of the run (the first suite's)
+  for (int i = 0, first = -1; i < max_dom; ++i)
+    if (doms[i].model.suite) {
+      if (first < 0) first = i;
+      else doms[i].model.suite->share_convtrans_counter(*doms[first].model.suite);
+    }
   for (int i = 1; i < max_dom; ++i) {
     const DomInstance& p = doms[doms[i].spec.parent_id - 1];
     // a nest whose wrfinput starts later (WRF: nests_to_open opens it at its start_* time) is not ported: every nest
@@ -1076,7 +1083,12 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       const tile::Use use(d.model.g);
       d.runner->before_step(n);
       serial.unlock();
-      d.model.rk->step(*d.model.st, *d.model.tend, *d.model.base);
+      {
+#ifdef CPPWRF_HAVE_NETCDF
+        const wrf_io::NcReleased io;  // the time step makes no NetCDF call: the output writer thread may (output_queue)
+#endif
+        d.model.rk->step(*d.model.st, *d.model.tend, *d.model.base);
+      }
       serial.lock();
       d.runner->after_solve(n);
     }

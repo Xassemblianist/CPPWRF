@@ -451,12 +451,15 @@ class PhysicsSuite : public dyn::ColumnPhysics {
     // allocation value undefined_int, which replaces the restart file's values
     if (wrf_file && o_.sf_surface_physics == 4) cropcat.upload(std::vector<int>(cropcat.layout().total, -9999));
   }
-  // module_convtrans_prep.F's SAVE stepave_count (one per tile thread, cumulus_driver.cpp): not in WRF's restart
-  // stream (0 in wrf.exe's resumed run); CPPWRF's own restart file carries it
-  static int convtrans_stepave_count();
-  static void set_convtrans_stepave_count(int n);
+  // module_convtrans_prep.F's SAVE stepave_count (cumulus_driver.cpp): one counter per run, which every domain of
+  // the run shares (share_convtrans_counter: the nest driver gives the nests domain 1's), 0 at the run's start; not
+  // in WRF's restart stream (0 in wrf.exe's resumed run); CPPWRF's own restart file carries it
+  int convtrans_stepave_count() const { return *stepave_count_; }
+  void set_convtrans_stepave_count(int n) { *stepave_count_ = n; }
+  void share_convtrans_counter(const PhysicsSuite& run) { stepave_count_ = run.stepave_count_; }
 
  private:
+  std::shared_ptr<int> stepave_count_ = std::make_shared<int>(0);
   Grid g_, gs_;
   SuiteOptions o_;
   noah::NoahTables noah_tables_;

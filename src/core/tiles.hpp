@@ -40,9 +40,11 @@ int run(const Options& o, const std::function<int(int)>& body);
 // MPI ranks (a CPPWRF_MPI build; otherwise mpi_start returns false and the others are not called).
 // mpi_start: MPI_Init; true when this process is one of several ranks. mpi_run: the calling rank as the worker of
 // patch `rank` of the layout (run.ranks / CPPWRF_RANKS = PxQ, default the most square P x Q with P Q = the rank
-// count, P <= Q as WRF's): body(rank); an error aborts every rank. mpi_finish: MPI_Finalize.
+// count, P <= Q as WRF's): body(rank); an error aborts every rank. `gpu_aware` (run.gpu_aware_mpi; the environment
+// CPPWRF_GPU_AWARE_MPI overrides it): auto (default), on or off, whether a GPU build's halo exchanges hand device
+// buffers to MPI (docs/MPI.md). mpi_finish: MPI_Finalize.
 bool mpi_start(int* argc, char*** argv);
-int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body);
+int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const std::function<int(int)>& body);
 void mpi_finish();
 void mpi_abort(int code);  // an error outside mpi_run: MPI_Abort (no-op without MPI)
 // The CUDA device of an MPI rank (mpi_run, CUDA builds): `local` is the rank among the ranks of its node, `count`

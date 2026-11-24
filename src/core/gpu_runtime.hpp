@@ -43,6 +43,7 @@
 #define gpuMemcpyDeviceToHost hipMemcpyDeviceToHost
 #define gpuMemcpyHostToDevice hipMemcpyHostToDevice
 #define gpuMemcpyDeviceToDevice hipMemcpyDeviceToDevice
+#define gpuMemcpyDefault hipMemcpyDefault
 #define gpuHostAllocDefault hipHostMallocDefault
 #define gpuDeviceProp hipDeviceProp_t
 #define gpuFuncAttributes hipFuncAttributes
@@ -55,6 +56,8 @@
 #define gpuGetLastError hipGetLastError
 #define gpuDeviceSynchronize hipDeviceSynchronize
 #define gpuStreamCreate hipStreamCreate
+#define gpuStreamDestroy hipStreamDestroy
+#define gpuEventDestroy hipEventDestroy
 #define gpuStreamSynchronize hipStreamSynchronize
 #define gpuEventCreateWithFlags hipEventCreateWithFlags
 #define gpuEventRecord hipEventRecord
@@ -97,6 +100,7 @@
 #define gpuMemcpyDeviceToHost cudaMemcpyDeviceToHost
 #define gpuMemcpyHostToDevice cudaMemcpyHostToDevice
 #define gpuMemcpyDeviceToDevice cudaMemcpyDeviceToDevice
+#define gpuMemcpyDefault cudaMemcpyDefault
 #define gpuHostAllocDefault cudaHostAllocDefault
 #define gpuDeviceProp cudaDeviceProp
 #define gpuFuncAttributes cudaFuncAttributes
@@ -109,6 +113,8 @@
 #define gpuGetLastError cudaGetLastError
 #define gpuDeviceSynchronize cudaDeviceSynchronize
 #define gpuStreamCreate cudaStreamCreate
+#define gpuStreamDestroy cudaStreamDestroy
+#define gpuEventDestroy cudaEventDestroy
 #define gpuStreamSynchronize cudaStreamSynchronize
 #define gpuEventCreateWithFlags cudaEventCreateWithFlags
 #define gpuEventRecord cudaEventRecord

@@ -5,6 +5,7 @@
 #include <mpi.h>
 #include <sys/resource.h>
 
+#include <cctype>
 #include <climits>
 #include <cstdio>
 #include <cstdlib>
@@ -20,6 +21,10 @@
 #if defined(CPPWRF_USE_GPU)
 #define CPPWRF_GPU_RUNTIME_HOST 1
 #include "core/gpu_runtime.hpp"
+// Open MPI's extensions: MPIX_CUDA_AWARE_SUPPORT / MPIX_Query_cuda_support (and the ROCm ones)
+#if defined(OPEN_MPI) && OPEN_MPI && __has_include(<mpi-ext.h>)
+#include <mpi-ext.h>
+#endif
 #endif
 
 namespace cppwrf::tile {
@@ -34,24 +39,36 @@ void check(int rc, const char* what) {
   if (rc != MPI_SUCCESS) throw std::runtime_error(std::string("MPI: ") + what + " failed");
 }
 
-// Messages in order per (sender, receiver) pair (one tag: MPI does not overtake). A send is MPI_Isend of a buffer
-// this object keeps until flush(), so two ranks that send to each other before they receive cannot block.
+// Messages in order per (sender, receiver) pair (one tag per kind of message: MPI does not overtake), on a
+// communicator of their own (a duplicate of MPI_COMM_WORLD). A send is MPI_Isend of a buffer this object keeps until
+// flush(), so two ranks that send to each other before they receive cannot block. A halo exchange's messages (tag
+// kBulk): every receive posted first, then every send, then one MPI_Waitall; from and into the caller's buffers
+// (device memory with a GPU-aware MPI).
 class MpiComm : public detail::Comm {
  public:
+  // the communicator is freed after a run every rank ended (release); a stopping rank leaves it to MPI_Abort: freed
+  // while its messages are unmatched, it would end the run with MPI's error in place of the rank's own
+  explicit MpiComm(bool device) : device_(device) { check(MPI_Comm_dup(MPI_COMM_WORLD, &comm_), "MPI_Comm_dup"); }
+  void release() {
+    flush();
+    if (comm_ != MPI_COMM_NULL) check(MPI_Comm_free(&comm_), "MPI_Comm_free");
+  }
+  MpiComm(const MpiComm&) = delete;
+  MpiComm& operator=(const MpiComm&) = delete;
   void send(int to, std::vector<char>&& m) override {
     if (m.size() > std::size_t(INT_MAX)) throw std::runtime_error("MPI: a message of more than 2 GiB");
     pending_.push_back(std::move(m));
     reqs_.push_back(MPI_REQUEST_NULL);
-    check(MPI_Isend(pending_.back().data(), int(pending_.back().size()), MPI_BYTE, to, 0, MPI_COMM_WORLD, &reqs_.back()),
+    check(MPI_Isend(pending_.back().data(), int(pending_.back().size()), MPI_BYTE, to, kMsg, comm_, &reqs_.back()),
           "MPI_Isend");
   }
   std::vector<char> recv(int from) override {
     MPI_Status st;
-    check(MPI_Probe(from, 0, MPI_COMM_WORLD, &st), "MPI_Probe");
+    check(MPI_Probe(from, kMsg, comm_, &st), "MPI_Probe");
     int n = 0;
     check(MPI_Get_count(&st, MPI_BYTE, &n), "MPI_Get_count");
     std::vector<char> m(std::size_t(n > 0 ? n : 0));
-    check(MPI_Recv(m.data(), n, MPI_BYTE, from, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE), "MPI_Recv");
+    check(MPI_Recv(m.data(), n, MPI_BYTE, from, kMsg, comm_, MPI_STATUS_IGNORE), "MPI_Recv");
     return m;
   }
   void flush() override {
@@ -60,11 +77,108 @@ class MpiComm : public detail::Comm {
     reqs_.clear();
     pending_.clear();
   }
+  void exchange(const std::vector<detail::Post>& out, const std::vector<detail::Post>& in, bool) override {
+    // every count checked and the request and status storage in place before the first post: nothing can throw
+    // while a request is active
+    for (const std::vector<detail::Post>* v : {&in, &out})
+      for (const detail::Post& m : *v)
+        if (m.bytes > std::size_t(INT_MAX)) throw std::runtime_error("MPI: a halo message of more than 2 GiB");
+    breqs_.assign(in.size() + out.size(), MPI_REQUEST_NULL);
+    bst_.resize(breqs_.size());
+    std::size_t r = 0;
+    int rc = MPI_SUCCESS;
+    for (const detail::Post& m : in)
+      if (rc == MPI_SUCCESS) rc = MPI_Irecv(m.p, int(m.bytes), MPI_BYTE, m.peer, kBulk, comm_, &breqs_[r++]);
+    for (const detail::Post& m : out)
+      if (rc == MPI_SUCCESS) rc = MPI_Isend(m.p, int(m.bytes), MPI_BYTE, m.peer, kBulk, comm_, &breqs_[r++]);
+    if (rc == MPI_SUCCESS) rc = MPI_Waitall(int(r), breqs_.data(), bst_.data());
+    if (rc != MPI_SUCCESS) {  // requests may still read or write the caller's buffers: stop here, with them alive
+      std::fprintf(stderr, "cppwrf: error: MPI: a halo exchange failed (posting or waiting)\n");
+      std::fflush(stderr);
+      MPI_Abort(MPI_COMM_WORLD, 2);
+    }
+    for (std::size_t q = 0; q < in.size(); ++q) {  // a message of another size: the ranks' calls differ
+      int n = 0;
+      check(MPI_Get_count(&bst_[q], MPI_BYTE, &n), "MPI_Get_count");
+      if (std::size_t(n) != in[q].bytes)
+        throw std::logic_error("decomposition: a halo message of " + std::to_string(n) + " bytes from rank " +
+                               std::to_string(in[q].peer) + ", " + std::to_string(in[q].bytes) +
+                               " expected (the ranks' calls differ)");
+    }
+  }
+  bool device_buffers() const override { return device_; }
+  bool allgather(const void* mine, std::size_t bytes, void* all) override {
+    if (bytes > std::size_t(INT_MAX)) return false;
+    check(MPI_Allgather(mine, int(bytes), MPI_BYTE, all, int(bytes), MPI_BYTE, comm_), "MPI_Allgather");
+    return true;
+  }
 
  private:
+  static constexpr int kMsg = 0, kBulk = 1;
+  MPI_Comm comm_ = MPI_COMM_NULL;
+  bool device_ = false;
   std::deque<std::vector<char>> pending_;
-  std::vector<MPI_Request> reqs_;
+  std::vector<MPI_Request> reqs_, breqs_;
+  std::vector<MPI_Status> bst_;
 };
+
+#if defined(CPPWRF_USE_GPU)
+// whether the MPI library takes device memory, as it reports at run time: 1 yes, 0 no, -1 it cannot say
+int library_takes_device_memory() {
+#if defined(CPPWRF_USE_HIP)
+#if defined(MPIX_ROCM_AWARE_SUPPORT) && MPIX_ROCM_AWARE_SUPPORT
+  return MPIX_Query_rocm_support() ? 1 : 0;
+#elif defined(MPICH_NUMVERSION) && defined(MPIX_GPU_SUPPORT_HIP)
+  int yes = 0;
+  return MPIX_GPU_query_support(MPIX_GPU_SUPPORT_HIP, &yes) == MPI_SUCCESS ? (yes ? 1 : 0) : -1;
+#else
+  return -1;
+#endif
+#else
+#if defined(MPIX_CUDA_AWARE_SUPPORT) && MPIX_CUDA_AWARE_SUPPORT
+  return MPIX_Query_cuda_support() ? 1 : 0;
+#elif defined(OPEN_MPI) && OPEN_MPI && defined(MPIX_CUDA_AWARE_SUPPORT)
+  return 0;  // Open MPI built without CUDA
+#elif defined(MPICH_NUMVERSION) && defined(MPIX_GPU_SUPPORT_CUDA)
+  int yes = 0;
+  return MPIX_GPU_query_support(MPIX_GPU_SUPPORT_CUDA, &yes) == MPI_SUCCESS ? (yes ? 1 : 0) : -1;
+#else
+  return -1;
+#endif
+#endif
+}
+#endif
+
+// run.gpu_aware_mpi / CPPWRF_GPU_AWARE_MPI (auto, on, off): whether the halo exchanges hand device buffers to MPI.
+// auto: when the library of every rank reports that it takes device memory (one rank that does not, or cannot say:
+// pinned host staging for all); on: always (the library of every rank must take it); off: never (pinned host
+// staging). The mode is rank 0's; the choice the same on every rank. CPU build: never.
+bool device_transport(const std::string& key, int rank) {
+  std::string v = key.empty() ? "auto" : key;
+  if (const char* e = std::getenv("CPPWRF_GPU_AWARE_MPI"); e && *e) v = e;
+  for (char& c : v) c = char(std::tolower(static_cast<unsigned char>(c)));
+  if (v != "auto" && v != "on" && v != "off" && v != "1" && v != "0")
+    throw std::runtime_error("run.gpu_aware_mpi (CPPWRF_GPU_AWARE_MPI): auto, on or off, not '" + v + "'");
+  int use = 0;
+#if defined(CPPWRF_USE_GPU)
+  int mode = v == "on" || v == "1" ? 1 : v == "auto" ? 2 : 0;  // rank 0's
+  check(MPI_Bcast(&mode, 1, MPI_INT, 0, MPI_COMM_WORLD), "MPI_Bcast");
+  const int lib = library_takes_device_memory();
+  int yes = lib == 1 ? 1 : 0, lo = 0, hi = 0;
+  check(MPI_Allreduce(&yes, &lo, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD), "MPI_Allreduce");
+  check(MPI_Allreduce(&yes, &hi, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD), "MPI_Allreduce");
+  use = mode == 1 ? 1 : mode == 2 ? lo : 0;
+  if (rank == 0) {
+    const char* m = mode == 1 ? "on" : mode == 2 ? "auto" : "off";
+    std::printf("cppwrf: halo exchanges %s (run.gpu_aware_mpi = %s; the MPI library %s device memory)\n",
+                use ? "from and into device buffers (GPU-aware MPI)" : "through pinned host buffers", m,
+                lo == 1 ? "takes" : hi == 1 ? "of some ranks only takes" : lib == 0 ? "does not take" : "does not say whether it takes");
+  }
+#else
+  (void)rank;
+#endif
+  return use != 0;
+}
 
 bool started = false;
 
@@ -97,7 +211,7 @@ void mpi_abort(int code) {
   if (started) MPI_Abort(MPI_COMM_WORLD, code);
 }
 
-int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body) {
+int mpi_run(const std::string& run_ranks, const std::string& gpu_aware, const std::function<int(int)>& body) {
   int n = 1, rank = 0;
   MPI_Comm_size(MPI_COMM_WORLD, &n);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -181,10 +295,11 @@ int mpi_run(const std::string& run_ranks, const std::function<int(int)>& body) {
       }
     }
 #endif
+    const bool device = device_transport(gpu_aware, rank);
     detail::install_hooks();
-    MpiComm comm;
+    MpiComm comm(device);
     rc = detail::run_worker(comm, rank, o, body);
-    comm.flush();
+    comm.release();
     // the ranks' peak resident memory: a rank holds its patch, not the domain; the writer also the fields it
     // gathers for the output
     struct rusage ru {};
