@@ -1533,6 +1533,7 @@ Options options(const std::string& run_tiles) {
 int id() { return W ? W->id : (ref_reg ? -1 : 0); }
 int count() { return W ? W->n : 1; }
 bool tiled() { return W != nullptr; }
+bool checking() { return S && S->o.check; }
 bool writer() { return !W || W->id == 0; }
 int patches_x() { return W ? W->px : 1; }
 int patches_y() { return W ? W->py : 1; }

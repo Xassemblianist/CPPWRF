@@ -332,6 +332,12 @@ def wrfrst_check(sets):
     return "suite.wrfrst" in sets
 
 
+def tile_check_env(sets):
+    """A tiled CPU case run with CPPWRF_TILE_CHECK=1 (suite.tile_check in its --set list: every launch of every step
+    of the tiles compared with a run with one patch; docs/MPI.md): the run's extra environment, else None."""
+    return {"CPPWRF_TILE_CHECK": "1"} if "suite.tile_check" in sets else None
+
+
 RESTART_ALARM = "WRF_ALARM_SECS_TIL_NEXT_RING_51"
 
 
@@ -1614,6 +1620,9 @@ def main():
         native = "suite.native_restart" in sets
         chain = chain_at(sets)
         lrst = layout_restart_at(sets)
+        tile_env = tile_check_env(sets)
+        if tile_env and (mid or chain or lrst):
+            return False, f"FAIL  {name:22s} suite.tile_check is for straight runs (no restart, chain or layout_restart)"
         sets = [x for x in sets if not x.startswith("suite.")]
         if lrst:  # the restart files of a decomposed run against those of one patch (layout_restart)
             bad, what = layout_restart(b, cfg, sets, refs, t, lrst[0], lrst[1], out)
@@ -1638,7 +1647,9 @@ def main():
             done(out, not bad)
             return not bad, (f"{'PASS' if not bad else 'FAIL'}  {name:22s} t={t:g}s exact: {what}"
                              + (f"  [{'; '.join(x[:300] for x in bad[:6])}{' ...' if len(bad) > 6 else ''}]" if bad else ""))
-        rc, log = run(b, cfg, sets, out)
+        rc, log = run(b, cfg, sets, out, tile_env)
+        if tile_env:  # the check's run with one patch writes OUT.ref (src/main.cpp); not compared
+            shutil.rmtree(out + ".ref", ignore_errors=True)
         if rc != 0:
             return False, f"FAIL  {name:22s} run failed: {log[-200:]}"
         if exact:

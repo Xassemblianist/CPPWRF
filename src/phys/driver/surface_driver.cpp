@@ -1745,6 +1745,22 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
           rc_of(tx, j) = last >= 0 ? double(hrc[L.index(last, j, 0)]) : 0.0;
         }
         tile::max_each(tab.data(), tab.size());
+        // CPPWRF_TILE_CHECK compares the workers with a run with one patch after every launch: n_rclast and rs as
+        // that run's KNoahRcLast and KNoahRs leave them, the check counting each launch (nothing here reads n_rclast,
+        // so other runs skip the copies)
+        if (tile::checking()) {
+          std::vector<int> hl;
+          n_rclast.download(hl);
+          const Layout& LL = n_rclast.layout();
+          if (cols.i0 >= LL.wi0 && cols.i0 < LL.wi1)
+            for (int j = std::max(LL.wj0, cols.j0); j < std::min(LL.wj1, cols.j1); ++j) {
+              int last = -1;
+              for (int t = 0; t < px; ++t) last = std::max(last, int(last_of(t, j)));
+              hl[LL.index(cols.i0, j, 0)] = last;
+            }
+          n_rclast.upload(hl);
+          tile::after_launch(typeid(KNoahRcLast).name());
+        }
         for (int j = std::max(ob.j0, cols.j0); j < std::min(ob.j1, cols.j1); ++j)
           for (int i = std::max(ob.i0, cols.i0); i < std::min(ob.i1, cols.i1); ++i) {
             const std::size_t q = L.index(i, j, 0);
@@ -1773,6 +1789,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
             }
           }
         copy_to_dev(rs.data() - rs.layout().offset, hrs.data(), rs.bytes());
+        tile::after_launch(typeid(KNoahRs).name());
       }
       if (do_ndump) {
         std::FILE* fp = std::fopen((std::string(ndump) + "/noah_out_c.bin").c_str(), "wb");

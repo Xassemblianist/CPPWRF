@@ -377,8 +377,7 @@ struct KTiedtke {
   View1<const real> znu;
   C2 xland, qfx;
   I2 icum1;
-  CI2 row_icum;
-  int row_i = 0;  // the column that holds the row's icum (a decomposed run: the worker's first)
+  CI2 row_icum;  // the row's icum at every point of the row
   V2 raincv, pratec;
   V3 rthcuten, rqvcuten, rqccuten, rqicuten, rucuten, rvcuten;
   bool flag_qc, flag_qi;
@@ -430,7 +429,7 @@ struct KTiedtke {
       u1[k] = in.pu[k]; v1[k] = in.pv[k]; t1[k] = in.pt[k]; q1[k] = in.pqv[k]; q2[k] = in.pqc[k]; q3[k] = in.pqi[k];
     }
     const real rn = cu_tiedtke::tiecnv<real>(c, nz, in, u1, v1, t1, q1, q2, q3, evap, slimsk, delt, i, nx,
-                                             row_icum(row_i, j), cppwrf_cw_);
+                                             row_icum(i, j), cppwrf_cw_);
     raincv(i, j) = rn / real(stepcu);
     pratec(i, j) = rn / (real(stepcu) * dt);
     for (int k = 0; k < nz; ++k) {
@@ -445,7 +444,7 @@ struct KTiedtke {
   }
 };
 
-// row_icum(0, j) = OR of icum1(i, j) over the row (cumastr_new's icum for the row)
+// row_icum(i, j) = OR of icum1(., j) over the row at every point of the row (cumastr_new's icum for the row)
 struct KRowAny {
   CI2 icum1;
   I2 row_icum;
@@ -453,7 +452,7 @@ struct KRowAny {
   CPPWRF_HD void operator()(int, int j) const {
     int any = 0;
     for (int i = 0; i < nx; ++i) any = any || icum1(i, j) != 0;
-    row_icum(0, j) = any;
+    for (int i = 0; i < nx; ++i) row_icum(i, j) = any;
   }
 };
 
@@ -758,7 +757,7 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
       column_for_whole(Range2D{0, 1, 0, g_.ny}, KRowAny{td_icum.cview(), td_row_icum.view(), g_.nx});
     } else {
       // a decomposed run: each worker's OR over its columns of its rows, then over the workers; the row's value at
-      // the worker's first column (k.row_i)
+      // the worker's points of the row, as KRowAny leaves them (CPPWRF_TILE_CHECK counts it as that launch)
       const tile::PatchBox ob = tile::own_box(g_);
       std::vector<int> hi, hr;
       td_icum.download(hi);
@@ -769,9 +768,10 @@ void PhysicsSuite::cumulus_driver(const dyn::State& s, const dyn::BaseState& b) 
         for (int i = ob.i0; i < ob.i1; ++i)
           if (hi[L.index(i, j, 0)] != 0) any[std::size_t(j)] = 1.0;
       tile::max_each(any.data(), any.size());
-      for (int j = ob.j0; j < ob.j1; ++j) hr[L.index(ob.i0, j, 0)] = any[std::size_t(j)] != 0.0;
+      for (int j = ob.j0; j < ob.j1; ++j)
+        for (int i = ob.i0; i < ob.i1; ++i) hr[L.index(i, j, 0)] = any[std::size_t(j)] != 0.0;
       td_row_icum.upload(hr);
-      k.row_i = ob.i0;
+      tile::after_launch(typeid(KRowAny).name());
     }
     k.first = false;
     column_for_work(g_.columns(), k);
