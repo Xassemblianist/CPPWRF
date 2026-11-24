@@ -256,7 +256,14 @@ void move_pieces(const std::vector<Piece>& ps, char* msg, std::size_t bytes, boo
   char* d = staging(bytes);
   if (put) copy_to_dev(d, msg, bytes);
   for (const Piece& p : ps) launch_box(W->reg.e[std::size_t(p.entry)], p, d, put);
-  if (!put) copy_to_host(msg, d, bytes);
+  if (!put) {
+    copy_to_host(msg, d, bytes);
+    // the boxes' alignment padding is sent as zeros, not as the staging buffer's stale bytes (layout_pieces)
+    for (const Piece& p : ps) {
+      const std::size_t pb = piece_bytes(W->reg.e[std::size_t(p.entry)], p);
+      std::memset(msg + p.off + pb, 0, (pb + 7) / 8 * 8 - pb);
+    }
+  }
 #else
   (void)bytes;
   for (const Piece& p : ps) {
@@ -521,12 +528,15 @@ std::uint64_t fnv(std::uint64_t h, const void* p, std::size_t n) {
   for (std::size_t k = 0; k < n; ++k) h = (h ^ c[k]) * 0x100000001b3ULL;
   return h;
 }
-std::uint64_t fingerprint(Kind kind, const std::vector<Piece>& ps) {
+// salt: the call's own arguments that every worker passes alike (a periodic line: axis, dst, src, t0, t1)
+std::uint64_t fingerprint(Kind kind, const std::vector<Piece>& ps, std::uint64_t salt) {
   std::uint64_t h = fnv(0xcbf29ce484222325ULL, &kind, sizeof kind);
+  h = fnv(h, &salt, sizeof salt);
   for (const Piece& p : ps) {
     const Entry& e = W->reg.e[std::size_t(p.entry)];
     h = fnv(h, e.name.data(), e.name.size());
-    const std::int64_t v[4] = {e.esz, levels(e.L), p.x.n(), p.y.n()};
+    // (the field's domain and logical extents too: a parent's and a child's field of one name and box size differ)
+    const std::int64_t v[8] = {e.esz, levels(e.L), p.x.n(), p.y.n(), e.L.dom, e.L.nx, e.L.ny, e.L.nz};
     h = fnv(h, v, sizeof v);
   }
   return h;
@@ -535,10 +545,10 @@ std::uint64_t fingerprint(Kind kind, const std::vector<Piece>& ps) {
 // The plan of the boxes snd[r] to every worker r, rcv[s] from every worker s (empty lists: no message) and the
 // pieces self_src the worker copies into its own self_dst (the same sizes, in the same order)
 std::unique_ptr<Plan> make_plan(Kind kind, std::vector<std::vector<Piece>>& snd, std::vector<std::vector<Piece>>& rcv,
-                                std::vector<Piece>& self_src, std::vector<Piece>& self_dst) {
+                                std::vector<Piece>& self_src, std::vector<Piece>& self_dst, std::uint64_t salt = 0) {
   auto P = std::make_unique<Plan>();
   P->kind = kind;
-  auto place = [kind](std::vector<std::vector<Piece>>& lists, std::vector<Piece>& all, std::vector<Seg>& segs) {
+  auto place = [kind, salt](std::vector<std::vector<Piece>>& lists, std::vector<Piece>& all, std::vector<Seg>& segs) {
     std::size_t o = 0;
     for (int r = 0; r < int(lists.size()); ++r) {
       std::vector<Piece>& ps = lists[std::size_t(r)];
@@ -548,7 +558,7 @@ std::unique_ptr<Plan> make_plan(Kind kind, std::vector<std::vector<Piece>>& snd,
         p.off += o + kHdr;
         all.push_back(p);
       }
-      segs.push_back(Seg{r, o, nb, fingerprint(kind, ps)});
+      segs.push_back(Seg{r, o, nb, fingerprint(kind, ps, salt)});
       o += kHdr + nb;
     }
     return o;
@@ -879,8 +889,10 @@ bool line_hook(const void* data, int axis, int dst, int src, int t0, int t1) {
     if (has(along(o), src) && has(along(t), dst) && !across(t).empty()) rcv[std::size_t(o)].push_back(piece(dst, across(t)));
   }
   std::vector<Piece> none, none2;
+  const std::int64_t args[5] = {axis, dst, src, t0, t1};
+  const std::uint64_t salt = fnv(0xcbf29ce484222325ULL, args, sizeof args);
   exchange_planned(std::vector<long long>{2, axis, dst, src, t0, t1, i},
-                   [&] { return make_plan(kLine, snd, rcv, none, none2); });
+                   [&] { return make_plan(kLine, snd, rcv, none, none2, salt); });
   return true;
 }
 
