@@ -128,10 +128,11 @@ def rapl_delta_j(a, b):
 
 
 class Sampler:
-    """nvidia-smi -lms INTERVAL into a CSV file while a run goes on."""
+    """nvidia-smi -lms INTERVAL into a CSV file while a run goes on; gpu: one device's index (nvidia-smi -i), else
+    every device's lines in one file (summarize then mixes them: give the index on a node with several GPUs)."""
 
-    def __init__(self, csv, interval_ms=100, fields=None):
-        self.csv, self.interval = csv, interval_ms
+    def __init__(self, csv, interval_ms=100, fields=None, gpu=None):
+        self.csv, self.interval, self.gpu = csv, interval_ms, gpu
         self.fields = fields if fields is not None else query_fields()
         self.p = None
 
@@ -144,7 +145,8 @@ class Sampler:
         # stdbuf -oL: one line per sample reaches the file at once (a block-buffered stdout loses its tail when the
         # sampler is terminated)
         pre = ["stdbuf", "-oL"] if shutil.which("stdbuf") else []
-        self.p = subprocess.Popen(pre + ["nvidia-smi", "--query-gpu=" + ",".join(self.fields),
+        only = ["-i", str(self.gpu)] if self.gpu is not None else []
+        self.p = subprocess.Popen(pre + ["nvidia-smi", *only, "--query-gpu=" + ",".join(self.fields),
                                          "--format=csv,noheader,nounits", "-lms", str(self.interval)],
                                   stdout=self.f, stderr=subprocess.DEVNULL)
         return True
