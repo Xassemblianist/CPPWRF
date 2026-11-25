@@ -1,0 +1,23 @@
+# WRF v4.8.0 reference runs of the lake model (sf_lake_physics = 1, tests/verify/cases/51_lake.py, data
+# port_b13_data.tar) for tools/colab/colab_wrfref.sh (REFS format of tools/gcp/gcp_wrfref.sh: NAME BASE_RUN WRF_EXE
+# section.key=value ...; tools/gcp/wrf_ref_run.py). Each reference: run_NAME (1 h, history every 10 min),
+# run_NAME/steps (3 steps, history every step), rst_NAME and rsm_NAME (tests/verify/make_restart_refs.sh,
+# make_resumed_refs.sh). use_lakedepth = 0 everywhere: the inputs have LAKE_DEPTH_FLAG = 0 (WRF's lakeini stops with
+# use_lakedepth = 1). Data: matrix_data.tar (run_P4_r8, the WRF executables), suite_data.tar and v05_suite_refs.tar
+# (run_NMP1_r8), v05_files_data.tar (run_V2_r8), which unpack beside the runtime's base runs (BASE_RUN
+# ../wrf_runs/run_<C>_r8). WRF build: r8 (stock -r8; module_sf_lake.F has no DOUBLE PRECISION).
+#
+#   tools/colab/colab_wrfref.sh tests/verify/refs/b13_refs.txt \
+#     --data matrix_data.tar,suite_data.tar,v05_suite_refs.tar,v05_files_data.tar \
+#     --stage port_b13_data.tar:<every case of 51_lake.py> --cases <the cpu_dp cases of 51_lake.py>
+#
+# P4 with the lake model, lakedepth_default 50 m (1715 lake points: LAKEMASK, LAKEFLAG = 1)
+LK1_r8 run_P4_r8 wrf_r8.exe physics.sf_lake_physics=1 physics.use_lakedepth=0 time_control.run_seconds=3600 time_control.history_interval_s=600
+# LK1 with lakedepth_default 10 m
+LK2_r8 run_P4_r8 wrf_r8.exe physics.sf_lake_physics=1 physics.use_lakedepth=0 physics.lakedepth_default=10. time_control.run_seconds=3600 time_control.history_interval_s=600
+# LK1 with lakedepth_default 0 (lakeini's spval depth: the standard column)
+LK3_r8 run_P4_r8 wrf_r8.exe physics.sf_lake_physics=1 physics.use_lakedepth=0 physics.lakedepth_default=0. time_control.run_seconds=3600 time_control.history_interval_s=600
+# V2 (Svalbard, polar night) with the lake model: cold lakes
+LKV_r8 ../wrf_runs/run_V2_r8 wrf_r8.exe physics.sf_lake_physics=1 physics.use_lakedepth=0 time_control.run_seconds=3600 time_control.history_interval_s=600
+# NMP1 (Noah-MP) with the lake model
+LKN_r8 ../wrf_runs/run_NMP1_r8 wrf_r8.exe physics.sf_lake_physics=1 physics.use_lakedepth=0 time_control.run_seconds=3600 time_control.history_interval_s=600
