@@ -1998,6 +1998,46 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                               + self.FDDA_PHYS + base.replace(" X", ""))
         self.assertTrue(any("grid_fdda = 1 with use_adaptive_time_step" in e for e in t.errors), t.errors)
 
+    OBS = ("&fdda obs_nudge_opt = 1, 1, max_obs = 1000, fdda_end = 360., 360., obs_nudge_wind = 1, 1,"
+           " obs_coef_wind = 6.E-4, 6.E-4, obs_nudge_temp = 1, 1, obs_coef_temp = 6.E-4, 6.E-4, obs_nudge_mois = 1, 1,"
+           " obs_coef_mois = 6.E-4, 3.E-4, obs_rinxy = 240., 80., obs_twindo = 0.6666667, 0., obs_ionf = 2, 2,"
+           " obs_ipf_errob = .true., obs_rinsig = 0.1, obs_npfi = 10, obs_sfc_scheme_horiz = 1,"
+           " obs_nudgezfullr1_uv = 100. X /\n")
+
+    def test_obs_nudging(self):
+        # obs_nudge_opt = 1: the &fdda obs options to [fdda], a nest's own max_domains entries to [d02] fdda_obs_*;
+        # printouts and options WRF 4.8 does not use are notices
+        t, sec = self.translate(self.NEST + self.FDDA_PHYS + self.OBS.replace(" X", ""))
+        self.assertEqual(t.errors, [])
+        f = sec["fdda"]
+        self.assertEqual((f["obs_nudge_opt"], f["max_obs"], f["fdda_end"], f["obs_ionf"]), (1, 1000, 360.0, 2))
+        self.assertEqual((f["obs_rinxy"], f["obs_twindo"], f["obs_sfc_scheme_horiz"]), (240.0, 0.6666667, 1))
+        self.assertEqual((f["obs_nudgezfullr1_uv"], f["obs_nudgezfullr4_t"], f["obs_dpsmx"]), (100.0, -5000.0, 7.5))
+        self.assertEqual((sec["d02"]["fdda_obs_rinxy"], sec["d02"]["fdda_obs_twindo"]), (80.0, 0.0))
+        self.assertEqual(sec["d02"]["fdda_obs_coef_mois"], 0.0003)
+        self.assertNotIn("fdda_obs_coef_wind", sec["d02"])
+        # without obs_nudge_opt the obs options have no effect
+        t, sec = self.translate(self.NEST + self.FDDA_PHYS + self.OBS.replace("obs_nudge_opt = 1, 1", "obs_nudge_opt = 0, 0").replace(" X", ""))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("fdda", sec)
+
+    def test_obs_nudging_errors(self):
+        for extra, expected in [
+                (", obs_nudge_opt = 2, 1", "obs_nudge_opt = 2"),
+                (", max_obs = 0", "max_obs > 0"),
+                (", obs_dpsmx = 12.", "obs_dpsmx"),
+                (", obs_idynin = 1", "obs_dtramp = 0"),
+                (", obs_scl_neg_qv_innov = 2", "obs_scl_neg_qv_innov = 2"),
+                (", obs_nudge_pstr = 1, 1", "obs_nudge_pstr"),
+                (", obs_prt_freq = 0, 0", "obs_prt_freq"),
+                (", obs_ionf = 0, 0", "obs_ionf"),
+                (", obs_nudgezmax = 50.", "obs_nudgezmax"),
+                (", obs_sfc_scheme_vert = 3", "obs_sfc_scheme_vert = 3")]:
+            t, _ = self.translate(self.NEST + self.FDDA_PHYS + self.OBS.replace(" X", extra))
+            self.assertTrue(any(expected in e for e in t.errors), (extra, t.errors))
+        t, _ = self.translate(self.NEST + self.OBS.replace(" X", ""))
+        self.assertTrue(any("obs_nudge_opt = 1 needs a real-data case" in e for e in t.errors), t.errors)
+
     def test_buckets_and_prec_acc(self):
         # diagnostic_output_calc: bucket_mm, bucket_J (one entry) and prec_acc_dt (every domain's entry; check_a_mundo's
         # prec_acc_opt = 1 when some domain has prec_acc_dt > 0); a nest's missing entry is the Registry default 0

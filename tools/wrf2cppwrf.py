@@ -600,7 +600,6 @@ DEFAULT_ONLY_OPTIONS = {
     ("physics", "ra_sw_eclipse"): (0, "solar eclipse in the shortwave radiation (ECOBSC, ECMASK)"),
     ("diags", "solar_diagnostics"): (0, "solar diagnostics (radiation_driver's Solar_step every step, SZA, CLRNIDX ...)"),
     ("fdda", "grid_sfdda"): (0, "surface grid nudging (needs wrfsfdda_d0N from OBSGRID)"),
-    ("fdda", "obs_nudge_opt"): (0, "observation nudging"),
     ("fire", "ifire"): (0, "wildland fire model"),
     ("stoch", "multi_perturb"): (0, "stochastic multi-physics perturbations"),
     ("stoch", "sppt"): (0, "stochastically perturbed physics tendencies"),
@@ -704,6 +703,23 @@ IGNORED_WRF_OPTIONS = {
 }
 
 
+# observation nudging (obs_nudge_opt = 1, phys/module_fddaobs_rtfdda.F): the &fdda options CPPWRF reads with WRF's
+# Registry defaults, the max_domains ones (each domain's) and the single ones (domain 1's)
+OBS_DOM_OPTIONS = (
+    ("obs_nudge_wind", 0), ("obs_coef_wind", 0.0), ("obs_nudge_temp", 0), ("obs_coef_temp", 0.0),
+    ("obs_nudge_mois", 0), ("obs_coef_mois", 0.0), ("obs_nudge_pstr", 0), ("obs_coef_pstr", 0.0),
+    ("obs_rinxy", 0.0), ("obs_twindo", 0.0), ("obs_ionf", 1), ("obs_prt_freq", 1000),
+    ("obs_no_pbl_nudge_uv", 0), ("obs_no_pbl_nudge_t", 0), ("obs_no_pbl_nudge_q", 0), ("fdda_end", 0.0),
+)
+OBS_ONE_OPTIONS = (
+    ("max_obs", 0), ("obs_idynin", 0), ("obs_dtramp", 0.0), ("obs_sfc_scheme_horiz", 0), ("obs_sfc_scheme_vert", 0),
+    ("obs_max_sndng_gap", 20.0), ("obs_sfcfact", 1.0), ("obs_sfcfacr", 1.0), ("obs_dpsmx", 7.5),
+    *[(f"obs_nudgez{w}r{r}_{v}", -5000.0 if (w, r) == ("full", 4) else 50.0)
+      for v in ("uv", "t", "q") for r in (1, 2, 4) for w in ("full", "ramp")],
+    ("obs_nudgezfullmin", 50.0), ("obs_nudgezrampmin", 50.0), ("obs_nudgezmax", 3000.0),
+    ("obs_scl_neg_qv_innov", 0),
+)
+
 # WRF options that are not translated and need not be: wrf.exe does not use them, or only in configurations
 # CPPWRF rejects anyway (any other WRF option away from its Registry default is an error)
 NO_EFFECT_OPTIONS = {
@@ -760,6 +776,11 @@ NO_EFFECT_OPTIONS = {
         "sgfdda_end_h", "sgfdda_end_m", "sgfdda_end_s", "io_form_sgfdda")},
     # analysis nudging options without grid_fdda (check_a_mundo zeroes the gfdda end and interval; STEPFG of the
     # restart file comes from namelist.input)
+    # observation nudging: its options without obs_nudge_opt = 1, its printouts and the options WRF 4.8 does not use
+    **{k: "obs_nudge_opt = 1 only" for k in [o for o, _ in OBS_DOM_OPTIONS + OBS_ONE_OPTIONS]},
+    **{k: "observation nudging printouts only" for k in (
+        "obs_ipf_errob", "obs_ipf_nudob", "obs_ipf_in4dob", "obs_ipf_init", "obs_npfi", "obs_prt_max")},
+    "obs_rinsig": "not used by WRF 4.8's observation nudging", "fdda_start": "not used by WRF 4.8's observation nudging",
     **{k: "grid_fdda = 1 only" for k in (
         "gfdda_inname", "io_form_gfdda", "gfdda_interval", "gfdda_interval_d", "gfdda_interval_h", "gfdda_interval_m",
         "gfdda_interval_s", "gfdda_interval_y", "gfdda_begin_y", "gfdda_begin_d", "gfdda_begin_h", "gfdda_begin_m",
@@ -1067,6 +1088,68 @@ class WrfTranslator:
                     sections.setdefault("real", {})["wrffdda"] = name
                 else:
                     sections.setdefault(f"d{d + 1:02d}", {})["wrffdda"] = name
+
+    def translate_obs(self, sections: Dict[str, Dict[str, Any]], max_dom: int, has_physics_suite: bool,
+                      case_name: str):
+        """obs_nudge_opt = 1 (observation nudging, phys/module_fddaobs_driver.F, module_fddaobs_rtfdda.F,
+        share/wrf_fddaobs_in.F) to [fdda] obs_*, a nest's own max_domains entries to [d0N] fdda_obs_*; the
+        observations come from OBS_DOMAIN<id>01 in the case directory. Values not proven against WRF are errors."""
+        n = max(1, max_dom)
+        on = [self.get_dom_opt("fdda", "obs_nudge_opt", d, 0, fallback_d0=False) for d in range(n)]
+        if all(v == 0 for v in on):
+            return
+        for d, v in enumerate(on):
+            if v not in (0, 1):
+                self.error(f"WRF obs_nudge_opt = {v} is not supported; CPPWRF supports 0 and 1 (domain {d + 1}).")
+        if case_name != "real" or not has_physics_suite:
+            self.error("WRF obs_nudge_opt = 1 needs a real-data case with the physics suite in CPPWRF.")
+        if self.get_opt("domains", "use_adaptive_time_step", False) is True:
+            self.error("WRF obs_nudge_opt = 1 with use_adaptive_time_step is not supported by CPPWRF.")
+        if n > 9:
+            self.error("WRF obs_nudge_opt = 1 with more than 9 domains (OBS_DOMAIN<id>01) is not supported.")
+        one = {k: self.get_opt("fdda", k, df) for k, df in OBS_ONE_OPTIONS}
+        dom = [{k: self.get_dom_opt("fdda", k, d, df, fallback_d0=False) for k, df in OBS_DOM_OPTIONS} for d in range(n)]
+        for k in ("obs_idynin", "obs_scl_neg_qv_innov", "obs_sfc_scheme_horiz", "obs_sfc_scheme_vert"):
+            if one[k] not in (0, 1):
+                self.error(f"WRF {k} = {one[k]} is not supported (0 or 1).")
+        if one["max_obs"] <= 0:
+            self.error("WRF obs_nudge_opt = 1 needs max_obs > 0 (wrf.exe stops at the first observation, STOP 122).")
+        if not 0 < float(one["obs_dpsmx"]) <= 10:
+            self.error(f"WRF obs_dpsmx = {one['obs_dpsmx']}: wrf.exe stops (it must be > 0 and <= 10).")
+        if one["obs_idynin"] == 1 and float(one["obs_dtramp"]) == 0:
+            self.error("WRF obs_idynin = 1 with obs_dtramp = 0 is not supported (fddaobs_driver divides by 0).")
+        if one["obs_sfc_scheme_vert"] == 0:
+            zmax, fmin, rmin = (float(one[k]) for k in ("obs_nudgezmax", "obs_nudgezfullmin", "obs_nudgezrampmin"))
+            if zmax <= 0 or fmin < 0 or rmin < 0 or zmax < fmin + rmin:
+                self.error("WRF obs_nudgezmax / obs_nudgezfullmin / obs_nudgezrampmin: wrf.exe stops (fddaobs_init).")
+        for d in range(n):
+            if on[d] != 1:
+                continue
+            dv = dom[d]
+            for k in ("obs_nudge_wind", "obs_nudge_temp", "obs_nudge_mois", "obs_no_pbl_nudge_uv",
+                      "obs_no_pbl_nudge_t", "obs_no_pbl_nudge_q"):
+                if dv[k] not in (0, 1):
+                    self.error(f"WRF {k} = {dv[k]} is not supported (0 or 1; domain {d + 1}).")
+            if dv["obs_nudge_pstr"] != 0:
+                self.error(f"WRF obs_nudge_pstr = {dv['obs_nudge_pstr']}: not used by WRF 4.8, not supported "
+                           f"(domain {d + 1}).")
+            if dv["obs_ionf"] < 1:
+                self.error(f"WRF obs_ionf = {dv['obs_ionf']} must be >= 1 (domain {d + 1}).")
+            if dv["obs_prt_freq"] <= 0:
+                self.error(f"WRF obs_prt_freq = {dv['obs_prt_freq']}: wrf.exe stops (domain {d + 1}).")
+        fd = sections.setdefault("fdda", {})
+        fd["obs_nudge_opt"] = on[0]
+        for k, _ in OBS_DOM_OPTIONS:
+            fd[k] = dom[0][k]
+        for k, _ in OBS_ONE_OPTIONS:
+            fd[k] = one[k]
+        for d in range(1, n):
+            tag = f"d{d + 1:02d}"
+            if on[d] != on[0]:
+                sections.setdefault(tag, {})["fdda_obs_nudge_opt"] = on[d]
+            for k, _ in OBS_DOM_OPTIONS:
+                if dom[d][k] != dom[0][k]:
+                    sections.setdefault(tag, {})[f"fdda_{k}"] = dom[d][k]
 
     def history_seconds(self, d: int) -> int:
         """History interval of domain index d in seconds (set_timekeeping_alarms.inc; 0: none)."""
@@ -3401,6 +3484,7 @@ class WrfTranslator:
                         sections[tag]["time_step_sound"] = tss_d
 
         self.translate_fdda(sections, max_dom, has_physics_suite, case_name)
+        self.translate_obs(sections, max_dom, has_physics_suite, case_name)
         self.check_input_intervals(sections, max_dom)
 
         # s_we / s_sn / s_vert set WRF's domain start index (ids = s_we, frame/module_domain.F); a real case reads
