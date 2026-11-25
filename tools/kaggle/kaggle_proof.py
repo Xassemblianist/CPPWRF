@@ -290,9 +290,9 @@ with tempfile.TemporaryDirectory(dir=working) as tmp:
                     raise RuntimeError(f"wrong SHA256 for {{name}}")
         rc = subprocess.call(["timeout", "--kill-after=30", str(job["limit"]),
                               "python3", "-u", str(marker.parent / {body!r}), str(marker), tmp])
-    except (OSError, ValueError, RuntimeError) as error:
-        print(f"SETUP_FAILED {{error}}", flush=True)
-        (logs / "setup.log").write_text(str(error) + "\\n")
+    except Exception as error:  # any setup error still gets an exit receipt and an artifact
+        print(f"SETUP_FAILED {{error!r}}", flush=True)
+        (logs / "setup.log").write_text(repr(error) + "\\n")
     print(f"proof shard exit {{rc}}", flush=True)
     (logs / "done.json").write_text(json.dumps({{"id": proof_id, "shard": {number}, "exit": rc}}) + "\\n")
     # Kaggle publishes one artifact even for a known proof failure. The collector uses the exit receipt.
@@ -510,6 +510,12 @@ def merge(out, plan, available):
                 ctests.append(f"glibc math proof {math.splitlines()[-1] if math else 'MISSING'}")
                 if state == "PASS":
                     state = "FAIL"
+        if state == "MISSING":
+            # Kaggle's last reported state explains a missing artifact (still running, error, cancelled).
+            status = out / f"status-{n:02d}.log"
+            text = status.read_text(errors="replace").strip() if status.is_file() else ""
+            if text:
+                diagnostics.append(f"shard {n:02d} Kaggle status: {text.splitlines()[-1]}")
         summaries.append(f"SHARD {n:02d} {state} ({kernel_slug(plan, n)})")
         if trusted:
             setup = logs / "setup.log"

@@ -51,8 +51,10 @@ def get_gpus(out):
         log.write(gpus)
         print(f"CPUs available: {len(os.sched_getaffinity(0))}", file=log, flush=True)
         for command in (["nvcc", "--version"], ["mpirun", "--version"], ["cmake", "--version"], ["gcc", "--version"]):
+            # Environment record only: a tool that is present but fails here must not end the proof.
             if shutil.which(command[0]):
-                subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
+                rc = subprocess.call(command, stdout=log, stderr=subprocess.STDOUT)
+                print(f"{' '.join(command)}: exit {rc}", file=log, flush=True)
     rows = list(csv.reader(gpus.splitlines(), skipinitialspace=True))
     if len(rows) != 2 or len({row[2] for row in rows}) != 2 or any(row[1] != "Tesla T4" or row[4] != "7.5" for row in rows):
         raise RuntimeError("expected exactly two Tesla T4 GPUs with compute capability 7.5 (see env.txt)")
