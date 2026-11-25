@@ -92,7 +92,8 @@ silently. `physics_suite` and the `-1` options work as in WRF.
 ### What is not ported?
 
 - moving nests, vertical nest refinement, ndown.exe;
-- the urban canopy models other than the single-layer UCM (sf_urban_physics = 1 with Noah), and the lake model;
+- the urban canopy models other than the single-layer UCM (sf_urban_physics = 1 with Noah), and the lake model (sf_lake_physics = 1) outside one domain with Noah / Noah-MP
+  and use_lakedepth = 0 input;
 - the schemes outside the ported list: other microphysics, cumulus, PBL, surface-layer and land-surface schemes,
   including the Pleim-Xiu land surface model;
 - Noah-MP's options outside the listed values;
