@@ -1443,8 +1443,8 @@ struct Wsm6Params {
         }
     }
 
-#if defined(CPPWRF_DOUBLE)
-    // ---- WSM6 in column stages (FP64 builds, CPU and CUDA; Wsm6Stages below) ----
+#if defined(CPPWRF_LOCAL_ROUNDING)
+    // ---- WSM6 in column stages (every build but the fast CUDA FP32 one; Wsm6Stages below) ----
     // Each function is the body of one of operator()'s level loops for one level k: the same statements with the
     // column arrays as scalars (x[k] -> x), so every value is the same arithmetic in the same order.
 
@@ -2195,8 +2195,8 @@ struct Wsm6Kernel {
     }
 };
 
-#if defined(CPPWRF_DOUBLE)
-// ---- WSM6 in column stages (FP64 builds, CPU and CUDA) ----
+#if defined(CPPWRF_LOCAL_ROUNDING)
+// ---- WSM6 in column stages (CPU builds, CUDA FP64 and FP32 identity: core/precision.hpp) ----
 // Wsm6Kernel runs a whole column in one thread. Most of WSM6's work is per level (the saturation, the slopes and
 // fall speeds, the melting, the freezing, the warm and cold rain processes, the saturation adjustment), and only
 // the sedimentation (nislfv_rain_plm / nislfv_rain_plm6) sweeps the column. wsm6_stages runs the level loops as
@@ -2209,8 +2209,10 @@ struct Wsm6Kernel {
 //   Wsm6StageC     qi after it, the freezing, the rain processes, the saturation adjustment, the padding (last
 //                  loop: th)
 // Every value is computed by the statements of Wsm6Params::operator() in the same order (its level loops never
-// read another level). The values carried between the stages are kept in Wsm6Work. FP32 builds keep Wsm6Kernel:
-// there nvcc contracts multiply-adds (--fmad=true), which a split could change.
+// read another level). The values carried between the stages are kept in Wsm6Work (stored as Real, the type
+// Wsm6Kernel keeps them in; the stages read no double locals of its). Builds where every operation is rounded on
+// its own (CPPWRF_LOCAL_ROUNDING) get the same values; the fast CUDA FP32 build keeps Wsm6Kernel: there nvcc
+// contracts multiply-adds (--fmad=true) depending on the code around them, which a split could change.
 template <typename Real>
 struct Wsm6Work {
     enum : int { kT, kCpm, kXl, kQsat0, kQsat1, kRh0, kRh1, kWorkr, kWorka, kDenqrs1, kDenqrs2, kDenqrs3, kArrays };
@@ -2474,7 +2476,7 @@ void wsm6_stages(const Wsm6Params<Real>& params, Real dt, int nz, const Range2D&
                                           qg});
     }
 }
-#endif  // CPPWRF_DOUBLE
+#endif  // CPPWRF_LOCAL_ROUNDING
 
 // WRF physics_mmm/mp_wsm6_effectRad.F90 mp_wsm6_effectRad_run (do_microp_re: has_reqc = has_reqi =
 // has_reqs = 1), called by module_mp_wsm6.F after each WSM6 call with t = th*pii of the updated

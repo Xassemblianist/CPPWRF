@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "core/gpu_runtime.hpp"
+#include "core/precision.hpp"  // CPPWRF_LOCAL_ROUNDING (kFuseMulAdd below, the column-work and stage gates)
 
 #if defined(CPPWRF_GPUCC)
 #define CPPWRF_HD __host__ __device__
