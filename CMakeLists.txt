@@ -496,7 +496,7 @@ if(CPPWRF_DIFF_TESTS)
   find_package(OpenMP REQUIRED COMPONENTS CXX)  # the CPU reference drivers (also in CUDA builds)
   add_subdirectory(tests/phys)
   set(DIFF_WORK ${CMAKE_BINARY_DIR}/diff_work)
-  foreach(t dyn/diffusion phys/suite nest)
+  foreach(t dyn/diffusion phys/suite nest nest/vortex)
     string(REPLACE "/" "_" tname "diff_${t}")
     add_test(NAME ${tname} COMMAND bash ${CMAKE_SOURCE_DIR}/tests/${t}/run_test.sh WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     set_tests_properties(${tname} PROPERTIES LABELS diff SKIP_RETURN_CODE 77  # 77: no WRF build / runs
