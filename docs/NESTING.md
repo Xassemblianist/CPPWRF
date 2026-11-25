@@ -2,9 +2,9 @@
 
 Scope: WRF 4.8.0 two-way (feedback = 1) and one-way (feedback = 0) static nests with odd
 parent_grid_ratio, the same vertical levels in all domains (no vertical refinement), nests that read
-their own wrfinput_d0N (input_from_file = .true.), real-data cases; prescribed moves of a nest of domain 1
-(unverified, section "Moving nests" below). Not implemented: ideal-case nests, vortex-following moving nests, vertical
-refinement.
+their own wrfinput_d0N (input_from_file = .true.), real-data cases; prescribed moves and vortex following of a nest
+of domain 1 (unverified, sections "Moving nests" and "Vortex-following nests" below). Not implemented: ideal-case
+nests, vertical refinement.
 
 ## WRF call sequence (frame/module_integrate.F integrate, recursive per domain)
 ```
@@ -99,5 +99,55 @@ differs from the basic build's; CPPWRF writes the moving build's values when mov
 of latitude / longitude (Model::xlat / xlong, the radiation driver's) follow the move. Not supported (errors): a
 moving nest that is not a nest of domain 1, has nests or siblings; tiles or MPI ranks; the adaptive time step;
 `parent_grid_ratio` > 3; a nest whose interpolation window leaves domain 1's points (i/j_parent_start < 5 or within
-5 parent cells plus the nest of the east / north edge); a resumed run (`run.restart_file`); vortex following;
-`time_to_move`.
+5 parent cells plus the nest of the east / north edge); a resumed run (`run.restart_file`); `time_to_move` with
+prescribed moves (verified with vortex following only).
+
+## Vortex-following nests
+
+WRF 4.8.0 built with vortex following (configure nesting 3: `-DMOVE_NESTS -DVORTEX_CENTER`) compiles the vortex branch
+of `time_for_move2` (share/mediation_nest_move.F:349-700) instead of the prescribed moves (num_moves and the move lists
+are then not read); everything after the decision (shift, interpolation, start_domain, NEST_POS) is the prescribed
+moves' code above. CPPWRF: `[domains] vortex_following = true` (tools/wrf2cppwrf.py `--vortex-following`), the
+numerics in src/nest/vortex_center.hpp, the alarm and the state in src/cases/nest_move.cpp (`time_for_move`). The
+reference is WRF dmpar with one MPI rank (flavors r8dmvortex / r4dmvortex of the cppwrf-data wrfref workflow;
+tests/verify/refs/vortexnest_refs.txt).
+
+1. `time_for_move` (every parent step, after the nest's feedback, as for prescribed moves): nothing while the nest's
+   `xtime` (minutesSinceSimulationStart after its last step, REAL) is below `time_to_move` (per domain, REAL minutes);
+   the vortex alarm is not consumed then.
+2. `COMPUTE_VORTEX_CENTER_ALARM` (set_timekeeping.F:565-583 for the nest when it opens): RingInterval =
+   `vortex_interval` minutes (per domain), ringing from the start; `ESMF_ClockAdvance` rings it at a nest step when
+   PrevRingTime + interval <= the step's time and adds one interval to PrevRingTime (PrevRingTime starts at the nest's
+   start; interval 0 rings every step). CPPWRF replays the nest's steps since the last call with the exact
+   `wrf_time::Interval` arithmetic. Only a ringing alarm recomputes the centre (and turns the ringer off).
+3. The centre (alarm ringing), on the nest's whole domain (`wrf_patch_to_global_real`; with one rank WRF's monitor
+   loops over the global copy, j outer, i inner):
+   - `compute_500mb_height` (share/module_compute_geop.F): per mass column `pressure = p + pb`, `geopotential =
+     0.5 * (ph + phb + ph(k+1) + phb(k+1))` (that order), `interp_p` at `track_level` (one value, Pa): a column whose
+     lowest level is above the level gets 9.81e5; otherwise the first level kp >= 2 whose pressure, truncated to an
+     INTEGER (`pk`), is not above track_level, and the linear weights in pressure; / 9.81. The fields are the nest's
+     ph_2, phb, p, pb at the end of its last step (CPPWRF: the model's state and base state, downloaded).
+   - the search box: the whole domain (`ids .. ide-1`) the first time (vc_i, vc_j < 0), else `vc -+ 60 *
+     vortex_interval * max_vortex_speed / dx` (an INTEGER product over REAL dx = check_a_mundo's dx(1) / ratio),
+     clipped to the domain and truncated to INTEGERs;
+   - in the box: `psfc + 11.38 * ht` and its minimum (printed on the ATCF line only), the first lowest height
+     (strict `<`: ties go to the first point in loop order) and the highest (only checked to exist); fatal errors as
+     WRF's when none is found;
+   - xi, xj = the first guess the first time; the smoothing window `first guess -+ 100000 / dx`, clipped to
+     `[1, ide-2]` / `[1, jde-2]` and truncated; vmax over it; `pbar`, `ipbar`, `jpbar` = the sums of `vmax - height`
+     and its products with `i - is`, `j - js` (loop order); if pbar /= 0: `xi = (0 * xi + 1 * (is + ipbar / pbar)) /
+     (0 + 1)`, `vc_i = xi + .5` (and in j); else they stay.
+4. The move (every call, ringing or not): `dc = (ide - ids + 1) / 2.`, `disp = vc - dc`, limited to +-6, `move_cd =
+   INT(disp / parent_grid_ratio)` limited to +-1; `vc -= move_cd * ratio`. The corral check of time_for_move then
+   cancels a move toward domain 1's edge and gives vc the cancelled move back (`vc_i += move_cd_x * pgr`).
+5. Reductions and decompositions: every reduction above is a host loop in WRF's order over the whole nest; moving
+   nests are refused with tiles or MPI ranks (one patch), and the fields are downloaded from the GPU, so CPU, CUDA
+   FP64 and FP32 run the same host code. A decomposed port would gather the global height / psfc / ht first (as WRF's
+   `wrf_patch_to_global_real`) and run these loops on one rank, broadcasting vc_i / vc_j.
+6. Restart: WRF keeps xi, xj, vc_i, vc_j in wrfrst (Registry `r`) and warns when a run restarts off the vortex
+   interval; CPPWRF refuses a resumed run with moving nests.
+7. Not supported (errors): more than one nest (WRF moves every nest; CPPWRF one nest of domain 1 without nests),
+   `track_level` outside (0, 2^24), negative `vortex_interval` / `max_vortex_speed` or an overflowing product, and
+   everything refused for prescribed moves. The differential test tests/nest/vortex (ctest -L diff) checks
+   compute_500mb_height of WRF's -r8 build and a copy of the search and move lines against vortex_center.hpp byte for
+   byte.
