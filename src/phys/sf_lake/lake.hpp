@@ -385,7 +385,7 @@ CPPWRF_HD inline void shal_lake_fluxes(r8 forc_t, r8 forc_pbot, r8 forc_psrf, r8
   const r8 zldis = forc_hgt_u - 0.;
   r8 um, obu;
   monin_obuk_ini(ur, thv, dthv, zldis, z0mg, um, obu);
-  r8 ustar = 0, temp1 = 0, temp2 = 0, temp12m = 0, temp22m = 0, ram = 0, rah = 0, raw = 0;
+  r8 ustar = 0, temp1 = 0, temp2 = 0, temp12m = 0, temp22m = 0, rah = 0, raw = 0;
   r8 eflx_sh_grnd = 0, qflx_evap_soi = 0;
   int iter = 1;
   bool active = true;  // fncopy > 0
@@ -405,7 +405,7 @@ CPPWRF_HD inline void shal_lake_fluxes(r8 forc_t, r8 forc_pbot, r8 forc_psrf, r8
       tksur = tkairc + (7.75e-5 * bw + 1.105e-6 * bw * bw) * (tkice - tkairc);
       tsur = col.t_soisno[jtop + 4];
     }
-    ram = 1. / (ustar * ustar / um);
+    // ram = 1 / (ustar * ustar / um): only taux, tauy and ram1, which Lake does not use
     rah = 1. / (temp1 * ustar);
     raw = 1. / (temp2 * ustar);
     const r8 stftg3 = emg * sb * tgbef * tgbef * tgbef;
@@ -466,7 +466,6 @@ CPPWRF_HD inline void shal_lake_fluxes(r8 forc_t, r8 forc_pbot, r8 forc_psrf, r8
   o.eflx_sh_grnd = eflx_sh_grnd;
   o.qflx_evap_soi = qflx_evap_soi;
   o.z0mg = z0mg;
-  (void)ram;  // taux, tauy, ram1: not used by Lake
 }
 
 // ---------------------------------------------------------------- ShalLakeTemperature (1153-2117)
