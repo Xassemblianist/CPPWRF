@@ -1,0 +1,21 @@
+# WRF v4.8.0 references of the vortex-following moving nests (tests/verify/cases/63_nest_vortex.py, data
+# vortexnest_data.tar), made by the wrfref workflow of the cppwrf-data repository with WRF dmpar (configure option
+# 34, MPICH) built with vortex following (nesting 3: -DMOVE_NESTS -DVORTEX_CENTER), -r8 (r8dmvortex,
+# wrf_r8_vortex.exe) and real*4 (r4dmvortex, wrf_r4_vortex.exe), each run with one MPI rank. REFS format of
+# tools/gcp/wrf_ref_run.py (NAME BASE_RUN WRF_EXE section.key=value ...). Data: matrix_nest.tar (run_N3s_r8: N3, d02 at
+# (40, 30) of d01, ratio 3, the P4 physics), fp32id4_data.tar (run_N3_cpu_sp: N3 with WRF real*4's inputs). Each
+# reference: run_NAME and run_NAME/steps (3 parent steps, history every step); no restart references (CPPWRF does
+# not resume a run with moving nests). history_interval_s has one value per domain. The N3 domain has no closed low:
+# the lowest 500 hPa height of d02 is at its north-west corner, so the vortex search moves d02 toward it (-1, +1)
+# after each parent step until vc is within one parent cell of the nest's centre or the corral stops it (moves.log).
+#
+# VX1: the Registry defaults (vortex_interval 15, max_vortex_speed 40, track_level 50000, corral_dist 8,
+# time_to_move 0): 1 h, history every 10 min; steps/ has the moves at 1 and 2 min
+VX1_r8 run_N3s_r8 wrf_r8_vortex.exe time_control.run_seconds=3600 time_control.history_interval_s=600,600
+# VX2: vortex_interval 1 (the centre again every minute, in the search box around the last one: 60 * 1 * 20 / 5000
+# points), max_vortex_speed 20, track_level 70000, time_to_move 2 (no move at 1 min), corral_dist 28 for d02 (the
+# y part of the move after the first is cancelled: "MOAD can not move", vc_j given back); 10 min, history every
+# minute (the run_NAME run; steps/ is not used)
+VX2_r8 run_N3s_r8 wrf_r8_vortex.exe time_control.run_seconds=600 time_control.history_interval_s=60,60 domains.vortex_interval=15,1 domains.max_vortex_speed=40,20 domains.track_level=70000 domains.time_to_move=0,2 domains.corral_dist=8,28
+# VX1 in real*4 (CPU FP32 bit for bit, and CUDA FP32 identity): 1 h and steps/
+VX1_cpu_sp run_N3_cpu_sp wrf_r4_vortex.exe time_control.run_seconds=3600 time_control.history_interval_s=600,600
