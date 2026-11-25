@@ -2581,6 +2581,32 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, _ = self.translate(three)
         self.assertTrue(any("nests of domain 1 only" in e for e in t.errors), t.errors)
 
+    def test_prescribed_moves_edge_cases(self):
+        # a skipped entry takes the Registry default; move_interval >= 999999999 is inactive; no active move: not
+        # translated; bool values, a negative move_interval, a ratio > 3 and a nest near domain 1's edge are errors
+        t, gen = self.translate(self.NEST.replace(
+            "&domains ", "&domains num_moves = 3, move_id = 2, , 2, move_interval = 5, 7, 9, move_cd_x = 1, 1, 1, "))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(gen["domains"]["move_id"], "2,0,2")
+        t, gen = self.translate(self.NEST.replace(
+            "&domains ", "&domains num_moves = 2, move_id = 2, 2, move_interval = 1000000000, 999999999, "))
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("num_moves", gen.get("domains", {}))
+        self.assertTrue(any("no move is active" in w for w in t.warnings), t.warnings)
+        for bad, msg in (("num_moves = .true., ", "num_moves = True"),
+                         ("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, corral_dist = 8, .true., ",
+                          "corral_dist = True"),
+                         ("num_moves = 1, move_id = 2, move_interval = -1, move_cd_x = 1, ", "must be >= 0"),
+                         ("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = .true., ", "integers expected")):
+            t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad))
+            self.assertTrue(any(msg in e for e in t.errors), (bad, t.errors))
+        near = self.NEST.replace("&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, ")
+        t, _ = self.translate(near.replace("i_parent_start = 1, 40,", "i_parent_start = 1, 4,"))
+        self.assertTrue(any("too near domain 1's edge" in e for e in t.errors), t.errors)
+        t, _ = self.translate(near.replace("parent_grid_ratio = 1, 3,", "parent_grid_ratio = 1, 5,")
+                              .replace("e_we = 120, 121,", "e_we = 120, 121,"))
+        self.assertTrue(any("parent_grid_ratio = 5 > 3" in e for e in t.errors), t.errors)
+
     def test_omitted_nest_parent_id_rejected(self):
         # Registry default parent_id = 0; omitted nest parent_id must not be inferred as dom_id - 1
         three = ("&time_control input_from_file = .true., .true., .true. /\n"

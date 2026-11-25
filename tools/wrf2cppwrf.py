@@ -888,16 +888,25 @@ class WrfTranslator:
         def entries(key: str) -> List[int]:
             vals = list(self.get_opt_list("domains", key))[:num_moves]
             vals += [REGISTRY_DEFAULTS[key][1]] * (num_moves - len(vals))
+            # an entry the namelist skips ("2, , 2"): the Registry default
+            vals = [REGISTRY_DEFAULTS[key][1] if v is None else v for v in vals]
             for v in vals:
                 if not isinstance(v, int) or isinstance(v, bool):
                     self.error(f"WRF &domains.{key} = {vals}: integers expected.")
             return vals
         ids, ivs, cdx, cdy = (entries(k) for k in ("move_id", "move_interval", "move_cd_x", "move_cd_y"))
         parents = [self.get_dom_opt("domains", "parent_id", d, 0, fallback_d0=False) for d in range(max_dom)]
+        active = False
         for k in range(num_moves):
             mid = ids[k]
-            if not isinstance(mid, int) or ivs[k] == 999999999 or mid < 2 or mid > max_dom:
-                continue  # never moves (WRF: no nest of that id asks for it)
+            if not all(isinstance(v, int) and not isinstance(v, bool) for v in (mid, ivs[k], cdx[k], cdy[k])):
+                continue  # reported by entries()
+            if ivs[k] < 0:
+                self.error(f"WRF move {k + 1}: move_interval = {ivs[k]} must be >= 0 (minutes).")
+            # time_for_move2 skips a move with move_interval >= 999999999 (used); no nest of another id asks for it
+            if ivs[k] >= 999999999 or mid < 2 or mid > max_dom:
+                continue
+            active = True
             if any(cdv not in (-1, 0, 1) for cdv in (cdx[k], cdy[k])):
                 # med_nest_move: wrf_error_fatal ' invalid move: dx, dy ' when |dx| or |dy| > 1
                 self.error(f"WRF move {k + 1}: move_cd_x = {cdx[k]}, move_cd_y = {cdy[k]}: WRF stops with "
@@ -909,8 +918,26 @@ class WrfTranslator:
                 self.error(f"WRF move {k + 1}: move_id = {mid} has nests of its own; not supported by CPPWRF.")
             if sum(1 for p in parents if p == 1) > 1:
                 self.error("WRF moving nests with several nests of domain 1 are not supported by CPPWRF.")
-            if ivs[k] < 0:
-                self.error(f"WRF move {k + 1}: move_interval = {ivs[k]} must be >= 0 (minutes).")
+            ratio = self.get_dom_opt("domains", "parent_grid_ratio", mid - 1, 1, fallback_d0=False)
+            if isinstance(ratio, int) and ratio > 3:
+                # shift_domain_em moves the arrays by parent_grid_ratio points out of the halo (CPPWRF: 3 points)
+                self.error(f"WRF move {k + 1}: the moving nest's parent_grid_ratio = {ratio} > 3 is not supported "
+                           "by CPPWRF.")
+            ipos = self.get_dom_opt("domains", "i_parent_start", mid - 1, 1, fallback_d0=False)
+            jpos = self.get_dom_opt("domains", "j_parent_start", mid - 1, 1, fallback_d0=False)
+            ewe = [self.get_dom_opt("domains", "e_we", d, 0, fallback_d0=False) for d in (0, mid - 1)]
+            esn = [self.get_dom_opt("domains", "e_sn", d, 0, fallback_d0=False) for d in (0, mid - 1)]
+            if all(isinstance(v, int) and not isinstance(v, bool) for v in [ratio, ipos, jpos] + ewe + esn) and \
+                    ratio > 0 and not (ipos >= 5 and jpos >= 5 and ipos + ewe[1] // ratio + 5 <= ewe[0] - 1 and
+                                       jpos + esn[1] // ratio + 5 <= esn[0] - 1):
+                # the intermediate domain's search window (interp_mask_water_field, SINT) inside domain 1's points
+                self.error(f"WRF move {k + 1}: the moving nest d{mid:02d} at i_parent_start {ipos}, j_parent_start "
+                           f"{jpos} is too near domain 1's edge for CPPWRF (i_parent_start, j_parent_start >= 5 and "
+                           "i_parent_start + e_we / parent_grid_ratio + 5 <= e_we - 1 of domain 1, and in y).")
+        if not active:
+            self.warn(f"WRF num_moves = {num_moves}: no move is active (move_id of a nest and move_interval < "
+                      "999999999); the moves are not translated.")
+            return
         self._moves_domains = ({
             "num_moves": num_moves,
             "move_id": ",".join(str(v) for v in ids),
@@ -921,7 +948,7 @@ class WrfTranslator:
         corral = self.get_opt_list("domains", "corral_dist")
         for d in range(1, max_dom):
             c = corral[d] if d < len(corral) and corral[d] is not None else REGISTRY_DEFAULTS["corral_dist"][1]
-            if not isinstance(c, int) or c < 1:
+            if not isinstance(c, int) or isinstance(c, bool) or c < 1:
                 self.error(f"Domain d{d + 1:02d}: corral_dist = {c} is not supported (an integer >= 1: the nest "
                            "keeps 2 parent cells from domain 1's edge).")
             elif c != REGISTRY_DEFAULTS["corral_dist"][1]:
@@ -3148,7 +3175,7 @@ class WrfTranslator:
         num_moves = self.get_opt("domains", "num_moves", 0)
         if num_moves is None:
             num_moves = 0
-        if not isinstance(num_moves, int) or num_moves < 0 or num_moves > 50:
+        if not isinstance(num_moves, int) or isinstance(num_moves, bool) or num_moves < 0 or num_moves > 50:
             self.error(f"WRF num_moves = {num_moves} is invalid (0 .. max_moves = 50).")
             num_moves = 0
         if num_moves > 0 and max_dom > 1:
