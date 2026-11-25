@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Moving nests with prescribed moves (src/cases/nest_move.cpp) against WRF v4.8.0 dmpar (one MPI rank) built with
-"preset moves" (configure nesting 2, -DMOVE_NESTS; tools/colab/colab_movenest.sh, references
+"preset moves" (configure nesting 2, -DMOVE_NESTS; the wrfref flavors r8dmmove / r4dmmove, references
 tests/verify/refs/movenest_refs.txt, data movenest_data.tar), at tolerance 0 on both domains:
 - MV1: N3 (d02 at (40, 30) of d01, ratio 3, the P4 physics) with d02 moved by one parent cell at 1 min (+1, 0),
   2 min (0, +1), 20 min (-1, -1) and 40 min (+1, -1): 3 parent steps with history every step (the first two moves)

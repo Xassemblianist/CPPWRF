@@ -88,8 +88,13 @@ from run_nested in the same place) ports, in WRF's order:
    the whole domain, `t_1 = t_2` and `mu_1 = mu_2` where imask = 1, `ph_1 = ph_2`, then `al`, `p` (from the `_1`
    levels), `alt`, `p_hyd`, `p_hyd_w`, the terrain slopes (TOPOSLPX, TOPOSLPY, LAP_HGT, SLOPE, SLP_AZI), and
    `phy_init` on the new points (set_tiles with imask_nostag; moved: IVGTYP, landuse_init, the effective radii,
-   bl_init's accumulations, Noah's LSMINIT, kf_eta_init), ported for the physics of mp_physics 0 / 6, cu_physics 0 / 1,
-   bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra 0 / 4 (others: an error). Then
+   bl_init's accumulations, Noah's LSMINIT, kf_eta_init; THC), ported with the column physics suite for
+   mp_physics 0 / 6, cu_physics 0 / 1, bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2,
+   ra 0 / 4, without urban, fractional_seaice, sst_update, tmn_update, usemonalb, gwd_opt, the terrain options and
+   grid_fdda (fg_init's fddagdinit); other physics, or none, is an error before the first step (translator and model);
+   `ctopo = ctopo2 = 1` (topo_wind = 0) over the whole nest; `set_physical_bc2d / 3d` (the nest's edge points copied
+   into the halo) of u, v, w, ph, t (both levels), mu_1, mu_2, the base state, php, al, alt, tke, moist, scalar and
+   the map factors, sina, cosa, e, f. Then
    `u_1 = u_2`, `v_1`, `t_1`, `w_1`, `ph_1`, `tke_1`, `mu_1` where imask = 1. WRF's T (th_phy_m_t0 of the last solve)
    moves with the nest and takes the parent's in the new points.
 
@@ -150,7 +155,8 @@ tests/verify/refs/vortexnest_refs.txt).
    `track_level` outside (0, 2^24), `vortex_interval` / `max_vortex_speed` outside 0 .. (2^31 - 1) / 60 or an
    overflowing `60 * vortex_interval * max_vortex_speed`, the vortex keys without `vortex_following`, restart files
    written within the run (WRF's wrfrst holds XI, XJ, VC_I, VC_J), and everything refused for prescribed moves (the
-   physics a moved nest's phy_init is ported for is checked before the first step, also without column physics).
+   physics a moved nest's phy_init is ported for, column physics required, and no grid_fdda on the nest, checked
+   before the first step).
    `dx` of the search is check_a_mundo's `dx(1) / REAL(parent_grid_ratio)` from domain 1's grid spacing, in REAL. The differential test tests/nest/vortex (ctest -L diff) checks
    compute_500mb_height of WRF's -r8 build and a copy of the search and move lines against vortex_center.hpp byte for
    byte.

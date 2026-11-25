@@ -521,25 +521,28 @@ direction ("MOAD can not move"). The nest's fields are shifted, the new strip is
 Registry "d" field, WRF's `med_interp_domain`), `start_domain` runs on the moved nest (its physics initialisation on
 the new points) and the time levels are copied, as `med_nest_move`; the output's `I_PARENT_START` / `J_PARENT_START`
 follow the move. Supported: a nest of domain 1 without nests of its own and without siblings, `parent_grid_ratio` up
-to 3, at least 5 parent cells (plus 5 beyond the nest) from domain 1's edges, the physics of mp_physics 0 / 6,
-cu_physics 0 / 1, bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4,
-in a run without tiles or MPI ranks, without the adaptive time step and not resumed from a restart file, on the CPU
-and the GPU. The option is **unverified** until the WRF comparison (cases MV1, MV2, built by
-`tools/colab/colab_movenest.sh`) has run: set `[cppwrf] allow_unverified = true` (`&cppwrf allow_unverified = .true. /`).
+to 3, at least 5 parent cells (plus 5 beyond the nest) from domain 1's edges, the moving nest with the column physics
+(a surface layer, land surface, PBL or cumulus scheme) of mp_physics 0 / 6, cu_physics 0 / 1, bl_pbl_physics 0 / 1,
+sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4, without urban physics,
+fractional_seaice, sst_update, tmn_update, usemonalb, gwd_opt, the terrain options and grid_fdda (the translator and
+the model check these before the first step), in a run without tiles or MPI ranks, without the adaptive time step
+and not resumed from a restart file, on the CPU and the GPU. The option is **unverified** until the WRF comparison
+(cases MV1, MV2: WRF dmpar references of tests/verify/refs/movenest_refs.txt) has run: set
+`[cppwrf] allow_unverified = true` (`&cppwrf allow_unverified = .true. /`).
 `time_to_move` with prescribed moves is rejected.
 
 **Vortex-following nests (unverified).** A wrf.exe built with vortex following (configure's nesting option 3,
 `-DMOVE_NESTS -DVORTEX_CENTER`) moves the nest toward the lowest `track_level` height instead of reading the
 prescribed moves: translate its namelist with `tools/wrf2cppwrf.py --vortex-following` (or run
-`tools/cppwrf-wrf --vortex-following`; the namelist cannot say how WRF was built), which writes `[domains] vortex_following = true` and the non-default `track_level` (Pa, one value),
+`tools/cppwrf-wrf --vortex-following`; the namelist cannot say how WRF was built), which writes `[domains]
+vortex_following = true` and the non-default `track_level` (Pa, one value),
 `vortex_interval` (minutes between centre searches), `max_vortex_speed` (m/s, the search box around the last centre),
 `time_to_move` (minutes before the first move) and `corral_dist` per nest. After each parent step the centre is
 searched again when the vortex alarm rings, and the nest moves by one parent cell toward it while it is at least one
 parent cell from the nest's centre (docs/NESTING.md, "Vortex-following nests"). The output, the restrictions and the
 physics are those of the prescribed moves above, with one nest (`max_dom = 2`) and no restart file written within the
-run. The option is **unverified** until
-the WRF comparison (cases VX1, VX2: tests/verify/refs/vortexnest_refs.txt) has run: set `[cppwrf] allow_unverified =
-true`.
+run. The option is **unverified** until the WRF comparison (cases VX1, VX2: tests/verify/refs/vortexnest_refs.txt)
+has run: set `[cppwrf] allow_unverified = true`.
 
 ---
 

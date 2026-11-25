@@ -2550,12 +2550,17 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, _ = self.translate(self.NEST.replace("&domains ", "&domains move_id = 2, move_interval = 60, "))
         self.assertEqual(t.errors, [])
 
+    # a moving nest needs the column physics of phy_init_moved (the P4 physics of the MV references)
+    MOVEPHYS = ("&physics mp_physics = 6, 6, ra_lw_physics = 4, 4, ra_sw_physics = 4, 4, radt = 1, 1,"
+                " sf_sfclay_physics = 1, 1, sf_surface_physics = 2, 2, bl_pbl_physics = 1, 1, cu_physics = 1, 1,"
+                " num_soil_layers = 4 /\n")
+
     def test_prescribed_moves_translated(self):
         # num_moves > 0 (WRF "preset moves"): [domains] lists of num_moves entries, missing entries the Registry
         # defaults; a non-default corral_dist goes to [d02]; the option is below the verified tier until its proof
         moves = ("num_moves = 3, move_id = 2, 2, 2, move_interval = 15, 30, move_cd_x = 1, -1, 0,"
                  " move_cd_y = 0, 1, -1, corral_dist = 8, 10, ")
-        t, gen = self.translate(self.NEST.replace("&domains ", "&domains " + moves))
+        t, gen = self.translate((self.NEST + self.MOVEPHYS).replace("&domains ", "&domains " + moves))
         self.assertEqual(t.errors, [])
         self.assertEqual(gen["domains"]["num_moves"], 3)
         self.assertEqual(gen["domains"]["move_id"], "2,2,2")
@@ -2569,7 +2574,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                           "corral_dist = 0"),
                          ("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, vortex_interval = 5, ",
                           "moving nest option")):
-            t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad))
+            t, _ = self.translate((self.NEST + self.MOVEPHYS).replace("&domains ", "&domains " + bad))
             self.assertTrue(any(msg in e for e in t.errors), (bad, t.errors))
         # a nest of a nest
         three = ("&time_control input_from_file = .true., .true., .true. /\n"
@@ -2578,17 +2583,17 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                  " parent_grid_ratio = 1, 3, 3, parent_time_step_ratio = 1, 3, 3,"
                  " num_moves = 1, move_id = 3, move_interval = 5, move_cd_x = 1 /\n"
                  "&bdy_control specified = .true., .false., .false. /\n")
-        t, _ = self.translate(three)
+        t, _ = self.translate(three + self.MOVEPHYS.replace("6, 6,", "6, 6, 6,"))
         self.assertTrue(any("nests of domain 1 only" in e for e in t.errors), t.errors)
 
     def test_prescribed_moves_edge_cases(self):
         # a skipped entry takes the Registry default; move_interval >= 999999999 is inactive; no active move: not
         # translated; bool values, a negative move_interval, a ratio > 3 and a nest near domain 1's edge are errors
-        t, gen = self.translate(self.NEST.replace(
+        t, gen = self.translate((self.NEST + self.MOVEPHYS).replace(
             "&domains ", "&domains num_moves = 3, move_id = 2, , 2, move_interval = 5, 7, 9, move_cd_x = 1, 1, 1, "))
         self.assertEqual(t.errors, [])
         self.assertEqual(gen["domains"]["move_id"], "2,0,2")
-        t, gen = self.translate(self.NEST.replace(
+        t, gen = self.translate((self.NEST + self.MOVEPHYS).replace(
             "&domains ", "&domains num_moves = 2, move_id = 2, 2, move_interval = 1000000000, 999999999, "))
         self.assertEqual(t.errors, [])
         self.assertNotIn("num_moves", gen.get("domains", {}))
@@ -2598,9 +2603,9 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                           "corral_dist = True"),
                          ("num_moves = 1, move_id = 2, move_interval = -1, move_cd_x = 1, ", "must be >= 0"),
                          ("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = .true., ", "integers expected")):
-            t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad))
+            t, _ = self.translate((self.NEST + self.MOVEPHYS).replace("&domains ", "&domains " + bad))
             self.assertTrue(any(msg in e for e in t.errors), (bad, t.errors))
-        near = self.NEST.replace("&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, ")
+        near = (self.NEST + self.MOVEPHYS).replace("&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, ")
         t, _ = self.translate(near.replace("i_parent_start = 1, 40,", "i_parent_start = 1, 4,"))
         self.assertTrue(any("too near domain 1's edge" in e for e in t.errors), t.errors)
         t, _ = self.translate(near.replace("parent_grid_ratio = 1, 3,", "parent_grid_ratio = 1, 5,")
@@ -2611,9 +2616,10 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         # --vortex-following (a wrf.exe built with configure nesting 3): [domains] vortex_following (and a
         # non-default track_level), [d02] the non-default vortex_interval, max_vortex_speed, time_to_move,
         # corral_dist; the prescribed moves are ignored with a warning
+        nest = self.NEST + self.MOVEPHYS
         keys = ("vortex_interval = 15, 1, max_vortex_speed = 40, 20, track_level = 70000, time_to_move = 0., 2.,"
                 " corral_dist = 8, 28, ")
-        t, gen = self.translate(self.NEST.replace("&domains ", "&domains " + keys), vortex_following=True)
+        t, gen = self.translate(nest.replace("&domains ", "&domains " + keys), vortex_following=True)
         self.assertEqual(t.errors, [])
         self.assertIs(gen["domains"]["vortex_following"], True)
         self.assertEqual(gen["domains"]["track_level"], 70000)
@@ -2621,13 +2627,13 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertEqual({k: v for k, v in gen["d02"].items() if k in mv_keys},
                          {"vortex_interval": 1, "max_vortex_speed": 20, "time_to_move": 2.0, "corral_dist": 28})
         # the defaults: only the switch
-        t, gen = self.translate(self.NEST, vortex_following=True)
+        t, gen = self.translate(nest, vortex_following=True)
         self.assertEqual(t.errors, [])
         self.assertEqual({k: v for k, v in gen["domains"].items() if k in ("vortex_following", "track_level")},
                          {"vortex_following": True})
         self.assertFalse(set(gen.get("d02", {})) & set(mv_keys))
         # the preset moves are not compiled into a vortex build
-        t, gen = self.translate(self.NEST.replace(
+        t, gen = self.translate(nest.replace(
             "&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, "),
             vortex_following=True)
         self.assertEqual(t.errors, [])
@@ -2638,15 +2644,11 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                     "track_level = 0, "):
             t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad))
             self.assertTrue(any("--vortex-following" in e for e in t.errors), (bad, t.errors))
-        # a moved nest's phy_init is ported for a set of physics only (prescribed moves too)
-        t, _ = self.translate(self.NEST + "&physics mp_physics = 8, 8 /\n", vortex_following=True)
-        self.assertTrue(any("physics initialisation" in e and "mp_physics = 8" in e for e in t.errors), t.errors)
-        t, _ = self.translate(self.NEST.replace(
-            "&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, ")
-            + "&physics sf_surface_physics = 1, 1 /\n")
-        self.assertTrue(any("physics initialisation" in e for e in t.errors), t.errors)
-        t, _ = self.translate(self.NEST + "&physics mp_physics = 6, 6, cu_physics = 1, 1 /\n", vortex_following=True)
-        self.assertFalse(any("physics initialisation" in e for e in t.errors), t.errors)
+        # a moved nest's phy_init is ported for the column physics of a set of options only
+        t, _ = self.translate(nest.replace("mp_physics = 6, 6,", "mp_physics = 8, 8,"), vortex_following=True)
+        self.assertTrue(any("moving nest d02 with" in e and "mp_physics = 8" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST, vortex_following=True)
+        self.assertTrue(any("moving nest d02 without surface-layer" in e for e in t.errors), t.errors)
         for bad, msg in (("vortex_interval = 15, -1, ", "vortex_interval = -1"),
                          ("max_vortex_speed = 40, .true., ", "max_vortex_speed = True"),
                          ("vortex_interval = 15, 100000, max_vortex_speed = 40, 1000, ", "overflows"),
@@ -2655,7 +2657,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                          ("track_level = 20000000, ", "track_level = 20000000"),
                          ("time_to_move = 0., .true., ", "time_to_move = True"),
                          ("corral_dist = 8, 0, ", "corral_dist = 0")):
-            t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad), vortex_following=True)
+            t, _ = self.translate(nest.replace("&domains ", "&domains " + bad), vortex_following=True)
             self.assertTrue(any(msg in e for e in t.errors), (bad, t.errors))
         # geometry: near domain 1's edge, a ratio > 3, a nest of a nest
         t, _ = self.translate(self.NEST.replace("i_parent_start = 1, 40,", "i_parent_start = 1, 4,"),
@@ -2672,6 +2674,35 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, gen = self.translate(self.FULL, vortex_following=True)
         self.assertEqual(t.errors, [])
         self.assertNotIn("vortex_following", gen.get("domains", {}))
+
+    def test_prescribed_moves_physics(self):
+        # the physics of the moved nest's phy_init: column physics, the ported options only, no grid_fdda
+        mv = (self.NEST + self.MOVEPHYS).replace(
+            "&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, ")
+        t, gen = self.translate(mv)
+        self.assertEqual(t.errors, [])
+        self.assertEqual(gen["domains"]["num_moves"], 1)
+        t, _ = self.translate(self.NEST.replace(
+            "&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, "))
+        self.assertTrue(any("moving nest d02 without surface-layer" in e for e in t.errors), t.errors)
+        for old, new, msg in (("mp_physics = 6, 6,", "mp_physics = 8, 8,", "mp_physics = 8"),
+                              ("bl_pbl_physics = 1, 1,", "bl_pbl_physics = 2, 2,", "bl_pbl_physics = 2"),
+                              ("sf_sfclay_physics = 1, 1,", "sf_sfclay_physics = 2, 2,", "sf_sfclay_physics = 2"),
+                              ("cu_physics = 1, 1,", "cu_physics = 2, 2,", "cu_physics = 2"),
+                              ("ra_lw_physics = 4, 4,", "ra_lw_physics = 1, 1,", "ra_lw_physics = 1")):
+            t, _ = self.translate(mv.replace(old, new))
+            self.assertTrue(any("moving nest d02 with" in e and msg in e for e in t.errors), (new, t.errors))
+        fdda = ("&fdda grid_fdda = 1, {}, gfdda_inname = 'wrffdda_d<domain>', gfdda_interval_m = 360, 360,"
+                " gfdda_end_h = 6, 6, io_form_gfdda = 2 /\n")
+        t, _ = self.translate(mv + fdda.format(1))
+        self.assertTrue(any("moving nest d02 with grid_fdda = 1" in e for e in t.errors), t.errors)
+        t, _ = self.translate(mv + fdda.format(0))  # nudging of domain 1 only
+        self.assertEqual(t.errors, [])
+        t, _ = self.translate(mv.replace("&physics ", "&physics usemonalb = .true., "))
+        self.assertTrue(any("moving nest d02 with usemonalb" in e for e in t.errors), t.errors)
+        # a nest that does not move: no check
+        t, _ = self.translate((self.NEST + self.MOVEPHYS.replace("mp_physics = 6, 6,", "mp_physics = 8, 8,")))
+        self.assertFalse(any("moving nest" in e for e in t.errors), t.errors)
 
     def test_omitted_nest_parent_id_rejected(self):
         # Registry default parent_id = 0; omitted nest parent_id must not be inferred as dom_id - 1

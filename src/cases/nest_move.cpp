@@ -868,15 +868,38 @@ void move_nest(Domain& P, Domain& N, int dx, int dy) {
       N.hist->move_start_em();
       N.hist->move_t_end();
     }
-    if (N.m->suite) {
+    {
+      // phy_init runs for any physics; check_phy_init_moved (at the run's start) admits the suite's options only
       std::vector<Arr> lu = nest_arrays(N, "lu_index");
       if (lu.empty()) throw std::runtime_error("moving nests: phy_init of the moved nest needs its LU_INDEX");
       std::vector<double> luv(strip.size(), 0.0);
       const real* q = reinterpret_cast<const real*>(lu[0].data());
       for (int j = 0; j < g.ny; ++j)
         for (int i = 0; i < g.nx; ++i) luv[std::size_t(j) * std::size_t(g.nx) + std::size_t(i)] = double(q[lu[0].L.index(i, j, 0)]);
-      phy_init_moved(*N.cfg, *N.m, strip, luv);
+      const std::vector<double> thc = phy_init_moved(*N.cfg, *N.m, strip, luv);
+      // landuse_init's THC (module_physics_init.F:2093, 2119): a Registry "r" field (restart, or a history field
+      // through iofields) the model does not carry
+      if (N.hist)
+        if (WrfHistory::MoveArray* a = N.hist->move_array("thc"))
+          if (a->L.nx == g.nx && a->L.ny == g.ny && thc.size() == strip.size())
+            for (int j = 0; j < g.ny; ++j)
+              for (int i = 0; i < g.nx; ++i) {
+                const std::size_t p = std::size_t(j) * std::size_t(g.nx) + std::size_t(i);
+                if (strip[p]) a->v[a->L.index(i, j, 0)] = real(thc[p]);
+              }
     }
+    // start_em.F:1620-1621 (not a restart; topo_wind = 0, the only value a move admits): grid%ctopo = 1.,
+    // grid%ctopo2 = 1. over the whole array (the strip's SINT values from the parent's fed-back 1 + 1 ulp go)
+    if (N.m->suite) {
+      for (Field2* f : {&N.m->suite->ctopo, &N.m->suite->ctopo2}) {
+        if (f->layout().total == 0) continue;
+        std::vector<real> h(f->layout().total, real(1));
+        copy_to_dev(const_cast<void*>(f->base()), h.data(), f->bytes());
+      }
+    }
+    if (N.hist)
+      for (const char* nm : {"ctopo", "ctopo2"})
+        if (WrfHistory::MoveArray* a = N.hist->move_array(nm)) std::fill(a->v.begin(), a->v.end(), real(1));
   }
 
   // 5. time level 2 to time level 1 in the new points (med_nest_move: where ( imask .EQ. 1 ) over the memory)
