@@ -2916,8 +2916,9 @@ class WrfTranslator:
                            "lake model is ported with Noah (2) and Noah-MP (4).")
                 ok = False
             for key in ("sst_update", "sst_skin", "fractional_seaice"):
-                if self.get_opt("physics", key, 0) not in (0, False):
-                    self.error(f"WRF sf_lake_physics = 1 with {key} = 1 is not supported by CPPWRF (the lake "
+                kv = self.get_opt("physics", key, 0)
+                if kv not in (0, False):
+                    self.error(f"WRF sf_lake_physics = 1 with {key} = {kv} is not supported by CPPWRF (the lake "
                                "branches of the surface driver's SST update / sea ice are not ported).")
                     ok = False
             if self.get_opt("domains", "use_adaptive_time_step", False):
@@ -2933,6 +2934,13 @@ class WrfTranslator:
                 ph["use_lakedepth"] = uld
                 ph["lakedepth_default"] = float(self.get_opt("physics", "lakedepth_default", 50.0))
                 ph["lake_min_elev"] = float(self.get_opt("physics", "lake_min_elev", 5.0))
+        else:
+            # sf_lake_physics = 0: WRF reads lakeini's options only with the lake model (bl_init, surface_driver)
+            for key, dflt in (("use_lakedepth", 1), ("lakedepth_default", 50.0), ("lake_min_elev", 5.0)):
+                if self.has_opt("physics", key):
+                    val = self.get_opt("physics", key, dflt)
+                    if val != dflt:
+                        self.notice(f"Option &physics.{key} = {val}: no effect with sf_lake_physics = 0.")
 
         # terrain options (src/phys/driver/topo.hpp): topo_wind 1 / 2 (start_em's CTOPO / CTOPO2 for YSU), slope_rad
         # = 1 (surface_driver's TOPO_RAD_ADJ_DRVR) and topo_shading = 1 (pre_radiation_driver's toposhad, shadlen) on

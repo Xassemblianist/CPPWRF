@@ -1665,9 +1665,15 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                           sec["phys"]["lake_min_elev"]), (1, 50.0, 5.0))
         t, sec = self.translate(noah)
         self.assertNotIn("sf_lake_physics", sec.get("phys", {}))
+        # without the lake model its options have no effect (WRF reads them only in lakeini / Lake)
+        t, sec = self.translate(noah.replace("&physics ", "&physics sf_lake_physics = 0, use_lakedepth = 0, "
+                                                          "lakedepth_default = 10., lake_min_elev = 10., "))
+        self.assertEqual(t.errors, [])
+        self.assertFalse(any(k in sec.get("phys", {}) for k in ("use_lakedepth", "lakedepth_default", "lake_min_elev")))
         for extra, msg in (("sf_lake_physics = 2", "sf_lake_physics = [2]"),
                            ("sf_lake_physics = 1, use_lakedepth = 2", "use_lakedepth = 2"),
                            ("sf_lake_physics = 1, sst_update = 1", "sst_update = 1"),
+                           ("sf_lake_physics = 1, fractional_seaice = 2", "fractional_seaice = 2"),
                            ("sf_lake_physics = 1, sst_skin = 1", "sst_skin = 1"),
                            ("sf_lake_physics = 1, fractional_seaice = 1", "fractional_seaice = 1")):
             errs = self.errors(complete(noah.replace("&physics ", "&physics " + extra + ", ")))
