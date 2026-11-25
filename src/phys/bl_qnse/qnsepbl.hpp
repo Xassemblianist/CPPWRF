@@ -305,7 +305,7 @@ struct QNSEPBLKernel {
   real dt;
   int stepbl;
   int nz;
-#if defined(CPPWRF_LOCAL_ROUNDING)
+#if defined(CPPWRF_SPLIT_PATHS)
   ColumnWork work{};  // the GPU's column arrays (column_for_work)
   static constexpr std::size_t kWorkBytes = 0 CPPWRF_QNSE_COLUMN(CPPWRF_COLUMN_BYTES);
 #endif

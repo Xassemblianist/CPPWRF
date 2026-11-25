@@ -185,7 +185,7 @@ struct MFSHCONVKernel {
   int stepbl;
   int nz;
   int tile_i0 = 0, tile_j0 = 0, tile_nx = 1, tile_n = 1;  // WRF's tile (its..ite x jts..jte): the libmvec lanes
-#if defined(CPPWRF_LOCAL_ROUNDING)
+#if defined(CPPWRF_SPLIT_PATHS)
   ColumnWork work{};  // the GPU's column arrays (column_for_work)
   static constexpr std::size_t kWorkBytes = 0 CPPWRF_MF_COLUMN(CPPWRF_COLUMN_BYTES);
 #endif

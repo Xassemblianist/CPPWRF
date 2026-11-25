@@ -28,8 +28,8 @@ void run_wsm6(
     int nz,
     const Wsm6Params<real>& params) {
   check_limit("WSM6", "nz", nz, kMaxLevels);
-#if defined(CPPWRF_LOCAL_ROUNDING)
-  // in column stages (all builds but the fast CUDA FP32 one), as src/dyn/physics_coupling.cpp
+#if defined(CPPWRF_SPLIT_PATHS)
+  // in column stages (CPPWRF_SPLIT_PATHS: FP64, CUDA FP32 identity), as src/dyn/physics_coupling.cpp
   Buffer work(Wsm6Work<real>::size(range, nz));
   if (nz <= 48)
     wsm6_stages<real, 48>(params, dt, nz, range, work.get(), th, q, qc, qr, qi, qs, qg, den, pii, p, delz, rain,

@@ -1443,8 +1443,8 @@ struct Wsm6Params {
         }
     }
 
-#if defined(CPPWRF_LOCAL_ROUNDING)
-    // ---- WSM6 in column stages (every build but the fast CUDA FP32 one; Wsm6Stages below) ----
+#if defined(CPPWRF_SPLIT_PATHS)
+    // ---- WSM6 in column stages (CPPWRF_SPLIT_PATHS builds: FP64, CUDA FP32 identity; Wsm6Stages below) ----
     // Each function is the body of one of operator()'s level loops for one level k: the same statements with the
     // column arrays as scalars (x[k] -> x), so every value is the same arithmetic in the same order.
 
@@ -2195,8 +2195,8 @@ struct Wsm6Kernel {
     }
 };
 
-#if defined(CPPWRF_LOCAL_ROUNDING)
-// ---- WSM6 in column stages (CPU builds, CUDA FP64 and FP32 identity: core/precision.hpp) ----
+#if defined(CPPWRF_SPLIT_PATHS)
+// ---- WSM6 in column stages (FP64 builds and CUDA FP32 identity: CPPWRF_SPLIT_PATHS, core/precision.hpp) ----
 // Wsm6Kernel runs a whole column in one thread. Most of WSM6's work is per level (the saturation, the slopes and
 // fall speeds, the melting, the freezing, the warm and cold rain processes, the saturation adjustment), and only
 // the sedimentation (nislfv_rain_plm / nislfv_rain_plm6) sweeps the column. wsm6_stages runs the level loops as
@@ -2210,15 +2210,19 @@ struct Wsm6Kernel {
 //                  loop: th)
 // Every value is computed by the statements of Wsm6Params::operator() in the same order (its level loops never
 // read another level). The values carried between the stages are kept in Wsm6Work (stored as Real, the type
-// Wsm6Kernel keeps them in; the stages read no double locals of its). Builds where every operation is rounded on
-// its own (CPPWRF_LOCAL_ROUNDING) get the same values; the fast CUDA FP32 build keeps Wsm6Kernel: there nvcc
-// contracts multiply-adds (--fmad=true) depending on the code around them, which a split could change.
+// Wsm6Kernel keeps them in; the stages read no double locals of its). With every operation rounded on its own and
+// IEEE division (FP64 builds, CUDA FP32 identity: CPPWRF_SPLIT_PATHS) the values are the same. The fast CUDA FP32
+// build keeps Wsm6Kernel (nvcc contracts multiply-adds there depending on the code around them, which a split could
+// change), the HIP FP32 builds too (untested on AMD hardware; the stages compute loops and dtcld on the host, the
+// kernel on the device, whose float division HIP does not require to be correctly rounded), and the CPU FP32 build
+// (the stages are for the GPU's stack reserve; on the CPU they only add work arrays).
 template <typename Real>
 struct Wsm6Work {
     enum : int { kT, kCpm, kXl, kQsat0, kQsat1, kRh0, kRh1, kWorkr, kWorka, kDenqrs1, kDenqrs2, kDenqrs3, kArrays };
     Real* p = nullptr;
     int i0 = 0, j0 = 0, ni = 0, nij = 0, nz = 0;
     static std::size_t size(const Range2D& r, int nz) {
+        if (r.i1 <= r.i0 || r.j1 <= r.j0) return 0;  // no columns (wsm6_stages returns at once)
         return (std::size_t(kArrays) * nz + 3) * std::size_t(r.i1 - r.i0) * std::size_t(r.j1 - r.j0);
     }
     CPPWRF_HD Real& operator()(int a, int i, int j, int k) const {
@@ -2476,7 +2480,7 @@ void wsm6_stages(const Wsm6Params<Real>& params, Real dt, int nz, const Range2D&
                                           qg});
     }
 }
-#endif  // CPPWRF_LOCAL_ROUNDING
+#endif  // CPPWRF_SPLIT_PATHS
 
 // WRF physics_mmm/mp_wsm6_effectRad.F90 mp_wsm6_effectRad_run (do_microp_re: has_reqc = has_reqi =
 // has_reqs = 1), called by module_mp_wsm6.F after each WSM6 call with t = th*pii of the updated

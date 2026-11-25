@@ -25,3 +25,12 @@ static_assert(__FLT_EVAL_METHOD__ == 0, "CPPWRF needs float and double arithmeti
 #if !(defined(CPPWRF_USE_CUDA) && !defined(CPPWRF_DOUBLE) && !defined(CPPWRF_FP32_IDENTITY))
 #define CPPWRF_LOCAL_ROUNDING 1
 #endif
+
+// CPPWRF_SPLIT_PATHS: the builds that take the split / batched forms of WSM6 (column stages), the batched launches
+// (kFuseMulAdd, LaunchBatch) and the KF / MYJ / QNSE / EDKF column work buffer: the FP64 builds (CPU, CUDA, HIP, as
+// before) and the CUDA FP32 identity build (--fmad=false, IEEE division and sqrt: every value the same, checked
+// byte for byte against the single-kernel forms). The CPU FP32 build and the HIP FP32 builds (identity and fast;
+// untested on AMD hardware) and the fast CUDA FP32 build keep the forms they had.
+#if defined(CPPWRF_DOUBLE) || (defined(CPPWRF_USE_CUDA) && defined(CPPWRF_FP32_IDENTITY))
+#define CPPWRF_SPLIT_PATHS 1
+#endif

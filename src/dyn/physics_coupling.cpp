@@ -178,7 +178,7 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     // wsm6init (WRF microphysics_driver arguments); once, not every step
     wp_.init(real(pc::rhoair0), real(pc::rhowater), real(pc::rhosnow), real(pc::cliq), real(4.0 * pc::r_v),
              p_.hail_opt);
-#if defined(CPPWRF_LOCAL_ROUNDING)
+#if defined(CPPWRF_SPLIT_PATHS)
     {  // the work arrays of wsm6_stages for step()'s mp_cols
       const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
       const tile::PatchBox ob = tile::own_box(g);  // the worker's columns of mp_cols (wsm6_stages clips them)
@@ -395,7 +395,7 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
     // the column arrays sized to the next tier above nz (CUDA reserves a kernel's stack frame for every resident
     // thread of the GPU: FP64 49 KB per thread with 128 levels, 19 KB with 48)
     auto wsm6 = [&](auto nl) {
-#if defined(CPPWRF_LOCAL_ROUNDING)  // the level loops in parallel, the sedimentation per column (wsm6.hpp)
+#if defined(CPPWRF_SPLIT_PATHS)  // the level loops in parallel, the sedimentation per column (wsm6.hpp)
       phys::wsm6::wsm6_stages<real, decltype(nl)::value>(
           wp_, dt, g.nz, mp_own, wsm6_work_.get(), th_phy.view(), qv.view(), s.q_2[s.P_QC].view(),
           s.q_2[s.P_QR].view(), s.q_2[s.P_QI].view(), s.q_2[s.P_QS].view(), s.q_2[s.P_QG].view(), rho.cview(),

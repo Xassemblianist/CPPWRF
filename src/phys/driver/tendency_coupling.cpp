@@ -64,7 +64,7 @@ struct KAdd {
 class AddLaunches {
  public:
   void add(const Range3D& r, KAdd::Kind kind, Field3& lvar, const Field3& rvar) {
-    if constexpr (!kFuseMulAdd) {  // fast CUDA FP32: each addition as its own kernel, in WRF's order (backend.hpp)
+    if constexpr (!kFuseMulAdd) {  // fast CUDA / HIP FP32: each addition as its own kernel, in WRF's order (backend.hpp)
       if (kind == KAdd::A2A) parallel_for(r, KAddA2A{lvar.view(), rvar.cview()});
       else if (kind == KAdd::A2CU) parallel_for(r, KAddA2CU{lvar.view(), rvar.cview()});
       else parallel_for(r, KAddA2CV{lvar.view(), rvar.cview()});

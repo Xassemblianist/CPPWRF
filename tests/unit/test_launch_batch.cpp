@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // LaunchBatch and parallel_fused (several independent kernels in one launch) must give exactly what parallel_for of
 // each kernel gives: parts with different ranges (staggers, k offsets, one-row and 2-D ranges), a batch that fills
-// up and launches by itself, empty parts, and kernels of two types in one launch (the CUDA FP32 build batches only
-// kernels without multiply-add: KCopy).
+// up and launches by itself, empty parts, and kernels of two types in one launch (the fast CUDA FP32 and the HIP
+// FP32 builds batch only kernels without multiply-add: KCopy).
 #include <cstdio>
 #include <vector>
 
@@ -24,7 +24,7 @@ struct KNeg {  // a second kernel type: out = -in at (i, j, k) and its neighbour
   View3<const real> in;
   CPPWRF_HD void operator()(int i, int j, int k) const { out(i, j, k) = -(in(i, j, k) + real(0.5) * in(i - 1, j, k)); }
 };
-struct KCopy {  // no multiply-add: batched in the CUDA FP32 build too
+struct KCopy {  // no multiply-add: batched in the fast CUDA / HIP FP32 builds too
   static constexpr bool kNoMulAdd = true;
   View3<real> out;
   View3<const real> in;

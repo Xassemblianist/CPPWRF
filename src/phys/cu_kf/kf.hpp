@@ -17,8 +17,9 @@ inline constexpr int kMaxLevels = 128;
 // buffer (core/column_work.hpp) instead of the thread's stack, which the GPU reserves for every thread it can hold
 // (29 KB per thread at 48 levels in FP64); the stored values and the arithmetic are the same. The fast CUDA FP32
 // build keeps the local arrays: kf.cpp contracts multiply-adds there, and the contraction follows the code around it
-// (in the buffer its P2 / P4 values differed). CPU builds: local arrays either way (column_work.hpp).
-#if defined(CPPWRF_LOCAL_ROUNDING)
+// (in the buffer its P2 / P4 values differed); the HIP FP32 builds keep them too (CPPWRF_SPLIT_PATHS,
+// core/precision.hpp). CPU builds: local arrays either way (column_work.hpp).
+#if defined(CPPWRF_SPLIT_PATHS)
 #define CPPWRF_KF_ARRAY CPPWRF_COLUMN_ARRAY
 #define CPPWRF_KF_SLOTS(work, i, j) CPPWRF_COLUMN_SLOTS(work, i, j)
 #else
@@ -351,7 +352,7 @@ struct KFKernel {
     View3<T> qc_kf;
     View3<T> qi_kf;
 
-#if defined(CPPWRF_LOCAL_ROUNDING)
+#if defined(CPPWRF_SPLIT_PATHS)
     // the GPU's column arrays (column_for_work through KFRunner)
     ColumnWork work{};
 #endif
@@ -1661,7 +1662,7 @@ struct KFRunner {
     KFKernel<T> k;
     static constexpr std::size_t kWorkBytes = kColumnBytes<T, MaxLevels>;
     CPPWRF_HD void operator()(int i, int j) const { k.template compute<MaxLevels>(i, j); }
-#if defined(CPPWRF_LOCAL_ROUNDING)
+#if defined(CPPWRF_SPLIT_PATHS)
     void set_work(const ColumnWork& w) { k.work = w; }
 #endif
 };

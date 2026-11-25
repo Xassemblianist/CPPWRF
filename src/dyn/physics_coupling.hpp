@@ -92,7 +92,7 @@ class PhysicsCoupling {
   phys::wsm6::Wsm6Params<real> wp_{};  // WSM6 constants (wsm6init), computed once
   phys::wsm5::Wsm5Params<real> w5_{};  // WSM5 / WSM3 constants (wsm5init = wsm3init), computed once
   phys::wdm6::Wdm6Params<real> wd6_{};  // WDM6 / WDM5 constants (wdm6init / wdm5init), computed once
-#if defined(CPPWRF_LOCAL_ROUNDING)
+#if defined(CPPWRF_SPLIT_PATHS)
   Buffer wsm6_work_;  // the values WSM6's column stages carry between them (Wsm6Work; wsm6.hpp)
 #endif
   // Thompson lookup tables (thompson_init), device-resident: one set shared by all domains, as WRF's
