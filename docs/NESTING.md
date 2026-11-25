@@ -59,7 +59,7 @@ start_domain(nest), start_domain(parent) again. Details: docs/NEST_NUMERICS.md.
 
 ## Moving nests (prescribed moves)
 
-WRF 4.8.0 built with "preset moves" (configure nesting 2: `-DMOVE_NESTS`; serial: `-DDM_PARALLEL -DSTUBMPI`) runs
+WRF 4.8.0 dmpar (one MPI rank) built with "preset moves" (configure nesting 2: `-DMOVE_NESTS`) runs
 `med_nest_move` (share/mediation_nest_move.F) after each nest's `med_nest_feedback` in the parent's step, unless domain
 1 is at its stop time (frame/module_integrate.F:446). CPPWRF (src/cases/nest_move.cpp, src/nest/nest_move.hpp, called
 from run_nested in the same place) ports, in WRF's order:
@@ -74,20 +74,30 @@ from run_nested in the same place) ports, in WRF's order:
    the patch, 0 on it) move with them, so 1 marks the strip the move brought in. In CPPWRF these are every field
    allocated while the nest's FieldRegistry scope is active (the model's state, tendencies and physics arrays) and the
    history fields the model does not hold (WrfHistory's move arrays), shifted on host copies.
-3. `grid%i_parent_start` / `j_parent_start` += the move (the forcing and the feedback use it). `nl_set_*` is under
-   `!STUBMPI`: the namelist's values, written to the wrfout / wrfrst attributes and read by a restart, stay the
-   original ones, and a resumed run starts the nest there.
+3. `grid%i_parent_start` / `j_parent_start` += the move, and `nl_set_i/j_parent_start`: the interpolation, the forcing
+   and the feedback read the namelist record's values, and the wrfout files' `I_PARENT_START` / `J_PARENT_START` follow
+   the move. A serial build (`-DSTUBMPI`) skips `nl_set_*` and step 5's `start_domain` (both under
+   `DM_PARALLEL && !STUBMPI`) while its intermediate grid moves: it interpolates from the wrong parent window and is
+   not the reference.
 4. `med_interp_domain`: every Registry "d" field of the configuration in inc/nest_interpdown_interp.inc's order
    (data/wrf_schema/nest_interpdown-4.8.0.tsv, tools/wrf_schema/gen_nest_interpdown.py), each writing where the
    imask is 1 (interp_fcnm and interp_mask_water_field: everywhere): interp_fcn (SINT), interp_fcni / fcnm /
    fcnm_imask / fcnm_lu (nearest), interp_mask_field, interp_mask_soil, interp_mask_water_field, interp_fcn_blint_ll
    (longitudes). Other functions stop the run with an error.
-5. No `start_domain` of the nest (it is under `DM_PARALLEL && !STUBMPI`); `u_1 = u_2`, `v_1`, `t_1`, `w_1`, `ph_1`,
-   `tke_1`, `mu_1` where imask = 1.
+5. `start_domain(nest)` with `nest%moved` (start_em, not a restart, the first trip): the base state from HGT over
+   the whole domain, `t_1 = t_2` and `mu_1 = mu_2` where imask = 1, `ph_1 = ph_2`, then `al`, `p` (from the `_1`
+   levels), `alt`, `p_hyd`, `p_hyd_w`, the terrain slopes (TOPOSLPX, TOPOSLPY, LAP_HGT, SLOPE, SLP_AZI), and
+   `phy_init` on the new points (set_tiles with imask_nostag; moved: IVGTYP, landuse_init, the effective radii,
+   bl_init's accumulations, Noah's LSMINIT, kf_eta_init), ported for the physics of mp_physics 0 / 6, cu_physics 0 / 1,
+   bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra 0 / 4 (others: an error). Then
+   `u_1 = u_2`, `v_1`, `t_1`, `w_1`, `ph_1`, `tke_1`, `mu_1` where imask = 1. WRF's T (th_phy_m_t0 of the last solve)
+   moves with the nest and takes the parent's in the new points.
 
 NEST_POS: the moving build sets it at each domain's input (ht + 500 where ht > 0) and rewrites the parent's after each
 feedback (the nest's points `ht * 1.5 + 1000`, elsewhere `ht + 500` where ht is not 0), so wrfout_d01's NEST_POS
 differs from the basic build's; CPPWRF writes the moving build's values when moves are configured. The host caches
 of latitude / longitude (Model::xlat / xlong, the radiation driver's) follow the move. Not supported (errors): a
 moving nest that is not a nest of domain 1, has nests or siblings; tiles or MPI ranks; the adaptive time step;
-vortex following; `time_to_move`.
+`parent_grid_ratio` > 3; a nest whose interpolation window leaves domain 1's points (i/j_parent_start < 5 or within
+5 parent cells plus the nest of the east / north edge); a resumed run (`run.restart_file`); vortex following;
+`time_to_move`.

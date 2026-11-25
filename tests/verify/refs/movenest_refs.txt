@@ -1,18 +1,18 @@
 # WRF v4.8.0 references of the moving nests (prescribed moves; tests/verify/cases/62_nest_move.py, data
-# movenest_data.tar) for tools/colab/colab_movenest.sh, which builds WRF with "preset moves" (configure nesting 2,
-# -DMOVE_NESTS) as the suite's wrf_r8.exe (wrf_r8_move.exe) and real*4 (wrf_r4_move.exe). REFS format of
-# tools/gcp/gcp_wrfref.sh (NAME BASE_RUN WRF_EXE section.key=value ...; tools/gcp/wrf_ref_run.py). Data:
-# matrix_nest.tar (run_N3s_r8: N3, d02 at (40, 30) of d01, ratio 3, the P4 physics), fp32id4_data.tar (run_N3_cpu_sp:
-# N3 with WRF real*4's inputs). Each reference: run_NAME (1 h or 10 min), run_NAME/steps (3 parent steps, history
-# every step), rst_NAME and rsm_NAME (tests/verify/make_restart_refs.sh, make_resumed_refs.sh: restart files every
-# minute; resumed at minute 1, where a serial wrf.exe puts the nest back at the namelist's i/j_parent_start and counts
-# move_interval from the restart time).
+# movenest_data.tar) for tools/colab/colab_movenest.sh, which builds WRF dmpar (configure option 34, MPICH; serial WRF
+# does not move nests correctly) with "preset moves" (nesting 2, -DMOVE_NESTS), -r8 (wrf_r8_move.exe) and real*4
+# (wrf_r4_move.exe), each run with one MPI rank. REFS format of tools/gcp/gcp_wrfref.sh (NAME BASE_RUN WRF_EXE
+# section.key=value ...; tools/gcp/wrf_ref_run.py). Data: matrix_nest.tar (run_N3s_r8: N3, d02 at (40, 30) of d01,
+# ratio 3, the P4 physics), fp32id4_data.tar (run_N3_cpu_sp: N3 with WRF real*4's inputs). Each reference: run_NAME
+# and run_NAME/steps (3 parent steps, history every step); no restart references (CPPWRF does not resume a run with
+# moving nests). history_interval_s has one value per domain (a missing d02 entry is WRF's 0: no d02 frames).
 #
 # MV1: four moves of d02, at 1 min (+1, 0), 2 min (0, +1), 20 min (-1, -1) and 40 min (+1, -1): steps/ has the first
 # two (d02's history after each); 1 h, history every 10 min
-MV1_r8 run_N3s_r8 wrf_r8_move.exe time_control.run_seconds=3600 time_control.history_interval_s=600 domains.num_moves=4 domains.move_id=2,2,2,2 domains.move_interval=1,2,20,40 domains.move_cd_x=1,0,-1,1 domains.move_cd_y=0,1,-1,-1
+MV1_r8 run_N3s_r8 wrf_r8_move.exe time_control.run_seconds=3600 time_control.history_interval_s=600,600 domains.num_moves=4 domains.move_id=2,2,2,2 domains.move_interval=1,2,20,40 domains.move_cd_x=1,0,-1,1 domains.move_cd_y=0,1,-1,-1
 # MV2: the corral (corral_dist = 39 for d02): at 1 min (-1, +1) the x move is cancelled (38 parent cells from d01's
-# west edge), the y move made; at 2 min (+1, 0) cancelled (39 cells from the east edge): "MOAD can not move"
-MV2_r8 run_N3s_r8 wrf_r8_move.exe time_control.run_seconds=600 time_control.history_interval_s=300 domains.num_moves=2 domains.move_id=2,2 domains.move_interval=1,2 domains.move_cd_x=-1,1 domains.move_cd_y=1,0 domains.corral_dist=8,39
-# MV1 in real*4 (CPU FP32 bit for bit, and CUDA FP32 identity): 1 h and steps/ (its rst / rsm runs are made, not used)
-MV1_cpu_sp run_N3_cpu_sp wrf_r4_move.exe time_control.run_seconds=3600 time_control.history_interval_s=600 domains.num_moves=4 domains.move_id=2,2,2,2 domains.move_interval=1,2,20,40 domains.move_cd_x=1,0,-1,1 domains.move_cd_y=0,1,-1,-1
+# west edge), the y move made; at 2 min (+1, 0) cancelled (39 cells from the east edge): "MOAD can not move"; only
+# steps/ is used (the run_NAME run as short)
+MV2_r8 run_N3s_r8 wrf_r8_move.exe time_control.run_seconds=180 time_control.history_interval_s=60,60 domains.num_moves=2 domains.move_id=2,2 domains.move_interval=1,2 domains.move_cd_x=-1,1 domains.move_cd_y=1,0 domains.corral_dist=8,39
+# MV1 in real*4 (CPU FP32 bit for bit, and CUDA FP32 identity): 1 h and steps/
+MV1_cpu_sp run_N3_cpu_sp wrf_r4_move.exe time_control.run_seconds=3600 time_control.history_interval_s=600,600 domains.num_moves=4 domains.move_id=2,2,2,2 domains.move_interval=1,2,20,40 domains.move_cd_x=1,0,-1,1 domains.move_cd_y=0,1,-1,-1

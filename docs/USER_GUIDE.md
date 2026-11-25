@@ -513,15 +513,18 @@ domain, as the translator checks. Each domain's files go to `output.dir/d0N`. A 
 WRF's (cases N1, N2, N3, N3sib, N3gc of docs/STATUS.md). docs/NESTING.md and docs/NEST_NUMERICS.md describe the port.
 
 **Moving nests (prescribed moves, unverified).** `num_moves`, `move_id`, `move_interval`, `move_cd_x`, `move_cd_y` and
-`corral_dist` run as a serial wrf.exe built with "preset moves" (configure's nesting option 2, `-DMOVE_NESTS`) runs
-them: after the nest's feedback, when its clock reaches `move_interval` minutes from the run's start (a resumed run:
-from the restart time), the nest moves by one parent cell (`move_cd_x`, `move_cd_y` in -1, 0, 1); each move is used
+`corral_dist` run as a dmpar wrf.exe (one MPI rank) built with "preset moves" (configure's nesting option 2,
+`-DMOVE_NESTS`) runs them: after the nest's feedback, when its clock reaches `move_interval` minutes from the run's
+start, the nest moves by one parent cell (`move_cd_x`, `move_cd_y` in -1, 0, 1); each move is used
 once, and a move that would bring the nest within `corral_dist` parent cells of domain 1's edge is cancelled in that
 direction ("MOAD can not move"). The nest's fields are shifted, the new strip is interpolated from the parent (every
-Registry "d" field, WRF's `med_interp_domain`) and the time levels copied, as `med_nest_move`. As in a serial wrf.exe,
-the output's `I_PARENT_START` / `J_PARENT_START` and a restarted run keep the namelist's position. Supported: a nest of
-domain 1 without nests of its own and without siblings, in a run without tiles or MPI ranks and without the adaptive
-time step, on the CPU and the GPU. The option is **unverified** until the WRF comparison (cases MV1, MV2, built by
+Registry "d" field, WRF's `med_interp_domain`), `start_domain` runs on the moved nest (its physics initialisation on
+the new points) and the time levels are copied, as `med_nest_move`; the output's `I_PARENT_START` / `J_PARENT_START`
+follow the move. Supported: a nest of domain 1 without nests of its own and without siblings, `parent_grid_ratio` up
+to 3, at least 5 parent cells (plus 5 beyond the nest) from domain 1's edges, the physics of mp_physics 0 / 6,
+cu_physics 0 / 1, bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4,
+in a run without tiles or MPI ranks, without the adaptive time step and not resumed from a restart file, on the CPU
+and the GPU. The option is **unverified** until the WRF comparison (cases MV1, MV2, built by
 `tools/colab/colab_movenest.sh`) has run: set `[cppwrf] allow_unverified = true` (`&cppwrf allow_unverified = .true. /`).
 Vortex following (`vortex_interval`, `max_vortex_speed`, `track_level`, configure's nesting option 3) and
 `time_to_move` are rejected.

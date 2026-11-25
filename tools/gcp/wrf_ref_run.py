@@ -46,10 +46,17 @@ def setkey(nl, sec, key, val):  # as tools/gcp/matrix_variant.py (keeping the li
 
 
 def wrf_failed(d, logname="wrf.log"):
-    """None when wrf.exe ended with SUCCESS in d, else its error lines."""
+    """None when wrf.exe ended with SUCCESS in d, else its error lines. A dmpar wrf.exe (mpiexec -n 1) writes its
+    messages to rsl.error.0000, read when the log lacks the SUCCESS line."""
     log = open(os.path.join(d, logname), errors="replace").read()
     if "SUCCESS COMPLETE WRF" in log:
         return None
+    rsl = os.path.join(d, "rsl.error.0000")
+    if os.path.exists(rsl):
+        r = open(rsl, errors="replace").read()
+        if "SUCCESS COMPLETE WRF" in r:
+            return None
+        log = log + "\n" + r
     lines = log.strip().splitlines()
     return [l.strip() for l in lines if 'ERROR' in l or 'FATAL' in l][:4] or lines[-1:]
 
@@ -92,6 +99,9 @@ def segmented(R, nl, seg, parts_prefix):
             n = setkey(n, "time_control", key, ", ".join([str(v)] * (1 if key in ("run_seconds", "restart",
                                                                                   "restart_interval") else ndom)))
         open(os.path.join(R, "namelist.input"), "w").write(n)
+        for f in ("rsl.error.0000", "rsl.out.0000"):  # a dmpar wrf.exe's log of this part only
+            if os.path.exists(os.path.join(R, f)):
+                os.remove(os.path.join(R, f))
         subprocess.run(f"./wrf.exe > wrf_part{k}.log 2>&1", shell=True, cwd=R, env=wrf_env)
         bad = wrf_failed(R, f"wrf_part{k}.log")
         if bad:
