@@ -5,6 +5,37 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
+## Unreleased
+
+### Added
+- The first AMD GPU run in one command (docs/HIP.md "First run on AMD hardware"): tools/amd/amd_run.sh builds HIP FP64,
+  HIP FP32 identity, fast HIP FP32 and CPU FP64 on a ROCm node, fetches the suite's data from the public cppwrf-data
+  releases, runs ctest, the device math proofs (tools/glibc_math*_proof_cuda.cu now compile for HIP too) and every GPU
+  suite check of the CUDA proofs over the node's GPUs, compares the HIP FP64 outputs with the CUDA FP64 build's directly
+  (the hashes of every variable of every output file: wrf_suite.py --hash-out, tests/verify/out_hashes.py) and writes a
+  summary; resumable, keyed by the binaries. wrf_suite.py takes the HIP binaries as --hip-dp / --hip-sp-id / --hip (the
+  cuda_dp / cuda_sp_id / cuda checks); the Python package counts HIP binaries as the GPU modes. New ctest
+  test_device_ieee: the device's IEEE arithmetic (+ - * /, sqrt, fma, conversions, rounding functions, fmod, ldexp, fmax
+  / fmin, lround, a * b + c written out, a + 0) against the host's and against explicit oracles (x86's maxsd / minsd,
+  two roundings, signed zeros), bit for bit, edge values, signaling NaNs and subnormal results included (CPU and CUDA
+  builds: unchanged results).
+
+### Fixed
+- HIP builds (no CUDA or CPU change of any result; docs/HIP.md "Bit-identity review"): a launch carries its ensemble
+  member's fatal slot as a kernel argument (HIP kernels cannot read their dynamic shared memory size, CUDA's carrier),
+  so HIP threads ensembles have per-member device flags as on CUDA; fmax / fmin in HIP builds (device and clang's host
+  pass) as x86's maxsd / minsd in glibc 2.41's fmax / fmin, for two zeros of opposite sign and NaNs (fmax_x86 /
+  fmin_x86, and fmax_x86_k / fmin_x86_k where the Fortran has a zero constant first, which keep it on a tie as
+  gfortran's code and g++'s call do: New Tiedtke, the nest interpolation; CPU and CUDA builds compile v1.5.0's std::fmax
+  / std::fmin token for token); lround_x86 on the HIP device returns LONG_MIN below -2^63 as x86 does; correctly rounded
+  float division and square root made explicit, clang's host pass kept from turning pow(2, x) into exp2(x), more
+  value-changing HIP flags refused (also -fno-signed-zeros and every flushing denormal mode) and ROCm 6.0 required
+  (correctly rounded double square root); a HIP launch whose kernel arguments with the 256 hidden bytes would exceed 4
+  KiB passes no oversized arguments: a batch or fused launch runs its parts one by one (the fused kernel is no longer
+  instantiated), a single kernel (the urban LSM's) reads its functor from a device copy; the fatal slot's shared-memory
+  word is written and read with relaxed atomics. test_libmvec_f4 reports but does not fail its differences from a system
+  libmvec of another glibc than 2.41 (as test_glibc_mathf).
+
 ## 1.5.0 (2026-11-24)
 
 ### Added
@@ -14,14 +45,6 @@ resumes across versions from WRF's wrfrst files.
   sharing the stack reserve and the device tables; the members' host work runs one member at a time. Every member's
   files are byte-identical to its single run (ctest `ensemble`; `--set ensemble.member=I` runs member I alone).
   Single runs are unchanged.
-- The first AMD GPU run in one command (docs/HIP.md "First run on AMD hardware"): tools/amd/amd_run.sh builds HIP FP64,
-  HIP FP32 identity, fast HIP FP32 and CPU FP64 on a ROCm node, fetches the suite's data from the public cppwrf-data
-  releases, runs ctest, the device math proofs (tools/glibc_math*_proof_cuda.cu now compile for HIP too) and every
-  GPU suite check of the CUDA proofs over the node's GPUs, and writes a summary; resumable. wrf_suite.py takes the
-  HIP binaries as --hip-dp / --hip-sp-id / --hip (the cuda_dp / cuda_sp_id / cuda checks); the Python package counts
-  HIP binaries as the GPU modes. New ctest test_device_ieee: the device's IEEE arithmetic (+ - * /, sqrt, fma,
-  conversions, rounding functions, fmod, ldexp, fmax / fmin, lround) against the host's, bit for bit, edge values and
-  subnormal results included (CPU and CUDA builds: unchanged results).
 
 ### Changed
 - Halo exchanges of a decomposed run (tiles, MPI ranks; docs/MPI.md section 3.4): each exchange is planned once and
@@ -62,14 +85,6 @@ resumes across versions from WRF's wrfrst files.
   only with HDF5 1.10 to 1.14 (another version keeps HDF5's own filter: the same bytes); docs/PERF.md IO2.
 
 ### Fixed
-- HIP builds (no CUDA or CPU change of any result; docs/HIP.md "Bit-identity review"): a launch carries its ensemble
-  member's fatal slot as a kernel argument (HIP kernels cannot read their dynamic shared memory size, CUDA's carrier),
-  so HIP threads ensembles have per-member device flags as on CUDA; fmax / fmin on the HIP device as glibc's for two
-  zeros of opposite sign (fmax_x86 / fmin_x86: New Tiedtke, the nest interpolation); lround_x86 on the HIP device
-  returns LONG_MIN below -2^63 as x86 does; correctly rounded float division and square root made explicit, clang's
-  host pass kept from turning pow(2, x) into exp2(x), more value-changing HIP flags refused and ROCm 6.0 required
-  (correctly rounded double square root); HIP batch and fused launches above 4 KiB of parameters launch their parts
-  one by one.
 - Ensembles and the output writer, second audit: HIP builds read the device fatal flag where HIP kernels raise it
   (one word for every launch; was a member's own slot, never written: a HIP threads ensemble missed every device
   stop); every directory a member writes to is its own in every `output.format` (`wrfout` members' run.json,

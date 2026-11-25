@@ -162,16 +162,17 @@ the first run on AMD hardware, which checks it (the test or step named).
 | Subnormals | `CMakeLists.txt` | `-fno-gpu-flush-denormals-to-zero`: kernels carry `float_denorm_mode_32 = 3` and `float_denorm_mode_16_64 = 3` (IEEE), round to nearest even, IEEE mode on. | compiled; AMD run: `test_device_ieee` (subnormal results) |
 | Float division and square root | `CMakeLists.txt` | Correctly rounded (`-fhip-fp32-correctly-rounded-divide-sqrt`, explicit); an option that turns it off is refused. | fixed; AMD run: `test_device_ieee` |
 | Double square root | `CMakeLists.txt` | Correctly rounded from LLVM 17 on (an `rsq` + Newton sequence); CMake refuses an older compiler. | fixed (ROCm >= 6.0) |
-| `fmax` / `fmin` | `src/core/backend.hpp` (`fmax_x86`, `fmin_x86`), `src/phys/cu_ntiedtke/ntiedtke.hpp`, `src/nest/nest_interp.hpp` | ROCm's `fmax` / `fmin` are the GPU's `v_max` / `v_min`, whose result for two zeros of opposite sign need not be glibc's (glibc 2.41: the first argument). The HIP device writes glibc's comparisons out; host and CUDA unchanged. | fixed; AMD run: `test_device_ieee` |
+| `fmax` / `fmin` | `src/core/backend.hpp` (`fmax_x86`, `fmin_x86`), `src/phys/cu_ntiedtke/ntiedtke.hpp`, `src/nest/nest_interp.hpp` | x86-64 computes `maxsd` / `minsd` with the first operand as the destination: glibc 2.41's `fmax(x, y)` (what the CPU build calls) is `x > y ? x : y`, so two zeros of opposite sign give `y`; a quiet NaN gives the other operand, a signaling NaN `x + y`. WRF's gfortran `MAX(x, 0.)` / `MIN(0., x)` keep the constant on a tie, and g++ passes a constant second to glibc whatever the source order: ntiedtke's 12 calls with a zero constant first are `fmax_x86_k` / `fmin_x86_k`, which keep the constant on HIP. CPU and CUDA builds: `fmax_x86` is a macro for v1.5.0's `std::fmax` (the same tokens; the CPU objects and CUDA SASS of the files that use it are identical to v1.5.0's). ROCm's `fmax` is `v_max_f64` and clang's host pass inlines `std::fmax` as a `maxsd` of its own order: HIP builds, host pass and device, write glibc's comparisons out (`detail::fmax_glibc`; equal to glibc's exported `fmax` / `fmin` / `fmaxf` / `fminf` on every pair of the edge values, signaling NaNs included). The CUDA device keeps PTX `max` / `min` (+0 / -0 for opposite zeros; unchanged, a CUDA-CPU difference no suite case reaches). Two-variable calls with opposite zeros: the CPU build's operand order is g++'s choice (it may swap two variables), not provable from the source. | fixed; `test_device_ieee` (oracle on host and device); AMD run |
 | `lround_x86` below `-2^63` | `src/core/backend.hpp` | An AMD GPU has no 64-bit float to integer conversion (LLVM expands it; out of range is undefined): the HIP device returns `LONG_MIN` there as x86 does. | fixed; AMD run: `test_lround_x86` (device part now on HIP too) |
 | Float to int conversion out of range | kernels | `v_cvt_i32_f64` saturates (NaN to 0) as CUDA does; x86 gives `INT_MIN`. The code converts in range (or through `lround_x86`), as for CUDA. | as CUDA |
 | 128-bit integer division (`glibc::tgamma`'s `x87_div`) | `src/core/glibc_math.hpp` | Expanded inline by LLVM (no `__udivti3` call). | compiled; AMD run: math proof (`tgamma`) |
+| Value-changing flags | `CMakeLists.txt` | `CMAKE_HIP_FLAGS` refuses fast-math and its parts, `-fno-signed-zeros` (it drops `x + 0.0`), every `-fdenormal-fp-math*=` value that flushes (also the two-part `ieee,preserve-sign`), Clang's `-fcuda-flush-denormals-to-zero` / `-fcuda-approx-transcendentals` aliases, `-ffp-model=fast/aggressive`, `-ffp-contract=fast/on` and `-munsafe-fp-atomics`. | fixed (tested with `cmake -P`) |
 | Host pass compiler | every HIP source | clang, not gcc: `pow(2, x)` to `exp2(x)` stopped (`-fno-builtin-exp2`, `-fno-builtin-exp2f`). A math call with constant arguments folds with the build machine's libm under clang, with MPFR (correctly rounded) under gcc: the device code has no such folds (`CPPWRF_LM_CONST` is false there) and the host code's are rare (initialisation). | fixed (exp2); AMD run: suite |
 | Wavefront 64 | `kred`, `kred_seq`, `column_work.hpp`, RRTMG votes | No shuffles or warp-synchronous code; the reductions are fixed trees or sequential; column work slots are a memory layout in 32-thread groups (independent of the hardware's wavefront); RRTMG's vote hints take the per-column predicate on HIP. | as CUDA (performance only) |
 | Atomics | `raise_fatal`, RRTMG `iscal` counters | Integer only (a CAS minimum, counts): the result does not depend on the order. No floating-point atomics. | as CUDA |
-| Fatal flag per launch (ensembles) | `src/core/backend.hpp` (`CPPWRF_KSLOT_PARAM`), `src/cases/ensemble.cpp` | A HIP kernel cannot read the size of its dynamic shared memory (CUDA's carrier of the slot). HIP launches pass the slot as a last kernel argument, which each thread stores into a shared-memory word that `raise_fatal` reads (where `raise_fatal` is inlined the compiler forwards the argument and the kernel keeps no shared memory); the HIP threads ensemble's shared-word caveat is gone. CUDA and CPU kernels unchanged. | fixed; compiled; AMD run: `test_fatal` (e) runs the two slot threads at once, `ensemble` |
+| Fatal flag per launch (ensembles) | `src/core/backend.hpp` (`CPPWRF_KSLOT_PARAM`, `CPPWRF_HIP_KSLOT`), `src/cases/ensemble.cpp` | A HIP kernel cannot read the size of its dynamic shared memory (CUDA's carrier of the slot). HIP launches pass the slot as a last kernel argument, which each thread stores into a shared-memory word that `raise_fatal` reads; the stores and the load are relaxed workgroup atomics (every thread stores the same value: no data race, no barrier). A HIP translation unit without `CPPWRF_USE_HIP` raises into slot 0. The reductions (`Reducer`) raise into slot 0, as on CUDA (no reducer callback raises). CUDA and CPU kernels unchanged. | fixed; compiled; AMD run: `test_fatal` (e) runs the two slot threads at once, `ensemble` |
 | Device symbols of the fatal flags | `fatal_code_dev`, `HIP_SYMBOL` | The TU-local `static __device__` array is emitted as a global symbol of its TU's code object (clang externalises device variables the host uses), so `hipMemcpy*Symbol*` can find it. | compiled; AMD run: `test_fatal` |
-| Kernel parameter size | `LaunchBatch`, `parallel_fused` | ROCm's limit is not documented above 4 KiB: a HIP batch or fused launch with parameters above `CPPWRF_HIP_MAX_KERNARG` (4096) launches its parts one by one (the same results). A single kernel's parameters are far below. | fixed |
+| Kernel parameter size | `src/core/backend.hpp` (`hip_kernarg_bytes`) | ROCm does not document a kernarg segment above 4 KiB. The segment is the explicit arguments laid out as a struct, then 256 bytes of hidden arguments (code object v5) at the next multiple of 8; `CPPWRF_HIP_MAX_KERNARG` (4096) bounds the whole segment. A batch or fused launch that would exceed it launches its parts one by one, and its fused kernel is not instantiated at all (it was before, in the batch's destructor). A single kernel that would exceed it (`KLsmUrban`, 4512 bytes in FP64 with its urban tables: 4792) reads its functor from a device copy (`k3d_ref` / `k2d_ref`, refilled on the thread's stream before each launch). gfx942 code of every model source: largest segment after the fix 3936 bytes (`ThompsonKernel`, FP64 and FP32 identity). CUDA unchanged (its batches stay below 32000 bytes). | fixed; compiled |
 | Device halt (`NSSL_STOP`) | `src/core/gpu_runtime.hpp` | `abort()` on the device (`s_trap`): the HIP runtime ends the process; the NSSL guards are unreachable in the supported configurations. | as before |
 | HIP graphs | `src/core/backend.cpp` | Off on HIP (`graphs_mode()` 0): each step's launches run directly, fatal checks through pinned slots. Same kernels, same order. | phase 2 (performance) |
 | Stack / scratch | `reserve_local_memory` | No-op on HIP (scratch is allocated per queue by the runtime). A launch that cannot get its scratch fails with the runtime's error. | AMD run: suite (MYNN, KF, NSSL frames) |
@@ -187,30 +188,48 @@ GPUs, in one command from a checkout of the commit to test:
 
 ```bash
 git clone https://github.com/Xassemblianist/CPPWRF && cd CPPWRF
-tools/amd/amd_run.sh                     # results in ~/cppwrf_amd/res/summary.txt; last line AMD RUN PASS / FAIL
+tools/amd/amd_run.sh --cuda-hashes cuda_dp_hashes.tsv.gz   # results in ~/cppwrf_amd/res/summary.txt
 ```
 
-1. **Dependencies**: g++, CMake 3.24 or later (pip's on an older Ubuntu), NetCDF, Python with numpy and netCDF4
-   (apt); ROCm itself must be there (`--install-rocm 6.4.1` installs it from repo.radeon.com when only the driver is).
+1. **Dependencies**: g++, CMake 3.24 or later (pip's on an older Ubuntu), NetCDF, gnupg, Python with numpy and
+   netCDF4 (apt); ROCm itself must be there (`--install-rocm 6.4.1` installs it from repo.radeon.com when only the
+   driver is; every step of the install is checked).
 2. **Builds** for the first GPU's architecture (`rocminfo`; `--arch` to choose): `b-hip-dp` (HIP FP64), `b-hip-id`
    (HIP FP32 identity), `b-hip-sp` (fast HIP FP32), and `b-cpu-dp` (CPU FP64, for triage: `CPPWRF_VM_DUMP` runs of
    both builds find the first kernel that differs). Each binary must report `backend hip` and its precision.
 3. **Data** (while the programs build): the tars of the selected checks (`wrf_suite.py --data-for`) from the public
-   release `data-v1` of cppwrf-data (its `ci/fetch_data.sh`), and the files of `v05_files_data.tar` from the packs of
-   `data-v2` (`tools/amd/amd_cases.py members`), as the CUDA proofs take them: about 240 GB for the full suite.
-4. **ctest** of each HIP build, with the reference data in place: `test_device_ieee` (the device's IEEE arithmetic
-   against the host's), `test_lround_x86`, `test_fatal` (per-launch slots), `test_glibc_mathf`, `ensemble`, ...
+   release `data-v1` of cppwrf-data (its `ci/fetch_data.sh`), every tar's links checked, and the files of
+   `v05_files_data.tar` from the packs of `data-v2` (`tools/amd/amd_cases.py members`), as the CUDA proofs take them:
+   about 240 GB for the full suite. Each attempt starts with fresh transfer state; the tars unpacked in order and the
+   packs unpacked are kept, so a retry fetches the rest only.
+4. **ctest** of each HIP build on the job's first GPU, with the reference data in place: `test_device_ieee` (the
+   device's IEEE arithmetic against the host's and against explicit oracles: x86's `maxsd` / `minsd`, no implicit
+   contraction, signed zeros), `test_lround_x86`, `test_fatal` (per-launch slots), `test_glibc_mathf` and
+   `test_libmvec_f4` (against the node's libm / libmvec: differences reported, not failed, on a glibc other than
+   2.41), `ensemble`, ... Skipped tests (data not fetched) are named in the summary.
 5. **Device math proofs**: `tools/glibc_math_proof_cuda.cu` (glibc's double functions and libmvec's, 10^7 random
    inputs each plus the edge values) and `tools/glibc_mathf_proof_cuda.cu` (every float input of the float
-   functions, 2^28 pairs for `powf` / `atan2f`), compiled for HIP (`tools/proof_gpu_runtime.hpp`): 0 differences.
+   functions, 2^28 pairs for `powf` / `atan2f`; linked with `src/core/glibc_mathf_host.cpp` as the FP32 builds are),
+   compiled for HIP (`tools/proof_gpu_runtime.hpp`, `--rocm-path`, rpath `$ROCM/lib`): 0 differences.
 6. **The GPU suite** (`tests/verify/wrf_suite.py --hip-dp / --hip-sp-id / --hip`): every check of the CUDA proofs
    (FP64: the `cuda_dp` cases with the slow ones and the restart checks, 423; FP32 identity: 44; fast FP32: 44),
-   FP64 and FP32 identity against WRF at tolerance 0. The checks are shared out over the node's GPUs
-   (`HIP_VISIBLE_DEVICES`, `--gpus N`).
-7. **Summary**: `res/summary.txt` (machine, builds, ctest, proofs, every FAIL / SKIP line), ending `AMD RUN PASS` only
-   when everything passed.
+   FP64 and FP32 identity against WRF at tolerance 0. The checks are shared out over the job's GPUs (the scheduler's
+   `HIP_VISIBLE_DEVICES` / `ROCR_VISIBLE_DEVICES`, else rocminfo's; `--gpus N` of them); a model run longer than
+   `--run-hours` (3) fails; each worker's exit status and final `SUITE` line are in the summary.
+7. **HIP FP64 against CUDA FP64, directly** (`cross_dp`): the hashes of every variable of every output file of every
+   passing FP64 check (`wrf_suite.py --hash-out`, `tests/verify/out_hashes.py`) against the CUDA FP64 build's. The
+   WRF comparisons alone show HIP = CUDA only on WRF's variables and frames; this covers the CPPWRF-only ones too.
+   The CUDA hashes come from one run of the FP64 suite on an NVIDIA GPU with `--hash-out` (the G4 proof job). Without
+   `--cuda-hashes` the run stops before it builds (`--no-cross`: it may pass, and the summary says the direct
+   comparison was not made).
+8. **Summary**: `res/summary.txt` (machine, each step's result of this run, every FAIL / SKIP line), ending
+   `AMD RUN PASS` only when everything passed.
 
-The run is resumable: a finished step is not repeated (`--redo STEP` repeats one), and a suite started again runs only
-its checks without a PASS line. `--cases NAME,...` runs some checks only (`tools/amd/amd_cases.py list cuda_dp` names
-them), `--flavours dp` one build, `--compile-only --arch gfx942` builds without a GPU. Multi-GPU MPI and tiled runs
-(`tools/kaggle/kg_body.sh`'s layouts) and HIP graphs / wave64 tuning (phase 2) come after this run.
+The run is resumable. A step is skipped when its stamp holds the current key: a build's key is the commit and its
+changes, the architecture, the compiler and ROCm; ctest, the suite and the comparison are keyed by the binaries'
+sha256, so a rebuilt binary that differs is checked again, and a suite started again runs only the checks of the
+same binary without a PASS line. `--redo STEP` repeats a step (`--redo suite_dp` also discards that binary's PASS
+lines, `--redo data` every fetched tar). `--cases NAME,...` runs some checks only (`tools/amd/amd_cases.py list
+cuda_dp` names them): every name must be a check of the selected flavours, and the flavours without one are left
+out. `--flavours dp` builds one flavour, `--compile-only --arch gfx942` builds without a GPU. Multi-GPU MPI and tiled
+runs (`tools/kaggle/kg_body.sh`'s layouts) and HIP graphs / wave64 tuning (phase 2) come after this run.
