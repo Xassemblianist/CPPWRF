@@ -11,7 +11,7 @@ COPY packaging/docker/build-wps.sh /tmp/build-wps.sh
 RUN bash /tmp/build-wps.sh /opt/weather
 
 ARG BUILD_JOBS=2
-ARG CUDA_ARCHS="80-real;86-real;89-real;90-real;120"
+ARG CUDA_ARCHS="75-real;80-real;86-real;89-real;90-real;120"
 ARG VCS_REF
 COPY . /src
 RUN bash /src/packaging/docker/build-cppwrf.sh gpu-fp32 gpu-fp32 gpu-fp64 cpu-fp64

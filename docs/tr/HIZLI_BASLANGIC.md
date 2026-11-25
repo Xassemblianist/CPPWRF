@@ -9,6 +9,7 @@ docker run --rm -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cpu quick
 ```
 
 NVIDIA GPU için NVIDIA Container Toolkit ve CUDA 13.0 uyumlu bir sürücü gerekir (Linux'ta 580.65.06 veya üstü).
+CUDA imgesi sm_75 (T4, RTX 20xx), sm_80, sm_86, sm_89, sm_90 ve sm_120 GPU'ları için derlenmiştir.
 
 ```bash
 docker run --rm --gpus all -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cuda quickstart
