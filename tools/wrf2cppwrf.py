@@ -621,7 +621,6 @@ SAME_ON_ALL_DOMAINS = (("physics", "kim_tofd"), ("physics", "tofd_factor"))
 
 UNSUPPORTED_PHYSICS_SWITCHES = {
     "shcu_physics": "Separate shallow cumulus scheme",
-    "sf_lake_physics": "Lake physics model",
     "swint_opt": "Shortwave radiation interpolation between radt calls",
     "seaice_thickness_opt": "Variable sea-ice thickness option",
     "seaice_snowdepth_opt": "Sea-ice snow depth option",
@@ -2893,6 +2892,47 @@ class WrfTranslator:
                 sections.setdefault("phys", {})["sf_urban_physics"] = 1
                 if lcz == 1:
                     sections["phys"]["use_wudapt_lcz"] = 1
+
+        # lake model: sf_lake_physics = 1 (phys/module_sf_lake.F, src/phys/sf_lake) with Noah or Noah-MP on one
+        # real-data domain with a fixed time step; lakeini's options use_lakedepth (0, 1), lakedepth_default and
+        # lake_min_elev. The model also stops on inputs it cannot reproduce (LAKEFLAG = 0, LAKE_DEPTH from WPS with
+        # use_lakedepth = 1). SST update, skin SST and fractional sea ice with the lake (their lake branches in
+        # surface_driver), nests (the lake fields' nest interpolation) and the adaptive time step are not ported
+        lake_vals = self.get_opt_list("physics", "sf_lake_physics")[:max(1, self._max_dom)] or [0]
+        lake = lake_vals[0]
+        if any(v not in (0, 1) for v in lake_vals):
+            self.error(f"WRF sf_lake_physics = {lake_vals} is not supported by CPPWRF; CPPWRF supports 0 and 1 "
+                       "(the CLM lake model).")
+        elif any(v == 1 for v in lake_vals):
+            ok = True
+            sfs = self.get_opt("physics", "sf_surface_physics", 0)
+            if max(1, self._max_dom) > 1:
+                self.error("WRF sf_lake_physics = 1 with nests (max_dom > 1) is not supported by CPPWRF.")
+                ok = False
+            elif lake != 1:
+                ok = False
+            if sfs not in (2, 4):
+                self.error(f"WRF sf_lake_physics = 1 with sf_surface_physics = {sfs} is not supported by CPPWRF; the "
+                           "lake model is ported with Noah (2) and Noah-MP (4).")
+                ok = False
+            for key in ("sst_update", "sst_skin", "fractional_seaice"):
+                if self.get_opt("physics", key, 0) not in (0, False):
+                    self.error(f"WRF sf_lake_physics = 1 with {key} = 1 is not supported by CPPWRF (the lake "
+                               "branches of the surface driver's SST update / sea ice are not ported).")
+                    ok = False
+            if self.get_opt("domains", "use_adaptive_time_step", False):
+                self.error("WRF sf_lake_physics = 1 with use_adaptive_time_step is not supported by CPPWRF.")
+                ok = False
+            uld = self.get_opt("physics", "use_lakedepth", 1)
+            if uld not in (0, 1):
+                self.error(f"WRF use_lakedepth = {uld} is not supported; CPPWRF supports 0 and 1.")
+                ok = False
+            if ok:
+                ph = sections.setdefault("phys", {})
+                ph["sf_lake_physics"] = 1
+                ph["use_lakedepth"] = uld
+                ph["lakedepth_default"] = float(self.get_opt("physics", "lakedepth_default", 50.0))
+                ph["lake_min_elev"] = float(self.get_opt("physics", "lake_min_elev", 5.0))
 
         # terrain options (src/phys/driver/topo.hpp): topo_wind 1 / 2 (start_em's CTOPO / CTOPO2 for YSU), slope_rad
         # = 1 (surface_driver's TOPO_RAD_ADJ_DRVR) and topo_shading = 1 (pre_radiation_driver's toposhad, shadlen) on
