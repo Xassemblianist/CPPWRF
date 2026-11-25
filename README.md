@@ -33,6 +33,7 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 
 ## Install, quick start, migrating from WRF
 
+- **Docker:** [Run a GFS forecast and generate a map in one command](docs/QUICKSTART.md#docker-one-command) with the CPU or CUDA image.
 - **Install:** [docs/INSTALL.md](docs/INSTALL.md) (builds, `cmake --install`, release tarballs, containers, the
   self-test). Turkish: [docs/tr/KURULUM.md](docs/tr/KURULUM.md).
 - **Quick start:** [docs/QUICKSTART.md](docs/QUICKSTART.md) goes from GFS through WPS, `cppwrf-realexe` and

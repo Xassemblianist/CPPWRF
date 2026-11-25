@@ -1,5 +1,39 @@
 # CPPWRF quick start
 
+## Docker: one command
+
+With Docker on x86-64, run the bundled three-hour forecast for the southeastern United States:
+
+```bash
+docker run --rm -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cpu quickstart
+```
+
+For NVIDIA GPUs, install NVIDIA Container Toolkit and use a CUDA 13.0-compatible driver (Linux 580.65.06 or later).
+
+```bash
+docker run --rm --gpus all -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cuda quickstart
+```
+
+Look for `out/slp_t2_d01.png`. Each run keeps its NetCDF files and logs in a new `out/forecast.*/` directory.
+The first run downloads about 1 GB from NOAA GFS and a 143 MiB UCAR geography archive (about 1.5 GiB unpacked).
+Both inputs are cached in `out/`. Allow several GB of free disk space and more for longer forecasts.
+The example uses the archived 2026-10-12 00 UTC GFS cycle. Set `-e GFS_DATE=YYYYMMDD -e GFS_CYCLE=HH`
+before the image name to use another archived cycle.
+
+Add `--hours 6` after `quickstart` to request a six-hour forecast (any whole number from 1 to 24).
+Add `--mode cpu-fp32` or `--mode cpu-fp64` on the CPU image (default `cpu-fp64`). The CUDA image has
+`gpu-fp32` (default), `gpu-fp64` and `cpu-fp64`. These images ship with WPS 4.6.0, the WRF 4.8.0 run tables,
+CPPWRF's replacement for `real.exe` and the plotting dependencies.
+
+The Debian 13 CPU image uses GCC 14 and glibc 2.41. CPU FP64 bit identity with GNU WRF 4.8.0 real*8 applies to
+the verified configurations with glibc 2.41 and matching build flags. CPU and CUDA FP32 use identity mode
+for the verified GNU WRF 4.8.0 real*4 cases and carry the required glibc 2.41 float functions. The CUDA image
+uses Ubuntu 24.04 (glibc 2.39), so verify either of its FP64 modes against the reference before relying on
+bit identity. See [INSTALL.md](INSTALL.md#the-glibc-math-options-and-why-they-exist) and
+[FP32_IDENTITY.md](FP32_IDENTITY.md).
+
+## Without Docker
+
 This page goes from the GFS analysis to a map of a 3-hour forecast in four steps: WPS, `cppwrf-realexe` (real.exe),
 `cppwrf-wrf` (wrf.exe) and a plot. If you already have a WRF run directory, only step 3 is new. Run `cppwrf-wrf`
 where you would run `wrf.exe`. The Turkish version is [tr/HIZLI_BASLANGIC.md](tr/HIZLI_BASLANGIC.md).
@@ -29,13 +63,15 @@ The case is WRF's own default:
 - WRF v4.8.0's `test/em_real/namelist.input`, with `physics_suite = 'CONUS'`;
 - the date of the GFS run and 3 forecast hours.
 
-The steps below are what `run.sh` does, so you can do them by hand on your own case.
+Set `GFS_DATE`, `GFS_CYCLE` or `FORECAST_HOURS` to change the date, UTC cycle or duration used by `run.sh`.
+The steps below show how to do the same work by hand on your own case.
 
 ## 1. WPS: from GFS to met_em files
 
 ```bash
 mkdir -p ~/qs/wps && cd ~/qs/wps
-sed "s|GEOG_DIR|$GEOG_DIR|" $CPPWRF/examples/quickstart/namelist.wps > namelist.wps
+ln -sfn "$GEOG_DIR" geog-data
+sed 's|GEOG_DIR|geog-data|' "$CPPWRF/examples/quickstart/namelist.wps" > namelist.wps
 ln -sfn $WPS_DIR/geogrid geogrid; ln -sfn $WPS_DIR/metgrid metgrid
 ln -sf $WPS_DIR/ungrib/Variable_Tables/Vtable.GFS Vtable
 for h in 000 003; do

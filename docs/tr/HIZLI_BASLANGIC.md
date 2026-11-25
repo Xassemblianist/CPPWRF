@@ -1,5 +1,39 @@
 # CPPWRF hızlı başlangıç
 
+## Docker ile tek komut
+
+Docker kurulu bir x86-64 makinede ABD'nin güneydoğusu için üç saatlik örnek tahmini çalıştırın.
+
+```bash
+docker run --rm -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cpu quickstart
+```
+
+NVIDIA GPU için NVIDIA Container Toolkit ve CUDA 13.0 uyumlu bir sürücü gerekir (Linux'ta 580.65.06 veya üstü).
+
+```bash
+docker run --rm --gpus all -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cuda quickstart
+```
+
+Harita `out/slp_t2_d01.png` dosyasına yazılır. Her koşunun NetCDF dosyaları ve günlükleri yeni bir
+`out/forecast.*/` dizininde saklanır. İlk koşu NOAA GFS'den yaklaşık 1 GB veri ve UCAR'dan 143 MiB'lik
+coğrafi veri arşivini indirir (açıldığında yaklaşık 1,5 GiB). Veriler `out/` altında sonraki koşular için
+saklanır. Birkaç GB, uzun koşular için daha fazla boş disk alanı ayırın.
+Örnek, arşivdeki 12 Ekim 2026 00 UTC GFS çevrimini kullanır. Başka bir çevrim için imge adından önce
+`-e GFS_DATE=YYYYMMDD -e GFS_CYCLE=HH` ekleyin.
+
+Altı saatlik tahmin için `quickstart` komutundan sonra `--hours 6` ekleyin (1 ile 24 arasında tam sayı).
+CPU imgesi `--mode cpu-fp64` (varsayılan) ve `--mode cpu-fp32` kiplerini içerir. CUDA imgesinde
+`gpu-fp32` (varsayılan), `gpu-fp64` ve `cpu-fp64` bulunur. İmgeler WPS 4.6.0, WRF 4.8.0 koşu tabloları,
+CPPWRF'in `real.exe` karşılığı ve harita için gereken Python paketleriyle gelir.
+
+Debian 13 tabanlı CPU imgesi GCC 14 ve glibc 2.41 kullanır. CPU FP64, eşleşen derleme seçenekleri ve glibc 2.41
+ile doğrulanmış vakalarda GNU WRF 4.8.0 real*8 ile bit düzeyinde aynıdır. CPU ve CUDA FP32 kimlik kipleri,
+doğrulanmış GNU WRF 4.8.0 real*4 vakaları için gerekli glibc 2.41 tek duyarlıklı işlevlerini içerir.
+CUDA imgesi Ubuntu 24.04 (glibc 2.39) kullandığı için bu imgedeki her iki FP64 kipini de bit düzeyinde eşitlik
+gereken işlerde önce referansla karşılaştırın. Ayrıntılar [FP32_IDENTITY.md](../FP32_IDENTITY.md) belgesindedir.
+
+## Docker olmadan
+
 Bu sayfa, GFS analizinden 3 saatlik bir tahminin haritasına dört adımda ulaşır: WPS, `cppwrf-realexe` (real.exe
 yerine), `cppwrf-wrf` (wrf.exe yerine) ve bir çizim. Elinizde hazır bir WRF koşu dizini varsa yalnızca 3. adım
 yenidir: `wrf.exe`'yi nerede çalıştırıyorsanız `cppwrf-wrf`'yi orada çalıştırın. İngilizcesi
@@ -28,13 +62,15 @@ Vaka, WRF'nin kendi varsayılan vakasıdır:
 - WRF'nin `test/em_real/namelist.input` dosyası (`physics_suite = 'CONUS'`);
 - 3 saatlik bir tahmin.
 
-Aşağıdaki adımlar betiğin yaptıklarıdır; kendi vakanızda elle de uygulayabilirsiniz.
+`run.sh` betiğinin tarihini, UTC çevrimini veya süresini değiştirmek için `GFS_DATE`, `GFS_CYCLE` veya
+`FORECAST_HOURS` değişkenlerini ayarlayın. Aşağıdaki adımları kendi vakanızda elle de uygulayabilirsiniz.
 
 ## 1. WPS
 
 ```bash
 mkdir -p ~/hb/wps && cd ~/hb/wps
-sed "s|GEOG_DIR|$GEOG_DIR|" $CPPWRF/examples/quickstart/namelist.wps > namelist.wps
+ln -sfn "$GEOG_DIR" geog-data
+sed 's|GEOG_DIR|geog-data|' "$CPPWRF/examples/quickstart/namelist.wps" > namelist.wps
 ln -sfn $WPS_DIR/geogrid geogrid; ln -sfn $WPS_DIR/metgrid metgrid
 ln -sf $WPS_DIR/ungrib/Variable_Tables/Vtable.GFS Vtable
 for h in 000 003; do

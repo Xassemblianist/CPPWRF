@@ -181,11 +181,12 @@ builds every flavour from the release tag, with checksums.
 
 ## 7. Containers
 
-The recipes are in `packaging/`:
+For the prebuilt images and the bundled forecast, see [Docker quick start](QUICKSTART.md#docker-one-command).
+To build the images locally, use the recipes in `packaging/`:
 
 ```bash
-docker build -f packaging/docker/Dockerfile.cpu -t cppwrf:cpu .        # Debian 13, cpu-fp64
-docker build -f packaging/docker/Dockerfile.cuda -t cppwrf:cuda .      # CUDA 12.8 on Ubuntu 24.04: gpu-fp32, gpu-fp64, cpu-fp64
+docker build -f packaging/docker/Dockerfile.cpu -t cppwrf:cpu .        # Debian 13: cpu-fp64, cpu-fp32
+docker build -f packaging/docker/Dockerfile.cuda -t cppwrf:cuda .      # CUDA 13.0 on Ubuntu 24.04: gpu-fp32, gpu-fp64, cpu-fp64
 docker run --rm --gpus all -v "$PWD/case:/work" cppwrf:cuda cppwrf-wrf --mode gpu-fp32
 
 apptainer build cppwrf-cuda.sif packaging/apptainer/cppwrf-cuda.def
@@ -198,7 +199,7 @@ cd case && apptainer run --nv ../cppwrf-cuda.sif --mode gpu-fp64
   code of the FP64 builds calls glibc's libm. In that image, check `gpu-fp64` against `cpu-fp64` with `cppwrf-compare`
   before relying on bit identity with WRF. The FP32 builds carry glibc 2.41's float functions (x86-64) and their FP32
   results do not depend on the image's libm.
-- Pin the base images by digest for reproducible images.
+- The Dockerfiles pin exact base-image tags. Registry builds record the CPPWRF source revision in the image labels.
 
 A Spack recipe is in `packaging/spack` (`spack repo add packaging/spack; spack install cppwrf +cuda cuda_arch=89`).
 

@@ -1,27 +1,35 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# CPPWRF, CPU build (OpenMP, FP64: bit-identical to WRF v4.8.0 real*8), on Debian 13, the system the proofs use
-# (gcc 14.2, glibc 2.41). From the repository's top directory:
-#   docker build -f packaging/docker/Dockerfile.cpu -t cppwrf:1.5.0-cpu .
-#   docker run --rm -v "$PWD/case:/work" cppwrf:1.5.0-cpu cppwrf-wrf --threads 8       # a WRF run directory
-# Pin the base image by digest for a reproducible image: --build-arg DEBIAN=debian:13.1-slim@sha256:...
-ARG DEBIAN=debian:13.1-slim
-
-FROM ${DEBIAN} AS build
+# Build from the repository root. The Debian 13 runtime supplies glibc 2.41.
+FROM debian:13.8-slim AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      g++-14 cmake make libnetcdf-dev python3 python3-netcdf4 python3-numpy ca-certificates \
+      ca-certificates cmake curl file g++-14 gcc gfortran libnetcdf-dev libnetcdff-dev \
+      m4 make patch perl python3 tcsh \
     && rm -rf /var/lib/apt/lists/*
-COPY . /src
-# CPPWRF_NATIVE=OFF: no -march=native, the image runs on any x86-64 CPU
-RUN cmake -S /src -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=g++-14 \
-      -DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=ON -DCPPWRF_NATIVE=OFF \
-    && cmake --build /build -j "$(nproc)" --target cppwrf cppwrf_real \
-    && cmake --install /build --prefix /opt/cppwrf
 
-FROM ${DEBIAN}
+COPY packaging/docker/build-wps.sh /tmp/build-wps.sh
+RUN bash /tmp/build-wps.sh /opt/weather
+
+ARG BUILD_JOBS=3
+ARG VCS_REF
+COPY . /src
+RUN bash /src/packaging/docker/build-cppwrf.sh cpu-fp64 cpu-fp64 cpu-fp32
+
+FROM debian:13.8-slim
+ARG VCS_REF
+LABEL org.opencontainers.image.source="https://github.com/Xassemblianist/CPPWRF" \
+      org.opencontainers.image.revision="${VCS_REF}"
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      libnetcdf22 libgomp1 python3 python3-netcdf4 python3-numpy \
+      ca-certificates curl libgomp1 libnetcdff7 python3-matplotlib python3-netcdf4 python3-numpy util-linux \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/cppwrf /opt/cppwrf
-ENV PATH=/opt/cppwrf/bin:$PATH PYTHONPATH=/opt/cppwrf/share/cppwrf/python
+COPY --from=build /opt/weather /opt/weather
+COPY packaging/docker/NOTICE.md /opt/weather/notices/README.md
+COPY --chmod=755 packaging/docker/cppwrf-quickstart /opt/cppwrf/bin/cppwrf-quickstart
+ENV PATH=/opt/cppwrf/bin:$PATH \
+    PYTHONPATH=/opt/cppwrf/share/cppwrf/python \
+    WPS_DIR=/opt/weather/wps \
+    WRF_DIR=/opt/weather/wrf \
+    CPPWRF_QUICKSTART_MODE=cpu-fp64
 WORKDIR /work
+ENTRYPOINT ["cppwrf-quickstart"]
 CMD ["cppwrf-wrf"]

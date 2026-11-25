@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Docker images
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Pushed branch, tag or commit to build (defaults to the dispatch commit)'
+        type: string
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/xassemblianist/cppwrf
+
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - name: Check out the image source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.ref || github.sha }}
+          persist-credentials: false
+
+      - name: Resolve the version and revision
+        id: source
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version=$(sed -nE 's/^project\(CPPWRF VERSION ([0-9]+\.[0-9]+\.[0-9]+) .*/\1/p' CMakeLists.txt)
+          if [[ ! $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Expected a CPPWRF X.Y.Z project version in CMakeLists.txt"
+            exit 1
+          fi
+          if [[ $EVENT_NAME == push && $EVENT_TAG != "v$version" ]]; then
+            echo "::error::The pushed tag must match the CMake version v$version"
+            exit 1
+          fi
+          if [[ ! -f packaging/docker/cppwrf-quickstart ]]; then
+            echo "::error::Select a source ref that includes the Docker quickstart"
+            exit 1
+          fi
+          printf 'version=%s\nrevision=%s\n' "$version" "$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Build the CPU image
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          REVISION: ${{ steps.source.outputs.revision }}
+        run: |
+          docker build --platform linux/amd64 --build-arg VCS_REF="$REVISION" \
+            -f packaging/docker/Dockerfile.cpu -t "$IMAGE:$VERSION-cpu" .
+
+      - name: Smoke-test CPU FP64 and FP32 without network access
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          image="$IMAGE:$VERSION-cpu"
+          docker run --rm --network none "$image" cppwrf --version
+          docker run --rm --network none "$image" quickstart --help
+          for mode in cpu-fp64 cpu-fp32; do
+            docker run --rm --network none "$image" /opt/cppwrf/share/cppwrf/examples/selftest/run.sh "$mode"
+          done
+          docker run --rm --network none "$image" bash -euo pipefail -c '
+            python3 -c "import matplotlib, netCDF4, numpy"
+            test -f "$WRF_DIR/run/LANDUSE.TBL"
+            for tool in geogrid ungrib metgrid; do
+              deps=$(ldd "$WPS_DIR/$tool.exe")
+              if grep -F "not found" <<< "$deps"; then exit 1; fi
+            done
+          '
+
+      - name: Build the CUDA image without a GPU
+        env:
+          VERSION: ${{ steps.source.outputs.version }}
+          REVISION: ${{ steps.source.outputs.revision }}
+        run: |
+          set -euo pipefail
+          docker builder prune -af
+          df -h "$GITHUB_WORKSPACE"
+          docker build --platform linux/amd64 --build-arg VCS_REF="$REVISION" \
+            -f packaging/docker/Dockerfile.cuda -t "$IMAGE:$VERSION-cuda" .
+          docker run --rm --network none "$IMAGE:$VERSION-cuda" cppwrf --version
+          docker run --rm --network none "$IMAGE:$VERSION-cuda" cppwrf-gpu-fp64 --version
+          docker image ls "$IMAGE"
+
+      - name: Publish to GitHub Container Registry
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.source.outputs.version }}
+        run: |
+          set -euo pipefail
+          printf '%s\n' "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for flavor in cpu cuda; do
+            docker push "$IMAGE:$VERSION-$flavor"
+          done
+          for flavor in cpu cuda; do
+            docker tag "$IMAGE:$VERSION-$flavor" "$IMAGE:latest-$flavor"
+            docker push "$IMAGE:latest-$flavor"
+          done

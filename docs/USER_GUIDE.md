@@ -238,7 +238,7 @@ examples/quickstart/run.sh ~/qs
 The script runs, in `~/qs`:
 
 1. **WPS** (`~/qs/wps`): downloads the GFS 0.25-degree analysis and 3 h forecast of 2026-10-12 00 UTC (NOAA's open
-   data on AWS; `GFS_DATE` and `GFS_CYCLE` choose another run, then change the dates of both namelists too), and runs
+   data on AWS; `GFS_DATE` and `GFS_CYCLE` choose another run and update both namelists), and runs
    `geogrid.exe`, `ungrib.exe` (Vtable.GFS) and `metgrid.exe`: `met_em.d01.*` and `met_em.d02.*`.
 2. **cppwrf_real** (`~/qs/run`): sets `num_metgrid_levels` and `num_land_cat` from the met_em files (real.exe stops
    when they differ), then

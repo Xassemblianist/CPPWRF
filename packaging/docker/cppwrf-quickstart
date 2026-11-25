@@ -1,0 +1,83 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+set -euo pipefail
+
+case ${1:-} in
+  quickstart) shift ;;
+  -*|'') ;;
+  *) exec "$@" ;;
+esac
+
+usage() {
+  cat <<'HELP'
+Usage: quickstart [--hours 1-24] [--mode cpu-fp64|cpu-fp32|gpu-fp64|gpu-fp32]
+
+Run the bundled GFS forecast and write /out/slp_t2_d01.png.
+Default duration: 3 hours. Default mode: cpu-fp64 (CPU image) or gpu-fp32 (CUDA image).
+Use GFS_DATE (YYYYMMDD) and GFS_CYCLE (00, 06, 12, or 18 UTC) to change the archived run.
+HELP
+}
+
+export FORECAST_HOURS=3 MODE=${CPPWRF_QUICKSTART_MODE:-cpu-fp64}
+while (( $# )); do
+  case $1 in
+    -h|--help) usage; exit 0 ;;
+    --hours|--mode)
+      if (( $# < 2 )) || [[ $2 == --* ]]; then
+        printf '%s requires a value\n' "$1" >&2
+        exit 2
+      fi
+      if [[ $1 == --hours ]]; then FORECAST_HOURS=$2; else MODE=$2; fi
+      shift 2 ;;
+    *) printf 'Unknown argument: %s\n' "$1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+if [[ ! $FORECAST_HOURS =~ ^([1-9]|1[0-9]|2[0-4])$ ]]; then
+  printf 'Expected --hours to be a whole number from 1 to 24\n' >&2
+  exit 2
+fi
+case $MODE in
+  cpu-fp64|cpu-fp32|gpu-fp64|gpu-fp32) ;;
+  *) printf 'Unknown --mode: %s\n' "$MODE" >&2; exit 2 ;;
+esac
+if ! command -v "cppwrf-$MODE" >/dev/null; then
+  printf 'This image does not contain mode %s\n' "$MODE" >&2
+  exit 2
+fi
+
+prefix=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+out=${CPPWRF_QUICKSTART_OUT:-/out}
+mkdir -p "$out"
+out=$(realpath "$out")
+export GFS_CACHE=$out/.gfs
+export MPLCONFIGDIR=${MPLCONFIGDIR:-/tmp/matplotlib}
+export REQUIRE_MAP=1
+
+# Publish the unpacked geography atomically so later runs only see a complete cache.
+if [[ -z ${GEOG_DIR:-} ]]; then
+  cache=$out/.wps-geog
+  mkdir -p "$cache"
+  export GEOG_DIR=$cache/WPS_GEOG_LOW_RES
+  (
+    flock -x 9
+    if [[ ! -d $GEOG_DIR ]]; then
+      staging=$(mktemp -d "$cache/download.XXXXXXXX")
+      trap 'rm -rf -- "$staging"' EXIT
+      printf 'Downloading UCAR low-resolution geography to %s\n' "$cache"
+      curl -fsSL --retry 5 -o "$staging/geog.tar.gz" \
+        https://www2.mmm.ucar.edu/wrf/src/wps_files/geog_low_res_mandatory.tar.gz
+      tar -xzf "$staging/geog.tar.gz" -C "$staging"
+      mv -T "$staging/WPS_GEOG_LOW_RES" "$GEOG_DIR"
+    fi
+  ) 9>"$cache/.lock"
+fi
+
+work=$(mktemp -d "$out/forecast.XXXXXXXX")
+chmod 755 "$work"
+printf 'Forecast directory: %s\n' "$work"
+"$prefix/share/cppwrf/examples/quickstart/run.sh" "$work"
+map=$(mktemp "$out/.slp_t2_d01.XXXXXXXX")
+trap 'rm -f -- "$map"' EXIT
+install -m 644 "$work/run/slp_t2_d01.png" "$map"
+mv -fT "$map" "$out/slp_t2_d01.png"
+printf 'Forecast map: %s/slp_t2_d01.png\n' "$out"
