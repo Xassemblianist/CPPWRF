@@ -9,6 +9,7 @@ version: "1.5.0"
 date-released: "2026-11-24"
 license: GPL-3.0-or-later
 repository-code: "https://github.com/Xassemblianist/CPPWRF"
+url: "https://cppwrf.org"
 doi: "10.5281/zenodo.24442751"
 keywords:
   - WRF

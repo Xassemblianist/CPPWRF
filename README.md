@@ -1,8 +1,9 @@
 # CPPWRF
 
 Version 1.5.0 ([release notes](docs/RELEASE_NOTES.md)). The Zenodo concept DOI for all versions is
-[doi:10.5281/zenodo.24442751](https://doi.org/10.5281/zenodo.24442751). The 1.4.0 archive is
-[doi:10.5281/zenodo.24488201](https://doi.org/10.5281/zenodo.24488201).
+[doi:10.5281/zenodo.24442751](https://doi.org/10.5281/zenodo.24442751). The 1.5.0 archive is
+[doi:10.5281/zenodo.24509951](https://doi.org/10.5281/zenodo.24509951). Project site:
+[cppwrf.org](https://cppwrf.org).
 
 CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static nesting,
 `real.exe` and `ideal.exe`. One source tree builds for the CPU (OpenMP) and for NVIDIA GPUs (CUDA), in FP64
