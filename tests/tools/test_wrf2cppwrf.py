@@ -1555,8 +1555,8 @@ class TestWrfNamelistSemantics(unittest.TestCase):
             "&bdy_control specified = .true. /\n")
 
     @staticmethod
-    def translate(text):
-        t = WrfTranslator(parse_namelist(complete(text)))
+    def translate(text, **kw):
+        t = WrfTranslator(parse_namelist(complete(text)), **kw)
         return t, t.translate()
 
     @staticmethod
@@ -2606,6 +2606,60 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         t, _ = self.translate(near.replace("parent_grid_ratio = 1, 3,", "parent_grid_ratio = 1, 5,")
                               .replace("e_we = 120, 121,", "e_we = 120, 121,"))
         self.assertTrue(any("parent_grid_ratio = 5 > 3" in e for e in t.errors), t.errors)
+
+    def test_vortex_following_translated(self):
+        # --vortex-following (a wrf.exe built with configure nesting 3): [domains] vortex_following (and a
+        # non-default track_level), [d02] the non-default vortex_interval, max_vortex_speed, time_to_move,
+        # corral_dist; the prescribed moves are ignored with a warning
+        keys = ("vortex_interval = 15, 1, max_vortex_speed = 40, 20, track_level = 70000, time_to_move = 0., 2.,"
+                " corral_dist = 8, 28, ")
+        t, gen = self.translate(self.NEST.replace("&domains ", "&domains " + keys), vortex_following=True)
+        self.assertEqual(t.errors, [])
+        self.assertIs(gen["domains"]["vortex_following"], True)
+        self.assertEqual(gen["domains"]["track_level"], 70000)
+        mv_keys = ("vortex_interval", "max_vortex_speed", "time_to_move", "corral_dist")
+        self.assertEqual({k: v for k, v in gen["d02"].items() if k in mv_keys},
+                         {"vortex_interval": 1, "max_vortex_speed": 20, "time_to_move": 2.0, "corral_dist": 28})
+        # the defaults: only the switch
+        t, gen = self.translate(self.NEST, vortex_following=True)
+        self.assertEqual(t.errors, [])
+        self.assertEqual({k: v for k, v in gen["domains"].items() if k in ("vortex_following", "track_level")},
+                         {"vortex_following": True})
+        self.assertFalse(set(gen.get("d02", {})) & set(mv_keys))
+        # the preset moves are not compiled into a vortex build
+        t, gen = self.translate(self.NEST.replace(
+            "&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, "),
+            vortex_following=True)
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("num_moves", gen["domains"])
+        self.assertTrue(any("ignores the prescribed moves" in w for w in t.warnings), t.warnings)
+        # without the switch the vortex keys stay errors
+        t, _ = self.translate(self.NEST.replace("&domains ", "&domains vortex_interval = 15, 1, "))
+        self.assertTrue(any("--vortex-following" in e for e in t.errors), t.errors)
+        for bad, msg in (("vortex_interval = 15, -1, ", "vortex_interval = -1"),
+                         ("max_vortex_speed = 40, .true., ", "max_vortex_speed = True"),
+                         ("vortex_interval = 15, 100000, max_vortex_speed = 40, 1000, ", "overflows"),
+                         ("track_level = 0, ", "track_level = 0"),
+                         ("track_level = 20000000, ", "track_level = 20000000"),
+                         ("time_to_move = 0., .true., ", "time_to_move = True"),
+                         ("corral_dist = 8, 0, ", "corral_dist = 0")):
+            t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad), vortex_following=True)
+            self.assertTrue(any(msg in e for e in t.errors), (bad, t.errors))
+        # geometry: near domain 1's edge, a ratio > 3, a nest of a nest
+        t, _ = self.translate(self.NEST.replace("i_parent_start = 1, 40,", "i_parent_start = 1, 4,"),
+                              vortex_following=True)
+        self.assertTrue(any("too near domain 1's edge" in e for e in t.errors), t.errors)
+        three = ("&time_control input_from_file = .true., .true., .true. /\n"
+                 "&domains time_step = 60, max_dom = 3, e_we = 120, 121, 61, e_sn = 90, 91, 61, e_vert = 45, 45, 45,"
+                 " dx = 15000, parent_id = 0, 1, 2, i_parent_start = 1, 40, 30, j_parent_start = 1, 30, 30,"
+                 " parent_grid_ratio = 1, 3, 3, parent_time_step_ratio = 1, 3, 3 /\n"
+                 "&bdy_control specified = .true., .false., .false. /\n")
+        t, _ = self.translate(three, vortex_following=True)
+        self.assertTrue(any("max_dom = 2" in e for e in t.errors), t.errors)
+        # one domain: nothing moves
+        t, gen = self.translate(self.FULL, vortex_following=True)
+        self.assertEqual(t.errors, [])
+        self.assertNotIn("vortex_following", gen.get("domains", {}))
 
     def test_omitted_nest_parent_id_rejected(self):
         # Registry default parent_id = 0; omitted nest parent_id must not be inferred as dom_id - 1
