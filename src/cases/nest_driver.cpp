@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cases/nest_driver.hpp"
+#include "cases/nest_move.hpp"
 
 #include <cstdlib>
 #include <algorithm>
@@ -336,7 +337,8 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
   // whose DomainRunner::start() rejects an unknown one); a [domains] key must be one of those read here
   static const char* const kDomainsKeys[] = {"max_dom", "feedback", "smooth_option", "spec_bdy_width", "blend_width",
                                              "parent_id", "i_parent_start", "j_parent_start", "parent_grid_ratio",
-                                             "parent_time_step_ratio"};
+                                             "parent_time_step_ratio", "num_moves", "move_id", "move_interval",
+                                             "move_cd_x", "move_cd_y"};
   for (const std::string& k : root_cfg.keys()) {
     if (k.rfind("domains.", 0) == 0) {
       const std::string n = k.substr(8);
@@ -462,8 +464,8 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
     auto map_key = [&](const std::string& sub, const std::string& val) {
       if (sub == "config" || sub == "parent_id" || sub == "i_parent_start" || sub == "j_parent_start" ||
           sub == "parent_grid_ratio" || sub == "parent_time_step_ratio" || sub == "feedback" ||
-          sub == "smooth_option" || sub == "blend_width") {
-        return;
+          sub == "smooth_option" || sub == "blend_width" || sub == "corral_dist") {
+        return;  // corral_dist: moving nests (cases/nest_move.cpp)
       }
       if (sub == "spec_bdy_width") ov.push_back("real.spec_bdy_width=" + val);
       else if (sub == "wrfinput" || sub == "wrfbdy" || sub == "dir" || sub == "bdy_interval" || sub == "nested" ||
@@ -502,7 +504,9 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       // Serialize non-domain-specific keys from root_cfg as base INI
       std::ostringstream base_ini;
       for (const std::string& k : root_cfg.keys()) {
-        if (k.rfind("domains.", 0) == 0) continue;
+        // domains.num_moves stays in every domain's configuration: its verification tier (io::check_option_tiers,
+        // the files' CPPWRF_UNVERIFIED_OPTIONS)
+        if (k.rfind("domains.", 0) == 0 && k != "domains.num_moves") continue;
         if (k.size() >= 4 && k[0] == 'd' && std::isdigit(k[1]) && std::isdigit(k[2]) && k[3] == '.') continue;
         if (id >= 2 && (k == "real.wrfbdy" || k == "real.bdy_interval" || k == "real.dx" || k == "real.dy" ||
                         k == "real.e_we" || k == "real.e_sn" || k == "real.e_vert" || k == "real.wrflowinp" ||
@@ -516,6 +520,7 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       sp.cfg = io::Config::from_string(base_ini.str(), ov);
     }
     if (sp.cfg.has("output.dir")) sp.cfg.mark_accessed("output.dir");
+    if (sp.cfg.has("domains.num_moves")) sp.cfg.mark_accessed("domains.num_moves");
   }
 
   // med_restart_out writes every domain when d01's restart alarm rings (restart_interval is one value); each
@@ -823,6 +828,8 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     throw std::runtime_error("time.adaptive (WRF use_adaptive_time_step) with nests is not supported");
   std::vector<NestDomainSpec> specs = parse_nest_specs(root_cfg);
   const int max_dom = static_cast<int>(specs.size());
+  // moving nests with prescribed moves (WRF built with -DMOVE_NESTS, cases/nest_move.hpp)
+  nestmove::Moves moves = nestmove::parse_moves(root_cfg, max_dom);
   // verification tiers (io/option_tiers.hpp) of every domain's options, before any domain is built
   if (root_cfg.has("cppwrf.allow_unverified")) root_cfg.mark_accessed("cppwrf.allow_unverified");
   for (const NestDomainSpec& sp : specs) io::check_option_tiers(sp.cfg, sp.tag + ": ");
@@ -891,12 +898,40 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       doms[doms[i].spec.parent_id - 1].children.push_back(i);
     }
   }
+  // moving nests: the nests a move names (time_for_move's innermost-nest branch with domain 1 as the parent; the
+  // until loop over moving parents is not ported), a run without a decomposition; every field of every domain is
+  // tracked from here on (nestmove::FieldRegistry)
+  std::unique_ptr<nestmove::Install> move_install;
+  std::vector<std::unique_ptr<nestmove::FieldRegistry>> move_regs;
+  auto move_scope = [&](int i) {
+    return std::make_unique<nestmove::Scope>(move_regs.empty() ? nullptr : move_regs[std::size_t(i)].get());
+  };
+  if (moves.any()) {
+    if (tile::tiled() || tile::options(root_cfg.get_string("run.tiles", "1")).on())
+      throw std::runtime_error("moving nests (domains.num_moves > 0) in a decomposed run (run.tiles, MPI ranks) are "
+                               "not supported");
+    for (int k = 0; k < moves.num_moves; ++k) {
+      const int id = moves.move_id[std::size_t(k)];
+      if (id < 2 || id > max_dom || moves.move_interval[std::size_t(k)] >= 999999999) continue;
+      const DomInstance& d = doms[std::size_t(id - 1)];
+      if (d.spec.parent_id != 1 || !d.children.empty())
+        throw std::runtime_error(d.spec.tag + ": moving nests are supported for a nest of domain 1 without nests of its "
+                                 "own (move_id)");
+      if (doms[0].children.size() > 1)
+        throw std::runtime_error("moving nests with sibling nests are not supported");
+    }
+    move_install = std::make_unique<nestmove::Install>();
+    for (int i = 0; i < max_dom; ++i) move_regs.push_back(std::make_unique<nestmove::FieldRegistry>());
+  }
 
   // 1. Build all domains; med_nest_initial of domain 1's children (WRF nests_to_open at the top of domain 1's
   // first step, before its t = 0 output). Deeper nests open at their parent's first step (open_children below).
   for (int i = 0; i < max_dom; ++i) {
+    const auto scope = move_scope(i);
     doms[i].model = Model::build(doms[i].spec.cfg);
   }
+  for (int i = 0; i < max_dom && moves.any(); ++i)
+    if (doms[i].model.adapt) throw std::runtime_error("moving nests with the adaptive time step are not supported");
   // module_convtrans_prep.F's SAVE stepave_count: one counter for every domain of the run (the first suite's)
   for (int i = 0, first = -1; i < max_dom; ++i)
     if (doms[i].model.suite) {
@@ -944,6 +979,7 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   for (int i = 0; i < max_dom; ++i)
     if (i == 0 || resumed)
       for (int c_idx : doms[i].children) {
+        const auto scope = move_scope(c_idx);
         med_nest_initial(doms[i].spec.cfg, doms[i].model, doms[c_idx].spec, doms[c_idx].model);
         opened[c_idx] = true;
       }
@@ -952,8 +988,11 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   for (int i = 0; i < max_dom; ++i) {
     std::string dom_out = out_dir + "/" + doms[i].spec.tag;
     const tile::Use use(doms[i].model.g);
+    const auto scope = move_scope(i);
     doms[i].runner = std::make_unique<DomainRunner>(doms[i].spec.cfg, doms[i].model, dom_out, doms[i].spec.tag);
     if (doms[i].spec.parent_id > 0) doms[i].runner->set_defer_output(true);
+    // moving nests: the history fields the model does not carry move with the nest (WrfHistory's move arrays)
+    if (moves.any()) doms[i].runner->set_need_history(true);
   }
 
 #ifdef CPPWRF_HAVE_NETCDF
@@ -966,7 +1005,9 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       }
   for (int i = 0; i < max_dom; ++i) {
     const tile::Use use(doms[i].model.g);
+    const auto scope = move_scope(i);
     doms[i].runner->prepare_output();
+    if (moves.any() && doms[i].runner->history()) doms[i].runner->history()->set_move_build(true);
   }
 #endif
   // med_nest_initial: parent%ht_coarse = parent%ht; its feedback (feedback != 0) of the history fields the model
@@ -1012,6 +1053,7 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   auto open_children = [&](int idx) {
     for (int c_idx : doms[idx].children)
       if (!opened[c_idx]) {
+        const auto scope = move_scope(c_idx);
         med_nest_initial(doms[idx].spec.cfg, doms[idx].model, doms[c_idx].spec, doms[c_idx].model);
         initial_history_feedback(idx, c_idx);
 #ifdef CPPWRF_HAVE_NETCDF
@@ -1025,6 +1067,7 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   // a domain's start in its patch; then every field's halo from the other workers (the start sets fields on the host)
   auto start = [&](int i) {
     const tile::Use use(doms[i].model.g);
+    const auto scope = move_scope(i);
     const bool ok = doms[i].runner->start();
     tile::exchange_all();
     return ok;
@@ -1076,8 +1119,39 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   //     skips this loop and each nest feeds back at the end of its own integrate (should_do_last_io), i.e. before
   //     its next sibling is integrated.
   //   - dom_idx.runner->after_step(step) (writes the parent's history frame after the feedback, as in WRF)
+  // med_nest_move (frame/module_integrate.F:446-452): after the nest's feedback, when domain 1 is not at its stop
+  // time; a move changes the nest's i_parent_start / j_parent_start of the forcing and the feedback (the grid's
+  // copy; the output attributes keep the namelist's, as a serial wrf.exe)
+  auto nest_move = [&](DomInstance& d, DomInstance& c) {
+    if (!moves.any()) return;
+    nestmove::Domain P, N;
+    const int pi = c.spec.parent_id - 1, ci = c.spec.dom_id - 1;
+    P.m = &d.model;
+    P.reg = move_regs[std::size_t(pi)].get();
+    P.hist = d.runner->history();
+    P.cfg = &d.spec.cfg;
+    P.id = d.spec.dom_id;
+    N.m = &c.model;
+    N.reg = move_regs[std::size_t(ci)].get();
+    N.hist = c.runner->history();
+    N.cfg = &c.spec.cfg;
+    N.id = c.spec.dom_id;
+    N.i_parent_start = c.spec.i_parent_start;
+    N.j_parent_start = c.spec.j_parent_start;
+    N.ratio = c.spec.parent_grid_ratio;
+    int dx = 0, dy = 0;
+    // the nest's clock since the clock's start time (a resumed run: the restart time), at the end of its last step
+    const wrf_time::Interval ct = c.model.dt_clock * int(c.step - c.runner->start_step);
+    if (!nestmove::time_for_move(moves, P, N, ct, dx, dy)) return;
+    const auto scope = move_scope(ci);
+    nestmove::move_nest(P, N, dx, dy);
+    c.spec.i_parent_start = N.i_parent_start;
+    c.spec.j_parent_start = N.j_parent_start;
+  };
+
   std::function<bool(int)> advance_domain = [&](int idx) -> bool {
     DomInstance& d = doms[idx];
+    const auto scope = move_scope(idx);
     const long n = ++d.step;
     {
       const tile::Use use(d.model.g);
@@ -1121,7 +1195,10 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       if (stop_time) feedback(d, c);
     }
     if (!stop_time)
-      for (int c_idx : d.children) feedback(d, doms[c_idx]);
+      for (int c_idx : d.children) {
+        feedback(d, doms[c_idx]);
+        nest_move(d, doms[c_idx]);
+      }
 
     const tile::Use use(d.model.g);
     if (!d.runner->after_step(n)) return false;

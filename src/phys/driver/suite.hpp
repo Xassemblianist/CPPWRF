@@ -48,6 +48,9 @@ struct RucTables;
 
 namespace cppwrf::phys::driver {
 
+// whether an allocation is an IntField2's (the moving nests' field registry holds every field by its allocation)
+bool is_int_field2(const void* base);
+
 // Integer 2D field (ivgtyp, isltyp, kpbl), mass points, same layout as Field2.
 class IntField2 {
  public:
@@ -385,6 +388,8 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   Field3 *re_cloud_ = nullptr, *re_ice_ = nullptr, *re_snow_ = nullptr;
   // radiation needs latitude/longitude (wrfinput XLAT/XLONG, i + nx*j); call before the first step
   void init_radiation(const std::vector<double>& xlat, const std::vector<double>& xlong);
+  // a moved nest: the radiation driver's copies of the latitudes and longitudes (init_radiation's)
+  void move_latlon(const std::vector<double>& xlat, const std::vector<double>& xlong);
   // phy_init with tmn_update = 1 (module_physics_init.F:1287-1301, not on restarts): NYEAR = 1, NDAY = 0, TYR = TMN,
   // TYRA = TDLY = 0, TLAG(n) = TMN; call after TMN holds the input's values
   void init_tmn_update();

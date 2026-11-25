@@ -21,3 +21,4 @@
 #
 # Example (a scheme ported with a column driver, not yet compared with a whole WRF run; WSM5 itself is verified):
 #   phys.mp_physics   physics.mp_physics   4   column_verified   WSM5 (tests/phys/mp_wsm35)
+domains.num_moves   domains.num_moves   1:50   unverified   moving nests with prescribed moves (src/cases/nest_move.cpp); no column driver is possible: the proof is the WRF "preset moves" run of tools/colab/colab_movenest.sh

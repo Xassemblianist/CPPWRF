@@ -7,6 +7,8 @@
 #include "core/vm_dump.hpp"
 
 #include <algorithm>
+#include <mutex>
+#include <set>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -37,13 +39,33 @@
 namespace cppwrf::phys::driver {
 
 // ------------------------------------------------------------------ IntField2
+namespace {
+// the allocations of the IntField2s (is_int_field2); the tiles of a decomposed run build their fields in threads
+std::mutex g_int_mutex;
+std::set<const void*>& int_buffers() {
+  static std::set<const void*> s;
+  return s;
+}
+}  // namespace
+bool is_int_field2(const void* base) {
+  const std::lock_guard<std::mutex> lock(g_int_mutex);
+  return int_buffers().count(base) != 0;
+}
 IntField2::IntField2(const Grid& g, std::string name)
     : name_(std::move(name)), L_(Layout::make(g, Stagger::M, 2)),
       buf_(static_cast<int*>(dev_alloc(L_.total * sizeof(int)))) {
+  {
+    const std::lock_guard<std::mutex> lock(g_int_mutex);
+    int_buffers().insert(buf_);
+  }
   if (tile::track) tile::track->add(buf_, L_, int(sizeof(int)), name_);
 }
 IntField2::~IntField2() {
   if (buf_ && tile::track) tile::track->remove(buf_);
+  if (buf_) {
+    const std::lock_guard<std::mutex> lock(g_int_mutex);
+    int_buffers().erase(buf_);
+  }
   dev_free(buf_);
 }
 IntField2::IntField2(IntField2&& o) noexcept : name_(std::move(o.name_)), L_(o.L_), buf_(o.buf_) { o.buf_ = nullptr; }
@@ -804,6 +826,12 @@ void PhysicsSuite::init_radiation(const std::vector<double>& xlat, const std::ve
   if (!radiation_on()) return;
   rad_ = std::make_unique<RadiationDriver>(g_, o_.rad, std::vector<::cppwrf::phys::rb>(xlat.begin(), xlat.end()),
                                              std::vector<::cppwrf::phys::rb>(xlong.begin(), xlong.end()));
+}
+
+void PhysicsSuite::move_latlon(const std::vector<double>& xlat, const std::vector<double>& xlong) {
+  if (!rad_) return;
+  rad_->set_latlon(std::vector<::cppwrf::phys::rb>(xlat.begin(), xlat.end()),
+                   std::vector<::cppwrf::phys::rb>(xlong.begin(), xlong.end()));
 }
 
 void PhysicsSuite::init_topo(const std::vector<double>& ht, const std::vector<double>& msftx,
