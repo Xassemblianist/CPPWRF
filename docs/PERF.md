@@ -1387,3 +1387,46 @@ to the base one-process run. CPU tiles 2 x 2 of em_quarter_ss with `CPPWRF_TILE_
 a fill of more than 8 fields per launch's 8 fields, as the run with one patch fills them). ctest (CPU FP64 with MPI):
 37 passed, 9 skipped for data not on the workstation. A planted bug (the interior box one point wider, w = 0, so
 advance_uv's patch-edge points read the halo before the fill) changes the CPU MPI 2 x 2 files.
+
+## FP64-only optimizations in the CUDA FP32 identity build (PERF15; measured on the workstation only)
+
+Four optimizations were gated on `CPPWRF_DOUBLE` because the fast CUDA FP32 build contracts multiply-adds
+(`--fmad=true`) depending on the code around them. The CUDA FP32 identity build compiles with `--fmad=false`, so every
+operation is rounded on its own there (`CPPWRF_LOCAL_ROUNDING`, core/precision.hpp, which backend.hpp now includes).
+Three of them now use that gate; the fast CUDA FP32 build keeps its code text, FP64 builds are unchanged:
+
+- WSM6 in column stages (`wsm6_stages`, P01b): the values carried between the stages are stored as `real`, the type
+  `Wsm6Kernel` keeps them in, and the stages read no double locals of it. The CPU FP32 build takes the stages too.
+- Launch fusion (`kFuseMulAdd`: `LaunchBatch`, `parallel_fused`, F04): a part of a batched kernel computes each point
+  with its own kernel's operator() on the same operands.
+- Kain-Fritsch, MYJ, QNSE and its EDKF column arrays in the column work buffer (PERF2): the same stored values and
+  arithmetic; the CPU builds declare the local arrays either way.
+
+Measured on an RTX 2060 (sm_75, 6 GB, one GPU), the CUDA FP32 identity build, base 7fac5bf and new 507136c, 30
+steps without history output, stepping time in s, two interleaved runs each (a b b a):
+
+| case | base | new | change |
+|---|---|---|---|
+| P4 (WSM6, KF, YSU, RRTMG radt 1) | 3.100, 3.077 | 3.016, 3.020 | -2.3 % |
+| Q4 (P4 with QNSE PBL and surface layer) | 3.066, 3.069 | 3.009, 3.008 | -1.9 % |
+| P9 (MYJ PBL, MYJ surface layer, no microphysics) | 0.584, 0.584 | 0.584, 0.584 | 0 |
+| P1 | 0.580, 0.580 | 0.579, 0.578 | 0 |
+
+`CPPWRF_KTIME=1`, 10 steps: P4 WSM6 49.0 ms (`Wsm6Kernel`) -> 34.4 ms (the stages), KF 27.3 -> 26.7 ms, kernel launches
+5084 -> 3754; the thread stack limit 14800 -> 4240 bytes, device memory at the end 2127 -> 2021 MiB. Q4: stack
+14800 -> 3296 bytes, 2125 -> 1993 MiB, QNSE 24.3 -> 24.6 ms. P9: MYJ 25.9 -> 26.3 ms (no gain from the buffer on
+this GPU), stack 9824 -> 1232 bytes, 923 -> 779 MiB, launches 3304 -> 2774.
+
+Not done: the advection face fluxes computed once per face (large_step.cpp, scalars.cpp, P01) in the FP32 identity
+build. Byte-identical too, but slower on this GPU: P4 3.033 / 3.026 s, P9 0.602 / 0.603 s, P1 0.596 / 0.597 s with
+it (on top of the three above); `KUpdateT` 20.3 -> 8.1 ms but `KFaceXT/YT/ZT` add 11.9 ms per 10 steps of P4 (FP32
+arithmetic is cheap next to the scratch traffic). It stays FP64-only.
+
+Proof on the workstation (byte for byte, base against new, 3 steps, history every step: every native snapshot and
+every variable of the wrfout file): CUDA FP32 identity and CPU FP32 on P4, P9, Q4, Q4M (QNSE with EDKF) and P1; the
+same with the face fluxes. CUDA FP32 identity new against WRF real*4 at tolerance 0: real_p1_fp32_cuda_id,
+real_p4_fp32_cuda_id; CPU FP32 new: real_p1_fp32_cpu, real_p4_fp32_cpu. CPU FP64, CUDA FP64 and the fast CUDA FP32
+build: all 84 source files of the library preprocess (host pass, and for CUDA the device pass of `nvcc -dryrun`,
+without line markers) to the same text as base with the include added (the same check in the FP32 identity build
+reports the changed files). Planted bugs: rain in `Wsm6StageIce` times 1001 instead of 1000, and
+`KAdd`'s A2CU case adding as A2A (used only by the batched launch), each changes the P4 FP32 identity files.
