@@ -17,6 +17,7 @@
 #include "phys/lsm_noah/noah.hpp"
 #include "phys/lsm_ruc/ruc.hpp"
 #include "phys/lsm_slab/slab.hpp"
+#include "phys/sf_lake/lake.hpp"
 #include "phys/sf_pxsfclay/pxsfclay.hpp"
 
 #include "phys/driver/suite_internal.hpp"
@@ -1015,6 +1016,82 @@ struct KTmnDay {
     } else {
       tyra(i, j) = tyra(i, j) + tlag(i, j, lagday - 1);
     }
+  }
+};
+
+// sf_lake_physics = 1 (module_surface_driver.F:4510-4543, after the land surface models): SUBROUTINE Lake at the
+// points with LAKEMASK = 1 (module_sf_lake.F, src/phys/sf_lake/lake.hpp); forcing at level kts (p8w at kts and
+// kts + 1), RAINBL of this call, ALBEDO as the land surface models left it; HFX, LH, GRDFLX, TSK, QFX, T2, TH2, Q2,
+// ALBEDO and the lake state of the lake points
+struct KLake {
+  C3 t_phy, p8w, dz8w, qv, u_phy, v_phy;
+  C2 glw, emiss, rainbl, swdown, xlat, lakemask, lakedepth2d;
+  V2 albedo, hfx, lh, grdflx, tsk, qfx, t2, th2, q2, savedtke12d, snowdp2d, h2osno2d, snl2d, t_grnd2d;
+  C3 z_lake3d, dz_lake3d, watsat3d, csol3d, tkmg3d, tkdry3d, tksatu3d;
+  V3 t_lake3d, lake_icefrac3d, t_soisno3d, h2osoi_ice3d, h2osoi_liq3d, h2osoi_vol3d, z3d, dz3d, zi3d;
+  real dtbl;
+  CPPWRF_HD void operator()(int i, int j) const {
+    namespace lk = phys::lake;
+    if (!(lakemask(i, j) == real(1))) return;
+    lk::LakeForcing f{t_phy(i, j, 0), p8w(i, j, 0), p8w(i, j, 1), dz8w(i, j, 0), qv(i, j, 0), u_phy(i, j, 0),
+                      v_phy(i, j, 0), glw(i, j), emiss(i, j), rainbl(i, j), swdown(i, j), albedo(i, j), xlat(i, j)};
+    lk::LakeSoil so;
+    lk::LakeColumn c;
+    c.lakedepth = lakedepth2d(i, j);
+    c.savedtke1 = savedtke12d(i, j);
+    c.snowdp = snowdp2d(i, j);
+    c.h2osno = h2osno2d(i, j);
+    c.snl = int(snl2d(i, j));  // REAL -> INTEGER (Lake:331)
+    c.t_grnd = t_grnd2d(i, j);
+    for (int k = 1; k <= lk::nlevlake; ++k) {
+      c.t_lake[k] = t_lake3d(i, j, k - 1);
+      c.lake_icefrac[k] = lake_icefrac3d(i, j, k - 1);
+      c.z_lake[k] = z_lake3d(i, j, k - 1);
+      c.dz_lake[k] = dz_lake3d(i, j, k - 1);
+      so.watsat[k] = watsat3d(i, j, k - 1);
+      so.csol[k] = csol3d(i, j, k - 1);
+      so.tkmg[k] = tkmg3d(i, j, k - 1);
+      so.tkdry[k] = tkdry3d(i, j, k - 1);
+      so.tksatu[k] = tksatu3d(i, j, k - 1);
+    }
+    for (int k = 0; k < 15; ++k) {
+      c.t_soisno[k] = t_soisno3d(i, j, k);
+      c.h2osoi_ice[k] = h2osoi_ice3d(i, j, k);
+      c.h2osoi_liq[k] = h2osoi_liq3d(i, j, k);
+      c.h2osoi_vol[k] = h2osoi_vol3d(i, j, k);
+      c.z[k] = z3d(i, j, k);
+      c.dz[k] = dz3d(i, j, k);
+    }
+    for (int k = 0; k < 16; ++k) c.zi[k] = zi3d(i, j, k);
+    lk::LakeOut o;
+    lk::lake_point(f, dtbl, wrfc::rcp, so, c, o);
+    hfx(i, j) = o.hfx;
+    lh(i, j) = o.lh;
+    grdflx(i, j) = o.grdflx;
+    tsk(i, j) = o.tsk;
+    t2(i, j) = o.t2;
+    th2(i, j) = o.th2;
+    q2(i, j) = o.q2;
+    albedo(i, j) = o.albedo;
+    qfx(i, j) = o.qfx;
+    savedtke12d(i, j) = real(c.savedtke1);
+    snowdp2d(i, j) = real(c.snowdp);
+    h2osno2d(i, j) = real(c.h2osno);
+    snl2d(i, j) = real(c.snl);
+    t_grnd2d(i, j) = real(c.t_grnd);
+    for (int k = 1; k <= lk::nlevlake; ++k) {
+      t_lake3d(i, j, k - 1) = real(c.t_lake[k]);
+      lake_icefrac3d(i, j, k - 1) = real(c.lake_icefrac[k]);
+    }
+    for (int k = 0; k < 15; ++k) {
+      z3d(i, j, k) = real(c.z[k]);
+      dz3d(i, j, k) = real(c.dz[k]);
+      t_soisno3d(i, j, k) = real(c.t_soisno[k]);
+      h2osoi_liq3d(i, j, k) = real(c.h2osoi_liq[k]);
+      h2osoi_ice3d(i, j, k) = real(c.h2osoi_ice[k]);
+      h2osoi_vol3d(i, j, k) = real(c.h2osoi_vol[k]);
+    }
+    for (int k = 0; k < 16; ++k) zi3d(i, j, k) = real(c.zi[k]);
   }
 };
 
@@ -2101,6 +2178,20 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
       for (int n = 0; n < 11; ++n) nd.lcz[n] = lcz_arr[n];
       column_for(cols, nd);
     }
+  }
+  if (lake_) {  // LakeModel == 1
+    LakeFields& l = *lake_;
+    column_for(cols, KLake{prep.t_phy.cview(), prep.p8w.cview(), prep.dz8w.cview(), s.q_2[s.P_QV].cview(),
+                           prep.u_phy.cview(), prep.v_phy.cview(), glw.cview(), emiss.cview(), rainbl.cview(),
+                           swdown.cview(), l.xlat.cview(), lakemask.cview(), l.lakedepth2d.cview(), albedo.view(),
+                           hfx.view(), lh.view(), grdflx.view(), tsk.view(), qfx.view(), t2.view(), th2.view(), q2.view(),
+                           l.savedtke12d.view(), l.snowdp2d.view(), l.h2osno2d.view(), l.snl2d.view(),
+                           l.t_grnd2d.view(), l.z_lake3d.cview(), l.dz_lake3d.cview(), l.watsat3d.cview(),
+                           l.csol3d.cview(), l.tkmg3d.cview(), l.tkdry3d.cview(), l.tksatu3d.cview(),
+                           l.t_lake3d.view(), l.lake_icefrac3d.view(), l.t_soisno3d.view(), l.h2osoi_ice3d.view(),
+                           l.h2osoi_liq3d.view(), l.h2osoi_vol3d.view(), l.z3d.view(), l.dz3d.view(), l.zi3d.view(),
+                           dtbl});
+    fatal_check();
   }
   column_for(cols, KSfcEnd{rainbl.view(), q2.view(), xland.cview(), s.q_2[s.P_QV].cview()});
   if (slope_rad) {

@@ -202,6 +202,9 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
     c.set("tmn_update", std::to_string(o.tmn_update));
     c.set("lagday", std::to_string(o.lagday));
     c.set("num_soil_layers", std::to_string(o.num_soil_layers));
+    c.set("sf_lake_physics", std::to_string(o.sf_lake_physics));  // package simple_lake, SF_LAKE_PHYSICS
+    c.set("use_lakedepth", std::to_string(o.use_lakedepth));
+    c.set("lakedepth_default", str(o.lakedepth_default)); c.set("lake_min_elev", str(o.lake_min_elev));
     c.set("ishallow", std::to_string(o.ishallow)); c.set("isfflx", std::to_string(o.isfflx));
     c.set("convtrans_avglen_m", str(o.convtrans_avglen_m));
     c.set("isftcflx", std::to_string(o.isftcflx)); c.set("iz0tlnd", std::to_string(o.iz0tlnd));

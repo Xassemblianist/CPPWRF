@@ -365,6 +365,14 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   if (o.sf_urban_physics != 0 && cfg.get_bool("real.nested", false))
     throw std::runtime_error("sf_urban_physics = " + std::to_string(o.sf_urban_physics) +
                              " on a nest is not supported");
+  // the lake model (module_sf_lake.F): one domain (the nest interpolation of the lake fields, interp_mask_water_field
+  // with ISLAKE, is not ported)
+  o.sf_lake_physics = int(cfg.get_int("phys.sf_lake_physics", 0));
+  o.use_lakedepth = int(cfg.get_int("phys.use_lakedepth", 1));
+  o.lakedepth_default = cfg.get_double("phys.lakedepth_default", 50.);
+  o.lake_min_elev = cfg.get_double("phys.lake_min_elev", 5.);
+  if (o.sf_lake_physics != 0 && cfg.get_bool("real.nested", false))
+    throw std::runtime_error("sf_lake_physics = " + std::to_string(o.sf_lake_physics) + " on a nest is not supported");
   // terrain options (start_em, pre_radiation_driver, surface_driver): one domain, a fixed time step
   o.topo_wind = int(cfg.get_int("phys.topo_wind", 0));
   o.slope_rad = int(cfg.get_int("phys.slope_rad", 0));
@@ -701,6 +709,25 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     if (in.has("SH2O")) put_soil(su.sh2o, in.var("SH2O", n2 * ns));
     if (in.has("SNOWH")) put2(su.snowh, rd2("SNOWH"));
     su.init_noahmp(in.has("SNOWH"));
+  }
+  if (su.lake_) {
+    // bl_init's lakeini after the land surface model's init. The proven inputs: LAKEFLAG = 1 (real.exe with the ISLAKE
+    // category: LAKEMASK from LU_INDEX) and no lake depth data in use (LAKE_DEPTH_FLAG = 0, or use_lakedepth = 0)
+    auto scalar = [&](const char* n) {
+      if (!in.has(n)) throw std::runtime_error(std::string("sf_lake_physics = 1: wrfinput lacks ") + n);
+      return int(std::lround(in.var(n, 1)[0]));
+    };
+    const int lakeflag = scalar("LAKEFLAG"), lake_depth_flag = scalar("LAKE_DEPTH_FLAG");
+    if (lakeflag != 1)
+      throw std::runtime_error("sf_lake_physics = 1 with LAKEFLAG = " + std::to_string(lakeflag) +
+                               " (an input without the ISLAKE land-use category: lakes from IVGTYP and lake_min_elev) "
+                               "is not supported (not proven against a WRF run)");
+    if (lake_depth_flag == 1 && o.use_lakedepth == 1)
+      throw std::runtime_error("sf_lake_physics = 1 with LAKE_DEPTH from the input (LAKE_DEPTH_FLAG = 1, use_lakedepth "
+                               "= 1) is not supported (not proven against a WRF run): set use_lakedepth = 0");
+    put2(su.lake_->xlat, m.xlat);
+    su.init_lake(rd2("HGT"), in.has("LAKE_DEPTH") ? rd2("LAKE_DEPTH") : std::vector<double>(), lakeflag,
+                 lake_depth_flag);
   }
   // CANWAT = 0 (lsminit / NoahmpInitMain; the slab's from wrfinput), the accumulations and fluxes stay zero
   su.init_radiation(m.xlat, m.xlong);
