@@ -2633,12 +2633,24 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertEqual(t.errors, [])
         self.assertNotIn("num_moves", gen["domains"])
         self.assertTrue(any("ignores the prescribed moves" in w for w in t.warnings), t.warnings)
-        # without the switch the vortex keys stay errors
-        t, _ = self.translate(self.NEST.replace("&domains ", "&domains vortex_interval = 15, 1, "))
-        self.assertTrue(any("--vortex-following" in e for e in t.errors), t.errors)
+        # without the switch the vortex keys stay errors, zero values too
+        for bad in ("vortex_interval = 15, 1, ", "vortex_interval = 0, 0, ", "max_vortex_speed = 0, 0, ",
+                    "track_level = 0, "):
+            t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad))
+            self.assertTrue(any("--vortex-following" in e for e in t.errors), (bad, t.errors))
+        # a moved nest's phy_init is ported for a set of physics only (prescribed moves too)
+        t, _ = self.translate(self.NEST + "&physics mp_physics = 8, 8 /\n", vortex_following=True)
+        self.assertTrue(any("physics initialisation" in e and "mp_physics = 8" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST.replace(
+            "&domains ", "&domains num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, ")
+            + "&physics sf_surface_physics = 1, 1 /\n")
+        self.assertTrue(any("physics initialisation" in e for e in t.errors), t.errors)
+        t, _ = self.translate(self.NEST + "&physics mp_physics = 6, 6, cu_physics = 1, 1 /\n", vortex_following=True)
+        self.assertFalse(any("physics initialisation" in e for e in t.errors), t.errors)
         for bad, msg in (("vortex_interval = 15, -1, ", "vortex_interval = -1"),
                          ("max_vortex_speed = 40, .true., ", "max_vortex_speed = True"),
                          ("vortex_interval = 15, 100000, max_vortex_speed = 40, 1000, ", "overflows"),
+                         ("vortex_interval = 15, 40000000, max_vortex_speed = 40, 0, ", "overflows"),
                          ("track_level = 0, ", "track_level = 0"),
                          ("track_level = 20000000, ", "track_level = 20000000"),
                          ("time_to_move = 0., .true., ", "time_to_move = True"),
