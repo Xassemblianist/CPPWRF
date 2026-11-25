@@ -953,6 +953,9 @@ enum FatalCode : int {
   kFatalUrbanSurface = 19,           // SLUCM: an urban category point that is water or sea ice (not a WRF stop)
   kFatalUrbanInput = 20,             // SLUCM: NUDAPT morphology (HGT_URB2D > 0)
   kFatalRucVilka = 30,               // RUC LSM VILKA: the saturation table index leaves 1..5000
+  kFatalLakeSnl = 40,                // lake model ShalLakeFluxes: snl outside -5..0 (WRF stops)
+  kFatalLakeTsoisno = 41,            // lake model ShalLakeTemperature: |t_soisno - 288| > 150 (WRF stops)
+  kFatalLakeImelt = 42,              // lake model: a new snow layer compacted by WRF's undefined imelt (not a WRF stop)
 };
 struct FatalError : std::runtime_error {
   int code;

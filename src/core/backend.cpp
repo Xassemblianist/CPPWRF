@@ -737,6 +737,12 @@ const char* fatal_message(int code) {
       return "sf_urban_physics = 1: urban morphology input (HGT_URB2D > 0, NUDAPT: the UCM reads an undefined U10 and "
              "SW then) is not supported";
     case kFatalRucVilka: return " crash in surface energy budget ";
+    case kFatalLakeSnl: return "snl: out of range value";
+    case kFatalLakeTsoisno: return " WARNING: Extreme t_soisno at c, level";
+    case kFatalLakeImelt:
+      return "sf_lake_physics = 1: a snow layer made this step on a lake with liquid water in it: WRF's SnowCompaction "
+             "reads the undefined imelt(0) of LakeMain there (PhaseChange_Lake sets imelt only for existing layers); "
+             "not supported";
     default: return "unknown fatal condition in a physics kernel";
   }
 }
