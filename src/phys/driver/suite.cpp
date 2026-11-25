@@ -706,12 +706,12 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     dfgdp = Field2(g, Stagger::M, "dfgdp");
   }
   if (o.bl_pbl_physics == 2) {
-    myjpbl::myjpbl_reserve(g.columns());  // CUDA FP64: its column arrays in the work buffer
+    myjpbl::myjpbl_reserve(g.columns());  // CUDA FP64 / FP32 identity: its column arrays in the work buffer
     lowlyr.upload(std::vector<int>(lowlyr.layout().total, 1));
     tke_pbl.fill_host([](int, int, int) { return 0.2; });       // myjpblinit: TKE_MYJ = EPSQ2 = 0.2
   }
   if (o.bl_pbl_physics == 4) {  // qnsepblinit (not restart): TKE_PBL = EPSQ2L = 0.01 (a restart reads it from wrfrst)
-    qnsepbl::qnsepbl_reserve(g.columns());  // CUDA FP64: its column arrays in the work buffer
+    qnsepbl::qnsepbl_reserve(g.columns());  // CUDA FP64 / FP32 identity: its column arrays in the work buffer
     tke_pbl.fill_host([](int, int, int) { return 0.01; });
     // mfshconvpblinit zeroes the EDKF diagnostics only (not kept here); RC_MF starts at the Registry's 0
     if (o.mfshconv == 1) {
@@ -739,7 +739,7 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     lowlyr.upload(std::vector<int>(lowlyr.layout().total, 1));
   }
   if (o.cu_physics == 1 || o.cu_physics == 11) {  // kf_eta_init / mskf_init (MSKF_LUTAB: the same tables)
-    if (o.cu_physics == 1) cu_kf::kf_reserve<real>(g.columns(), g.nz);  // CUDA FP64: its column arrays in the work buffer
+    if (o.cu_physics == 1) cu_kf::kf_reserve<real>(g.columns(), g.nz);  // CUDA FP64 / FP32 identity: its column arrays in the work buffer
     using namespace wrfc;
     cu_kf::KFTables<real> h_kf{};
     cu_kf::init_kf_tables(h_kf, svp1, svp2, svp3, svpt0);

@@ -68,7 +68,7 @@ static constexpr real ZRVORD = XRV / XRD;
 static constexpr real XRDCP = XRD / XCPD;
 
 // The kernel's column arrays (1-based as in the Fortran, levels 1 .. nz + 1): in the column work buffer in CUDA FP64
-// builds, local arrays otherwise (as MYJ's, myjpbl.hpp)
+// and FP32 identity builds, local arrays otherwise (as MYJ's, myjpbl.hpp)
 #define CPPWRF_MF_COLUMN(X) \
   X(real, zz, kMaxLevels + 2) X(real, dzz, kMaxLevels + 2) X(real, rhodj, kMaxLevels + 2) \
   X(real, rhodref, kMaxLevels + 2) X(real, pabs, kMaxLevels + 2) X(real, thm, kMaxLevels + 2) \
@@ -185,7 +185,7 @@ struct MFSHCONVKernel {
   int stepbl;
   int nz;
   int tile_i0 = 0, tile_j0 = 0, tile_nx = 1, tile_n = 1;  // WRF's tile (its..ite x jts..jte): the libmvec lanes
-#if defined(CPPWRF_DOUBLE)
+#if defined(CPPWRF_LOCAL_ROUNDING)
   ColumnWork work{};  // the GPU's column arrays (column_for_work)
   static constexpr std::size_t kWorkBytes = 0 CPPWRF_MF_COLUMN(CPPWRF_COLUMN_BYTES);
 #endif

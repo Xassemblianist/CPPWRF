@@ -4,7 +4,7 @@
 namespace cppwrf::phys::qnsepbl {
 
 void run_qnsepbl(const QNSEPBLKernel& kernel, const Range2D& range) {
-#if defined(CPPWRF_DOUBLE)  // the column arrays in the work buffer (as MYJ's)
+#if defined(CPPWRF_LOCAL_ROUNDING)  // the column arrays in the work buffer (as MYJ's)
   column_for_work(range, kernel);
 #else
   column_for(range, kernel);
@@ -12,7 +12,7 @@ void run_qnsepbl(const QNSEPBLKernel& kernel, const Range2D& range) {
 }
 
 void qnsepbl_reserve([[maybe_unused]] const Range2D& range) {
-#if defined(CPPWRF_DOUBLE)
+#if defined(CPPWRF_LOCAL_ROUNDING)
   column_work_reserve(range, QNSEPBLKernel::kWorkBytes);
 #endif
 }

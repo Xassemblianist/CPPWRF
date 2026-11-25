@@ -18,10 +18,11 @@ CPPWRF_HD inline T c_abs(T a) { return (a < T(0)) ? -a : a; }
 static constexpr int kMaxLevels = 128;
 
 // The kernel's column arrays (1-based as in the Fortran: 1 .. nz, zhk 1 .. nz + 1): the column, the tridiagonal
-// and level-2.5 work arrays shared by MIXLEN, VDIFQ, VDIFH and VDIFV. CUDA FP64 builds keep them in the column
-// work buffer (core/column_work.hpp) instead of the thread's stack, which the GPU reserves for every thread it can
-// hold (19.6 KB per thread). FP32 builds keep the local arrays: myjpbl.cpp contracts multiply-adds there, and the
-// contraction follows the code around it.
+// and level-2.5 work arrays shared by MIXLEN, VDIFQ, VDIFH and VDIFV. CUDA FP64 and FP32 identity builds keep them
+// in the column work buffer (core/column_work.hpp) instead of the thread's stack, which the GPU reserves for every
+// thread it can hold (19.6 KB per thread in FP64); the stored values and the arithmetic are the same. The fast CUDA
+// FP32 build keeps the local arrays: myjpbl.cpp contracts multiply-adds there, and the contraction follows the code
+// around it. CPU builds: local arrays either way.
 #define CPPWRF_MYJ_COLUMN(X) \
   X(real, tk, kMaxLevels + 1) X(real, thek, kMaxLevels + 1) X(real, qk, kMaxLevels + 1) \
   X(real, cwmk, kMaxLevels + 1) X(real, qcwk, kMaxLevels + 1) X(real, qcik, kMaxLevels + 1) \
@@ -30,7 +31,7 @@ static constexpr int kMaxLevels = 128;
   X(real, dtoz, kMaxLevels + 1) X(real, gm, kMaxLevels + 1) X(real, gh, kMaxLevels + 1) \
   X(real, el, kMaxLevels + 1) X(real, rhok, kMaxLevels + 1) X(real, akhk, kMaxLevels + 1) \
   X(real, akmk, kMaxLevels + 1)
-#if defined(CPPWRF_DOUBLE)
+#if defined(CPPWRF_LOCAL_ROUNDING)
 #define CPPWRF_MYJ_ARRAY CPPWRF_COLUMN_ARRAY
 #define CPPWRF_MYJ_SLOTS(work, i, j) CPPWRF_COLUMN_SLOTS(work, i, j)
 using MyjPtr = ColPtr<real>;    // a column array as a parameter
@@ -661,7 +662,7 @@ struct MYJPBLKernel {
   bool has_qi;
   int i0;
   int nx;
-#if defined(CPPWRF_DOUBLE)
+#if defined(CPPWRF_LOCAL_ROUNDING)
   ColumnWork work{};  // the GPU's column arrays (column_for_work)
   static constexpr std::size_t kWorkBytes = 0 CPPWRF_MYJ_COLUMN(CPPWRF_COLUMN_BYTES);
 #endif
@@ -841,7 +842,7 @@ struct MYJPBLKernel {
 };
 
 // Host launcher functions
-// The GPU work buffer of run_myjpbl over range (outside the time loop; CUDA FP64 builds, otherwise a no-op)
+// The GPU work buffer of run_myjpbl over range (outside the time loop; CUDA FP64 and FP32 identity, else a no-op)
 void myjpbl_reserve(const Range2D& range);
 
 void run_myjpbl(
