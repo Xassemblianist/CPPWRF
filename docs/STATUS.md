@@ -135,7 +135,7 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | KESSKF | P4 with Kessler instead of WSM6 (Kain-Fritsch rain in Kessler's split sedimentation steps) | 1 h |
 | DUD | V1 with the Dudhia shortwave and RRTMG longwave (00 UTC: sunrise over the Bay of Bengal, the whole domain sunlit within the hour) | 1 h |
 | RRTM | V1 with the RRTM longwave and RRTMG shortwave | 3 steps, 1 h |
-| OB1 | P4 with observation nudging (obs_nudge_opt 1, synthetic OBS_DOMAIN101; restarted at 30 min) | 1 h |
+| OB1 | P4 with observation nudging (obs_nudge_opt 1, synthetic OBS_DOMAIN101; OB1R: obs_ionf 4, restarted at 30 min) | 1 h |
 | OB2 | OB1 with the MM5 surface schemes, no PBL nudging, scaled qv innovations, sfcfact / sfcfacr, dpsmx | 1 h |
 | OB3 | OB1 with dynamic initialisation (idynin, dtramp 30 min), regime-based vertical ramps, nudgezmax | 1 h |
 | OB4 | OB1 with wind nudging only, MM5 horizontal weights | 1 h |

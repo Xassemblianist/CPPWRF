@@ -792,7 +792,7 @@ nesting from a parent run's wrfout) is not part of CPPWRF.
 | boundary (`wrfbdy_d01`) | read for domain 1 every `interval_seconds` | from real.exe or cppwrf_real |
 | auxinput4 (`wrflowinp_d0N`) | read with `sst_update = 1` every `auxinput4_interval` | from real.exe or cppwrf_real |
 | auxinput10 (`wrffdda_d0N`) | read with `grid_fdda = 1` at the start and every `gfdda_interval_m` up to `gfdda_end_h` | from real.exe or cppwrf_real (`gfdda_inname`) |
-| observations (`OBS_DOMAIN<id>01`) | read with `obs_nudge_opt = 1` every step up to the reports of the next `obs_twindo` / 2 | from OBSGRID (little_r reports, `fdda.obs_file`) |
+| observations (`OBS_DOMAIN<id>01`) | read with `obs_nudge_opt = 1` at the run's first step and every `obs_ionf` steps (times the nest ratios) until `fdda_end`, the reports up to `obs_twindo` hours ahead | from OBSGRID (little_r reports, `fdda.obs_file`) |
 | history (h:0) | written every `history_interval` per domain | `wrfout_d0N_<date>` (`history_outname`, `frames_per_outfile`, `iofields_filename`) |
 | restart (r) | written every `restart_interval` for every domain | `wrfrst_d0N_<date>` (`rst_outname`) and CPPWRF's `restart_<step>.nc` |
 | auxhist3 (h:3) | written with `output_diagnostics = 1` every `auxhist3_interval` | `auxhist3_d0N_<date>` (`auxhist3_outname`, `frames_per_auxhist3`) |

@@ -37,10 +37,12 @@ CASES = [
      f"{WR}/run_OB1_r8/steps/wrfout_d01_{_D}", 180, _T),
     ("real_ob1_r8_fp64_cpu_1h", "cpu_dp", "configs/real_ob1_r8.ini", ["real.dir=" + f"{WR}/run_OB1_r8"] + _1H,
      f"{WR}/run_OB1_r8/wrfout_d01_{_D}", 3600, _T),
-    # 1 h restarted at 30 min against WRF's OB1 run restarted there (run_OB1R_r8, run.segment=1800): the resumed run
-    # reads OBS_DOMAIN101 again from the restart time (in4dob at ktaur) and calls errob at its first step (idarst)
+    # OB1R = OB1 with obs_ionf 4, 1 h restarted at 30 min against WRF's run restarted there (run_OB1R_r8,
+    # run.segment=1800, restart_interval 30): the resumed run reads OBS_DOMAIN101 again from the restart time (in4dob
+    # at ktaur) and calls errob at its first step (idarst; ktaur 30 is no multiple of obs_ionf), the model levels of
+    # the reports recomputed there
     ("real_ob1r_r8_fp64_cpu_1h_rst", "cpu_dp", "configs/real_ob1_r8.ini",
-     ["real.dir=" + f"{WR}/run_OB1R_r8"] + _1H + ["suite.restart_at=1800"],
+     ["real.dir=" + f"{WR}/run_OB1R_r8", "fdda.obs_ionf=4"] + _1H + ["suite.restart_at=1800"],
      f"{WR}/run_OB1R_r8/wrfout_d01_{_D}", 3600, _T),
     # FP32 GPU against the real*8 run (no real*4 WRF run of OB1): bounds of the P4 FP32 case's order
     ("real_ob1_fp32_1h", "cuda", "configs/real_ob1_r8.ini", ["real.dir=" + f"{WR}/run_OB1_r8"] + _1H,
@@ -76,7 +78,7 @@ CASES += [(c[0].replace("_fp64_cpu", "_fp64_cuda"), "cuda_dp") + tuple(c[2:]) fo
 # the rows of docs/STATUS.md's table of the CPU FP64 cases (wrf_suite.py --status-table): case, configuration,
 # duration
 STATUS = [
-    ('OB1', 'P4 with observation nudging (obs_nudge_opt 1, synthetic OBS_DOMAIN101; restarted at 30 min)', '1 h'),
+    ('OB1', 'P4 with observation nudging (obs_nudge_opt 1, synthetic OBS_DOMAIN101; OB1R: obs_ionf 4, restarted at 30 min)', '1 h'),
     ('OB2', 'OB1 with the MM5 surface schemes, no PBL nudging, scaled qv innovations, sfcfact / sfcfacr, dpsmx', '1 h'),
     ('OB3', 'OB1 with dynamic initialisation (idynin, dtramp 30 min), regime-based vertical ramps, nudgezmax', '1 h'),
     ('OB4', 'OB1 with wind nudging only, MM5 horizontal weights', '1 h'),
