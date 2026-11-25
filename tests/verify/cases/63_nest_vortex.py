@@ -43,9 +43,10 @@ CASES = [
        _refs(f"{WR}/run_VX1_r8/steps"), 180, _TOL) for b in ("cpu", "cuda")],
     *[(f"real_vx1_r8_fp64_{b}_1h", f"{b}_dp", "configs/real_n3.ini", _run("run_VX1_r8", _VX1),
        _refs(f"{WR}/run_VX1_r8"), 3600, _TOL) for b in ("cpu", "cuda")],
-    # 10 min with history every minute on both domains (the steps config's output interval: one parent step)
-    *[(f"real_vx2_r8_fp64_{b}", f"{b}_dp", "configs/real_n3_steps.ini", _run("run_VX2_r8", _VX2),
-       _refs(f"{WR}/run_VX2_r8"), 600, _TOL) for b in ("cpu", "cuda")],
+    # 10 min (run.run_time: the case's time is not passed to the run) with history every minute on both domains (the
+    # steps config's output interval: one parent step)
+    *[(f"real_vx2_r8_fp64_{b}", f"{b}_dp", "configs/real_n3_steps.ini",
+       _run("run_VX2_r8", _VX2, ("run.run_time=600",)), _refs(f"{WR}/run_VX2_r8"), 600, _TOL) for b in ("cpu", "cuda")],
     ("real_vx1_fp32_cpu", "cpu_sp", "configs/real_n3_steps.ini", _steps("run_VX1_cpu_sp", _VX1),
      _refs(f"{WR}/run_VX1_cpu_sp/steps"), 180, _TOL),
     ("real_vx1_fp32_cpu_1h", "cpu_sp", "configs/real_n3.ini", _run("run_VX1_cpu_sp", _VX1),

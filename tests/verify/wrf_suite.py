@@ -160,14 +160,20 @@ def config_vs_namelist(cfg, sets, nml):
     """Options of the case's configuration (cfg and its --set) that differ from tools/wrf2cppwrf.py's translation of
     the namelist.input of the WRF run that made the reference (options both set; paths by their real path; the run
     length, output and restart settings aside), or the translation's errors. A case with output.auxhist3=true (the
-    translation of io_form_auxhist3 = 2, which needs WRF history output) is translated with --format wrfout."""
+    translation of io_form_auxhist3 = 2, which needs WRF history output) is translated with --format wrfout; a case
+    with domains.vortex_following = true with --vortex-following."""
     nl = read_namelist(nml)
     from tools.wrf2cppwrf import WrfTranslator
-    tr = WrfTranslator(nl, namelist_path=nml, output_format="wrfout" if auxhist3_check(sets, cfg) else "native")
+    conf = configuration(cfg, sets)
+    # a vortex-following case's reference comes from a wrf.exe built with vortex following, which the namelist does
+    # not say (tools/wrf2cppwrf.py --vortex-following)
+    vortex = str(conf.get("domains", {}).get("vortex_following", "false")).strip().lower() in ("true", "1", ".true.",
+                                                                                                "t", "yes")
+    tr = WrfTranslator(nl, namelist_path=nml, output_format="wrfout" if auxhist3_check(sets, cfg) else "native",
+                       vortex_following=vortex)
     gen = tr.translate()
     if tr.errors:
         return [f"{nml} does not translate: {tr.errors}"]
-    conf = configuration(cfg, sets)
 
     def norm(v):
         v = os.path.expandvars(str(v)).strip().strip("'\"").replace(" ", "")
