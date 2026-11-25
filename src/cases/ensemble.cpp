@@ -388,8 +388,7 @@ int run_ensemble(const std::string& path, const std::vector<std::string>& ov, co
 #endif
           set_thread_stream_sync(true);
           // the member's own fatal flags (core/backend.hpp): a code one member raises stops that member, never
-          // another one that runs the same scheme at the same time (HIP: the host flags; the device's one word is
-          // read by every member's checks, see above)
+          // another one that runs the same scheme at the same time (CUDA and HIP: the launches carry the slot)
           set_fatal_slot(i + 1);
           body(i);
           // the thread ends: its stream, graphs, flag slots, work and upload buffers are not kept for the process

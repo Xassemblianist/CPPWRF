@@ -4,6 +4,9 @@
 // (klon = 1). Arrays keep the Fortran 1-based level index (k = 1 is the model TOP, k = klev the lowest
 // level; klev + 1 is the surface for half levels), sized kMaxLevels + 2. Every statement follows the
 // Fortran in order; x**2 is x*x (gfortran powi), x**real is pow.
+// MAX / MIN: fmax_x86 / fmin_x86 (core/backend.hpp) in the Fortran's operand order; a zero constant as the first
+// operand (MAX(0., x)) is fmax_x86_k / fmin_x86_k, which keep it on a tie of two zeros as gfortran's maxsd / minsd
+// and the CPU build's glibc call (g++ passes the constant second) do.
 #include <cmath>
 
 #include "core/backend.hpp"
@@ -311,7 +314,7 @@ CPPWRF_HD inline void cutypen(const NtConst<T>& c, int klev, ColCPtr<T> pqen, Co
         zqsu = fmin_x86(T(0.5), zqsu);
         T zcor = T(1.) / (T(1.) - c.vtmpc1 * zqsu);
         zqsu = zqsu * zcor;
-        zdq = fmin_x86(T(0.), pqu[ik] - zqsu);
+        zdq = fmin_x86_k(T(0.), pqu[ik] - zqsu);
         const T zalfaw = foealfa(ptu[ik]);
         const T aw = ptu[ik] - c4les, ai = ptu[ik] - c4ies;
         const T zfacw = c.c5les / (aw * aw);
@@ -715,7 +718,7 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
             kup[jk] = (kup[jk + 1] * (T(1.) - zdken) + zdkbuo) / (T(1.) + zdken);
             if (zbuo[jk] < T(0.)) {
               T zkedke = kup[jk] / fmax_x86(T(1.e-10), kup[jk + 1]);
-              zkedke = fmax_x86(T(0.), fmin_x86(T(1.), zkedke));
+              zkedke = fmax_x86_k(T(0.), fmin_x86(T(1.), zkedke));
               const T zmfun = std::sqrt(zkedke) * pmfu[jk + 1];
               zdmfde = fmax_x86(zdmfde, pmfu[jk + 1] - zmfun);
               plude[jk] = plu[jk + 1] * zdmfde;
@@ -775,9 +778,9 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
           else zd = zzco * zdfi;
           const T zint = libm::exp(-zd);
           T zlnew = zluold * zint + zc / zd * (T(1.) - zint);
-          zlnew = fmax_x86(T(0.), fmin_x86(plu[jk], zlnew));
+          zlnew = fmax_x86_k(T(0.), fmin_x86(plu[jk], zlnew));
           zlnew = fmin_x86(z_cldmax, zlnew);
-          zprecip = fmax_x86(T(0.), zluold + zc - zlnew);
+          zprecip = fmax_x86_k(T(0.), zluold + zc - zlnew);
           pdmfup[jk] = zprecip * pmfu[jk];
           zlrain[jk] = zlrain[jk] + zprecip;
           plu[jk] = zlnew;
@@ -795,7 +798,7 @@ CPPWRF_HD inline void cuascn(const NtConst<T>& c, int klev, ColPtr<T> ptenh, Col
           const T zd = zvv / zwu;
           const T zint = libm::exp(-zd);
           T zrnew = zrold * zint + zc / zd * (T(1.) - zint);
-          zrnew = fmax_x86(T(0.), fmin_x86(zlrain[jk], zrnew));
+          zrnew = fmax_x86_k(T(0.), fmin_x86(zlrain[jk], zrnew));
           zlrain[jk] = zrnew;
         }
       }
@@ -1063,15 +1066,15 @@ CPPWRF_HD inline void cuflxn(const NtConst<T>& c, int klev, T ztmst, ColCPtr<T> 
     if (ldcum && jk >= kcbot) {
       const T zrfl = pmflxr[jk] + pmflxs[jk];
       if (zrfl > T(1.e-20)) {
-        const T zdrfl1 = zcpecons * fmax_x86(T(0.), pqsen[jk] - pqen[jk]) * zcucov *
+        const T zdrfl1 = zcpecons * fmax_x86_k(T(0.), pqsen[jk] - pqen[jk]) * zcucov *
                          libm::pow(std::sqrt(paph[jk] / paph[klev + 1]) / T(5.09e-3) * zrfl / zcucov, T(0.5777)) *
                          (paph[jk + 1] - paph[jk]);
         T zrnew = zrfl - zdrfl1;
-        const T zrmin = zrfl - zcucov * fmax_x86(T(0.), rhevap * pqsen[jk] - pqen[jk]) * zcons2 *
+        const T zrmin = zrfl - zcucov * fmax_x86_k(T(0.), rhevap * pqsen[jk] - pqen[jk]) * zcons2 *
                                    (paph[jk + 1] - paph[jk]);
         zrnew = fmax_x86(zrnew, zrmin);
         const T zrfln = fmax_x86(zrnew, T(0.));
-        const T zdrfl = fmin_x86(T(0.), zrfln - zrfl);
+        const T zdrfl = fmin_x86_k(T(0.), zrfln - zrfl);
         const T zdenom = T(1.) / fmax_x86(T(1.e-20), pmflxr[jk] + pmflxs[jk]);
         T zalfaw = foealfa(pten[jk]);
         if (pten[jk] < tmelt) zalfaw = T(0.);
@@ -1320,10 +1323,10 @@ CPPWRF_HD inline void cumastrn(const NtConst<T>& c, int klev, ColCPtr<T> pten, C
     ztauc = fmin_x86(T(10800.), ztauc);
     const T ztau = ztauc * scale_fac;
     if (C::nonequil) {
-      zcape2 = fmax_x86(T(0.), zcape2);
-      zcape = fmax_x86(T(0.), fmin_x86(zcape1 - zcape2, T(5000.)));
+      zcape2 = fmax_x86_k(T(0.), zcape2);
+      zcape = fmax_x86_k(T(0.), fmin_x86(zcape1 - zcape2, T(5000.)));
     } else {
-      zcape = fmax_x86(T(0.), fmin_x86(zcape1, T(5000.)));
+      zcape = fmax_x86_k(T(0.), fmin_x86(zcape1, T(5000.)));
     }
     zheat = fmax_x86(T(1.e-4), zheat);
     zmfub1 = (zcape * zmfub) / (zheat * ztau);
@@ -1640,7 +1643,7 @@ CPPWRF_HD inline void cu_ntiedtke_run(const NtConst<T>& c, int km, ColPtr<T> pu,
     zqp1[k] = zqp1[k] + (pqte[k] - zqq[k]) * ztmst;
     pqv[k] = zqp1[k] / (T(1.0) - zqp1[k]);
   }
-  zprecc = fmax_x86(T(0.0), (prsfc + pssfc) * ztmst);
+  zprecc = fmax_x86_k(T(0.0), (prsfc + pssfc) * ztmst);
   if (NtConst<T>::lmfdudv) {
     for (int k = 1; k <= km; ++k) {
       pu[k] = pu[k] + pvom[k] * ztmst;

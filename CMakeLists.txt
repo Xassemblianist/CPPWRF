@@ -152,7 +152,7 @@ if(CPPWRF_ENABLE_HIP)
   foreach(_cppwrf_cfg IN LISTS _cppwrf_configs)
     string(TOUPPER "${_cppwrf_cfg}" _cppwrf_bt)
     if("${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_cppwrf_bt}}" MATCHES
-       "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only|approx-func|gpu-flush-denormals-to-zero|gpu-approx-transcendentals|no-hip-fp32-correctly-rounded-divide-sqrt|no-honor-nans|no-honor-infinities|denormal-fp-math[-a-z0-9]*=(preserve-sign|positive-zero))|-ffp-model=(fast|aggressive)|-ffp-contract=(fast|on)|-munsafe-fp-atomics|${_cppwrf_x87})")
+       "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only|approx-func|no-signed-zeros|gpu-flush-denormals-to-zero|gpu-approx-transcendentals|cuda-flush-denormals-to-zero|cuda-approx-transcendentals|no-hip-fp32-correctly-rounded-divide-sqrt|no-honor-nans|no-honor-infinities|denormal-fp-math[-a-z0-9]*=[a-z-]*,?(preserve-sign|positive-zero|dynamic))|-ffp-model=(fast|aggressive)|-ffp-contract=(fast|on|fast-honor-pragmas)|-munsafe-fp-atomics|${_cppwrf_x87})")
       message(FATAL_ERROR "CMAKE_HIP_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
     endif()
   endforeach()

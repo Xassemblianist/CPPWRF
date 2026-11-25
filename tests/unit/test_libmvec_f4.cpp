@@ -10,8 +10,12 @@
 //              special x / y (0, negatives, denormals, Inf, NaN) with random partners.
 // sinf / cosf also every 97th bit pattern with |x| <= 2 pi. expf, logf, sinf, cosf and atanf use IEEE operations only
 // (any x86-64 CPU); powf's results equal libmvec's only on Intel (rcpps):
-// elsewhere the powf differences are reported, not failed.
+// elsewhere the powf differences are reported, not failed. The ports are glibc 2.41's, and their out-of-range lanes
+// call glibc 2.41's scalar functions (glibc_mathf_host.cpp) where the system's libmvec calls the system's: on another
+// glibc (an Ubuntu node of tools/amd/amd_run.sh) every difference is reported, none fails the test (as
+// test_glibc_mathf). The vm:: lane checks fail on any glibc.
 #include <cpuid.h>
+#include <gnu/libc-version.h>
 
 #include <cstdint>
 #include <cstdio>
@@ -86,12 +90,17 @@ static long check_all(const char* name, Port port, Vec vec) {  // every float bi
 
 int main(int argc, char** argv) {
   const bool intel = is_intel();
+  const bool strict = std::strcmp(gnu_get_libc_version(), "2.41") == 0;
+  if (!strict)
+    std::printf("glibc %s, not 2.41: the differences from the system's libmvec are reported, not failed\n",
+                gnu_get_libc_version());
   if (argc > 1 && std::strcmp(argv[1], "all") == 0) {
     long d = check_all("expf", [](float x) { return cppwrf::mvec4::expf(x); }, [](__m128 x) { return _ZGVbN4v_expf(x); });
     d += check_all("logf", [](float x) { return cppwrf::mvec4::logf(x); }, [](__m128 x) { return _ZGVbN4v_logf(x); });
     d += check_all("sinf", [](float x) { return cppwrf::mvec4::sinf(x); }, [](__m128 x) { return _ZGVbN4v_sinf(x); });
     d += check_all("cosf", [](float x) { return cppwrf::mvec4::cosf(x); }, [](__m128 x) { return _ZGVbN4v_cosf(x); });
     d += check_all("atanf", [](float x) { return cppwrf::mvec4::atanf(x); }, [](__m128 x) { return _ZGVbN4v_atanf(x); });
+    if (!strict) d = 0;
     std::printf("%s\n", d ? "test_libmvec_f4 all FAILED" : "test_libmvec_f4 all passed");
     return d ? 1 : 0;
   }
@@ -156,6 +165,7 @@ int main(int argc, char** argv) {
   }
   std::printf("powf: %zu inputs, %ld differ (%s CPU)\n", px.size() / 4 * 4, dpow, intel ? "Intel" : "non-Intel");
   if (intel) fails += dpow;
+  if (!strict) fails = 0;  // (another glibc: reported above)
   // the vm:: lanes: iterations 0 ... 4*(n/4)-1 vector, the rest scalar
   for (int n = 0; n < 12; ++n)
     for (int i = 0; i < n; ++i)
