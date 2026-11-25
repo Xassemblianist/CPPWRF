@@ -880,6 +880,53 @@ class WrfTranslator:
     def notice(self, msg: str):
         self.notices.append(msg)
 
+    def translate_moves(self, sections: Dict[str, Dict[str, Any]], num_moves: int, max_dom: int) -> None:
+        """&domains num_moves > 0: WRF's prescribed moves (share/mediation_nest_move.F time_for_move2) as [domains]
+        num_moves, move_id, move_interval, move_cd_x, move_cd_y (the first num_moves entries, a missing entry the
+        Registry default) and [d0N] corral_dist. CPPWRF moves a nest of domain 1 without nests of its own, by one
+        parent cell per move (src/cases/nest_move.cpp)."""
+        def entries(key: str) -> List[int]:
+            vals = list(self.get_opt_list("domains", key))[:num_moves]
+            vals += [REGISTRY_DEFAULTS[key][1]] * (num_moves - len(vals))
+            for v in vals:
+                if not isinstance(v, int) or isinstance(v, bool):
+                    self.error(f"WRF &domains.{key} = {vals}: integers expected.")
+            return vals
+        ids, ivs, cdx, cdy = (entries(k) for k in ("move_id", "move_interval", "move_cd_x", "move_cd_y"))
+        parents = [self.get_dom_opt("domains", "parent_id", d, 0, fallback_d0=False) for d in range(max_dom)]
+        for k in range(num_moves):
+            mid = ids[k]
+            if not isinstance(mid, int) or ivs[k] == 999999999 or mid < 2 or mid > max_dom:
+                continue  # never moves (WRF: no nest of that id asks for it)
+            if any(cdv not in (-1, 0, 1) for cdv in (cdx[k], cdy[k])):
+                # med_nest_move: wrf_error_fatal ' invalid move: dx, dy ' when |dx| or |dy| > 1
+                self.error(f"WRF move {k + 1}: move_cd_x = {cdx[k]}, move_cd_y = {cdy[k]}: WRF stops with "
+                           "'invalid move' (one parent cell per move).")
+            if parents[mid - 1] != 1:
+                self.error(f"WRF move {k + 1}: move_id = {mid} is a nest of domain {parents[mid - 1]}; CPPWRF "
+                           "moves nests of domain 1 only.")
+            if mid in parents:
+                self.error(f"WRF move {k + 1}: move_id = {mid} has nests of its own; not supported by CPPWRF.")
+            if sum(1 for p in parents if p == 1) > 1:
+                self.error("WRF moving nests with several nests of domain 1 are not supported by CPPWRF.")
+            if ivs[k] < 0:
+                self.error(f"WRF move {k + 1}: move_interval = {ivs[k]} must be >= 0 (minutes).")
+        self._moves_domains = ({
+            "num_moves": num_moves,
+            "move_id": ",".join(str(v) for v in ids),
+            "move_interval": ",".join(str(v) for v in ivs),
+            "move_cd_x": ",".join(str(v) for v in cdx),
+            "move_cd_y": ",".join(str(v) for v in cdy),
+        })  # merged into [domains] below
+        corral = self.get_opt_list("domains", "corral_dist")
+        for d in range(1, max_dom):
+            c = corral[d] if d < len(corral) and corral[d] is not None else REGISTRY_DEFAULTS["corral_dist"][1]
+            if not isinstance(c, int) or c < 1:
+                self.error(f"Domain d{d + 1:02d}: corral_dist = {c} is not supported (an integer >= 1: the nest "
+                           "keeps 2 parent cells from domain 1's edge).")
+            elif c != REGISTRY_DEFAULTS["corral_dist"][1]:
+                sections.setdefault(f"d{d + 1:02d}", {})["corral_dist"] = c
+
     def get_opt_list(self, group: str, key: str) -> List[Any]:
         grp = self.nml.get(group, {})
         self.used_keys.add((group, key))
@@ -3095,8 +3142,21 @@ class WrfTranslator:
             }
 
         # 14. Nested Domains [domains] and [d02]..[d0N]
-        for mv_key in ("vortex_interval", "max_vortex_speed", "corral_dist", "track_level",
-                       "time_to_move", "move_id", "move_interval", "move_cd_x", "move_cd_y"):
+        # moving nests: prescribed moves (WRF built with "preset moves", -DMOVE_NESTS) are translated below; vortex
+        # following (-DVORTEX_CENTER: vortex_interval, max_vortex_speed, track_level) and time_to_move are not
+        # supported. The move_* lists and corral_dist matter only with num_moves > 0 (time_for_move2).
+        num_moves = self.get_opt("domains", "num_moves", 0)
+        if num_moves is None:
+            num_moves = 0
+        if not isinstance(num_moves, int) or num_moves < 0 or num_moves > 50:
+            self.error(f"WRF num_moves = {num_moves} is invalid (0 .. max_moves = 50).")
+            num_moves = 0
+        if num_moves > 0 and max_dom > 1:
+            self.translate_moves(sections, num_moves, max_dom)
+        else:
+            for mv_key in ("move_id", "move_interval", "move_cd_x", "move_cd_y", "corral_dist"):
+                self.get_opt_list("domains", mv_key)  # no move: WRF does not read them
+        for mv_key in ("vortex_interval", "max_vortex_speed", "track_level", "time_to_move"):
             if self.has_opt("domains", mv_key):
                 reg = REGISTRY_DEFAULTS.get(mv_key)
                 reg_def = reg[1] if reg else 0
@@ -3105,7 +3165,9 @@ class WrfTranslator:
                 vals = self.get_opt_list("domains", mv_key)
                 checked = vals[:n_mv] if n_mv is not None else vals
                 if any(v is not None and not _same_value(v, reg_def) and v not in (0, False) for v in checked):
-                    self.error(f"WRF moving nest option &domains.{mv_key} = {vals} is not supported by CPPWRF.")
+                    self.error(f"WRF moving nest option &domains.{mv_key} = {vals} is not supported by CPPWRF "
+                               "(vortex following and time_to_move are not ported; prescribed moves are: num_moves, "
+                               "move_id, move_interval, move_cd_x, move_cd_y, corral_dist).")
 
         for vr_key in ("vert_refine_method", "vert_refine_fact"):
             if self.has_opt("domains", vr_key):
@@ -3136,6 +3198,7 @@ class WrfTranslator:
                 "feedback": feedback,
                 "smooth_option": smooth_option,
             }
+            sections["domains"].update(getattr(self, "_moves_domains", {}))
 
             if self.has_opt("domains", "save_topo_from_real"):  # a wrfinput variable, not a namelist option
                 self.error("save_topo_from_real is not a WRF namelist option (WRF reads it from wrfinput_d0N).")

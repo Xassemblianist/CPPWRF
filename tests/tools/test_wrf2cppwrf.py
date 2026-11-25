@@ -2543,9 +2543,43 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                     " time_to_move = 0., move_id = 0, move_interval = 999999999, move_cd_x = 0, move_cd_y = 0, ")
         t, _ = self.translate(self.FULL.replace("&domains ", "&domains " + defaults))
         self.assertEqual(t.errors, [])
-        for bad in ("vortex_interval = 10, ", "move_interval = 999999999, 60, "):
-            t, _ = self.translate(self.FULL.replace("&domains ", "&domains " + bad))
+        for bad in ("vortex_interval = 10, ", "max_vortex_speed = 30, ", "time_to_move = 0., 5., "):
+            t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad))
             self.assertTrue(any("moving nest option" in e for e in t.errors), (bad, t.errors))
+        # the move lists without num_moves: WRF's time_for_move2 does not read them
+        t, _ = self.translate(self.NEST.replace("&domains ", "&domains move_id = 2, move_interval = 60, "))
+        self.assertEqual(t.errors, [])
+
+    def test_prescribed_moves_translated(self):
+        # num_moves > 0 (WRF "preset moves"): [domains] lists of num_moves entries, missing entries the Registry
+        # defaults; a non-default corral_dist goes to [d02]; the option is below the verified tier until its proof
+        moves = ("num_moves = 3, move_id = 2, 2, 2, move_interval = 15, 30, move_cd_x = 1, -1, 0,"
+                 " move_cd_y = 0, 1, -1, corral_dist = 8, 10, ")
+        t, gen = self.translate(self.NEST.replace("&domains ", "&domains " + moves))
+        self.assertEqual(t.errors, [])
+        self.assertEqual(gen["domains"]["num_moves"], 3)
+        self.assertEqual(gen["domains"]["move_id"], "2,2,2")
+        self.assertEqual(gen["domains"]["move_interval"], "15,30,999999999")
+        self.assertEqual(gen["domains"]["move_cd_x"], "1,-1,0")
+        self.assertEqual(gen["domains"]["move_cd_y"], "0,1,-1")
+        self.assertEqual(gen["d02"]["corral_dist"], 10)
+        for bad, msg in (("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 2, ", "invalid move"),
+                         ("num_moves = 51, ", "num_moves = 51"),
+                         ("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, corral_dist = 8, 0, ",
+                          "corral_dist = 0"),
+                         ("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, vortex_interval = 5, ",
+                          "moving nest option")):
+            t, _ = self.translate(self.NEST.replace("&domains ", "&domains " + bad))
+            self.assertTrue(any(msg in e for e in t.errors), (bad, t.errors))
+        # a nest of a nest
+        three = ("&time_control input_from_file = .true., .true., .true. /\n"
+                 "&domains time_step = 60, max_dom = 3, e_we = 120, 121, 61, e_sn = 90, 91, 61, e_vert = 45, 45, 45,"
+                 " dx = 15000, parent_id = 0, 1, 2, i_parent_start = 1, 40, 30, j_parent_start = 1, 30, 30,"
+                 " parent_grid_ratio = 1, 3, 3, parent_time_step_ratio = 1, 3, 3,"
+                 " num_moves = 1, move_id = 3, move_interval = 5, move_cd_x = 1 /\n"
+                 "&bdy_control specified = .true., .false., .false. /\n")
+        t, _ = self.translate(three)
+        self.assertTrue(any("nests of domain 1 only" in e for e in t.errors), t.errors)
 
     def test_omitted_nest_parent_id_rejected(self):
         # Registry default parent_id = 0; omitted nest parent_id must not be inferred as dom_id - 1
