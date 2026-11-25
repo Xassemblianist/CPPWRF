@@ -461,7 +461,9 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   if (o.topo_shading == 1 && !(o.shadlen > 0.0))
     throw std::runtime_error("PhysicsSuite: topo_shading = 1 needs shadlen > 0");
   if (o.slope_rad == 1 || o.topo_shading == 1) topo_ = std::make_unique<TopoFields>(g);
-  if (o.sst_update == 1) xicem = Field2(g, Stagger::M, "xicem");
+  // XICEM: landuse_init's copy of XICE, which only the SST update changes afterwards; with the lake model it keeps
+  // the sea ice of frozen lake points that lakeini sets to 0 in XICE (module_sf_lake.F:5039-5047)
+  if (o.sst_update == 1 || o.sf_lake_physics == 1) xicem = Field2(g, Stagger::M, "xicem");
   // sst_skin / tmn_update: surface_driver every step (module_surface_driver.F:1855-1895). Ported with the Noah LSM
   // (the reference runs); check_a_mundo stops tmn_update = 1 with lagday = 1
   if (o.sst_skin != 0 && o.sst_skin != 1) throw std::runtime_error("PhysicsSuite: sst_skin must be 0 or 1");
@@ -988,7 +990,7 @@ struct KUrbanInit {
 }  // namespace
 
 void PhysicsSuite::init_lake(const std::vector<double>& ht, const std::vector<double>& lake_depth, int lakeflag,
-                             int lake_depth_flag) {
+                             int lake_depth_flag, std::vector<double>* xland_host) {
   if (!lake_) return;
   LakeFields& lk = *lake_;
   const int nx = g_.nx;
@@ -1022,6 +1024,7 @@ void PhysicsSuite::init_lake(const std::vector<double>& ht, const std::vector<do
     for (int i = L.i0(); i < L.i1(); ++i, ++n) {
       const std::size_t q = L.index(i, j, 0), qi = Li.index(i, j, 0);
       hivg[qi] = iv[n]; hxland[q] = xl[n]; hxice[q] = xi[n]; hmask[q] = lm[n];
+      if (xland_host) (*xland_host)[std::size_t(i) + std::size_t(nx) * j] = double(xl[n]);
     }
   copy_to_dev(xland.data() - L.offset, hxland.data(), xland.bytes());
   copy_to_dev(xice.data() - L.offset, hxice.data(), xice.bytes());
@@ -1241,7 +1244,7 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
     v.emplace_back("sfc_sst", &sst);
     v.emplace_back("sfc_tsk_save", &tsk_save);
   }
-  if (o_.sst_update == 1) v.emplace_back("sfc_xicem", &xicem);
+  if (o_.sst_update == 1 || o_.sf_lake_physics == 1) v.emplace_back("sfc_xicem", &xicem);
   if (o_.sst_skin == 1) {
     if (o_.fractional_seaice != 1 && o_.sst_update != 1) v.emplace_back("sfc_sst", &sst);
     v.emplace_back("sfc_sstsk", &sstsk);
@@ -1594,7 +1597,7 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
   if (o_.bl_pbl_physics == 5 && o_.mynn.edmf > 0)  // package mynn_dmp_edmf1
     v.insert(v.end(), {&maxwidth, &maxmf, &ztop_plume, &excess_h, &excess_q});
   if (o_.fractional_seaice == 1 || o_.sst_update == 1) v.insert(v.end(), {&sst, &tsk_save});
-  if (o_.sst_update == 1) v.push_back(&xicem);
+  if (o_.sst_update == 1 || o_.sf_lake_physics == 1) v.push_back(&xicem);
   if (o_.sst_skin == 1) {
     if (o_.fractional_seaice != 1 && o_.sst_update != 1) v.push_back(&sst);
     v.insert(v.end(), {&sstsk, &dtw});

@@ -343,9 +343,10 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   // bl_init's lakeini (module_sf_lake.F:4886-5397; not on restarts): call after the LSM's init with XLAT, TSK, SNOW,
   // XICE, XLAND, IVGTYP, ISLTYP and LAKEMASK of the input in place; ht, lake_depth: wrfinput HGT and LAKE_DEPTH
   // (i + nx*j); lakeflag, lake_depth_flag: wrfinput LAKEFLAG, LAKE_DEPTH_FLAG. Changes IVGTYP, XLAND, XICE at lake
-  // points with sea ice and LAKEMASK (LAKEFLAG 0) as WRF does.
+  // points with sea ice and LAKEMASK (LAKEFLAG 0) as WRF does; xland_host (i + nx*j), when given, gets the patch's
+  // XLAND after lakeini (start_em's topo_wind reads grid%xland after phy_init).
   void init_lake(const std::vector<double>& ht, const std::vector<double>& lake_depth, int lakeflag,
-                 int lake_depth_flag);
+                 int lake_depth_flag, std::vector<double>* xland_host = nullptr);
   urban::UrbanTables urban_tables_;  // urban_param_init (URBPARM.TBL / URBPARM_LCZ.TBL)
   // phy_init's urban_var_init (module_sf_urban.F:3525-4044, not a restart): UTYPE, FRC_URB2D (frc_in: wrfinput's
   // FRC_URB2D, empty: 0), the state from TSK and TSLB; call after TSK, TSLB and IVGTYP hold the input's values.
