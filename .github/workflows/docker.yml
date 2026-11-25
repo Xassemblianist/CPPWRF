@@ -25,7 +25,7 @@ env:
 jobs:
   publish:
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 330  # run 45677809765: 2 h 21 min, of which the CUDA image 2 h 2 min
     steps:
       - name: Check out the image source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
