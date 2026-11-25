@@ -6,7 +6,9 @@
 // med_nest_move skips nl_set_i/j_parent_start, which the interpolation, forcing and feedback read, and start_domain.
 //   time_for_move / time_for_move2: the namelist's num_moves, move_id, move_interval (minutes from the run's start:
 //     the clock's start time, which a restarted run resets), move_cd_x, move_cd_y; a move is used once; the corral
-//     check against domain 1 (corral_dist);
+//     check against domain 1 (corral_dist); with vortex following (wrf.exe built with -DVORTEX_CENTER, configure
+//     nesting 3) time_to_move, the vortex alarm (vortex_interval) and the search of the lowest track_level height
+//     (nest/vortex_center.hpp) instead of the namelist's moves;
 //   shift_domain_em: every state array of the nest by one parent cell (nest/nest_move.hpp);
 //   grid%i_parent_start / j_parent_start += the move, and nl_set_i/j_parent_start (the output's I/J_PARENT_START);
 //   med_interp_domain: every Registry "d" field of the configuration (data/wrf_schema/nest_interpdown-4.8.0.tsv,
@@ -73,16 +75,36 @@ class Scope {
 };
 
 // The namelist's prescribed moves (WRF's model_config_rec: one list for the run; a used move's interval becomes
-// 999999999, as nl_set_move_interval)
+// 999999999, as nl_set_move_interval), or vortex following
 struct Moves {
   int num_moves = 0;
   std::vector<int> move_id, move_interval, move_cd_x, move_cd_y;
   std::vector<int> corral_dist;  // per domain (index id - 1), Registry default 8
-  bool active = false;  // a move of a nest (2 <= move_id <= max_dom) with move_interval < 999999999
+  bool active = false;  // a move of a nest (2 <= move_id <= max_dom) with move_interval < 999999999, or vortex
   bool any() const { return active; }
+
+  // vortex following: wrf.exe built with configure nesting 3 (-DMOVE_NESTS -DVORTEX_CENTER), whose time_for_move2
+  // searches the vortex instead of reading the prescribed moves (which it ignores); every nest of the run is moved
+  bool vortex = false;
+  int track_level = 50000;  // Pa, one value for the run (Registry)
+  // per domain (index id - 1): Registry defaults 15 (minutes), 40 (m/s), 0. (minutes, REAL)
+  std::vector<int> vortex_interval, max_vortex_speed;
+  std::vector<real> time_to_move;
+  // per domain: COMPUTE_VORTEX_CENTER_ALARM (set_timekeeping.F:565-583: RingInterval = vortex_interval minutes,
+  // ringing at the start; ESMF_ClockAdvance rings it at a nest step when PrevRingTime + interval <= the step's time and
+  // then adds the interval to PrevRingTime) and the vortex centre (Registry xi, xj, vc_i, vc_j: -1 at the start)
+  struct VortexState {
+    bool ringing = true;
+    wrf_time::Interval prev_ring{};  // since the start
+    long steps = 0;                  // the nest steps the alarm has seen
+    real xi = real(-1.0), xj = real(-1.0), vc_i = real(-1.0), vc_j = real(-1.0);
+  };
+  std::vector<VortexState> vx;
 };
 // [domains] num_moves, move_id, move_interval, move_cd_x, move_cd_y (comma lists), corral_dist (d0N / domains.d0N_);
-// checks max_moves (50), the moving domains (no children, parent domain 1, ratio, the nest inside its parent)
+// [domains] vortex_following, track_level and [d0N] vortex_interval, max_vortex_speed, time_to_move (also
+// domains.d0N_<key>); checks max_moves (50), the moving domains (no children, parent domain 1, ratio, the nest inside
+// its parent)
 Moves parse_moves(const io::Config& root, int max_dom);
 
 // One domain as the move sees it
@@ -95,11 +117,15 @@ struct Domain {
   int i_parent_start = 1, j_parent_start = 1, ratio = 1;  // a nest's (the grid's copy)
 };
 
-// time_for_move (share/mediation_nest_move.F:657-758) for a nest without children whose parent is domain 1:
-// time_for_move2's prescribed move of this nest due at the nest's clock (now: since the run's start), then the
-// corral check against the parent (a move that would bring the nest within corral_dist parent cells of domain 1's
-// edge is cancelled: "MOAD can not move"). dx, dy: the move in parent cells (-1, 0, 1).
-bool time_for_move(Moves& mv, const Domain& parent, const Domain& nest, const wrf_time::Interval& now, int& dx, int& dy);
+// time_for_move (share/mediation_nest_move.F:753-932) for a nest without children whose parent is domain 1: nothing
+// before time_to_move (xtime, the nest's minutes since the start, < time_to_move); time_for_move2's prescribed move of
+// this nest due at the nest's clock, or (vortex following) the move toward the vortex centre; then the corral check
+// against the parent (a move that would bring the nest within corral_dist parent cells of domain 1's edge is
+// cancelled: "MOAD can not move"; vortex following: vc_i / vc_j get the cancelled move back). dt_clock, nsteps: the
+// nest's clock step and the steps since the run's start (now = dt_clock * nsteps). dx, dy: the move in parent cells
+// (-1, 0, 1).
+bool time_for_move(Moves& mv, const Domain& parent, const Domain& nest, const wrf_time::Interval& dt_clock,
+                   long nsteps, int& dx, int& dy);
 
 // med_nest_move's work after time_for_move: shift, i/j_parent_start, interpolation, time levels. nest's
 // i_parent_start / j_parent_start are updated.

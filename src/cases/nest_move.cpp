@@ -18,6 +18,8 @@
 #include "core/tiles.hpp"
 #include "dyn/state.hpp"
 #include "nest/nest_move.hpp"
+#include "nest/vortex_center.hpp"
+#include "wrf_io/global_atts.hpp"
 #include "phys/driver/suite.hpp"
 
 #ifdef CPPWRF_HAVE_NETCDF
@@ -148,6 +150,46 @@ Moves parse_moves(const io::Config& root, int max_dom) {
         if (mv.corral_dist[std::size_t(id - 1)] < 1) throw std::runtime_error(k + " < 1 is not supported");
       }
   }
+  // vortex following (configure nesting 3): the per-domain keys as corral_dist
+  mv.vortex = root.get_bool("domains.vortex_following", false);
+  mv.track_level = int(root.get_int("domains.track_level", 50000));
+  mv.vortex_interval.assign(std::size_t(std::max(1, max_dom)), 15);
+  mv.max_vortex_speed.assign(std::size_t(std::max(1, max_dom)), 40);
+  mv.time_to_move.assign(std::size_t(std::max(1, max_dom)), real(0.));
+  mv.vx.assign(std::size_t(std::max(1, max_dom)), Moves::VortexState{});
+  for (int id = 1; id <= max_dom; ++id) {
+    char tag[16];
+    std::snprintf(tag, sizeof tag, "d%02d", id);
+    for (const char* name : {"vortex_interval", "max_vortex_speed", "time_to_move"})
+      for (const std::string k : {std::string(tag) + "." + name, "domains." + std::string(tag) + "_" + name})
+        if (root.has(k)) {
+          if (!mv.vortex)
+            throw std::runtime_error(k + ": vortex following (domains.vortex_following = true) only; time_to_move "
+                                     "with prescribed moves is not verified");
+          const std::size_t d = std::size_t(id - 1);
+          if (std::string(name) == "vortex_interval") mv.vortex_interval[d] = int(root.get_int(k));
+          else if (std::string(name) == "max_vortex_speed") mv.max_vortex_speed[d] = int(root.get_int(k));
+          else mv.time_to_move[d] = real(root.get_double(k));  // a REAL namelist value
+        }
+    const std::size_t d = std::size_t(id - 1);
+    // the search box's INTEGER product 60 * vortex_interval * max_vortex_speed (time_for_move2) must not overflow;
+    // vortex_interval: the alarm's minutes
+    if (mv.vortex && (mv.vortex_interval[d] < 0 || mv.max_vortex_speed[d] < 0 ||
+                      std::int64_t(60) * mv.vortex_interval[d] * mv.max_vortex_speed[d] > 2147483647LL))
+      throw std::runtime_error(std::string(tag) + ": vortex_interval (" + std::to_string(mv.vortex_interval[d]) +
+                               ") and max_vortex_speed (" + std::to_string(mv.max_vortex_speed[d]) +
+                               ") must be >= 0 with 60 * vortex_interval * max_vortex_speed < 2^31");
+  }
+  if (mv.vortex) {
+    if (root.has("domains.track_level") && (mv.track_level <= 0 || mv.track_level >= 16777216))
+      throw std::runtime_error("domains.track_level = " + std::to_string(mv.track_level) + " Pa is not supported "
+                               "(0 < track_level < 2^24)");
+    // the vortex build compiles time_for_move2's vortex branch instead of the prescribed moves: num_moves and the
+    // move lists are not read; every nest asks for a move after each of its parent's steps
+    mv.num_moves = 0;
+    mv.active = max_dom > 1;
+    return mv;
+  }
   if (mv.num_moves <= 0) {
     mv.num_moves = 0;
     return mv;
@@ -178,23 +220,51 @@ Moves parse_moves(const io::Config& root, int max_dom) {
 }
 
 // ---------------------------------------------------------------- time_for_move
-bool time_for_move(Moves& mv, const Domain& parent, const Domain& nest, const wrf_time::Interval& now, int& dx,
-                   int& dy) {
+namespace {
+// time_for_move2 of a wrf.exe built with vortex following (below)
+bool time_for_move2_vortex(Moves& mv, const Domain& nest, const wrf_time::Interval& now, int& dx, int& dy);
+}  // namespace
+
+bool time_for_move(Moves& mv, const Domain& parent, const Domain& nest, const wrf_time::Interval& dt_clock,
+                   long nsteps, int& dx, int& dy) {
   dx = dy = 0;
+  if (nsteps > 2147483647L) throw std::runtime_error("moving nests: more than 2^31 - 1 steps of a nest");
+  const wrf_time::Interval now = dt_clock * int(nsteps);
   if (debug()) std::fprintf(stderr, "moving nests: time_for_move d%02d at %lld s (moves %d)\n", nest.id, (long long)now.S, mv.num_moves);
-  // time_for_move2 (prescribed moves): the first move of this nest whose time has come, used once
-  // (nl_set_move_interval( i, 999999999 ))
+  // the vortex alarm of the nest (ESMF_ClockAdvance at each of its steps since the last call)
+  if (mv.vortex) {
+    Moves::VortexState& vs = mv.vx[std::size_t(nest.id - 1)];
+    const wrf_time::Interval iv = wrf_time::make(std::int64_t(mv.vortex_interval[std::size_t(nest.id - 1)]) * 60);
+    for (long k = vs.steps + 1; k <= nsteps; ++k)
+      if (vs.prev_ring + iv <= dt_clock * int(k)) {
+        vs.ringing = true;
+        vs.prev_ring = vs.prev_ring + iv;
+      }
+    vs.steps = std::max(vs.steps, nsteps);
+  }
+  // xtime = grid%xtime (domain_clockadvance: minutesSinceSimulationStart after the step) .lt. time_to_move: no move
+  {
+    const real xtime = wrf_time::minutes<real>(now);
+    const real time_to_move = mv.time_to_move.empty() ? real(0.) : mv.time_to_move[std::size_t(nest.id - 1)];
+    if (xtime < time_to_move) return false;
+  }
   bool t2 = false;
-  for (int i = 0; i < mv.num_moves; ++i) {
-    if (mv.move_id[std::size_t(i)] != nest.id) continue;
-    const int iv = mv.move_interval[std::size_t(i)];
-    if (iv >= 999999999) continue;
-    if (now >= wrf_time::make(std::int64_t(iv) * 60)) {  // ct .GE. st + ti (WRFU_TimeIntervalSet( ti, M=... ))
-      dx = mv.move_cd_x[std::size_t(i)];
-      dy = mv.move_cd_y[std::size_t(i)];
-      mv.move_interval[std::size_t(i)] = 999999999;
-      t2 = true;
-      break;
+  if (mv.vortex) {
+    t2 = time_for_move2_vortex(mv, nest, now, dx, dy);
+  } else {
+    // time_for_move2 (prescribed moves): the first move of this nest whose time has come, used once
+    // (nl_set_move_interval( i, 999999999 ))
+    for (int i = 0; i < mv.num_moves; ++i) {
+      if (mv.move_id[std::size_t(i)] != nest.id) continue;
+      const int iv = mv.move_interval[std::size_t(i)];
+      if (iv >= 999999999) continue;
+      if (now >= wrf_time::make(std::int64_t(iv) * 60)) {  // ct .GE. st + ti (WRFU_TimeIntervalSet( ti, M=... ))
+        dx = mv.move_cd_x[std::size_t(i)];
+        dy = mv.move_cd_y[std::size_t(i)];
+        mv.move_interval[std::size_t(i)] = 999999999;
+        t2 = true;
+        break;
+      }
     }
   }
   if (!t2) return false;
@@ -214,12 +284,15 @@ bool time_for_move(Moves& mv, const Domain& parent, const Domain& nest, const wr
   if (de <= corral) wx += 1;
   if (ds <= corral) wy -= 1;
   if (dn <= corral) wy += 1;
+  Moves::VortexState* vs = mv.vortex ? &mv.vx[std::size_t(nest.id - 1)] : nullptr;
   if (wx != 0 && dx != 0) {
     std::fprintf(stderr, "MOAD can not move. Cancelling nest move in X\n");
+    if (vs) vs->vc_i = vs->vc_i + real(dx * pgr);  // cancel effect of move
     dx = 0;
   }
   if (wy != 0 && dy != 0) {
     std::fprintf(stderr, "MOAD can not move. Cancelling nest move in Y\n");
+    if (vs) vs->vc_j = vs->vc_j + real(dy * pgr);  // cancel effect of move
     dy = 0;
   }
   return dx != 0 || dy != 0;
@@ -245,6 +318,11 @@ void check_window(const Grid& cg, const Grid& ng, int ratio, int ipos, int jpos,
 // ---------------------------------------------------------------- the move
 #ifndef CPPWRF_HAVE_NETCDF
 void move_nest(Domain&, Domain&, int, int) { throw std::runtime_error("moving nests need NetCDF support"); }
+namespace {
+bool time_for_move2_vortex(Moves&, const Domain&, const wrf_time::Interval&, int&, int&) {
+  throw std::runtime_error("moving nests need NetCDF support");
+}
+}  // namespace
 #else
 namespace {
 
@@ -441,6 +519,111 @@ bool parent_array(Domain& p, const std::string& name, std::size_t occurrence, Ar
     return true;
   }
   return false;
+}
+
+// time_for_move2 with -DVORTEX_CENTER (share/mediation_nest_move.F:349-700) for a nest of one patch: when the nest's
+// COMPUTE_VORTEX_CENTER_ALARM rings, the vortex centre from the nest's current ph_2, phb, p, pb (the end of its last
+// step), psfc, ht (nest/vortex_center.hpp); then the move toward it
+bool time_for_move2_vortex(Moves& mv, const Domain& nest, const wrf_time::Interval& now, int& move_cd_x,
+                           int& move_cd_y) {
+  namespace vx = nest::vortex;
+  Domain& N = const_cast<Domain&>(nest);
+  const Grid& g = N.m->g;
+  if (g.patched()) throw std::runtime_error("moving nests in a decomposed run are not supported");
+  const std::size_t d = std::size_t(N.id - 1);
+  Moves::VortexState& vs = mv.vx[d];
+  const int pgr = N.ratio;
+  const int nx = g.nx, ny = g.ny, nz = g.nz;  // ide - 1, jde - 1, kde - 1
+  // nl_get_dx of the nest: check_a_mundo's dx(1) / REAL(parent_grid_ratio) (REAL), the model's grid spacing
+  const real dx = real(g.dx);
+  const std::string timestr = wrf_io::add_seconds(N.m->start_date, long(now.S)).substr(0, 19);
+  vx::Centre c{vs.xi, vs.xj, vs.vc_i, vs.vc_j};
+  if (vs.ringing) {
+    vs.ringing = false;  // WRFU_AlarmRingerOff
+    // the whole domain on the host (wrf_patch_to_global_real: the domain's mass points): the model's ph_2, p and
+    // base state, psfc / u10 / v10 / xlat / xlong by name (a field the configuration does not allocate: WRF's 0)
+    auto host = [&](const void* base, const Layout& L) {
+      Arr a;
+      a.L = L;
+      a.esz = int(sizeof(real));
+      a.h.resize(L.total * sizeof(real));
+      copy_to_host(a.h.data(), base, a.h.size());
+      return a;
+    };
+    const dyn::BaseState& b = *N.m->base;
+    const dyn::State& st = *N.m->st;
+    if (b.phb.uniform() || b.pb.uniform() || b.ht.uniform())
+      throw std::runtime_error("moving nests (vortex following): a horizontally uniform base state is not supported");
+    auto named = [&](const char* name) {
+      Arr a;
+      if (!parent_array(N, name, 0, a)) {
+        a.L = Layout::make(g, Stagger::M, 2);
+        a.esz = int(sizeof(real));
+        a.h.assign(a.L.total * sizeof(real), 0);
+      }
+      if (a.esz != int(sizeof(real)) || a.L.nx < nx || a.L.ny < ny)
+        throw std::runtime_error(std::string("moving nests (vortex following): unexpected layout of ") + name);
+      return a;
+    };
+    Arr ph = host(st.ph_2.base(), st.ph_2.layout()), p = host(st.p.base(), st.p.layout());
+    Arr phb = host(b.phb.base(), b.phb.layout()), pb = host(b.pb.base(), b.pb.layout());
+    Arr ht = host(b.ht.base(), b.ht.layout());
+    Arr psfc_a = named("psfc"), u10 = named("u10"), v10 = named("v10"), xlat = named("xlat"), xlong = named("xlong");
+    auto at = [](Arr& a, int i, int j, int k) { return reinterpret_cast<const real*>(a.data())[a.L.index(i, j, k)]; };
+    const std::size_t n2 = std::size_t(nx) * std::size_t(ny);
+    std::vector<real> height(n2), psfc(n2), terrain(n2);
+    // compute_500mb_height over its, min(ide-1, ite) x jts, min(jde-1, jte): every mass column
+    const std::size_t nk = std::size_t(nz);
+    std::vector<real> cph(nk + 1), cphb(nk + 1), cp(nk), cpb(nk), pressure(nk), geopotential(nk);
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        for (int k = 0; k <= nz; ++k) {
+          cph[std::size_t(k)] = at(ph, i, j, k);
+          cphb[std::size_t(k)] = at(phb, i, j, k);
+        }
+        for (int k = 0; k < nz; ++k) {
+          cp[std::size_t(k)] = at(p, i, j, k);
+          cpb[std::size_t(k)] = at(pb, i, j, k);
+        }
+        const std::size_t ij = std::size_t(j) * std::size_t(nx) + std::size_t(i);
+        if (!vx::height_column(cph.data(), cphb.data(), cp.data(), cpb.data(), nz, mv.track_level, pressure.data(),
+                               geopotential.data(), height[ij])) {
+          std::fprintf(stderr, " interp too high: pressure, p(ke), i, j = %g %g %d %d\n", double(mv.track_level),
+                       double(pressure[std::size_t(nz) - 1]), i + 1, j + 1);
+          throw std::runtime_error(" interp too high (compute_500mb_height, track_level " +
+                                   std::to_string(mv.track_level) + " Pa)");
+        }
+        psfc[ij] = at(psfc_a, i, j, 0);
+        terrain[ij] = at(ht, i, j, 0);
+      }
+    // calculate max wind speed (the ATCF line only): u10 ** 2 + v10 ** 2 over the patch's mass points
+    real maxws = real(0.);
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const real ws = at(u10, i, j, 0) * at(u10, i, j, 0) + at(v10, i, j, 0) * at(v10, i, j, 0);
+        if (ws > maxws) maxws = ws;
+      }
+    maxws = std::sqrt(maxws);
+    const vx::Found f = vx::search(height, psfc, terrain, nx, ny, dx, mv.vortex_interval[d], mv.max_vortex_speed[d], c);
+    const int ia = std::min(std::max(f.i_atcf, 1), nx), ja = std::min(std::max(f.j_atcf, 1), ny);
+    std::fprintf(stderr, "ATCF %s %8.2f %8.2f %6.1f %6.1f\n", timestr.c_str(), double(at(xlat, ia - 1, ja - 1, 0)),
+                 double(at(xlong, ia - 1, ja - 1, 0)), double(real(0.01) * f.pmin), double(maxws * real(1.94)));
+  }
+  const vx::Decision dcs = vx::decide(nx + 1, ny + 1, pgr, c);
+  // (decide shifted vc by the move; WRF prints the centre before that)
+  std::fprintf(stderr, " %s vortex center (in nest x and y): %.10g %.10g\n", timestr.c_str(),
+               double(c.vc_i + real(dcs.move_cd_x * pgr)), double(c.vc_j + real(dcs.move_cd_y * pgr)));
+  std::fprintf(stderr, " %s grid   center (in nest x and y): %.10g %.10g\n", timestr.c_str(), double(dcs.dc_i),
+               double(dcs.dc_j));
+  std::fprintf(stderr, " %s disp          : %.10g %.10g\n", timestr.c_str(), double(dcs.disp_x), double(dcs.disp_y));
+  std::fprintf(stderr, " %s move (rel cd) : %d %d\n", timestr.c_str(), dcs.move_cd_x, dcs.move_cd_y);
+  vs.xi = c.xi;
+  vs.xj = c.xj;
+  vs.vc_i = c.vc_i;
+  vs.vc_j = c.vc_j;
+  move_cd_x = dcs.move_cd_x;
+  move_cd_y = dcs.move_cd_y;
+  return move_cd_x != 0 || move_cd_y != 0;
 }
 
 }  // namespace
