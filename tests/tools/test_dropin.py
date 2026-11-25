@@ -244,3 +244,23 @@ class RealExe(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VortexFollowing(unittest.TestCase):
+    def test_translate_passes_the_build(self):
+        # cppwrf-wrf --vortex-following: the namelist is translated as for a wrf.exe built with vortex following
+        sys.path.insert(0, os.path.join(REPO, "python"))
+        from cppwrf import namelist as nlm
+        d = os.path.join(WORK, "vortex_nml")
+        os.makedirs(d, exist_ok=True)
+        p = os.path.join(d, "namelist.input")
+        with open(p, "w") as f:
+            f.write("&time_control input_from_file = .true., .true. /\n"
+                    "&domains time_step = 60, max_dom = 2, e_we = 120, 121, e_sn = 90, 91, e_vert = 45, 45,"
+                    " dx = 15000, dy = 15000, parent_id = 0, 1, i_parent_start = 1, 40, j_parent_start = 1, 30,"
+                    " parent_grid_ratio = 1, 3, parent_time_step_ratio = 1, 3, vortex_interval = 15, 5 /\n"
+                    "&bdy_control specified = .true., .false. /\n")
+        tr = nlm.translate(p, vortex_following=True)
+        self.assertEqual(tr.sections["domains"].get("vortex_following"), True, tr.errors)
+        self.assertEqual(tr.sections["d02"].get("vortex_interval"), 5)
+        self.assertTrue(any("--vortex-following" in e for e in nlm.translate(p).errors))

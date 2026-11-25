@@ -85,15 +85,16 @@ class Translation:
 
 
 def translate(nml: Any, namelist_path: str = "", output_format: str = "wrfout", real_dir: Optional[str] = None,
-              table_dir: Optional[str] = None, case: Optional[str] = None) -> Translation:
+              table_dir: Optional[str] = None, case: Optional[str] = None,
+              vortex_following: bool = False) -> Translation:
     """Translate a namelist (a path or a parsed Namelist) to a CPPWRF configuration, as
-    `tools/wrf2cppwrf.py NAMELIST --format FORMAT` does."""
+    `tools/wrf2cppwrf.py NAMELIST --format FORMAT [--vortex-following]` does."""
     t = translator()
     if isinstance(nml, str):
         namelist_path = namelist_path or nml
         nml = read(nml)
     tr = t.WrfTranslator(nml, namelist_path=namelist_path, override_case=case, real_dir=real_dir,
-                         table_dir=table_dir, output_format=output_format)
+                         table_dir=table_dir, output_format=output_format, vortex_following=vortex_following)
     sections = tr.translate()
     ini = tr.format_ini(sections)
     return Translation(ini, sections, list(tr.errors), list(tr.warnings), list(tr.notices))
