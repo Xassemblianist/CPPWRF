@@ -418,6 +418,10 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   void set_effective_radii(Field3* re_cloud, Field3* re_ice, Field3* re_snow) {
     re_cloud_ = re_cloud; re_ice_ = re_ice; re_snow_ = re_snow;
   }
+  // the effective radii set above (nullptr: has_reqc = 0); a moved nest's phy_init resets them in the new points
+  Field3* re_cloud_field() const { return re_cloud_; }
+  Field3* re_ice_field() const { return re_ice_; }
+  Field3* re_snow_field() const { return re_snow_; }
   // grid-scale precipitation of the last step (PhysicsCoupling): WRF's grid%rainncv and grid%sr, read by
   // surface_driver (RAINBL) and the Noah LSM (FFROZP = SR); sr = nullptr for schemes without it (WRF: 0)
   void set_microphysics_precip(const Field2* rainncv_mp, const Field2* sr_mp,

@@ -113,6 +113,26 @@ class WrfHistory {
   // the input (share/mediation_wrfmain.F:113-118, mediation_integrate.F:663-666) and med_nest_feedback rewrites it
   // after each feedback (mediation_integrate.F:1052-1069); the feedback of the history fields runs at once
   void set_move_build(bool on) { move_build_ = on; }
+  bool move_build() const { return move_build_; }
+  // the nest's position after a move: WRF dmpar's nl_set_i/j_parent_start (share/mediation_nest_move.F:165-186),
+  // which output_wrf.F:312-315 writes as I_PARENT_START / J_PARENT_START
+  void set_parent_start(int i, int j) {
+    i_parent_start_ = i;
+    j_parent_start_ = j;
+  }
+  // the end of step n of a moving run when no frame is due: grid%th_phy_m_t0 as after_solve takes it
+  void move_track(long n);
+  // a parent's grid%th_phy_m_t0 of its last solve over the domain's memory (the halo 0); false: none
+  bool move_t_source(MoveArray& out);
+  // a move: the last solve's th_phy_m_t0 as the move array "th_phy_m_t0" (shifted with the others, interpolated by
+  // move_nest); move_t_end makes it the last solve's T again (the frame of that step, written after the move)
+  void move_t_begin();
+  void move_t_end();
+  // start_domain after the move: P_HYD = p + pb of the last solve's frame (a run without column physics)
+  void move_set_p_hyd(std::vector<double> p_hyd);
+  // start_domain after the move (start_em.F:1574-1615): TOPOSLPX, TOPOSLPY, LAP_HGT, SLOPE, SLP_AZI from the moved
+  // HGT, map factors and rotation over the whole domain
+  void move_start_em();
   // the queued feedback of the history fields, run now (before a nest of this domain moves)
   void move_flush() { run_queued_feedback(); }
   // the first move of this domain: every history and restart field value() does not take from the model becomes a
@@ -178,6 +198,9 @@ class WrfHistory {
   bool model_only_ = false;
   std::map<std::string, std::vector<double>> fed_;  // nest-feedback values of such fields
   bool move_build_ = false;
+  int i_parent_start_ = 0, j_parent_start_ = 0;  // set_parent_start (0: the namelist's)
+  std::vector<double> t_last_;  // th_phy_m_t0 of the last solve (a moving run), (k, j, i)
+  long t_last_step_ = -1;
   std::map<std::string, MoveArray> moved_;            // moving nests: by Registry varname
   std::map<std::string, std::string> moved_varname_;  // NetCDF name -> varname of moved_
   bool moved_value(const std::string& name, std::size_t n, std::vector<double>& out) const;

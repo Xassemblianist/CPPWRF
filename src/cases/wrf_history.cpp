@@ -387,7 +387,22 @@ void WrfHistory::after_solve(long n) {
   step_ = -1;  // no snapshot lookup: the current state
   const bool ok = value("T", "th_phy_m_t0", {std::size_t(m_.g.nz), std::size_t(m_.g.ny), std::size_t(m_.g.nx)}, t);
   step_ = saved;
-  if (ok) t_snap_[n] = t;
+  if (ok && move_build_) {
+    t_last_ = t;
+    t_last_step_ = n;
+  }
+  if (ok) t_snap_[n] = std::move(t);
+}
+
+void WrfHistory::move_track(long n) {
+  std::vector<double> t;
+  const long saved = step_;
+  step_ = -1;  // no snapshot lookup: the current state
+  const bool ok = value("T", "th_phy_m_t0", {std::size_t(m_.g.nz), std::size_t(m_.g.ny), std::size_t(m_.g.nx)}, t);
+  step_ = saved;
+  if (!ok) throw std::runtime_error("moving nests: no th_phy_m_t0 of the step");
+  t_last_ = std::move(t);
+  t_last_step_ = n;
 }
 
 void WrfHistory::before_step(long n) {
@@ -631,6 +646,9 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
       if (n == std::size_t(w)) { out = name == "FCX" ? fcx : gcx; return true; }
     }
   }
+  // a moved nest's field (move_begin): also the phy_init / start_em fields below, which the move shifts, interpolates
+  // and start_domain recomputes
+  if (!model_only_ && !moved_.empty() && moved_value(name, n, out)) return true;
   if (!model_only_) {  // phy_init / start_em values (nest feedback replaces them on the parent)
     auto it = phy_init_.find(name);
     if (it != phy_init_.end() && it->second.size() == n) {
@@ -1308,7 +1326,10 @@ wrf_io::DomainAtts WrfHistory::domain_atts() {
   d.grid_id = wc_->domain();
   d.parent_id = wc_->integer("parent_id"); d.i_parent_start = wc_->integer("i_parent_start");
   d.j_parent_start = wc_->integer("j_parent_start"); d.parent_grid_ratio = wc_->integer("parent_grid_ratio");
-  // output_wrf.F:312-315: the namelist values of every domain (d01's parent_id may be 0 or 1, check_a_mundo)
+  // output_wrf.F:312-315: the namelist values of every domain (d01's parent_id may be 0 or 1, check_a_mundo); a
+  // moved nest's are the move's (WRF dmpar: nl_set_i/j_parent_start in med_nest_move)
+  if (i_parent_start_ > 0) d.i_parent_start = i_parent_start_;
+  if (j_parent_start_ > 0) d.j_parent_start = j_parent_start_;
   d.dt = g.dt;
   if (m_.adapt) {
     d.adaptive = true;
@@ -1591,6 +1612,84 @@ void WrfHistory::move_begin() {
         for (std::size_t i = 0; i < ni; ++i) a.v[L.index(int(i), int(j), int(k))] = real(cur[(k * nj + j) * ni + i]);
     moved_varname_[v.name] = v.var->varname;
     moved_.emplace(v.var->varname, std::move(a));
+  }
+}
+
+namespace {
+// a (k, j, i) array at the domain's points into a move array of layout L (the halo 0)
+void to_move_array(const std::vector<double>& a, const Layout& L, std::vector<real>& v) {
+  v.assign(L.total, real(0));
+  const std::size_t nk = std::size_t(std::max(1, L.nz)), nj = std::size_t(L.ny), ni = std::size_t(L.nx);
+  for (std::size_t k = 0; k < nk; ++k)
+    for (std::size_t j = 0; j < nj; ++j)
+      for (std::size_t i = 0; i < ni; ++i) v[L.index(int(i), int(j), int(k))] = real(a[(k * nj + j) * ni + i]);
+}
+}  // namespace
+
+bool WrfHistory::move_t_source(MoveArray& out) {
+  if (t_last_.empty()) return false;
+  const Grid& g = m_.g;
+  if (!move_layout(g, {std::size_t(g.nz), std::size_t(g.ny), std::size_t(g.nx)}, "", out.L)) return false;
+  out.name = "T";
+  to_move_array(t_last_, out.L, out.v);
+  return true;
+}
+
+void WrfHistory::move_t_begin() {
+  MoveArray a;
+  if (!move_t_source(a)) throw std::runtime_error("moving nests: the nest has no th_phy_m_t0 of its last step");
+  moved_["th_phy_m_t0"] = std::move(a);  // no moved_varname_: value("T") keeps reading the snapshots
+}
+
+void WrfHistory::move_t_end() {
+  auto it = moved_.find("th_phy_m_t0");
+  if (it == moved_.end()) return;
+  const MoveArray& a = it->second;
+  const Layout& L = a.L;
+  const std::size_t nk = std::size_t(L.nz), nj = std::size_t(L.ny), ni = std::size_t(L.nx);
+  t_last_.assign(nk * nj * ni, 0.0);
+  for (std::size_t k = 0; k < nk; ++k)
+    for (std::size_t j = 0; j < nj; ++j)
+      for (std::size_t i = 0; i < ni; ++i) t_last_[(k * nj + j) * ni + i] = double(a.v[L.index(int(i), int(j), int(k))]);
+  auto sn = t_snap_.find(t_last_step_);
+  if (sn != t_snap_.end()) sn->second = t_last_;
+  moved_.erase(it);
+}
+
+void WrfHistory::move_set_p_hyd(std::vector<double> p_hyd) {
+  if (m_.suite || t_last_step_ < 0) return;  // with column physics P_HYD is the suite's field (the move sets it)
+  auto it = p_hyd_snap_.find(t_last_step_);
+  if (it != p_hyd_snap_.end()) it->second = std::move(p_hyd);
+}
+
+void WrfHistory::move_start_em() {
+  if (moved_.empty()) return;
+  const Grid& g = m_.g;
+  const dyn::BaseState& b = *m_.base;
+  const int nx = g.nx, ny = g.ny;
+  std::vector<double> ht, mx, my, sa, ca;
+  if (!copy_base(b.ht, {std::size_t(ny), std::size_t(nx)}, nx, ny, 1, ht)) return;
+  const bool mapped = b.mapped;
+  if (mapped) {
+    copy_base(b.msftx, {std::size_t(ny), std::size_t(nx)}, nx, ny, 1, mx);
+    copy_base(b.msfty, {std::size_t(ny), std::size_t(nx)}, nx, ny, 1, my);
+    copy_base(b.sina, {std::size_t(ny), std::size_t(nx)}, nx, ny, 1, sa);
+    copy_base(b.cosa, {std::size_t(ny), std::size_t(nx)}, nx, ny, 1, ca);
+  }
+  const bool px = wc_->logical("periodic_x"), py = wc_->logical("periodic_y");
+  phys::driver::topo::Slopes t = phys::driver::topo::start_em_slopes(nx, ny, g.dx, g.dy, px, py, ht, mapped ? &mx : nullptr,
+                                                                     mapped ? &my : nullptr, mapped ? &sa : nullptr,
+                                                                     mapped ? &ca : nullptr);
+  const std::pair<const char*, std::vector<double>*> f[] = {{"toposlpx", &t.toposlpx}, {"toposlpy", &t.toposlpy},
+                                                            {"lap_hgt", &t.lap_hgt}, {"slope", &t.slope},
+                                                            {"slp_azi", &t.slp_azi}};
+  for (const auto& [vn, v] : f) {
+    auto it = moved_.find(vn);
+    if (it == moved_.end()) continue;
+    MoveArray& a = it->second;
+    if (a.L.nx != nx || a.L.ny != ny) continue;
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) a.v[a.L.index(i, j, 0)] = real((*v)[std::size_t(j) * nx + i]);
   }
 }
 

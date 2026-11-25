@@ -12,8 +12,8 @@
 //     points with imask = 1, except interp_fcnm and interp_mask_water_field, which write every point).
 // The arrays are host copies of the fields' whole allocations (core/field.hpp Layout, halo included). The functions
 // index them with WRF's 1-based (i, k, j): nest point (ni, nk, nj) is element (ni-1, nj-1, nk-1) of the nest's
-// Layout, coarse point (ci, ck, cj) element (ci-1, cj-1, ck-1) of the parent's. A serial wrf.exe has one patch: the
-// tile ranges are nits = 1, nite = ide (every stagger), njts = 1, njte = jde.
+// Layout, coarse point (ci, ck, cj) element (ci-1, cj-1, ck-1) of the parent's. A wrf.exe of one task has one patch:
+// the tile ranges are nits = 1, nite = ide (every stagger), njts = 1, njte = jde.
 // ============================================================================
 
 #include <algorithm>

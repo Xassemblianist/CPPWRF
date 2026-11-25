@@ -8,6 +8,7 @@
 #include <cstring>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 
@@ -38,20 +39,46 @@ std::vector<FieldRegistry*>& registries() {
   return r;
 }
 
+// the registries are shared by the domains' threads (fields made, freed and swapped concurrently)
+std::mutex& reg_mutex() {
+  static std::mutex m;
+  return m;
+}
+
 void track_add(const void* base, const Layout& L, int esz, const std::string& name) {
-  if (g_cur) g_cur->fields.push_back(Tracked{const_cast<void*>(base), L, esz, name});
+  if (g_cur) {
+    std::lock_guard<std::mutex> lk(reg_mutex());
+    g_cur->fields.push_back(Tracked{const_cast<void*>(base), L, esz, name});
+  }
   if (g_prev) g_prev->add(base, L, esz, name);
 }
 
 void track_remove(const void* base) {
-  for (FieldRegistry* r : registries()) {
-    auto& f = r->fields;
-    f.erase(std::remove_if(f.begin(), f.end(), [&](const Tracked& t) { return t.base == base; }), f.end());
+  {
+    std::lock_guard<std::mutex> lk(reg_mutex());
+    for (FieldRegistry* r : registries()) {
+      auto& f = r->fields;
+      f.erase(std::remove_if(f.begin(), f.end(), [&](const Tracked& t) { return t.base == base; }), f.end());
+    }
   }
   if (g_prev) g_prev->remove(base);
 }
 
-const tile::Track kTrack{&track_add, &track_remove};
+// two fields exchanged their allocations (a scalar's time levels: ScalarTransport swaps q_2 with its work array):
+// each name stays with its field object, so the tracked addresses are exchanged
+void track_swapped(const void* a, const void* b) {
+  if (a != b) {
+    std::lock_guard<std::mutex> lk(reg_mutex());
+    for (FieldRegistry* r : registries())
+      for (Tracked& t : r->fields) {
+        if (t.base == a) t.base = const_cast<void*>(b);
+        else if (t.base == b) t.base = const_cast<void*>(a);
+      }
+  }
+  if (g_prev && g_prev->swapped) g_prev->swapped(a, b);
+}
+
+const tile::Track kTrack{&track_add, &track_remove, &track_swapped};
 
 bool debug() {
   static const bool d = [] {
@@ -81,8 +108,12 @@ std::vector<int> int_list(const std::string& s, const std::string& key) {
 
 }  // namespace
 
-FieldRegistry::FieldRegistry() { registries().push_back(this); }
+FieldRegistry::FieldRegistry() {
+  std::lock_guard<std::mutex> lk(reg_mutex());
+  registries().push_back(this);
+}
 FieldRegistry::~FieldRegistry() {
+  std::lock_guard<std::mutex> lk(reg_mutex());
   auto& r = registries();
   r.erase(std::remove(r.begin(), r.end(), this), r.end());
 }
@@ -136,6 +167,13 @@ Moves parse_moves(const io::Config& root, int max_dom) {
   mv.move_interval = list("move_interval", 999999999);
   mv.move_cd_x = list("move_cd_x", 0);
   mv.move_cd_y = list("move_cd_y", 0);
+  for (int i = 0; i < mv.num_moves; ++i) {
+    const int iv = mv.move_interval[std::size_t(i)], id = mv.move_id[std::size_t(i)];
+    if (iv < 0)
+      throw std::runtime_error("domains.move_interval = " + std::to_string(iv) + " < 0 (minutes from the start) is not "
+                               "supported");
+    if (iv < 999999999 && id >= 2 && id <= max_dom) mv.active = true;
+  }
   return mv;
 }
 
@@ -185,6 +223,23 @@ bool time_for_move(Moves& mv, const Domain& parent, const Domain& nest, const wr
     dy = 0;
   }
   return dx != 0 || dy != 0;
+}
+
+// ---------------------------------------------------------------- the window the interpolation reads
+// med_interp_domain's intermediate domain (external/RSL_LITE/module_dm.F:480-483, 625-660; one task; shw = 2): c_ids =
+// i_parent_start - 2, c_ide = c_ids + e_we / ratio + 5, its patch and tile 2 more points each way; interp_mask_water_field
+// searches up to that tile (cits = i_parent_start - 4 .. cite = i_parent_start + e_we / ratio + 5), SINT reads 2
+// parent points beyond the nest. CPPWRF serves domain 1's mass points 1 .. e_we - 1 only (no halo of the parent's
+// history fields), so the nest must keep the tile inside them.
+void check_window(const Grid& cg, const Grid& ng, int ratio, int ipos, int jpos, const std::string& what) {
+  const int cide = cg.nx + 1, cjde = cg.ny + 1, nide = ng.nx + 1, njde = ng.ny + 1;
+  const bool ok = ipos - 4 >= 1 && jpos - 4 >= 1 && ipos + nide / ratio + 5 <= cide - 1 &&
+                  jpos + njde / ratio + 5 <= cjde - 1;
+  if (!ok)
+    throw std::runtime_error("moving nests: " + what + " at i_parent_start " + std::to_string(ipos) +
+                             ", j_parent_start " + std::to_string(jpos) + " is too near domain 1's edge: i_parent_start, "
+                             "j_parent_start >= 5 and i_parent_start + e_we / parent_grid_ratio + 5 <= e_we - 1 of "
+                             "domain 1 (and in y) are supported (corral_dist keeps a moving nest there)");
 }
 
 // ---------------------------------------------------------------- the move
@@ -298,20 +353,48 @@ Arr from_vec(std::vector<double>& v, const Grid& g) {
   return a;
 }
 
-// the wrfinput attribute of a domain (ISWATER, ISICE, ISLAKE)
+// the wrfinput attribute of a domain (ISWATER, ISICE, ISLAKE), read at the first move (WRF reads them at the input)
 int input_att(const Domain& d, const char* att, int def) {
   const std::string path = d.cfg->get_string("real.dir") + "/" + d.cfg->get_string("real.wrfinput", "wrfinput_d01");
+  static std::mutex mu;
+  static std::map<std::string, int> cache;
+  const std::lock_guard<std::mutex> lk(mu);
+  const std::string key = path + '\n' + att + '\n' + std::to_string(def);
+  auto it = cache.find(key);
+  if (it != cache.end()) return it->second;
   int nc = 0, v = def;
   if (nc_open(path.c_str(), NC_NOWRITE, &nc) != NC_NOERR) throw std::runtime_error("moving nests: cannot open " + path);
   if (nc_get_att_int(nc, NC_GLOBAL, att, &v) != NC_NOERR) v = def;
   nc_close(nc);
+  cache.emplace(key, v);
   return v;
+}
+
+// a move array as an Arr (a copy)
+Arr from_move_array(const WrfHistory::MoveArray& a) {
+  Arr out;
+  out.L = a.L;
+  out.esz = int(sizeof(real));
+  out.h.resize(a.v.size() * sizeof(real));
+  std::memcpy(out.h.data(), a.v.data(), out.h.size());
+  return out;
 }
 
 // the arrays of a domain named `name` (every registry field of that name on the grid, else the history's move
 // array; the model's host latitudes / longitudes as well for xlat / xlong): the nest's destinations
 std::vector<Arr> nest_arrays(Domain& d, const std::string& name) {
   std::vector<Arr> r;
+  // grid%th_phy_m_t0 of moist_physics_finish_em (WRF's T): the history's array of the last solve (move_t_begin); the
+  // suite's phy_prep field of that name is recomputed at every step's start
+  if (name == "th_phy_m_t0" && d.hist)
+    if (WrfHistory::MoveArray* a = d.hist->move_array(name)) {
+      Arr x;
+      x.L = a->L;
+      x.esz = int(sizeof(real));
+      x.hist = a;
+      r.push_back(std::move(x));
+      return r;
+    }
   for (const Tracked& t : d.reg->fields)
     if (t.name == name && on_grid(t.L, d.m->g)) r.push_back(from_tracked(t));
   if (r.empty() && d.hist)
@@ -330,6 +413,12 @@ std::vector<Arr> nest_arrays(Domain& d, const std::string& name) {
 // the parent's array named `name` (the occurrence-th registry field of that name, else its first, else the history's
 // current values, else the model's host latitudes / longitudes); false: the parent has none
 bool parent_array(Domain& p, const std::string& name, std::size_t occurrence, Arr& out) {
+  if (name == "th_phy_m_t0" && p.hist) {  // the parent's grid%th_phy_m_t0 of its last solve (before the feedback)
+    WrfHistory::MoveArray a;
+    if (!p.hist->move_t_source(a)) throw std::runtime_error("moving nests: the parent has no th_phy_m_t0 of its last step");
+    out = from_move_array(a);
+    return true;
+  }
   std::vector<const Tracked*> ts;
   for (const Tracked& t : p.reg->fields)
     if (t.name == name && on_grid(t.L, p.m->g)) ts.push_back(&t);
@@ -342,11 +431,7 @@ bool parent_array(Domain& p, const std::string& name, std::size_t occurrence, Ar
   if (p.hist) {
     auto a = std::make_unique<WrfHistory::MoveArray>();
     if (p.hist->move_source(name, *a)) {
-      out = Arr{};
-      out.L = a->L;
-      out.esz = int(sizeof(real));
-      out.h.resize(a->v.size() * sizeof(real));
-      std::memcpy(out.h.data(), a->v.data(), out.h.size());
+      out = from_move_array(*a);
       return true;
     }
   }
@@ -369,6 +454,11 @@ void move_nest(Domain& P, Domain& N, int dx, int dy) {
     os << " invalid move: dx, dy " << dx << " " << dy;
     throw std::runtime_error(os.str());
   }
+  // shift_domain_em moves the arrays by parent_grid_ratio points, which come from the halo (WRF's halo is at least
+  // that wide; CPPWRF's Grid::halo)
+  if (N.ratio > Grid::halo)
+    throw std::runtime_error("moving nests: parent_grid_ratio " + std::to_string(N.ratio) + " > " +
+                             std::to_string(Grid::halo) + " is not supported");
   std::fprintf(stderr, " moving %d %d %d\n", N.id, dx, dy);
   dev_sync();
   // the parent's queued history feedback reads this nest's fields as they are now
@@ -376,6 +466,7 @@ void move_nest(Domain& P, Domain& N, int dx, int dy) {
   if (N.hist) {
     N.hist->move_flush();
     N.hist->move_begin();
+    N.hist->move_t_begin();
   }
   const int r = N.ratio;
   // shift_domain_em: px = isign(parent_grid_ratio, disp_x); one shift (|disp| <= 1)
@@ -410,6 +501,8 @@ void move_nest(Domain& P, Domain& N, int dx, int dy) {
   // 3. grid%i_parent_start / j_parent_start (med_nest_move: + px / parent_grid_ratio)
   N.i_parent_start += px / r;
   N.j_parent_start += py / r;
+  check_window(P.m->g, g, r, N.i_parent_start, N.j_parent_start, "d" + std::string(N.id < 10 ? "0" : "") +
+               std::to_string(N.id) + " after its move");
 
   // 4. med_interp_domain: every "d" field in WRF's order, where imask = 1
   Geo G;
@@ -539,6 +632,46 @@ void move_nest(Domain& P, Domain& N, int dx, int dy) {
     }
   }
 
+  // 4b. start_domain(nest, .FALSE.) with nest%moved = .TRUE. (WRF dmpar; mediation_nest_move.F:264-271): the
+  // dynamics (start_domain_moved), the terrain slopes, T and P_HYD of the frame written after the move, phy_init on
+  // the new points (phy_init_moved)
+  {
+    std::vector<unsigned char> strip(std::size_t(g.nx) * std::size_t(g.ny), 0);
+    for (int j = 0; j < g.ny; ++j)
+      for (int i = 0; i < g.nx; ++i) strip[std::size_t(j) * std::size_t(g.nx) + std::size_t(i)] = M.at(Masks::NOSTAG, i, j) == 1;
+    StartMoved sm = start_domain_moved(*N.cfg, *N.m, strip);
+    for (const char* nm : {"p_hyd", "p_hyd_w"}) {
+      const std::vector<double>& v = nm[5] == '_' ? sm.p_hyd_w : sm.p_hyd;
+      for (const Tracked& t : N.reg->fields) {
+        if (t.name != nm || !on_grid(t.L, g) || t.L.nx != g.nx || t.L.ny != g.ny) continue;
+        Arr a = from_tracked(t);
+        real* q = reinterpret_cast<real*>(a.h.data());
+        const int nk = std::max(1, a.L.nz);
+        if (std::size_t(nk) * std::size_t(g.nx) * std::size_t(g.ny) != v.size())
+          throw std::logic_error(std::string("moving nests: the levels of ") + nm);
+        for (int k = 0; k < nk; ++k)
+          for (int j = 0; j < g.ny; ++j)
+            for (int i = 0; i < g.nx; ++i)
+              q[a.L.index(i, j, k)] = real(v[(std::size_t(k) * std::size_t(g.ny) + std::size_t(j)) * std::size_t(g.nx) + std::size_t(i)]);
+        a.commit();
+      }
+    }
+    if (N.hist) {
+      N.hist->move_set_p_hyd(std::move(sm.p_hyd));
+      N.hist->move_start_em();
+      N.hist->move_t_end();
+    }
+    if (N.m->suite) {
+      std::vector<Arr> lu = nest_arrays(N, "lu_index");
+      if (lu.empty()) throw std::runtime_error("moving nests: phy_init of the moved nest needs its LU_INDEX");
+      std::vector<double> luv(strip.size(), 0.0);
+      const real* q = reinterpret_cast<const real*>(lu[0].data());
+      for (int j = 0; j < g.ny; ++j)
+        for (int i = 0; i < g.nx; ++i) luv[std::size_t(j) * std::size_t(g.nx) + std::size_t(i)] = double(q[lu[0].L.index(i, j, 0)]);
+      phy_init_moved(*N.cfg, *N.m, strip, luv);
+    }
+  }
+
   // 5. time level 2 to time level 1 in the new points (med_nest_move: where ( imask .EQ. 1 ) over the memory)
   {
     dyn::State& s = *N.m->st;
@@ -572,8 +705,13 @@ void move_nest(Domain& P, Domain& N, int dx, int dy) {
     }
   }
 
+  // the suite's copy of grid%t_1 for first_rk_step_part2 (conv_t_tendf_to_moist) is grid%t_1 as the move left it
+  if (N.m->suite && N.m->suite->t1_lag_set_) N.m->suite->t1_lag_.copy_from(N.m->st->t_1);
+
   // 6. the radiation driver's copies of the latitudes and longitudes
   if (N.m->suite) N.m->suite->move_latlon(N.m->xlat, N.m->xlong);
+  // the output's I_PARENT_START / J_PARENT_START (WRF dmpar: nl_set_i/j_parent_start)
+  if (N.hist) N.hist->set_parent_start(N.i_parent_start, N.j_parent_start);
   dev_sync();
 
   std::fprintf(stderr, " Grid %d New SW corner (in parent x and y): %d %d\n", N.id, N.i_parent_start, N.j_parent_start);

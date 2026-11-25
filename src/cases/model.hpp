@@ -87,6 +87,10 @@ void init_real_physics(const io::Config& cfg, Model& m);
 // med_nest_initial's start_domain(parent) after the feedback at the parent's first step: phy_init again on the
 // fed-back fields (landuse_init, TSK_SAVE, XICEM, Noah's SNOALB without rdmaxalb), on this worker's patch
 void phy_init_after_feedback(const io::Config& cfg, Model& m);
+// start_em's phy_init on a moved nest's new points (grid%moved, set_tiles with imask_nostag; strip at the domain's
+// points j * nx + i, lu_index the nest's moved LU_INDEX there); the physics options it is ported for, others throw
+void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip,
+                    const std::vector<double>& lu_index);
 // sst_update = 1: the auxinput4 record of `date` (WRF date string) from wrflowinp_d0N into the suite's fields
 void read_wrflowinp(const std::string& path, const std::string& date, phys::driver::PhysicsSuite& su);
 // grid_fdda = 1: the auxinput10 record of `date` from wrffdda_d0N into the suite's analyses (fdda3d, fdda2d)

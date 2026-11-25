@@ -70,6 +70,8 @@ namespace tile {
 struct Track {
   void (*add)(const void* base, const Layout& L, int esz, const std::string& name);
   void (*remove)(const void* base);
+  // optional: two fields exchanged their allocations (FieldT's swap; each keeps its name). Null: not told
+  void (*swapped)(const void* a, const void* b) = nullptr;
 };
 inline thread_local const Track* track = nullptr;
 }  // namespace tile
@@ -133,6 +135,7 @@ template <int R> class FieldT {
   void copy_from(const FieldT& o) { copy_dev(buf_.get(), o.buf_.get(), bytes()); }
   // Swaps the storage (data, layout, stagger); each field keeps its name.
   friend void swap(FieldT& a, FieldT& b) noexcept {
+    if (tile::track && tile::track->swapped) tile::track->swapped(a.buf_.get(), b.buf_.get());
     std::swap(a.st_, b.st_); std::swap(a.L_, b.L_); std::swap(a.buf_, b.buf_);
   }
 

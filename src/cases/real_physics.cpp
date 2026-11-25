@@ -10,8 +10,10 @@
 //     SNOALB = MAXALB/100 when rdmaxalb = false,
 //   - start_em: CTOPO = CTOPO2 = 1 (topo_wind = 0; topo_wind 1 / 2, slope_rad, topo_shading: PhysicsSuite::init_topo).
 // Every other surface field starts at zero (WRF allocates grid fields zeroed).
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
+#include <initializer_list>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
@@ -119,6 +121,9 @@ LanduseInit landuse_init(const std::string& table_dir, const std::string& mminlu
 #ifndef CPPWRF_HAVE_NETCDF
 void init_real_physics(const io::Config&, Model&) { throw std::runtime_error("column physics needs NetCDF"); }
 void phy_init_after_feedback(const io::Config&, Model&) {}
+void phy_init_moved(const io::Config&, Model&, const std::vector<unsigned char>&, const std::vector<double>&) {
+  throw std::runtime_error("moving nests need NetCDF support");
+}
 void read_wrflowinp(const std::string&, const std::string&, phys::driver::PhysicsSuite&) {
   throw std::runtime_error("sst_update needs NetCDF");
 }
@@ -797,6 +802,160 @@ void phy_init_after_feedback(const io::Config& cfg, Model& m) {
       }
     put2(su.snoalb, snoalb);
   }
+}
+
+// dyn_em/start_em.F:1007-1101 for a moved nest (share/mediation_nest_move.F:264-271, WRF dmpar): set_tiles with
+// imask_nostag gives phy_init (phys/module_physics_init.F, moved = .TRUE., restart = .FALSE., start_of_simulation =
+// .FALSE.) the new points only. Ported for mp_physics 0 / 6, cu_physics 0 / 1, bl_pbl_physics 0 / 1,
+// sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4 without the options that change
+// phy_init (urban, fractional_seaice, sst_update, tmn_update, usemonalb, the terrain options); there:
+//  - 1256-1278 (IF .NOT. moved: XLAND, GSW, UST, ...) is skipped; IVGTYP = NINT(LU_INDEX); the XLAND < 1.5 defaults
+//    are overwritten by landuse_init (1423-1437: ALBBCK, ALBEDO, Z0, ZNT, EMBCK, EMISS, MAVAIL, XLAND, THC);
+//    compute_2d_dx_area: DX2D = dx; RAINCV_A = RAINCV_B = 0; RE_CLOUD, RE_ICE, RE_SNOW = 2.49e-6, 4.99e-6, 9.99e-6
+//    (has_reqc / has_reqi / has_reqs);
+//  - ra_init, mp_init (WSM6): nothing without start_of_simulation;
+//  - bl_init: ACHFX = ACLHF = ACGRDFLX = SFCEVP = 0; sfclayinit, ysuinit: nothing; Noah (lsm_init's NLCD40 IVGTYP
+//    23, 25 -> 24, LSMINIT): SNOALB = MAXALB(IVGTYP) / 100 without rdmaxalb, SH2O from TSLB, SMOIS and ISLTYP,
+//    CANWAT = 0 (FNDSNOWH: SNOWH stays);
+//  - cu_init (start_of_simulation false: RAINC, RAINCV stay), kf_eta_init: RTHCUTEN, RQVCUTEN, RQCCUTEN, RQRCUTEN,
+//    RQICUTEN (P_QI), RQSCUTEN (P_QS) = 0, NCA = -100, W0AVG = 0.
+void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip,
+                    const std::vector<double>& lu_index) {
+  if (!m.suite) return;
+  phys::driver::PhysicsSuite& su = *m.suite;
+  const phys::driver::SuiteOptions& o = su.options();
+  auto in = [](long v, std::initializer_list<long> ok) { return std::find(ok.begin(), ok.end(), v) != ok.end(); };
+  const long mp = cfg.get_int("phys.mp_physics", 0);
+  if (!in(mp, {0, 6}) || !in(o.cu_physics, {0, 1}) || !in(o.bl_pbl_physics, {0, 1}) ||
+      !in(o.sf_sfclay_physics, {0, 1}) || !in(o.sf_surface_physics, {0, 2}) || !in(o.rad.ra_lw_physics, {0, 4}) ||
+      !in(o.rad.ra_sw_physics, {0, 4}) || o.sf_urban_physics != 0 || su.urb_ || o.fractional_seaice != 0 ||
+      o.sst_update != 0 || o.tmn_update != 0 || o.usemonalb || o.topo_wind != 0 || o.slope_rad != 0 ||
+      o.topo_shading != 0 || o.gwd_opt != 0)
+    throw std::runtime_error("moving nests: phy_init of a moved nest is ported for mp_physics 0 / 6, cu_physics 0 / 1, "
+                             "bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / "
+                             "ra_sw_physics 0 / 4 without urban, fractional_seaice, sst_update, tmn_update, usemonalb, "
+                             "gwd_opt and the terrain options");
+  const Grid& g = m.g;
+  const int nx = g.nx, ny = g.ny;
+  const std::size_t n2 = std::size_t(nx) * ny;
+  if (strip.size() != n2 || lu_index.size() != n2) throw std::logic_error("phy_init_moved: the arrays' sizes");
+  auto each = [&](auto fn) {
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i)
+        if (strip[std::size_t(j) * nx + i]) fn(i, j, std::size_t(j) * nx + i);
+  };
+  auto get2 = [&](const Field2& f) {
+    std::vector<real> h;
+    f.download(h);
+    std::vector<double> a(n2, 0.0);
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) a[std::size_t(j) * nx + i] = double(h[f.layout().index(i, j, 0)]);
+    return a;
+  };
+  auto put2 = [&](Field2& f, const std::vector<double>& a) {  // the new points
+    std::vector<real> h;
+    f.download(h);
+    each([&](int i, int j, std::size_t p) { h[f.layout().index(i, j, 0)] = real(a[p]); });
+    copy_to_dev(f.data() - f.layout().offset, h.data(), f.bytes());
+  };
+  auto set2 = [&](Field2& f, double v) { put2(f, std::vector<double>(n2, v)); };
+  auto set3 = [&](Field3& f, double v) {  // the mass levels kts..ktf of the new points
+    if (f.layout().total == 0) return;
+    std::vector<real> h;
+    f.download(h);
+    const Layout& L = f.layout();
+    for (int k = 0; k < std::min(L.nz, g.nz); ++k) each([&](int i, int j, std::size_t) { h[L.index(i, j, k)] = real(v); });
+    copy_to_dev(f.data() - L.offset, h.data(), f.bytes());
+  };
+
+  // IVGTYP = NINT(LU_INDEX); Noah with NLCD40: 23, 25 -> 24 (lsm_init)
+  const bool nlcd40_noah = o.sf_surface_physics == 2 && o.mminlu == "NLCD40";
+  std::vector<int> ivg;
+  su.ivgtyp.download(ivg);
+  each([&](int i, int j, std::size_t p) {
+    const int v = int(std::lround(lu_index[p]));
+    ivg[su.ivgtyp.layout().index(i, j, 0)] = nlcd40_noah && (v == 23 || v == 25) ? 24 : v;
+  });
+  su.ivgtyp.upload(ivg);
+
+  // landuse_init on the moved LU_INDEX, XICE and SNOWC (julday, cen_lat: the nest's wrfinput, as phy_init's)
+  const NcIn inp(cfg.get_string("real.dir") + "/" + cfg.get_string("real.wrfinput", "wrfinput_d01"));
+  std::vector<double> lu(n2, 0.0);
+  each([&](int, int, std::size_t p) { lu[p] = lu_index[p]; });
+  const LanduseInit li = landuse_init(o.table_dir, o.mminlu, int(inp.att_num("JULDAY", 0)), inp.att_num("CEN_LAT", 0.0),
+                                      o.iswater, o.isice, lu, get2(su.xice), get2(su.snowc), o.fractional_seaice,
+                                      false, std::vector<double>(), std::vector<double>());
+  put2(su.albbck, li.albbck); put2(su.albedo, li.albedo); put2(su.z0, li.z0); put2(su.znt, li.z0);
+  put2(su.embck, li.embck); put2(su.emiss, li.emiss); put2(su.mavail, li.mavail); put2(su.xland, li.xland);
+  set2(su.dx2d, g.dx);
+  set2(su.raincv_a, 0.0);
+  set2(su.raincv_b, 0.0);
+  if (Field3* f = su.re_cloud_field()) set3(*f, 2.49e-6);  // RE_QC_BG
+  if (Field3* f = su.re_ice_field()) set3(*f, 4.99e-6);    // RE_QI_BG
+  if (Field3* f = su.re_snow_field()) set3(*f, 9.99e-6);   // RE_QS_BG
+
+  // bl_init
+  set2(su.achfx, 0.0); set2(su.aclhf, 0.0); set2(su.acgrdflx, 0.0); set2(su.sfcevp, 0.0);
+  if (o.sf_surface_physics == 2) {  // LSMINIT
+    phys::noah::NoahTables nt;
+    if (!phys::noah::read_noah_tables(o.table_dir, o.mminlu, o.mminsl, nt))
+      throw std::runtime_error("real physics: cannot read the Noah tables from " + o.table_dir);
+    std::vector<int> isl;
+    su.isltyp.download(isl);
+    each([&](int i, int j, std::size_t) {
+      if (isl[su.isltyp.layout().index(i, j, 0)] < 1)
+        throw std::runtime_error("module_sf_noahdrv.F: lsminit: out of range value of ISLTYP");
+    });
+    if (!cfg.get_bool("phys.rdmaxalb", true)) {
+      std::vector<double> snoalb(n2, 0.0);
+      each([&](int i, int j, std::size_t p) {
+        const int vt = ivg[su.ivgtyp.layout().index(i, j, 0)];
+        snoalb[p] = std::is_same_v<real, float> ? double(real(nt.maxalb[vt - 1]) * real(0.01)) : nt.maxalb[vt - 1] * 0.01;
+      });
+      put2(su.snoalb, snoalb);
+    }
+    std::vector<real> tslb, smois, sh2o;
+    su.tslb.download(tslb);
+    su.smois.download(smois);
+    su.sh2o.download(sh2o);
+    const Layout& L = su.sh2o.layout();
+    each([&](int i, int j, std::size_t) {
+      const int st = isl[su.isltyp.layout().index(i, j, 0)];
+      real bx = nt.bb[st - 1];
+      const real smcmax = nt.maxsmc[st - 1], psisat = nt.satpsi[st - 1];
+      for (int k = 0; k < L.nz; ++k) {
+        const std::size_t q = L.index(i, j, k);
+        if (bx > 0 && smcmax > 0 && psisat > 0) {
+          if (tslb[q] < real(273.149)) {
+            bx = nt.bb[st - 1];
+            if (bx > real(5.5)) bx = real(5.5);
+            const real t = tslb[q];
+            real fk = libm::pow((real(3.335e5) / (real(9.81) * (-psisat))) * ((t - real(273.15)) / t), real(-1) / bx) * smcmax;
+            if (fk < real(0.02)) fk = real(0.02);
+            real s = std::min(fk, smois[q]);
+            real free_w = 0;
+            phys::noah::NoahKernel::frh2o(free_w, t, smois[q], s, smcmax, bx, psisat);
+            sh2o[q] = free_w;
+          } else {
+            sh2o[q] = smois[q];
+          }
+        } else {
+          sh2o[q] = smois[q];
+        }
+      }
+    });
+    copy_to_dev(su.sh2o.data() - L.offset, sh2o.data(), su.sh2o.bytes());
+    set2(su.canwat, 0.0);
+  }
+  if (o.cu_physics == 1) {  // kf_eta_init
+    const dyn::State& s = *m.st;
+    set3(su.pt.rthcuten, 0.0); set3(su.pt.rqvcuten, 0.0); set3(su.pt.rqccuten, 0.0); set3(su.pt.rqrcuten, 0.0);
+    if (s.P_QI >= 0) set3(su.pt.rqicuten, 0.0);
+    if (s.P_QS >= 0) set3(su.pt.rqscuten, 0.0);
+    set2(su.nca, -100.0);
+    set3(su.w0avg, 0.0);
+  }
+  dev_sync();
 }
 #endif
 
