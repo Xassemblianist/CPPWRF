@@ -13,8 +13,9 @@
 # time_to_move 0): 1 h, history every 10 min; steps/ has the moves at 1 and 2 min
 VX1_r8 run_N3s_r8 wrf_r8_vortex.exe time_control.run_seconds=3600 time_control.history_interval_s=600,600
 # VX2: vortex_interval 1 (the centre again every minute, in the search box around the last one: 60 * 1 * 20 / 5000
-# points), max_vortex_speed 20, track_level 70000, time_to_move 2 (no move at 1 min), corral_dist 28 for d02 (the
-# y part of the move after the first is cancelled: "MOAD can not move", vc_j given back); 10 min, history every
+# points), max_vortex_speed 20, track_level 70000, time_to_move 2 (no move at 1 min), corral_dist 28 for d02 (at
+# 700 hPa the lowest height lay toward the south-west in a local N2 run; d02 starts 29 parent cells from d01's south
+# edge, so the corral cancels a y move toward it: "MOAD can not move", vc_j given back); 10 min, history every
 # minute (the run_NAME run; steps/ is not used)
 VX2_r8 run_N3s_r8 wrf_r8_vortex.exe time_control.run_seconds=600 time_control.history_interval_s=60,60 domains.vortex_interval=15,1 domains.max_vortex_speed=40,20 domains.track_level=70000 domains.time_to_move=0,2 domains.corral_dist=8,28
 # VX1 in real*4 (CPU FP32 bit for bit, and CUDA FP32 identity): 1 h and steps/

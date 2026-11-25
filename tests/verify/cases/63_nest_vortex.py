@@ -8,8 +8,8 @@ tests/verify/refs/vortexnest_refs.txt, data vortexnest_data.tar), at tolerance 0
   1 h, on the CPU and in CUDA FP64; in FP32 against WRF real*4's run (CPU, and on the GPU as the derived cuda_sp_id
   case);
 - VX2: vortex_interval 1, max_vortex_speed 20, track_level 70000, time_to_move 2, corral_dist 28 for d02 (the search
-  box around the last centre every minute, no move before 2 min, the corral cancelling the y part): 10 min, history
-  every minute.
+  box around the last centre every minute, no move before 2 min, the corral cancelling a move toward d01's edge):
+  10 min, history every minute.
 A resumed run with moving nests is refused by CPPWRF (no restart cases).
 The option is "unverified" (data/option_tiers.txt) until these cases have passed; they set cppwrf.allow_unverified.
 
