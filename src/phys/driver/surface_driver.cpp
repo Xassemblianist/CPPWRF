@@ -1021,7 +1021,7 @@ struct KTmnDay {
 
 // sf_lake_physics = 1 (module_surface_driver.F:4510-4543, after the land surface models): SUBROUTINE Lake at the
 // points with LAKEMASK = 1 (module_sf_lake.F, src/phys/sf_lake/lake.hpp); forcing at level kts (p8w at kts and
-// kts + 1), RAINBL of this call, ALBEDO as the land surface models left it; HFX, LH, GRDFLX, TSK, QFX, T2, TH2, Q2,
+// kts + 1: surface_driver's P8W is grid%p_hyd_w, module_first_rk_step_part1.F:642, not phy_prep's p8w), RAINBL of this call, ALBEDO as the land surface models left it; HFX, LH, GRDFLX, TSK, QFX, T2, TH2, Q2,
 // ALBEDO and the lake state of the lake points
 struct KLake {
   C3 t_phy, p8w, dz8w, qv, u_phy, v_phy;
@@ -2181,7 +2181,7 @@ void PhysicsSuite::surface_driver(const dyn::State& s, const dyn::BaseState& b) 
   }
   if (lake_) {  // LakeModel == 1
     LakeFields& l = *lake_;
-    column_for(cols, KLake{prep.t_phy.cview(), prep.p8w.cview(), prep.dz8w.cview(), s.q_2[s.P_QV].cview(),
+    column_for(cols, KLake{prep.t_phy.cview(), prep.p_hyd_w.cview(), prep.dz8w.cview(), s.q_2[s.P_QV].cview(),
                            prep.u_phy.cview(), prep.v_phy.cview(), glw.cview(), emiss.cview(), rainbl.cview(),
                            swdown.cview(), l.xlat.cview(), lakemask.cview(), l.lakedepth2d.cview(), albedo.view(),
                            hfx.view(), lh.view(), grdflx.view(), tsk.view(), qfx.view(), t2.view(), th2.view(), q2.view(),
