@@ -21,16 +21,27 @@ saklanır. Birkaç GB, uzun koşular için daha fazla boş disk alanı ayırın.
 Örnek, arşivdeki 12 Ekim 2026 00 UTC GFS çevrimini kullanır. Başka bir çevrim için imge adından önce
 `-e GFS_DATE=YYYYMMDD -e GFS_CYCLE=HH` ekleyin.
 
+Kapsayıcı root olarak çalışır; Linux'ta `out/` içindeki dosyalar root'a ait olur. Dosyaların size ait olması için
+önce `out` dizinini oluşturun ve imge adından önce `--user "$(id -u):$(id -g)"` ekleyin.
+
 Altı saatlik tahmin için `quickstart` komutundan sonra `--hours 6` ekleyin (1 ile 24 arasında tam sayı).
 CPU imgesi `--mode cpu-fp64` (varsayılan) ve `--mode cpu-fp32` kiplerini içerir. CUDA imgesinde
-`gpu-fp32` (varsayılan), `gpu-fp64` ve `cpu-fp64` bulunur. İmgeler WPS 4.6.0, WRF 4.8.0 koşu tabloları,
-CPPWRF'in `real.exe` karşılığı ve harita için gereken Python paketleriyle gelir.
+`gpu-fp32` (varsayılan), `gpu-fp64` ve `cpu-fp64` bulunur. İmgeler WPS 4.6.0 (iki resmî düzeltmeyle; liste
+`/opt/weather/notices/README.md` dosyasında), WRF 4.8.0 koşu tabloları, CPPWRF'in `real.exe` karşılığı ve harita
+için gereken Python paketleriyle gelir. Koşu iki alan içerir (15 km ve 5 km'lik iç alan). CPU'da yavaştır:
+`cpu-fp64` üç saatlik koşuyu 48 iş parçacığıyla 222-273 s'de tamamladı; masaüstü bir makinede onlarca dakika bekleyin.
 
-Debian 13 tabanlı CPU imgesi GCC 14 ve glibc 2.41 kullanır. CPU FP64, eşleşen derleme seçenekleri ve glibc 2.41
-ile doğrulanmış vakalarda GNU WRF 4.8.0 real*8 ile bit düzeyinde aynıdır. CPU ve CUDA FP32 kimlik kipleri,
-doğrulanmış GNU WRF 4.8.0 real*4 vakaları için gerekli glibc 2.41 tek duyarlıklı işlevlerini içerir.
-CUDA imgesi Ubuntu 24.04 (glibc 2.39) kullandığı için bu imgedeki her iki FP64 kipini de bit düzeyinde eşitlik
-gereken işlerde önce referansla karşılaştırın. Ayrıntılar [FP32_IDENTITY.md](../FP32_IDENTITY.md) belgesindedir.
+İmgelerin nasıl denetlendiği: yayın iş akışı iki imgeyi GPU'suz bir makinede derler, CPU imgesindeki iki derlemenin
+ve CUDA imgesindeki `cpu-fp64` derlemesinin küçük öz sınamasını (`examples/selftest`) ağ erişimi olmadan çalıştırır ve
+WPS programlarının kitaplıklarını bulduğunu denetler. İmgeler doğrulama takımından geçirilmemiştir; GPU derlemeleri
+iş akışında çalıştırılmaz.
+
+CPU imgesi, kanıtların yapıldığı sistem olan Debian 13'tür (GCC 14, glibc 2.41) ve aynı katı kayan nokta
+ayarlarıyla derlenir. WRF 4.8.0 ile bit düzeyinde eşitlik her namelist için değil, [STATUS.md](../STATUS.md) ve
+[FP32_IDENTITY.md](../FP32_IDENTITY.md) belgelerindeki doğrulanmış yapılandırmalar için geçerlidir. FP32 derlemeleri
+glibc 2.41'in tek duyarlıklı işlevlerini içinde taşır; sonuçları imgenin libm'ine bağlı değildir. CUDA imgesi
+Ubuntu 24.04'tür (glibc 2.39) ve FP64 derlemelerinin ana makine kodu bu libm'i çağırır: bit düzeyinde eşitliğe
+güvenmeden önce oradaki `gpu-fp64` veya `cpu-fp64` sonuçlarını `cppwrf-compare` ile bir referansla karşılaştırın.
 
 ## Docker olmadan
 
@@ -89,7 +100,7 @@ değiştirin.
 mkdir -p ~/hb/run && cd ~/hb/run
 cp $CPPWRF/examples/quickstart/namelist.input .
 ln -sf ~/hb/wps/met_em.d0* .
-cppwrf-realexe
+cppwrf-realexe                                     # FP32 kipleri: cppwrf-realexe --precision float
 ```
 
 `cppwrf-realexe`, real.exe'nin yazdığı `wrfinput_d01`, `wrfinput_d02` ve `wrfbdy_d01` dosyalarını yazar.

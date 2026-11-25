@@ -51,6 +51,11 @@ mkdir -p "$out"
 out=$(realpath "$out")
 export GFS_CACHE=$out/.gfs
 export MPLCONFIGDIR=${MPLCONFIGDIR:-/tmp/matplotlib}
+# Under docker run --user, HOME (/) is not writable; give programs that cache files there a writable one.
+if [[ ! -w ${HOME:-/} ]]; then
+  HOME=$(mktemp -d /tmp/home.XXXXXXXX)
+  export HOME
+fi
 export REQUIRE_MAP=1
 
 # Publish the unpacked geography atomically so later runs only see a complete cache.

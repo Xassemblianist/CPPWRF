@@ -93,8 +93,16 @@ jobs:
           df -h "$GITHUB_WORKSPACE"
           docker build --platform linux/amd64 --build-arg VCS_REF="$REVISION" \
             -f packaging/docker/Dockerfile.cuda -t "$IMAGE:$VERSION-cuda" .
-          docker run --rm --network none "$IMAGE:$VERSION-cuda" cppwrf --version
-          docker run --rm --network none "$IMAGE:$VERSION-cuda" cppwrf-gpu-fp64 --version
+          image="$IMAGE:$VERSION-cuda"
+          docker run --rm --network none "$image" cppwrf --version
+          docker run --rm --network none "$image" cppwrf-gpu-fp64 --version
+          docker run --rm --network none "$image" cppwrf-cpu-fp64 --version
+          docker run --rm --network none "$image" quickstart --help
+          # The runner has no GPU, so only the image's CPU FP64 build runs. Its host libm is Ubuntu 24.04's glibc 2.39,
+          # not the glibc 2.41 of the proofs; a different hash is reported, not hidden, and does not block publishing.
+          if ! docker run --rm --network none "$image" /opt/cppwrf/share/cppwrf/examples/selftest/run.sh cpu-fp64; then
+            echo "::warning::CUDA image: the cpu-fp64 self-test did not reproduce expected_fp64.txt (glibc 2.39 image)"
+          fi
           docker image ls "$IMAGE"
 
       - name: Publish to GitHub Container Registry

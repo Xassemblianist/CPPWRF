@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Build from the repository root. The CUDA runtime uses Ubuntu 24.04's glibc 2.39.
-FROM nvidia/cuda:13.0.0-devel-ubuntu24.04 AS build
+# The base images are pinned by digest (multi-architecture index, 2026-11-25); update tag and digest together.
+FROM nvidia/cuda:13.0.0-devel-ubuntu24.04@sha256:1e8ac7a54c184a1af8ef2167f28fa98281892a835c981ebcddb1fad04bdd452d AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates cmake curl file g++-14 gcc gfortran libnetcdf-dev libnetcdff-dev \
       m4 make patch perl python3 tcsh \
@@ -15,7 +16,7 @@ ARG VCS_REF
 COPY . /src
 RUN bash /src/packaging/docker/build-cppwrf.sh gpu-fp32 gpu-fp32 gpu-fp64 cpu-fp64
 
-FROM nvidia/cuda:13.0.0-runtime-ubuntu24.04
+FROM nvidia/cuda:13.0.0-runtime-ubuntu24.04@sha256:95318efecfd68ab3d109da5277863257b06137c84f34a87f38de970d5cd035d3
 ARG VCS_REF
 LABEL org.opencontainers.image.source="https://github.com/Xassemblianist/CPPWRF" \
       org.opencontainers.image.revision="${VCS_REF}"

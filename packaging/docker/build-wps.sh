@@ -15,10 +15,13 @@ else
   mkdir -p "$WRF_DIR" "$wps"
   curl -fsSL --retry 5 -o "$work/wrf.tar.gz" \
     https://github.com/wrf-model/WRF/releases/download/v4.8.0/v4.8.0.tar.gz
+  # The digest GitHub lists for the v4.8.0 release asset.
   printf '%s  %s\n' f3b997266379e1719d186c92471a8f44f8185e976244abde82145a7fddeaf418 "$work/wrf.tar.gz" | sha256sum -c -
   tar -xzf "$work/wrf.tar.gz" --strip-components=1 -C "$WRF_DIR"
   curl -fsSL --retry 5 -o "$work/wps.tar.gz" \
     https://codeload.github.com/wrf-model/WPS/tar.gz/335c76a111f84503e8b963abaf273ea8053645bb
+  # 335c76a is the commit of the v4.6.0 tag. GitHub's archive of it, as downloaded on 2026-11-25:
+  printf '%s  %s\n' 3e0f2a53bdb38dc1a6750580b98a463d58d42c46d96d9e2293008cd85511ac47 "$work/wps.tar.gz" | sha256sum -c -
   tar -xzf "$work/wps.tar.gz" --strip-components=1 -C "$wps"
 fi
 
