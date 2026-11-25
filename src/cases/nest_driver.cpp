@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <iterator>
 #include <map>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 
@@ -73,6 +74,14 @@ struct BaseParams {
 };
 
 BaseParams read_base_params_nc(const std::string& path) {
+  // read once per file (a moving nest's start_domain runs at every move)
+  static std::mutex mu;
+  static std::map<std::string, BaseParams> cache;
+  {
+    const std::lock_guard<std::mutex> lk(mu);
+    auto it = cache.find(path);
+    if (it != cache.end()) return it->second;
+  }
   int nc = 0;
   if (nc_open(path.c_str(), NC_NOWRITE, &nc) != NC_NOERR)
     throw std::runtime_error("nest_driver: cannot open " + path);
@@ -87,6 +96,8 @@ BaseParams read_base_params_nc(const std::string& path) {
   };
   BaseParams b{get("T00"), get("P00"), get("TLP"), get("TISO"), get("TLP_STRAT"), get("P_STRAT")};
   nc_close(nc);
+  const std::lock_guard<std::mutex> lk(mu);
+  cache.emplace(path, b);
   return b;
 }
 
@@ -358,7 +369,7 @@ namespace nestmove {
 //  - 809-856: al from ph_1, mu_1 (hypsometric_opt), p from t_1 (use_theta_m = 1: qvf = 1), p_hyd = p + pb,
 //    alt = al + alb; 861-871: p_hyd_w from p_surf of HGT (a real run);
 //  - press_adj is .FALSE. for a moved nest, set_w_surface runs only at the start of the simulation.
-// The halo points keep their (shifted) values: WRF computes the patch's points only.
+// These compute the patch's points; then set_physical_bc2d / 3d fill the halo of the fields start_em lists (below).
 StartMoved start_domain_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip) {
   const Grid& g = m.g;
   const int nx = g.nx, ny = g.ny, nz = g.nz;
@@ -481,6 +492,29 @@ StartMoved start_domain_moved(const io::Config& cfg, Model& m, const std::vector
   copy_to_dev(const_cast<void*>(s.al.base()), hal.data(), s.al.bytes());
   copy_to_dev(const_cast<void*>(s.p.base()), hp.data(), s.p.bytes());
   copy_to_dev(const_cast<void*>(s.alt.base()), halt.data(), s.alt.bytes());
+
+  // start_em.F:1479-1507, 1669-1785, 1822-1829, 1975-2024: set_physical_bc3d / 2d over the whole patch (its = ips,
+  // ite = ipe: start_em.F:163) of the fields below; config_flags%nested: open_xs / xe / ys / ye copy the edge points
+  // outward into the halo (share/module_bc.F:388-427, 867-923; x, then y over the whole memory row). The base
+  // state's ht, mub, phb, pb, alb, t_init got theirs in start_em_base. p, ph0 and the other fields keep their halo
+  // (shifted) values. moist (1..num_moist), scalar (1..num_scalar) and tke_2: q_2's moist species, WRF scalars and
+  // TKE (not the tracers, which start_em does not touch).
+  {
+    if (!g.flat_x() || !g.flat_y()) throw std::logic_error("start_domain_moved: a nest without specified boundaries");
+    std::vector<HaloField> hf;
+    for (Field3* f : {&s.u_1, &s.u_2, &s.v_1, &s.v_2, &s.w_1, &s.w_2, &s.ph_1, &s.ph_2, &s.t_1, &s.t_2})
+      hf.emplace_back(*f);
+    hf.emplace_back(s.mu_1);
+    hf.emplace_back(s.mu_2);
+    for (Field3* f : {&s.php, &s.al, &s.alt})
+      if (f->layout().total > 0) hf.emplace_back(*f);
+    for (int q = 0; q < s.n_scalars(); ++q)
+      if ((q < s.n_moist || s.wrf_scalar(q) || q == s.P_TKE) && s.q_2[std::size_t(q)].layout().total > 0)
+        hf.emplace_back(s.q_2[std::size_t(q)]);
+    for (BaseField2* f : {&b.msftx, &b.msfty, &b.msfux, &b.msfuy, &b.msfvx, &b.msfvy, &b.sina, &b.cosa, &b.e, &b.f})
+      if (!f->uniform() && f->layout().total > 0) hf.emplace_back(*f);
+    fill_halos(hf, g);
+  }
   return r;
 }
 
@@ -1152,6 +1186,8 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
         throw std::runtime_error(cs.tag + ": a moving nest's parent_grid_ratio " + std::to_string(r) + " > " +
                                  std::to_string(Grid::halo) + " is not supported");
       nestmove::check_window(pg, cg, r, cs.i_parent_start, cs.j_parent_start, cs.tag);
+      // start_domain's phy_init on the new points at every move: its options checked before the first step
+      check_phy_init_moved(cs.cfg, doms[i].model, cs.tag);
     }
   }
   // A resumed run opens every nest before the restart files are read (they overwrite the initial state).

@@ -938,6 +938,9 @@ class WrfTranslator:
             self.warn(f"WRF num_moves = {num_moves}: no move is active (move_id of a nest and move_interval < "
                       "999999999); the moves are not translated.")
             return
+        self._moving_ids = {ids[k] for k in range(num_moves)
+                            if isinstance(ids[k], int) and isinstance(ivs[k], int) and 2 <= ids[k] <= max_dom
+                            and 0 <= ivs[k] < 999999999}
         self._moves_domains = ({
             "num_moves": num_moves,
             "move_id": ",".join(str(v) for v in ids),
@@ -3533,7 +3536,47 @@ class WrfTranslator:
                         self.error(f"WRF &{grp_name}.{key_name} = {vals[:n]} is not supported by CPPWRF (WRF's default "
                                    f"{reg[1] if reg else '?'}; CPPWRF has no port of it).")
 
+        if getattr(self, "_moving_ids", None):
+            self.check_moving_nest_physics(sections)
         return sections
+
+    def check_moving_nest_physics(self, sections: Dict[str, Dict[str, Any]]) -> None:
+        """The physics start_domain's phy_init runs on a moved nest's new points (dyn_em/start_em.F:1007-1101 with
+        grid%moved): CPPWRF ports it (src/cases/real_physics.cpp phy_init_moved / check_phy_init_moved) with the column
+        physics suite for mp_physics 0 / 6, cu_physics 0 / 1, bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1,
+        sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4, without urban, fractional_seaice, sst_update,
+        tmn_update, usemonalb, gwd_opt, the terrain options and grid_fdda (fg_init's fddagdinit). The model checks
+        the same before the first step."""
+        phys = sections.get("phys", {})
+        allowed = {"mp_physics": (0, 6), "cu_physics": (0, 1), "bl_pbl_physics": (0, 1), "sf_sfclay_physics": (0, 1),
+                   "sf_surface_physics": (0, 2), "ra_lw_physics": (0, 4), "ra_sw_physics": (0, 4)}
+        off = ("sf_urban_physics", "fractional_seaice", "sst_update", "tmn_update", "usemonalb", "topo_wind",
+               "slope_rad", "topo_shading")
+        for mid in sorted(self._moving_ids):
+            tag = f"d{mid:02d}"
+            dsec = sections.get(tag, {})
+
+            def eff(sec: str, key: str) -> Any:
+                if f"{sec}_{key}" in dsec:
+                    return dsec[f"{sec}_{key}"]
+                return sections.get(sec, {}).get(key, 0)
+
+            vals = {k: eff("phys", k) for k in allowed}
+            if not any(vals[k] for k in ("sf_sfclay_physics", "sf_surface_physics", "bl_pbl_physics", "cu_physics")):
+                self.error(f"WRF moving nest {tag} without surface-layer, land-surface, PBL or cumulus physics is not "
+                           "supported by CPPWRF (phy_init of a moved nest is ported with the column physics only).")
+            bad = [f"{k} = {v}" for k, v in vals.items() if v not in allowed[k]]
+            bad += [f"{k} = {eff('phys', k)}" for k in off if eff("phys", k) not in (0, False, None)]
+            if eff("dyn", "gwd_opt") not in (0, None):
+                bad.append(f"gwd_opt = {eff('dyn', 'gwd_opt')}")
+            if eff("fdda", "grid_fdda") not in (0, None):
+                bad.append(f"grid_fdda = {eff('fdda', 'grid_fdda')}")
+            if bad:
+                self.error(f"WRF moving nest {tag} with {', '.join(bad)} is not supported by CPPWRF: phy_init of a "
+                           "moved nest is ported for mp_physics 0 / 6, cu_physics 0 / 1, bl_pbl_physics 0 / 1, "
+                           "sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4 without "
+                           "urban, fractional_seaice, sst_update, tmn_update, usemonalb, gwd_opt, the terrain options "
+                           "and grid_fdda.")
 
     def format_ini(self, sections: Dict[str, Dict[str, Any]]) -> str:
         """Format translated sections into standard CPPWRF INI string."""

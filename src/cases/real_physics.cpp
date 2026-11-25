@@ -15,7 +15,9 @@
 #include <filesystem>
 #include <initializer_list>
 #include <iostream>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -121,7 +123,11 @@ LanduseInit landuse_init(const std::string& table_dir, const std::string& mminlu
 #ifndef CPPWRF_HAVE_NETCDF
 void init_real_physics(const io::Config&, Model&) { throw std::runtime_error("column physics needs NetCDF"); }
 void phy_init_after_feedback(const io::Config&, Model&) {}
-void phy_init_moved(const io::Config&, Model&, const std::vector<unsigned char>&, const std::vector<double>&) {
+void check_phy_init_moved(const io::Config&, const Model&, const std::string&) {
+  throw std::runtime_error("moving nests need NetCDF support");
+}
+std::vector<double> phy_init_moved(const io::Config&, Model&, const std::vector<unsigned char>&,
+                                   const std::vector<double>&) {
   throw std::runtime_error("moving nests need NetCDF support");
 }
 void read_wrflowinp(const std::string&, const std::string&, phys::driver::PhysicsSuite&) {
@@ -819,10 +825,13 @@ void phy_init_after_feedback(const io::Config& cfg, Model& m) {
 //    CANWAT = 0 (FNDSNOWH: SNOWH stays);
 //  - cu_init (start_of_simulation false: RAINC, RAINCV stay), kf_eta_init: RTHCUTEN, RQVCUTEN, RQCCUTEN, RQRCUTEN,
 //    RQICUTEN (P_QI), RQSCUTEN (P_QS) = 0, NCA = -100, W0AVG = 0.
-void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip,
-                    const std::vector<double>& lu_index) {
-  if (!m.suite) return;
-  phys::driver::PhysicsSuite& su = *m.suite;
+void check_phy_init_moved(const io::Config& cfg, const Model& m, const std::string& tag) {
+  // phy_init on the new points runs for any physics (WRF calls it without column physics too); the column-physics
+  // suite (PhysicsSuite) holds the fields it sets for the options below only
+  if (!m.suite)
+    throw std::runtime_error(tag + ": moving nests need the column physics (sf_sfclay_physics, sf_surface_physics, "
+                             "bl_pbl_physics or cu_physics != 0): phy_init of a moved nest without them is not ported");
+  const phys::driver::PhysicsSuite& su = *m.suite;
   const phys::driver::SuiteOptions& o = su.options();
   auto in = [](long v, std::initializer_list<long> ok) { return std::find(ok.begin(), ok.end(), v) != ok.end(); };
   const long mp = cfg.get_int("phys.mp_physics", 0);
@@ -831,10 +840,21 @@ void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned 
       !in(o.rad.ra_sw_physics, {0, 4}) || o.sf_urban_physics != 0 || su.urb_ || o.fractional_seaice != 0 ||
       o.sst_update != 0 || o.tmn_update != 0 || o.usemonalb || o.topo_wind != 0 || o.slope_rad != 0 ||
       o.topo_shading != 0 || o.gwd_opt != 0)
-    throw std::runtime_error("moving nests: phy_init of a moved nest is ported for mp_physics 0 / 6, cu_physics 0 / 1, "
-                             "bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / "
-                             "ra_sw_physics 0 / 4 without urban, fractional_seaice, sst_update, tmn_update, usemonalb, "
-                             "gwd_opt and the terrain options");
+    throw std::runtime_error(tag + ": moving nests: phy_init of a moved nest is ported for mp_physics 0 / 6, "
+                             "cu_physics 0 / 1, bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / "
+                             "2, ra_lw / ra_sw_physics 0 / 4 without urban, fractional_seaice, sst_update, tmn_update, "
+                             "usemonalb, gwd_opt and the terrain options");
+  // phy_init's fg_init (module_physics_init.F:4961-4986) -> fddagdinit zeroes the nudging tendencies of the new
+  // points (module_fdda_psufddagd.F:1516-1530); not ported
+  if (o.fdda.grid_fdda != 0)
+    throw std::runtime_error(tag + ": moving nests with grid_fdda (analysis nudging) are not supported");
+}
+
+std::vector<double> phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip,
+                                   const std::vector<double>& lu_index) {
+  check_phy_init_moved(cfg, m, "moving nests");
+  phys::driver::PhysicsSuite& su = *m.suite;
+  const phys::driver::SuiteOptions& o = su.options();
   const Grid& g = m.g;
   const int nx = g.nx, ny = g.ny;
   const std::size_t n2 = std::size_t(nx) * ny;
@@ -879,10 +899,25 @@ void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned 
   su.ivgtyp.upload(ivg);
 
   // landuse_init on the moved LU_INDEX, XICE and SNOWC (julday, cen_lat: the nest's wrfinput, as phy_init's)
-  const NcIn inp(cfg.get_string("real.dir") + "/" + cfg.get_string("real.wrfinput", "wrfinput_d01"));
+  // (read once per file: a moving nest's phy_init runs at every move)
+  int julday = 0;
+  double cen_lat = 0.0;
+  {
+    static std::mutex mu;
+    static std::map<std::string, std::pair<int, double>> cache;
+    const std::string path = cfg.get_string("real.dir") + "/" + cfg.get_string("real.wrfinput", "wrfinput_d01");
+    const std::lock_guard<std::mutex> lk(mu);
+    auto it = cache.find(path);
+    if (it == cache.end()) {
+      const NcIn inp(path);
+      it = cache.emplace(path, std::make_pair(int(inp.att_num("JULDAY", 0)), inp.att_num("CEN_LAT", 0.0))).first;
+    }
+    julday = it->second.first;
+    cen_lat = it->second.second;
+  }
   std::vector<double> lu(n2, 0.0);
   each([&](int, int, std::size_t p) { lu[p] = lu_index[p]; });
-  const LanduseInit li = landuse_init(o.table_dir, o.mminlu, int(inp.att_num("JULDAY", 0)), inp.att_num("CEN_LAT", 0.0),
+  const LanduseInit li = landuse_init(o.table_dir, o.mminlu, julday, cen_lat,
                                       o.iswater, o.isice, lu, get2(su.xice), get2(su.snowc), o.fractional_seaice,
                                       false, std::vector<double>(), std::vector<double>());
   put2(su.albbck, li.albbck); put2(su.albedo, li.albedo); put2(su.z0, li.z0); put2(su.znt, li.z0);
@@ -956,6 +991,7 @@ void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned 
     set3(su.w0avg, 0.0);
   }
   dev_sync();
+  return li.thc;  // landuse_init's THC (a history field without a model array: the caller stores the new points)
 }
 #endif
 
