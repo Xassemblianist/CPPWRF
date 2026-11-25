@@ -2,6 +2,7 @@
 #include "cases/nest_move.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -144,15 +145,27 @@ Moves parse_moves(const io::Config& root, int max_dom) {
     std::snprintf(tag, sizeof tag, "d%02d", id);
     for (const std::string k : {std::string(tag) + ".corral_dist", "domains." + std::string(tag) + "_corral_dist"})
       if (root.has(k)) {
-        mv.corral_dist[std::size_t(id - 1)] = int(root.get_int(k));
+        const long long c = root.get_int(k);
         // a nest nearer domain 1's edge than 2 parent cells reads WRF's intermediate grid beyond the parent (not
-        // verified; tools/wrf2cppwrf.py: i_parent_start >= 3)
-        if (mv.corral_dist[std::size_t(id - 1)] < 1) throw std::runtime_error(k + " < 1 is not supported");
+        // verified; tools/wrf2cppwrf.py: i_parent_start >= 3); an INTEGER in WRF
+        if (c < 1) throw std::runtime_error(k + " < 1 is not supported");
+        if (c > 2147483647LL) throw std::runtime_error(k + " = " + std::to_string(c) + " is not an INTEGER");
+        mv.corral_dist[std::size_t(id - 1)] = int(c);
       }
   }
-  // vortex following (configure nesting 3): the per-domain keys as corral_dist
+  // vortex following (configure nesting 3): the per-domain keys as corral_dist. The values are range-checked as
+  // 64-bit integers before they become WRF's INTEGERs.
   mv.vortex = root.get_bool("domains.vortex_following", false);
-  mv.track_level = int(root.get_int("domains.track_level", 50000));
+  if (!mv.vortex && root.has("domains.track_level"))
+    throw std::runtime_error("domains.track_level: vortex following (domains.vortex_following = true) only");
+  {
+    const long long tl = root.get_int("domains.track_level", 50000);
+    // float(track_level) is exact below 2^24 (the real*4 build)
+    if (tl <= 0 || tl >= 16777216)
+      throw std::runtime_error("domains.track_level = " + std::to_string(tl) + " Pa is not supported (0 < "
+                               "track_level < 2^24)");
+    mv.track_level = int(tl);
+  }
   mv.vortex_interval.assign(std::size_t(std::max(1, max_dom)), 15);
   mv.max_vortex_speed.assign(std::size_t(std::max(1, max_dom)), 40);
   mv.time_to_move.assign(std::size_t(std::max(1, max_dom)), real(0.));
@@ -160,30 +173,37 @@ Moves parse_moves(const io::Config& root, int max_dom) {
   for (int id = 1; id <= max_dom; ++id) {
     char tag[16];
     std::snprintf(tag, sizeof tag, "d%02d", id);
+    const std::size_t d = std::size_t(id - 1);
     for (const char* name : {"vortex_interval", "max_vortex_speed", "time_to_move"})
       for (const std::string k : {std::string(tag) + "." + name, "domains." + std::string(tag) + "_" + name})
         if (root.has(k)) {
           if (!mv.vortex)
             throw std::runtime_error(k + ": vortex following (domains.vortex_following = true) only; time_to_move "
                                      "with prescribed moves is not verified");
-          const std::size_t d = std::size_t(id - 1);
-          if (std::string(name) == "vortex_interval") mv.vortex_interval[d] = int(root.get_int(k));
-          else if (std::string(name) == "max_vortex_speed") mv.max_vortex_speed[d] = int(root.get_int(k));
-          else mv.time_to_move[d] = real(root.get_double(k));  // a REAL namelist value
+          if (std::string(name) == "time_to_move") {
+            // a REAL namelist value: one rounding from the decimal (gfortran's list-directed READ)
+            const std::string t = trim(root.get_string(k));
+            char* end = nullptr;
+            const real v = sizeof(real) == sizeof(float) ? real(std::strtof(t.c_str(), &end))
+                                                          : real(std::strtod(t.c_str(), &end));
+            if (t.empty() || !end || *end != 0 || !std::isfinite(double(v)))
+              throw std::runtime_error(k + " = " + t + ": a number of minutes");
+            mv.time_to_move[d] = v;
+            continue;
+          }
+          // 60 * vortex_interval and 60 * vortex_interval * max_vortex_speed are WRF INTEGER products (time_for_move2's
+          // search radius): each factor in 0 .. (2^31 - 1) / 60
+          const long long v = root.get_int(k);
+          if (v < 0 || v > 2147483647LL / 60)
+            throw std::runtime_error(k + " = " + std::to_string(v) + " is not supported (0 .. 35791394)");
+          (std::string(name) == "vortex_interval" ? mv.vortex_interval : mv.max_vortex_speed)[d] = int(v);
         }
-    const std::size_t d = std::size_t(id - 1);
-    // the search box's INTEGER product 60 * vortex_interval * max_vortex_speed (time_for_move2) must not overflow;
-    // vortex_interval: the alarm's minutes
-    if (mv.vortex && (mv.vortex_interval[d] < 0 || mv.max_vortex_speed[d] < 0 ||
-                      std::int64_t(60) * mv.vortex_interval[d] * mv.max_vortex_speed[d] > 2147483647LL))
+    if (mv.vortex && std::int64_t(60) * mv.vortex_interval[d] * mv.max_vortex_speed[d] > 2147483647LL)
       throw std::runtime_error(std::string(tag) + ": vortex_interval (" + std::to_string(mv.vortex_interval[d]) +
                                ") and max_vortex_speed (" + std::to_string(mv.max_vortex_speed[d]) +
-                               ") must be >= 0 with 60 * vortex_interval * max_vortex_speed < 2^31");
+                               ") must give 60 * vortex_interval * max_vortex_speed < 2^31");
   }
   if (mv.vortex) {
-    if (root.has("domains.track_level") && (mv.track_level <= 0 || mv.track_level >= 16777216))
-      throw std::runtime_error("domains.track_level = " + std::to_string(mv.track_level) + " Pa is not supported "
-                               "(0 < track_level < 2^24)");
     // the vortex build compiles time_for_move2's vortex branch instead of the prescribed moves: num_moves and the
     // move lists are not read; every nest asks for a move after each of its parent's steps
     mv.num_moves = 0;
@@ -222,7 +242,8 @@ Moves parse_moves(const io::Config& root, int max_dom) {
 // ---------------------------------------------------------------- time_for_move
 namespace {
 // time_for_move2 of a wrf.exe built with vortex following (below)
-bool time_for_move2_vortex(Moves& mv, const Domain& nest, const wrf_time::Interval& now, int& dx, int& dy);
+bool time_for_move2_vortex(Moves& mv, const Domain& parent, const Domain& nest, const wrf_time::Interval& now, int& dx,
+                           int& dy);
 }  // namespace
 
 bool time_for_move(Moves& mv, const Domain& parent, const Domain& nest, const wrf_time::Interval& dt_clock,
@@ -250,7 +271,7 @@ bool time_for_move(Moves& mv, const Domain& parent, const Domain& nest, const wr
   }
   bool t2 = false;
   if (mv.vortex) {
-    t2 = time_for_move2_vortex(mv, nest, now, dx, dy);
+    t2 = time_for_move2_vortex(mv, parent, nest, now, dx, dy);
   } else {
     // time_for_move2 (prescribed moves): the first move of this nest whose time has come, used once
     // (nl_set_move_interval( i, 999999999 ))
@@ -319,7 +340,7 @@ void check_window(const Grid& cg, const Grid& ng, int ratio, int ipos, int jpos,
 #ifndef CPPWRF_HAVE_NETCDF
 void move_nest(Domain&, Domain&, int, int) { throw std::runtime_error("moving nests need NetCDF support"); }
 namespace {
-bool time_for_move2_vortex(Moves&, const Domain&, const wrf_time::Interval&, int&, int&) {
+bool time_for_move2_vortex(Moves&, const Domain&, const Domain&, const wrf_time::Interval&, int&, int&) {
   throw std::runtime_error("moving nests need NetCDF support");
 }
 }  // namespace
@@ -524,8 +545,8 @@ bool parent_array(Domain& p, const std::string& name, std::size_t occurrence, Ar
 // time_for_move2 with -DVORTEX_CENTER (share/mediation_nest_move.F:349-700) for a nest of one patch: when the nest's
 // COMPUTE_VORTEX_CENTER_ALARM rings, the vortex centre from the nest's current ph_2, phb, p, pb (the end of its last
 // step), psfc, ht (nest/vortex_center.hpp); then the move toward it
-bool time_for_move2_vortex(Moves& mv, const Domain& nest, const wrf_time::Interval& now, int& move_cd_x,
-                           int& move_cd_y) {
+bool time_for_move2_vortex(Moves& mv, const Domain& parent, const Domain& nest, const wrf_time::Interval& now,
+                           int& move_cd_x, int& move_cd_y) {
   namespace vx = nest::vortex;
   Domain& N = const_cast<Domain&>(nest);
   const Grid& g = N.m->g;
@@ -534,8 +555,11 @@ bool time_for_move2_vortex(Moves& mv, const Domain& nest, const wrf_time::Interv
   Moves::VortexState& vs = mv.vx[d];
   const int pgr = N.ratio;
   const int nx = g.nx, ny = g.ny, nz = g.nz;  // ide - 1, jde - 1, kde - 1
-  // nl_get_dx of the nest: check_a_mundo's dx(1) / REAL(parent_grid_ratio) (REAL), the model's grid spacing
-  const real dx = real(g.dx);
+  // nl_get_dx of the nest: check_a_mundo's model_config_rec%dx(i) = dx(1) / REAL(factor) (module_check_a_mundo.F:274)
+  // in REAL, with domain 1's namelist dx (its grid spacing: real.dx, which input_wrf compares with the file) and the
+  // nest's parent_grid_ratio (the parent is domain 1); not the nest's wrfinput DX attribute
+  if (parent.id != 1) throw std::logic_error("vortex following: the parent must be domain 1");
+  const real dx = real(parent.m->g.dx) / real(N.ratio);
   const std::string timestr = wrf_io::add_seconds(N.m->start_date, long(now.S)).substr(0, 19);
   vx::Centre c{vs.xi, vs.xj, vs.vc_i, vs.vc_j};
   if (vs.ringing) {
@@ -609,10 +633,10 @@ bool time_for_move2_vortex(Moves& mv, const Domain& nest, const wrf_time::Interv
     std::fprintf(stderr, "ATCF %s %8.2f %8.2f %6.1f %6.1f\n", timestr.c_str(), double(at(xlat, ia - 1, ja - 1, 0)),
                  double(at(xlong, ia - 1, ja - 1, 0)), double(real(0.01) * f.pmin), double(maxws * real(1.94)));
   }
+  const real vc_i_found = c.vc_i, vc_j_found = c.vc_j;  // WRF prints vc before the move shifts it
   const vx::Decision dcs = vx::decide(nx + 1, ny + 1, pgr, c);
-  // (decide shifted vc by the move; WRF prints the centre before that)
-  std::fprintf(stderr, " %s vortex center (in nest x and y): %.10g %.10g\n", timestr.c_str(),
-               double(c.vc_i + real(dcs.move_cd_x * pgr)), double(c.vc_j + real(dcs.move_cd_y * pgr)));
+  std::fprintf(stderr, " %s vortex center (in nest x and y): %.10g %.10g\n", timestr.c_str(), double(vc_i_found),
+               double(vc_j_found));
   std::fprintf(stderr, " %s grid   center (in nest x and y): %.10g %.10g\n", timestr.c_str(), double(dcs.dc_i),
                double(dcs.dc_j));
   std::fprintf(stderr, " %s disp          : %.10g %.10g\n", timestr.c_str(), double(dcs.disp_x), double(dcs.disp_y));

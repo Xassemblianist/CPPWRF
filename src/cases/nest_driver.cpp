@@ -665,6 +665,10 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       }
     }
 
+    // the moving-nest switches reach every domain's configuration, an external one too: their verification tiers
+    // (io::check_option_tiers, the files' CPPWRF_UNVERIFIED_OPTIONS)
+    for (const char* k : {"domains.num_moves", "domains.vortex_following"})
+      if (root_cfg.has(k)) ov.push_back(std::string(k) + "=" + root_cfg.get_string(k));
     if (!ext_cfg_path.empty()) {
       sp.cfg = io::Config::load(ext_cfg_path, ov);
     } else {
@@ -1100,6 +1104,16 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     if (!root_cfg.get_string("run.restart_file", "").empty())
       throw std::runtime_error("moving nests (domains.num_moves > 0, domains.vortex_following) in a resumed run "
                                "(run.restart_file) are not supported");
+    // writing wrfrst with vortex following: WRF's restart stream holds the vortex state (Registry XI, XJ, VC_I, VC_J,
+    // io "r") and the COMPUTE_VORTEX_CENTER_ALARM, which CPPWRF does not write
+    if (moves.vortex) {
+      const double ri = root_cfg.get_double("restart.interval", root_cfg.get_double("output.restart_interval", 0.0));
+      const double rt = root_cfg.get_double("run.run_time", 0.0);
+      if (ri > 0.0 && (rt <= 0.0 || ri <= rt))
+        throw std::runtime_error("vortex following (domains.vortex_following) with restart files (restart.interval = " +
+                                 std::to_string(ri) + " s within the run) is not supported: WRF's wrfrst holds the "
+                                 "vortex centre (XI, XJ, VC_I, VC_J), CPPWRF's does not");
+    }
     move_install = std::make_unique<nestmove::Install>();
     for (int i = 0; i < max_dom; ++i) move_regs.push_back(std::make_unique<nestmove::FieldRegistry>());
   }
@@ -1112,6 +1126,14 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   }
   for (int i = 0; i < max_dom && moves.any(); ++i)
     if (doms[i].model.adapt) throw std::runtime_error("moving nests with the adaptive time step are not supported");
+  // the physics a moved nest's phy_init is ported for, checked before the first step (not at the first move)
+  for (int i = 1; i < max_dom && moves.any(); ++i) {
+    bool moving = moves.vortex;
+    for (int k = 0; k < moves.num_moves; ++k)
+      moving = moving || (moves.move_id[std::size_t(k)] == doms[i].spec.dom_id &&
+                          moves.move_interval[std::size_t(k)] < 999999999);
+    if (moving) check_phy_init_moved(doms[i].spec.cfg, doms[i].model);
+  }
   // module_convtrans_prep.F's SAVE stepave_count: one counter for every domain of the run (the first suite's)
   for (int i = 0, first = -1; i < max_dom; ++i)
     if (doms[i].model.suite) {

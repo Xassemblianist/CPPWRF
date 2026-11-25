@@ -124,6 +124,7 @@ void phy_init_after_feedback(const io::Config&, Model&) {}
 void phy_init_moved(const io::Config&, Model&, const std::vector<unsigned char>&, const std::vector<double>&) {
   throw std::runtime_error("moving nests need NetCDF support");
 }
+void check_phy_init_moved(const io::Config&, const Model&) { throw std::runtime_error("moving nests need NetCDF support"); }
 void read_wrflowinp(const std::string&, const std::string&, phys::driver::PhysicsSuite&) {
   throw std::runtime_error("sst_update needs NetCDF");
 }
@@ -819,22 +820,32 @@ void phy_init_after_feedback(const io::Config& cfg, Model& m) {
 //    CANWAT = 0 (FNDSNOWH: SNOWH stays);
 //  - cu_init (start_of_simulation false: RAINC, RAINCV stay), kf_eta_init: RTHCUTEN, RQVCUTEN, RQCCUTEN, RQRCUTEN,
 //    RQICUTEN (P_QI), RQSCUTEN (P_QS) = 0, NCA = -100, W0AVG = 0.
-void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip,
-                    const std::vector<double>& lu_index) {
-  if (!m.suite) return;
-  phys::driver::PhysicsSuite& su = *m.suite;
-  const phys::driver::SuiteOptions& o = su.options();
+void check_phy_init_moved(const io::Config& cfg, const Model& m) {
   auto in = [](long v, std::initializer_list<long> ok) { return std::find(ok.begin(), ok.end(), v) != ok.end(); };
+  // microphysics: also without column physics (a run with microphysics only has no suite)
   const long mp = cfg.get_int("phys.mp_physics", 0);
-  if (!in(mp, {0, 6}) || !in(o.cu_physics, {0, 1}) || !in(o.bl_pbl_physics, {0, 1}) ||
-      !in(o.sf_sfclay_physics, {0, 1}) || !in(o.sf_surface_physics, {0, 2}) || !in(o.rad.ra_lw_physics, {0, 4}) ||
-      !in(o.rad.ra_sw_physics, {0, 4}) || o.sf_urban_physics != 0 || su.urb_ || o.fractional_seaice != 0 ||
-      o.sst_update != 0 || o.tmn_update != 0 || o.usemonalb || o.topo_wind != 0 || o.slope_rad != 0 ||
-      o.topo_shading != 0 || o.gwd_opt != 0)
+  bool ok = in(mp, {0, 6});
+  if (m.suite) {
+    const phys::driver::PhysicsSuite& su = *m.suite;
+    const phys::driver::SuiteOptions& o = su.options();
+    ok = ok && in(o.cu_physics, {0, 1}) && in(o.bl_pbl_physics, {0, 1}) && in(o.sf_sfclay_physics, {0, 1}) &&
+         in(o.sf_surface_physics, {0, 2}) && in(o.rad.ra_lw_physics, {0, 4}) && in(o.rad.ra_sw_physics, {0, 4}) &&
+         o.sf_urban_physics == 0 && !su.urb_ && o.fractional_seaice == 0 && o.sst_update == 0 && o.tmn_update == 0 &&
+         !o.usemonalb && o.topo_wind == 0 && o.slope_rad == 0 && o.topo_shading == 0 && o.gwd_opt == 0;
+  }
+  if (!ok)
     throw std::runtime_error("moving nests: phy_init of a moved nest is ported for mp_physics 0 / 6, cu_physics 0 / 1, "
                              "bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / "
                              "ra_sw_physics 0 / 4 without urban, fractional_seaice, sst_update, tmn_update, usemonalb, "
                              "gwd_opt and the terrain options");
+}
+
+void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip,
+                    const std::vector<double>& lu_index) {
+  check_phy_init_moved(cfg, m);
+  if (!m.suite) return;
+  phys::driver::PhysicsSuite& su = *m.suite;
+  const phys::driver::SuiteOptions& o = su.options();
   const Grid& g = m.g;
   const int nx = g.nx, ny = g.ny;
   const std::size_t n2 = std::size_t(nx) * ny;

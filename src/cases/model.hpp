@@ -91,6 +91,8 @@ void phy_init_after_feedback(const io::Config& cfg, Model& m);
 // points j * nx + i, lu_index the nest's moved LU_INDEX there); the physics options it is ported for, others throw
 void phy_init_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip,
                     const std::vector<double>& lu_index);
+// the physics options phy_init_moved is ported for (throws otherwise); checked for every moving nest at the start
+void check_phy_init_moved(const io::Config& cfg, const Model& m);
 // sst_update = 1: the auxinput4 record of `date` (WRF date string) from wrflowinp_d0N into the suite's fields
 void read_wrflowinp(const std::string& path, const std::string& date, phys::driver::PhysicsSuite& su);
 // grid_fdda = 1: the auxinput10 record of `date` from wrffdda_d0N into the suite's analyses (fdda3d, fdda2d)
