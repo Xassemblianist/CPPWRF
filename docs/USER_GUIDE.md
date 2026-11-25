@@ -530,13 +530,14 @@ and the GPU. The option is **unverified** until the WRF comparison (cases MV1, M
 
 **Vortex-following nests (unverified).** A wrf.exe built with vortex following (configure's nesting option 3,
 `-DMOVE_NESTS -DVORTEX_CENTER`) moves the nest toward the lowest `track_level` height instead of reading the
-prescribed moves: translate its namelist with `tools/wrf2cppwrf.py --vortex-following` (the namelist cannot say how
-WRF was built), which writes `[domains] vortex_following = true` and the non-default `track_level` (Pa, one value),
+prescribed moves: translate its namelist with `tools/wrf2cppwrf.py --vortex-following` (or run
+`tools/cppwrf-wrf --vortex-following`; the namelist cannot say how WRF was built), which writes `[domains] vortex_following = true` and the non-default `track_level` (Pa, one value),
 `vortex_interval` (minutes between centre searches), `max_vortex_speed` (m/s, the search box around the last centre),
 `time_to_move` (minutes before the first move) and `corral_dist` per nest. After each parent step the centre is
 searched again when the vortex alarm rings, and the nest moves by one parent cell toward it while it is at least one
 parent cell from the nest's centre (docs/NESTING.md, "Vortex-following nests"). The output, the restrictions and the
-physics are those of the prescribed moves above, with one nest (`max_dom = 2`). The option is **unverified** until
+physics are those of the prescribed moves above, with one nest (`max_dom = 2`) and no restart file written within the
+run. The option is **unverified** until
 the WRF comparison (cases VX1, VX2: tests/verify/refs/vortexnest_refs.txt) has run: set `[cppwrf] allow_unverified =
 true`.
 

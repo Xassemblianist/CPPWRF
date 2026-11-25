@@ -147,7 +147,10 @@ tests/verify/refs/vortexnest_refs.txt).
 6. Restart: WRF keeps xi, xj, vc_i, vc_j in wrfrst (Registry `r`) and warns when a run restarts off the vortex
    interval; CPPWRF refuses a resumed run with moving nests.
 7. Not supported (errors): more than one nest (WRF moves every nest; CPPWRF one nest of domain 1 without nests),
-   `track_level` outside (0, 2^24), negative `vortex_interval` / `max_vortex_speed` or an overflowing product, and
-   everything refused for prescribed moves. The differential test tests/nest/vortex (ctest -L diff) checks
+   `track_level` outside (0, 2^24), `vortex_interval` / `max_vortex_speed` outside 0 .. (2^31 - 1) / 60 or an
+   overflowing `60 * vortex_interval * max_vortex_speed`, the vortex keys without `vortex_following`, restart files
+   written within the run (WRF's wrfrst holds XI, XJ, VC_I, VC_J), and everything refused for prescribed moves (the
+   physics a moved nest's phy_init is ported for is checked before the first step, also without column physics).
+   `dx` of the search is check_a_mundo's `dx(1) / REAL(parent_grid_ratio)` from domain 1's grid spacing, in REAL. The differential test tests/nest/vortex (ctest -L diff) checks
    compute_500mb_height of WRF's -r8 build and a copy of the search and move lines against vortex_center.hpp byte for
    byte.
