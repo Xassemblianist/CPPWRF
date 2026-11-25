@@ -114,6 +114,11 @@ int read_i(const std::string& rec, std::size_t pos, std::size_t w) {
 long long date_seconds(const std::string& d) {
   auto num = [&](std::size_t p, std::size_t n) { return std::stoll(d.substr(p, n)); };
   long long y = num(0, 4), m = num(5, 2), dd = num(8, 2);
+  // geth_idts (module_date_time.F) stops on an invalid date: month, day of that month, hour, minute or second
+  const bool leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+  const int mdays[12] = {31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+  if (m < 1 || m > 12 || dd < 1 || dd > mdays[m - 1] || num(11, 2) > 23 || num(14, 2) > 59 || num(17, 2) > 59)
+    throw std::invalid_argument("invalid date " + d);
   y -= m <= 2;
   const long long era = (y >= 0 ? y : y - 399) / 400;
   const long long yoe = y - era * 400;

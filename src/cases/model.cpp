@@ -502,6 +502,11 @@ Model Model::build(const io::Config& cfg) {
                      cfg.get_int("phys.topo_shading", 0) != 0))
       throw std::runtime_error("phys.topo_wind / slope_rad / topo_shading without surface-layer, land-surface, PBL or "
                                "cumulus physics are not supported");
+    // observation nudging (fddaobs_driver, which wrf.exe calls whatever the physics) is ported with the column physics
+    // suite only: without it obs_nudge_opt would be silently ignored
+    if (!m.suite && cfg.get_int("fdda.obs_nudge_opt", 0) != 0)
+      throw std::runtime_error("fdda.obs_nudge_opt = 1 without surface-layer, land-surface, PBL or cumulus physics is "
+                               "not supported");
     // diagnostic_output_calc's buckets and prec_acc_dt sums are ported with the column physics suite (RAINC, T2, AC*)
     if (!m.suite && (cfg.get_double("phys.bucket_mm", -1.0) > 0 || cfg.get_double("phys.bucket_j", -1.0) > 0 ||
                      cfg.get_double("phys.prec_acc_dt", 0.0) > 0))
