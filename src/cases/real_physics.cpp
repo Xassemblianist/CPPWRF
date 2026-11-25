@@ -415,6 +415,81 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     throw std::runtime_error("grid_sfdda (surface analysis nudging) is not supported: it needs wrfsfdda_d0N from OBSGRID");
   if (o.fdda.grid_fdda != 0 && cfg.get_bool("time.adaptive", false))
     throw std::runtime_error("grid_fdda with the adaptive time step (use_adaptive_time_step) is not supported");
+  {  // observation nudging (&fdda obs_*; max_domains entries this domain's, fdda.obs_* of [d0N] for a nest)
+    auto& ob = o.obs;
+    auto gi = [&](const char* k, int d) { return int(cfg.get_int(k, d)); };
+    auto gd = [&](const char* k, double d) { return cfg.get_double(k, d); };
+    ob.obs_nudge_opt = gi("fdda.obs_nudge_opt", 0);
+    if (ob.obs_nudge_opt != 0) {
+      if (ob.obs_nudge_opt != 1) throw std::runtime_error("obs_nudge_opt = " + std::to_string(ob.obs_nudge_opt) + " (0 or 1)");
+      ob.nudge_wind = gi("fdda.obs_nudge_wind", 0);
+      ob.nudge_temp = gi("fdda.obs_nudge_temp", 0);
+      ob.nudge_mois = gi("fdda.obs_nudge_mois", 0);
+      ob.nudge_pstr = gi("fdda.obs_nudge_pstr", 0);
+      ob.coef_wind = gd("fdda.obs_coef_wind", 0);
+      ob.coef_temp = gd("fdda.obs_coef_temp", 0);
+      ob.coef_mois = gd("fdda.obs_coef_mois", 0);
+      ob.coef_pstr = gd("fdda.obs_coef_pstr", 0);
+      ob.rinxy = gd("fdda.obs_rinxy", 0);
+      ob.twindo = gd("fdda.obs_twindo", 0);
+      ob.twindo_cg = gd("fdda.obs_twindo_cg", ob.twindo);
+      ob.ionf = gi("fdda.obs_ionf", 1);
+      ob.prt_freq = gi("fdda.obs_prt_freq", 1000);
+      ob.no_pbl_nudge_uv = gi("fdda.obs_no_pbl_nudge_uv", 0);
+      ob.no_pbl_nudge_t = gi("fdda.obs_no_pbl_nudge_t", 0);
+      ob.no_pbl_nudge_q = gi("fdda.obs_no_pbl_nudge_q", 0);
+      ob.fdda_end = gd("fdda.fdda_end", 0);
+      ob.idynin = gi("fdda.obs_idynin", 0);
+      ob.dtramp = gd("fdda.obs_dtramp", 0);
+      ob.sfc_scheme_horiz = gi("fdda.obs_sfc_scheme_horiz", 0);
+      ob.sfc_scheme_vert = gi("fdda.obs_sfc_scheme_vert", 0);
+      ob.max_sndng_gap = gd("fdda.obs_max_sndng_gap", 20);
+      ob.sfcfact = gd("fdda.obs_sfcfact", 1.0);
+      ob.sfcfacr = gd("fdda.obs_sfcfacr", 1.0);
+      ob.dpsmx = gd("fdda.obs_dpsmx", 7.5);
+      // the full / ramp heights of the regimes 1, 2, 4 (the keys as literals: src/cases/config_keys.cmake)
+      const char* const vk[3][3][2] = {
+          {{"fdda.obs_nudgezfullr1_uv", "fdda.obs_nudgezrampr1_uv"}, {"fdda.obs_nudgezfullr1_t", "fdda.obs_nudgezrampr1_t"},
+           {"fdda.obs_nudgezfullr1_q", "fdda.obs_nudgezrampr1_q"}},
+          {{"fdda.obs_nudgezfullr2_uv", "fdda.obs_nudgezrampr2_uv"}, {"fdda.obs_nudgezfullr2_t", "fdda.obs_nudgezrampr2_t"},
+           {"fdda.obs_nudgezfullr2_q", "fdda.obs_nudgezrampr2_q"}},
+          {{"fdda.obs_nudgezfullr4_uv", "fdda.obs_nudgezrampr4_uv"}, {"fdda.obs_nudgezfullr4_t", "fdda.obs_nudgezrampr4_t"},
+           {"fdda.obs_nudgezfullr4_q", "fdda.obs_nudgezrampr4_q"}}};
+      decltype(&ob.vif_uv) const arrs[3] = {&ob.vif_uv, &ob.vif_t, &ob.vif_q};
+      for (int r = 0; r < 3; ++r) {
+        for (int v = 0; v < 3; ++v) {
+          (*arrs[v])[2 * r] = gd(vk[r][v][0], r == 2 ? -5000 : 50);
+          (*arrs[v])[2 * r + 1] = gd(vk[r][v][1], 50);
+        }
+      }
+      ob.nudgezfullmin = gd("fdda.obs_nudgezfullmin", 50);
+      ob.nudgezrampmin = gd("fdda.obs_nudgezrampmin", 50);
+      ob.nudgezmax = gd("fdda.obs_nudgezmax", 3000);
+      ob.scl_neg_qv_innov = gi("fdda.obs_scl_neg_qv_innov", 0);
+      ob.max_obs = gi("fdda.max_obs", 0);
+      ob.grid_id = gi("fdda.obs_grid_id", 1);
+      ob.levidn = gi("fdda.obs_levidn", 0);
+      ob.parent_grid_ratio = gi("fdda.obs_parent_grid_ratio", 1);
+      ob.file = cfg.get_string("fdda.obs_file", dir + "/OBS_DOMAIN" + std::to_string(ob.grid_id) + "01");
+      const int diff_opt = int(cfg.get_int("dyn.diff_opt", 0));
+      ob.diff_z = diff_opt == 1 || diff_opt == 2;
+      // options without data proving them stay errors (tools/wrf2cppwrf.py says the same)
+      auto bad = [](const std::string& m) { throw std::runtime_error("obs nudging: " + m); };
+      for (auto [v, n] : {std::pair{ob.nudge_wind, "obs_nudge_wind"}, std::pair{ob.nudge_temp, "obs_nudge_temp"},
+                          std::pair{ob.nudge_mois, "obs_nudge_mois"}, std::pair{ob.no_pbl_nudge_uv, "obs_no_pbl_nudge_uv"},
+                          std::pair{ob.no_pbl_nudge_t, "obs_no_pbl_nudge_t"}, std::pair{ob.no_pbl_nudge_q, "obs_no_pbl_nudge_q"},
+                          std::pair{ob.idynin, "obs_idynin"}, std::pair{ob.scl_neg_qv_innov, "obs_scl_neg_qv_innov"}})
+        if (v != 0 && v != 1) bad(std::string(n) + " = " + std::to_string(v) + " is not supported (0 or 1)");
+      if (ob.nudge_pstr != 0) bad("obs_nudge_pstr = 1 has no effect in WRF 4.8 and is not supported");
+      if (ob.ionf < 1) bad("obs_ionf must be >= 1");
+      if (ob.prt_freq <= 0) bad("obs_prt_freq must be greater than zero (WRF stops)");
+      if (ob.dpsmx > 10.) bad("obs_dpsmx > 10 (WRF stops, in4dob STOP 557)");
+      if (ob.idynin == 1 && ob.dtramp == 0) bad("obs_idynin = 1 with obs_dtramp = 0 (WRF divides by 0)");
+      if (ob.max_obs <= 0) bad("max_obs must be > 0 (WRF stops at the first observation: in4dob STOP 122)");
+      if (cfg.get_bool("time.adaptive", false)) bad("the adaptive time step (use_adaptive_time_step) is not supported");
+      if (ob.grid_id > 9) bad("more than 9 domains: OBS_DOMAIN<id>01 has one digit");
+    }
+  }
   o.bucket_mm = cfg.get_double("phys.bucket_mm", -1.0);  // diagnostic_output_calc (module_diag_misc.F)
   o.bucket_j = cfg.get_double("phys.bucket_j", -1.0);
   o.prec_acc_dt = cfg.get_double("phys.prec_acc_dt", 0.0);  // this domain's entry (minutes)
@@ -704,6 +779,21 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   }
   // CANWAT = 0 (lsminit / NoahmpInitMain; the slab's from wrfinput), the accumulations and fluxes stay zero
   su.init_radiation(m.xlat, m.xlong);
+  if (su.obs_) {  // fddaobs_init's inputs: wrfinput's base state, XLAT(1,1), XLONG(1,1) and projection
+    auto& ip = su.obs_->in;
+    ip.p00 = in.var("P00", 1)[0];
+    ip.t00 = in.var("T00", 1)[0];
+    ip.tlp = in.var("TLP", 1)[0];
+    ip.p_top = m.base->p_top;
+    ip.znu.resize(std::size_t(g.nz));
+    for (int k = 0; k < g.nz; ++k) ip.znu[k] = m.base->znu[k];
+    ip.xlat11 = m.xlat.at(0);
+    ip.xlong11 = m.xlong.at(0);
+    ip.map_proj = int(in.att_num("MAP_PROJ", 0));
+    ip.truelat1 = in.att_num("TRUELAT1", 0);
+    ip.truelat2 = in.att_num("TRUELAT2", 0);
+    ip.stand_lon = in.att_num("STAND_LON", 0);
+  }
   if (o.topo_wind != 0 || su.topo_) {
     // start_em (not a restart): CTOPO / CTOPO2 and the slope-radiation arrays from the terrain and phy_init's XLAND
     if (o.topo_wind == 1 && !(in.has("GOT_VAR_SSO") && in.var("GOT_VAR_SSO", 1)[0] != 0.0))

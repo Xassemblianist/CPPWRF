@@ -657,6 +657,8 @@ void DomainRunner::load_restart_file(const std::string& path) {
 
   if (m_.suite && m_.suite->options().tmn_update == 1 && !wrf_file)  // NYEAR / NDAY: WRF's restart stream only
     throw std::runtime_error("tmn_update: resume from the wrfrst file of the run, not " + path);
+  if (m_.suite && m_.suite->obs_ && !wrf_file)  // WRF reads the observations again from the restart time
+    throw std::runtime_error("obs_nudge_opt: resume from the wrfrst file of the run, not " + path);
   if (m_.adapt && !wrf_file)  // the adaptive state (LAST_DT_SEC, ...) is in WRF's restart stream only
     throw std::runtime_error("time.adaptive: resume from the wrfrst file of the run, not " + path);
   long native_run_start = 0;  // CPPWRF's own file: the step the run that wrote it started at
@@ -1315,6 +1317,18 @@ void DomainRunner::before_step(long n) {
   // grid_fdda: med_before_solve_io reads auxinput10 (wrffdda_d0N) when its alarm rings
   if (aux10_on() && aux10_read_step_ != n - 1 && aux10_due(n - 1)) read_aux10(n - 1);
 #endif
+  // obs_nudge_opt = 1: fddaobs_init at the run's first step (ktaur: a resumed run's itimestep, the run's start date of
+  // namelist start_*), then med_before_solve_io's wrf_fddaobs_in every step
+  if (m_.suite && m_.suite->obs_) {
+    phys::driver::ObsNudging& ob = *m_.suite->obs_;
+    if (!ob.initialised) {
+      if (tile::count() > 1)
+        throw std::runtime_error("obs nudging: decomposed runs (tiles, MPI) are not supported (one patch only)");
+      const long it = m_.suite->itimestep;
+      ob.start(it > 0, it, wrf_io::add_seconds(start_date_, std::lround(double(it) * m_.g.dt)));
+    }
+    m_.suite->obs_before_step();
+  }
 }
 
 #ifdef CPPWRF_HAVE_NETCDF

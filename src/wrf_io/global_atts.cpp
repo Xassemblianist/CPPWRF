@@ -125,6 +125,15 @@ void write_global_atts(NcOut& nc, const WrfConfig& c, const DomainAtts& d, Strea
       ci("IF_RAMPING", "if_ramping"); cr("DTRAMP_MIN", "dtramp_min");
     }
     ci("OBS_NUDGE_OPT", "obs_nudge_opt");
+    if (c.integer("obs_nudge_opt") == 1) {  // output_wrf.F:762-776 (obs_ionf, obs_idynin, obs_dtramp: domain 1's)
+      cr("FDDA_END", "fdda_end");
+      ci("OBS_NUDGE_WIND", "obs_nudge_wind"); cr("OBS_COEF_WIND", "obs_coef_wind");
+      ci("OBS_NUDGE_TEMP", "obs_nudge_temp"); cr("OBS_COEF_TEMP", "obs_coef_temp");
+      ci("OBS_NUDGE_MOIS", "obs_nudge_mois"); cr("OBS_COEF_MOIS", "obs_coef_mois");
+      ci("OBS_NUDGE_PSTR", "obs_nudge_pstr"); cr("OBS_COEF_PSTR", "obs_coef_pstr");
+      i("OBS_IONF", c.integer("obs_ionf", 1)); i("OBS_IDYNIN", c.integer("obs_idynin", 1));
+      r("OBS_DTRAMP", c.num("obs_dtramp", 1));
+    }
     cr("BUCKET_MM", "bucket_mm"); cr("BUCKET_J", "bucket_j"); cr("PREC_ACC_DT", "prec_acc_dt");
     ci("ISFTCFLX", "isftcflx"); ci("ISHALLOW", "ishallow"); ci("ISFFLX", "isfflx");
     ci("ICLOUD", "icloud"); ci("ICLOUD_CU", "icloud_cu"); ci("TRACER_PBLMIX", "tracer_pblmix");

@@ -737,6 +737,11 @@ const char* fatal_message(int code) {
       return "sf_urban_physics = 1: urban morphology input (HGT_URB2D > 0, NUDAPT: the UCM reads an undefined U10 and "
              "SW then) is not supported";
     case kFatalRucVilka: return " crash in surface energy budget ";
+    case kFatalObsRegime: return "fddaobs_driver: compute_VIH STOP (Unknown regime type)";
+    case kFatalObsKpblObs:
+      return "obs nudging: a single-level upper-air observation whose influence layer holds the PBL top level is not "
+             "supported (WRF's nudob reads kpbl_obs there, which its serial build never sets)";
+    case kFatalObsSoundingLevels: return "wrf_fddaobs_in: in4dob";
     default: return "unknown fatal condition in a physics kernel";
   }
 }

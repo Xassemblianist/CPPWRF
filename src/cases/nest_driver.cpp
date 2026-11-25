@@ -425,6 +425,16 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       ov.push_back("real.i_parent_start=" + std::to_string(sp.i_parent_start));
       ov.push_back("real.j_parent_start=" + std::to_string(sp.j_parent_start));
       ov.push_back("real.spec_bdy_width=" + std::to_string(sp.spec_bdy_width));
+      // obs nudging: the domain's id (OBS_DOMAIN<id>01, nudob's INEST), nest level (fddaobs_init's levidn), ratio to its
+      // parent and domain 1's obs_twindo (a nest's window when its own obs_twindo is 0); only when the option is set
+      if (root_cfg.has("fdda.obs_nudge_opt") || root_cfg.has(pfx + "fdda_obs_nudge_opt")) {
+        ov.push_back("fdda.obs_grid_id=" + std::to_string(id));
+        int lev = 1;
+        for (int p = sp.parent_id; p > 1; p = specs[p - 1].parent_id) ++lev;
+        ov.push_back("fdda.obs_levidn=" + std::to_string(lev));
+        ov.push_back("fdda.obs_parent_grid_ratio=" + std::to_string(sp.parent_grid_ratio));
+        if (root_cfg.has("fdda.obs_twindo")) ov.push_back("fdda.obs_twindo_cg=" + root_cfg.get_string("fdda.obs_twindo"));
+      }
       {
         std::ostringstream oss;
         oss.precision(17);
