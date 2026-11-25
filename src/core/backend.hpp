@@ -774,11 +774,12 @@ template <class K> void column_for_whole(const Range2D& r, const K& k) {
 // in any order. The CPU build runs each part at once as its own parallel_for, in the order given.
 // Fast CUDA FP32 (-DCPPWRF_CUDA_FP32_IDENTITY=OFF, nvcc's default --fmad=true): ptxas contracts a*b + c into an fma
 // depending on the code around it, so a kernel with such arithmetic can round differently inside a batched kernel
-// (FP64 and the default FP32 identity build compile with --fmad=false: every operation is rounded on its own). In
-// GPU FP32 builds only kernels that declare `static constexpr bool kNoMulAdd = true` (copies, zeros, comparisons)
-// are batched; the others are launched one by one with parallel_for, the kernel they had before.
+// (FP64 and the default FP32 identity build compile with --fmad=false: every operation is rounded on its own,
+// CPPWRF_LOCAL_ROUNDING in core/precision.hpp). In the fast CUDA FP32 build only kernels that declare
+// `static constexpr bool kNoMulAdd = true` (copies, zeros, comparisons) are batched; the others are launched one by
+// one with parallel_for, the kernel they had before.
 #if !defined(CPPWRF_USE_GPU) || defined(CPPWRF_GPUCC)
-#if defined(CPPWRF_USE_GPU) && !defined(CPPWRF_DOUBLE)
+#if defined(CPPWRF_USE_GPU) && !defined(CPPWRF_LOCAL_ROUNDING)
 inline constexpr bool kFuseMulAdd = false;
 #else
 inline constexpr bool kFuseMulAdd = true;
