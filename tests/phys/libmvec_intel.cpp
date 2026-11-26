@@ -13,8 +13,15 @@
 // would need them here too. Compiled without FMA contraction and without -march (IEEE double operations in
 // libmvec's order). -DCPPWRF_MVEC_INTEL_NO_LOG / -DCPPWRF_MVEC_INTEL_NO_LOG10 leave one of them out (to find which one a
 // difference comes from, e.g. as an LD_PRELOAD library).
+// The float 4-lane powf (_ZGVbN4vv_powf) takes rcpps as well: WRF's real*4 build calls it in its vectorised REAL
+// x**y loops (WSM6, the surface layer, ...), and on an AMD CPU it gives other bits than on Intel. Each lane here is
+// cppwrf::mvec4::powf (src/core/libmvec_f4.hpp: libmvec's SSE4 code with Intel's rcpps table, the lanes CPPWRF's
+// FP32 build computes), so the real*4 references made on a GitHub runner (AMD EPYC or Intel Xeon) are Intel's.
+// -DCPPWRF_MVEC_INTEL_NO_POWF leaves it out. acosf, asinf and tanf (rsqrtps / rcpps too) are not replaced.
 #include <emmintrin.h>
+#include <xmmintrin.h>
 
+#include "core/libmvec_f4.hpp"
 #include "core/libmvec_x86.hpp"
 
 extern "C" {
@@ -34,6 +41,15 @@ __m128d _ZGVbN2v_log10(__m128d x) {
   v[0] = cppwrf::mvec::log10(v[0]);
   v[1] = cppwrf::mvec::log10(v[1]);
   return _mm_load_pd(v);
+}
+#endif
+#if !defined(CPPWRF_MVEC_INTEL_NO_POWF)
+__m128 _ZGVbN4vv_powf(__m128 x, __m128 y) {
+  alignas(16) float a[4], b[4];
+  _mm_store_ps(a, x);
+  _mm_store_ps(b, y);
+  for (int l = 0; l < 4; ++l) a[l] = cppwrf::mvec4::powf(a[l], b[l]);
+  return _mm_load_ps(a);
 }
 #endif
 }
