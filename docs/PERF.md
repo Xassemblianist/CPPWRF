@@ -1391,19 +1391,26 @@ advance_uv's patch-edge points read the halo before the fill) changes the CPU MP
 ## FP64-only optimizations in the CUDA FP32 identity build (PERF15; measured on the workstation only)
 
 Four optimizations were gated on `CPPWRF_DOUBLE` because the fast CUDA FP32 build contracts multiply-adds
-(`--fmad=true`) depending on the code around them. The CUDA FP32 identity build compiles with `--fmad=false`, so every
-operation is rounded on its own there (`CPPWRF_LOCAL_ROUNDING`, core/precision.hpp, which backend.hpp now includes).
-Three of them now use that gate; the fast CUDA FP32 build keeps its code text, FP64 builds are unchanged:
+(`--fmad=true`) depending on the code around them. The CUDA FP32 identity build compiles with `--fmad=false` and IEEE
+division and sqrt, so there every operation is rounded on its own. Three of them now use the gate
+`CPPWRF_SPLIT_PATHS` (core/precision.hpp, which backend.hpp now includes): the FP64 builds (CPU, CUDA, HIP, as before)
+and the CUDA FP32 identity build.
 
 - WSM6 in column stages (`wsm6_stages`, P01b): the values carried between the stages are stored as `real`, the type
-  `Wsm6Kernel` keeps them in, and the stages read no double locals of it. The CPU FP32 build takes the stages too.
+  `Wsm6Kernel` keeps them in, and the stages read no double locals of it.
 - Launch fusion (`kFuseMulAdd`: `LaunchBatch`, `parallel_fused`, F04): a part of a batched kernel computes each point
   with its own kernel's operator() on the same operands.
 - Kain-Fritsch, MYJ, QNSE and its EDKF column arrays in the column work buffer (PERF2): the same stored values and
-  arithmetic; the CPU builds declare the local arrays either way.
+  arithmetic.
 
-Measured on an RTX 2060 (sm_75, 6 GB, one GPU), the CUDA FP32 identity build, base 7fac5bf and new 507136c, 30
-steps without history output, stepping time in s, two interleaved runs each (a b b a):
+The CPU FP32 build, the fast CUDA FP32 build and both HIP FP32 builds (identity and fast) keep the forms they had:
+on the CPU the stages only add work arrays; HIP FP32 is untested on AMD hardware, its float division is not required
+to be correctly rounded (the stages compute WSM6's loop count and time step on the host, the kernel on the device),
+and its batched parameter blocks would pass 4 KB.
+
+Measured on an RTX 2060 (sm_75, 6 GB, one GPU), the CUDA FP32 identity build, base 7fac5bf and new 507136c (the CUDA
+FP32 identity code of the final commit is the same but for an empty-range guard in `Wsm6Work::size`), 30 steps
+without history output, stepping time in s, two interleaved runs each (a b b a):
 
 | case | base | new | change |
 |---|---|---|---|
@@ -1422,11 +1429,21 @@ build. Byte-identical too, but slower on this GPU: P4 3.033 / 3.026 s, P9 0.602 
 it (on top of the three above); `KUpdateT` 20.3 -> 8.1 ms but `KFaceXT/YT/ZT` add 11.9 ms per 10 steps of P4 (FP32
 arithmetic is cheap next to the scratch traffic). It stays FP64-only.
 
-Proof on the workstation (byte for byte, base against new, 3 steps, history every step: every native snapshot and
-every variable of the wrfout file): CUDA FP32 identity and CPU FP32 on P4, P9, Q4, Q4M (QNSE with EDKF) and P1; the
-same with the face fluxes. CUDA FP32 identity new against WRF real*4 at tolerance 0: real_p1_fp32_cuda_id,
-real_p4_fp32_cuda_id; CPU FP32 new: real_p1_fp32_cpu, real_p4_fp32_cpu. CPU FP64, CUDA FP64 and the fast CUDA FP32
-build: all 84 source files of the library preprocess (host pass, and for CUDA the device pass of `nvcc -dryrun`,
-without line markers) to the same text as base with the include added (the same check in the FP32 identity build
-reports the changed files). Planted bugs: rain in `Wsm6StageIce` times 1001 instead of 1000, and
-`KAdd`'s A2CU case adding as A2A (used only by the batched launch), each changes the P4 FP32 identity files.
+Proof on the workstation, final commit against base 7fac5bf:
+
+- CUDA FP32 identity, byte for byte (every native snapshot of every domain, every variable of the wrfout files), 3
+  steps: P4; P4 with dt = 180 s (two WSM6 loops per step); P4 with moist / scalar_adv_opt 2 (monotonic), 3 (WENO) and
+  4 (WENO PD); P4 as 2 x 2 tiles on the GPU; Q4, Q4M (QNSE with EDKF), P9, P1; N1 (two domains) with feedback = 1,
+  and with WSM6 and smooth_option = 2. Against WRF real*4 at tolerance 0: real_p1_fp32_cuda_id, real_p4_fp32_cuda_id.
+  `test_launch_batch` passes.
+- CPU FP32 (`-DCPPWRF_ENABLE_CUDA=OFF`): all 106 source files of the library and the tests preprocess to the same text
+  as base with the include added; the binaries' P4, P4 dt = 180 s, Q4, Q4M, P9 and P1 files are byte-identical;
+  real_p1_fp32_cpu and real_p4_fp32_cpu pass against WRF real*4. The fast CUDA FP32 build: the same preprocessing
+  identity (107 files, host pass and `nvcc -dryrun`'s device pass). CPU FP64 and CUDA FP64: the same, with the
+  empty-range guard of `Wsm6Work::size` added to base as well (its only change there). The same check of the CUDA
+  FP32 identity build reports 68 changed files. The HIP builds were not built (no ROCm here); their FP32 forms
+  follow from `CPPWRF_SPLIT_PATHS` being undefined there, as `CPPWRF_DOUBLE` was.
+- Planted bugs: rain in `Wsm6StageIce` times 1001 instead of 1000, and `KAdd`'s A2CU case adding as A2A (used only by
+  the batched launch), each changes the P4 FP32 identity files.
+- GitHub CI: run 45715016152, all 44 cpu_sp cases against WRF real*4 at tolerance 0 (CPU builds, at an intermediate
+  commit whose CPU FP32 build took the WSM6 stages); run 45714991411, the CPU FP64 cases the change touches.
