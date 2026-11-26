@@ -25,6 +25,12 @@ BC parse_bc(const std::string& s) {
 }
 
 void check_grid_size(const Grid& g) {
+  // WRF's specified (config_flags%specified) holds on all four sides; the only other condition it may be combined
+  // with is periodic_x (the channel: specified in y; module_bc.F:106-111 boundary_condition_check, solve_em.F:3854);
+  // one specified axis with anything else cannot be expressed in WRF
+  if ((g.bc_x == BC::Specified) != (g.bc_y == BC::Specified) && !(g.bc_x == BC::Periodic && g.bc_y == BC::Specified))
+    throw std::runtime_error("domain: specified boundaries apply to both axes (bc_x = bc_y = specified) or, as WRF's "
+                             "channel, to y with bc_x = periodic; this combination is not a WRF configuration");
   if (g.nz < 3)
     throw std::runtime_error("domain: " + std::to_string(g.nz) + " vertical levels (e_vert = " + std::to_string(g.nz + 1) +
                              "); at least 3 (e_vert >= 4) are needed");

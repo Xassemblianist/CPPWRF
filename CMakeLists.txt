@@ -468,6 +468,12 @@ if(TARGET cppwrf)
            $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/restart_resume WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   set_tests_properties(restart_resume PROPERTIES LABELS unit SKIP_RETURN_CODE 77
                        ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
+  # Kessler resumed from a wrfrst file with SR /= 0: SR = 0 after the first step (solve_em.F:3852)
+  # (tests/verify/kessler_sr_resume_test.py; P1, skipped without ${CPPWRF_WRF_RUNS}/run_P1_r8/steps)
+  add_test(NAME kessler_sr_resume COMMAND python3 ${CMAKE_SOURCE_DIR}/tests/verify/kessler_sr_resume_test.py
+           $<TARGET_FILE:cppwrf> ${CMAKE_BINARY_DIR}/kessler_sr_resume WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+  set_tests_properties(kessler_sr_resume PROPERTIES LABELS unit SKIP_RETURN_CODE 77
+                       ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
   # an ensemble of 3 members (one host thread each, and one after the other; the output writer thread on and off):
   # every member's files byte-identical to its single run (tests/verify/ensemble_test.py; a tiny squall2d, no data)
   if(CPPWRF_NETCDF_OUTPUT)

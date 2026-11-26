@@ -141,6 +141,18 @@ std::shared_ptr<const std::pair<Buffer, phys::mp_p3::P3Tables<real>>> p3_tables(
 
 }  // namespace
 
+namespace {
+// The one (i, j) box of moist_physics_prep_em, microphysics_driver and moist_physics_finish_em: WRF's sz rule
+// (solve_em.F:3779-3800, 4247-4259; module_microphysics_driver.F:835-839, 903-912): sz = spec_zone (1) with
+// specified (or nested) boundaries, else 0; x keeps its edge columns when periodic_x (channel); y always drops sz.
+// WRF's specified applies to all four sides (only periodic_x may join it): check_grid_size rejects anything else.
+Range2D mp_box(const Grid& g) {
+  const int sz = g.bc_x == BC::Specified || g.bc_y == BC::Specified ? 1 : 0;
+  const int si = g.bc_x == BC::Periodic ? 0 : sz;
+  return Range2D{si, g.nx - si, sz, g.ny - sz};
+}
+}  // namespace
+
 PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     : rainnc(g, Stagger::M, "rainnc"), rainncv(g, Stagger::M, "rainncv"), g_(g), p_(p),
       th_phy(g, Stagger::M, "th_phy"), rho(g, Stagger::M, "rho"), pii(g, Stagger::M, "pii"), z(g, Stagger::M, "z"),
@@ -180,7 +192,8 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
              p_.hail_opt);
 #if defined(CPPWRF_DOUBLE)
     {  // the work arrays of wsm6_stages for step()'s mp_cols
-      const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
+      const Range2D mb = mp_box(g);
+      const int sx = mb.i0, sy = mb.j0;
       const tile::PatchBox ob = tile::own_box(g);  // the worker's columns of mp_cols (wsm6_stages clips them)
       wsm6_work_ = Buffer(phys::wsm6::Wsm6Work<real>::size(
           Range2D{std::max(sx, ob.i0), std::min(g.nx - sx, ob.i1), std::max(sy, ob.j0), std::min(g.ny - sy, ob.j1)}, g.nz));
@@ -230,8 +243,7 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     // phy_init: morr_two_moment_init(morr_rimed_ice), once
     morr_ = phys::mp_morrison::morrison_init<real>(p_.morr_rimed_ice);
     {  // the column arrays' work buffer on the GPU, for step()'s mp_cols
-      const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
-      phys::mp_morrison::morrison_reserve<real>(Range2D{sx, g.nx - sx, sy, g.ny - sy}, g.nz);
+      phys::mp_morrison::morrison_reserve<real>(mp_box(g), g.nz);
     }
   }
   if (p3()) {
@@ -251,8 +263,7 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     di3d = Field3(g, Stagger::M, "di3d");
     rhopo3d = Field3(g, Stagger::M, "rhopo3d");
     p3t_ = p3_tables(p_.table_dir, p3c_);  // phy_init: p3_init('.', 1, .false., 'WRF')
-    const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
-    phys::mp_p3::p3_reserve<real>(Range2D{sx, g.nx - sx, sy, g.ny - sy}, g.nz);
+    phys::mp_p3::p3_reserve<real>(mp_box(g), g.nz);
   }
   if (nssl()) {  // NSSL 2-moment (mp_physics 18 with its defaults; module_mp_nssl_2mom.F)
     snownc = Field2(g, Stagger::M, "snownc");
@@ -264,7 +275,8 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     sr = Field2(g, Stagger::M, "sr");
     refl_10cm = Field3(g, Stagger::M, "refl_10cm");  // compute_radar_ref: always with mp_physics 18
     nssl_zero_ = Field3(g, Stagger::M, "nssl_zero");
-    const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
+    const Range2D mb = mp_box(g);
+    const int sx = mb.i0, sy = mb.j0;
     // phy_init: nssl_2mom_init (mp_init's call for mp_physics 18), once per domain; the work space for the worker's
     // rows (step: nssl_->run over mp_own's rows, one thread per row)
     const tile::PatchBox ob = tile::own_box(g);
@@ -286,8 +298,7 @@ PhysicsCoupling::PhysicsCoupling(const Grid& g, const PhysicsParams& p)
     }
     tp_ = thompson_tables(p_.table_dir, p_.force_read_thompson, p_.mp_physics == 28);
     {  // the column arrays' work buffer on the GPU, for step()'s mp_cols
-      const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
-      phys::mp_thompson::thompson_reserve<real>(Range2D{sx, g.nx - sx, sy, g.ny - sy}, g.nz);
+      phys::mp_thompson::thompson_reserve<real>(mp_box(g), g.nz);
     }
     if (p_.do_radar_ref == 1) {  // thompson_init (calc_refl10cm reads only the bins, K_w, PI5, lamda4, m_w_0, m_i_0)
       namespace mt = phys::mp_thompson;
@@ -333,26 +344,27 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
   // zone's th_phy, h_diabatic, qv_diabatic, qc_diabatic keep their values: h_diabatic there enters
   // small_step_finish's last stage and the stage's calc_p_rho_phi on the whole tile (a moved nest's strip and edge
   // hold shifted or interpolated values there; a nest that does not move keeps its initial 0)
-  const int pz = g.bc_x == BC::Specified || g.bc_y == BC::Specified ? 1 : 0;
-  const int pi0 = g.bc_x == BC::Periodic ? 0 : pz;
-  const Range3D mp_tile{pi0, g.nx - pi0, pz, g.ny - pz, 0, g.nz};
+  const Range2D mp_cols = mp_box(g);  // the same box for the prep, the microphysics and the finish
+  const int pi0 = mp_cols.i0;
+  const Range3D mp_tile{mp_cols.i0, mp_cols.i1, mp_cols.j0, mp_cols.j1, 0, g.nz};
   parallel_for(mp_tile, KPrep{s.t_2.cview(), qv.cview(), s.ph_2.cview(), s.al.cview(), s.p.cview(),
                                      b.phb.view(), b.alb.view(), b.pb.view(), th_phy.view(), s.h_diabatic.view(),
-                                     qv_diabatic.view(), rho.view(), pii.view(), z.view(), dz8w.view(), p_phy.view(), pi0, g.nx - 2 * pi0});
+                                     qv_diabatic.view(), rho.view(), pii.view(), z.view(), dz8w.view(), p_phy.view(), pi0, mp_cols.i1 - pi0});
   if (s.P_QC >= 0) parallel_for(mp_tile, KSaveQc{s.q_2[s.P_QC].cview(), qc_diabatic.view()});
   namespace pc = phys::cst;
-  // microphysics_driver: with specified boundaries the spec zone is skipped (sz = spec_zone)
-  const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
-  const Range2D mp_cols{sx, g.nx - sx, sy, g.ny - sy};
+  // microphysics_driver: with specified boundaries the spec zone is skipped (sz = spec_zone): mp_cols above
+  const int sx = mp_cols.i0, sy = mp_cols.j0;
   // the worker's columns of mp_cols (wsm6_stages' work arrays are indexed from the range's first column)
   const tile::PatchBox mp_ob = tile::own_box(g);
   const Range2D mp_own{std::max(sx, mp_ob.i0), std::min(g.nx - sx, mp_ob.i1), std::max(sy, mp_ob.j0),
                        std::min(g.ny - sy, mp_ob.j1)};
-  // solve_em.F:3852: grid%sr = 0. over the whole array before microphysics_driver (the schemes then set it on the
-  // tile without the spec zone; the spec zone of a moved nest would otherwise keep the shifted values)
-  if (sr.layout().total > 0) {
-    const View2<real> v = sr.view();
-    const Layout& L = sr.layout();
+  // solve_em.F:3852: grid%sr = 0. over the whole array (ims:ime, jms:jme) before microphysics_driver, for every
+  // mp_physics /= 0 (the schemes with SR then set it on the tile without the spec zone; the spec zone of a moved
+  // nest would otherwise keep the shifted values; Kessler leaves it 0, a resumed run's SR from wrfrst included)
+  if (Field2* gsr = grid_sr(); gsr && gsr->layout().total > 0) {
+    const View2<real> v = gsr->view();
+    const Layout& L = gsr->layout();
+    const tile::Whole whole;  // every point of the allocation, the halo too
     parallel_for(Range3D{L.wi0, L.wi1, L.wj0, L.wj1, 0, 1}, [=] CPPWRF_HD(int i, int j, int) { v(i, j) = real(0); });
   }
   if (p_.mp_physics == 4) {
