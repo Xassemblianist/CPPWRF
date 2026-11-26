@@ -7,7 +7,7 @@ namespace cppwrf::phys::cu_kf {
 template <typename T>
 void run_kf(KFKernel<T> kernel, const Range2D& range) {
     check_limit("Kain-Fritsch", "nz", kernel.nz, kMaxLevels);
-#if defined(CPPWRF_DOUBLE)  // the column arrays in the work buffer (kf.hpp)
+#if defined(CPPWRF_SPLIT_PATHS)  // the column arrays in the work buffer (kf.hpp)
     if (kernel.nz <= 48) {
         column_for_work(range, KFRunner<T, 48>{kernel});
     } else {
@@ -25,7 +25,7 @@ void run_kf(KFKernel<T> kernel, const Range2D& range) {
 
 template <typename T>
 void kf_reserve([[maybe_unused]] const Range2D& range, [[maybe_unused]] int nz) {
-#if defined(CPPWRF_DOUBLE)
+#if defined(CPPWRF_SPLIT_PATHS)
     column_work_reserve(range, nz <= 48 ? kColumnBytes<T, 48> : kColumnBytes<T, kMaxLevels>);
 #endif
 }

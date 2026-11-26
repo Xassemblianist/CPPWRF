@@ -61,7 +61,7 @@ static constexpr real BH1 = real(3.6), BH2 = real(16.0), BH3 = real(720.0);
 static constexpr real EPSKM = real(1.e-3);
 
 // The kernel's column arrays (1-based as in the Fortran; zhk 1 .. nz + 1): in the column work buffer in CUDA FP64
-// builds, local arrays otherwise (as MYJ's, myjpbl.hpp)
+// and FP32 identity builds, local arrays otherwise (as MYJ's, myjpbl.hpp)
 #define CPPWRF_QNSE_COLUMN(X) \
   X(real, tk, kMaxLevels + 1) X(real, thek, kMaxLevels + 1) X(real, qk, kMaxLevels + 1) \
   X(real, cwmk, kMaxLevels + 1) X(real, uk, kMaxLevels + 1) X(real, vk, kMaxLevels + 1) \
@@ -305,7 +305,7 @@ struct QNSEPBLKernel {
   real dt;
   int stepbl;
   int nz;
-#if defined(CPPWRF_DOUBLE)
+#if defined(CPPWRF_SPLIT_PATHS)
   ColumnWork work{};  // the GPU's column arrays (column_for_work)
   static constexpr std::size_t kWorkBytes = 0 CPPWRF_QNSE_COLUMN(CPPWRF_COLUMN_BYTES);
 #endif
@@ -432,7 +432,7 @@ struct QNSEPBLKernel {
   }
 };
 
-// The GPU work buffer of run_qnsepbl over range (outside the time loop; CUDA FP64 builds, otherwise a no-op)
+// The GPU work buffer of run_qnsepbl over range (outside the time loop; CUDA FP64 and FP32 identity, else a no-op)
 void qnsepbl_reserve(const Range2D& range);
 void run_qnsepbl(const QNSEPBLKernel& kernel, const Range2D& range);
 
