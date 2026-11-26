@@ -20,6 +20,50 @@
 
 namespace cppwrf::nest {
 
+CPPWRF_HD inline int sintb_imax(int a, int b) { return a > b ? a : b; }
+CPPWRF_HD inline int sintb_imin(int a, int b) { return a < b ? a : b; }
+
+// The SINTB loop copy (sintb_lane) that gives psca(ci, cj), ci / cj the coarse indices of WRF's bdy_interp1
+// (share/interp_fcn.F:2536-2560). Its four SINTB calls fill psca in the order south, north, west, east; a point in
+// more than one call's box holds the last call's value, computed at loop position ci - N1STAR of that call's trip
+// count N1END - N1STAR + 1 (both SINTB sweeps loop over II). nits:nite x njts:njte is the nest patch WRF passes
+// (nips:nipe x njps:njpe; one process: the whole nest, nids:nide x njds:njde, the staggered ends).
+template <class T>
+CPPWRF_HD inline int sintb_bdy_lane(int ci, int cj, int ipos, int jpos, int nri, int nrj, int sz, int ioff, int joff,
+                                    int nids, int nide, int njds, int njde, int nits, int nite, int njts, int njte) {
+  // n2ci(n) = (n+ipos*nri-1)/nri, n2cj(n) = (n+jpos*nrj-1)/nrj (interp_fcn.F:2498-2499)
+  const int ci_its = (nits + ipos * nri - 1) / nri, ci_ite = (nite + ipos * nri - 1) / nri;
+  const int cj_jts = (njts + jpos * nrj - 1) / nrj, cj_jte = (njte + jpos * nrj - 1) / nrj;
+  int i0, i1, j0, j1;
+  // EAST BDY
+  if (nite <= nide && nite >= nide - sz - ioff) {
+    i0 = (sintb_imax(nits, nide - sz - ioff) + ipos * nri - 1) / nri;
+    i1 = (sintb_imin(nite, nide - 1 + ioff) + ipos * nri - 1) / nri;
+    if (ci >= i0 && ci <= i1 && cj >= cj_jts - 1 && cj <= cj_jte + 1) return sintb_lane<T>(ci - i0, i1 - i0 + 1);
+  }
+  // WEST BDY
+  if (nits >= nids && nits <= nids + sz + ioff) {
+    i0 = (sintb_imax(nits, nids) + ipos * nri - 1) / nri;
+    i1 = (sintb_imin(nite, nids + sz + ioff) + ipos * nri - 1) / nri;
+    if (ci >= i0 && ci <= i1 && cj >= cj_jts - 1 && cj <= cj_jte + 1) return sintb_lane<T>(ci - i0, i1 - i0 + 1);
+  }
+  i0 = ci_its - 1;
+  i1 = ci_ite + 1;
+  // NORTH BDY
+  if (njte <= njde && njte >= njde - sz - joff) {
+    j0 = (sintb_imax(njts, njde - sz - joff) + jpos * nrj - 1) / nrj;
+    j1 = (sintb_imin(njte, njde - 1 + joff) + jpos * nrj - 1) / nrj;
+    if (ci >= i0 && ci <= i1 && cj >= j0 && cj <= j1) return sintb_lane<T>(ci - i0, i1 - i0 + 1);
+  }
+  // SOUTH BDY
+  if (njts >= njds && njts <= njds + sz + joff) {
+    j0 = (sintb_imax(njts, njds) + jpos * nrj - 1) / nrj;
+    j1 = (sintb_imin(njte, njds + sz + joff) + jpos * nrj - 1) / nrj;
+    if (ci >= i0 && ci <= i1 && cj >= j0 && cj <= j1) return sintb_lane<T>(ci - i0, i1 - i0 + 1);
+  }
+  return kSintbVector;  // not a boundary point of bdy_interp1 (no psca value)
+}
+
 // Structure holding the 4 boundary slabs for values and tendencies in LateralBC layout
 struct LateralBCSlabs {
   // Slabs: XS (West), XE (East), YS (South), YE (North)
@@ -358,7 +402,10 @@ struct KBdySlab {
         patch[dj + 2][di + 2] = cfld[c_idx];
       }
     }
-    double interp_val = sint_point_2d<double, true>(patch, ax, ay);  // SINTB
+    // SINTB on the one-process nest patch (nids:nide = 1:n_nx+1, the staggered ends)
+    const int lane = sintb_bdy_lane<double>(ci, cj, ipos, jpos, nri, nrj, sz, ioff, joff, 1, n_nx + 1, 1, n_ny + 1, 1,
+                                            n_nx + 1, 1, n_ny + 1);
+    double interp_val = sintb_point_2d<double>(patch, ax, ay, lane);  // SINTB
 
     int n_stride_k = xstag ? n_nx + 1 : n_nx;
     int n_stride_j = (xstag ? n_nx + 1 : n_nx) * nk;
@@ -433,7 +480,11 @@ struct KBdySlabView3D {
         patch[dj + 2][di + 2] = static_cast<nreal>(cfld(ci0 + di, cj0 + dj, k));
       }
     }
-    nreal interp_val = sint_point_2d<nreal, true>(patch, ax, ay);  // SINTB
+    // SINTB on the one-process nest patch (nids:nide = 1:n_nx+1, the staggered ends; a decomposed run's workers
+    // also take the one-process WRF run's loop copies)
+    const int lane = sintb_bdy_lane<nreal>(ci0 + 1, cj0 + 1, ipos, jpos, nri, nrj, sz, ioff, joff, 1, n_nx + 1, 1,
+                                           n_ny + 1, 1, n_nx + 1, 1, n_ny + 1);
+    nreal interp_val = sintb_point_2d<nreal>(patch, ax, ay, lane);  // SINTB
     nreal cur_val = static_cast<nreal>(nfld(ni - 1, nj - 1, k));
     // WRF (share/interp_fcn.F): REAL*8 rdt = 1.D0/cdt, also in its single-precision build; the difference is taken
     // in the model's precision and multiplied in double
@@ -493,7 +544,10 @@ struct KBdySlabView2D {
         patch[dj + 2][di + 2] = static_cast<nreal>(cfld(ci0 + di, cj0 + dj));
       }
     }
-    nreal interp_val = sint_point_2d<nreal, true>(patch, ax, ay);  // SINTB
+    // SINTB on the one-process nest patch (as KBdySlabView3D's; unstaggered: ioff = joff = 0)
+    const int lane = sintb_bdy_lane<nreal>(ci0 + 1, cj0 + 1, ipos, jpos, nri, nrj, sz, 0, 0, 1, n_nx + 1, 1, n_ny + 1,
+                                           1, n_nx + 1, 1, n_ny + 1);
+    nreal interp_val = sintb_point_2d<nreal>(patch, ax, ay, lane);  // SINTB
     nreal cur_val = static_cast<nreal>(nfld(ni - 1, nj - 1));
     // WRF (share/interp_fcn.F): REAL*8 rdt = 1.D0/cdt, also in its single-precision build; the difference is taken
     // in the model's precision and multiplied in double

@@ -21,25 +21,6 @@ namespace cppwrf::nest {
 // the FP64 builds).
 using nreal = ::cppwrf::real;
 
-#if defined(CPPWRF_USE_HIP) || defined(__HIP__)
-// HIP: x86's maxsd / minsd as glibc's fmax / fmin use them (core/backend.hpp, fmax_x86)
-CPPWRF_HD inline double sint_max(double a, double b) { return fmax_x86(a, b); }
-CPPWRF_HD inline double sint_min(double a, double b) { return fmin_x86(a, b); }
-CPPWRF_HD inline float sint_max(float a, float b) { return fmax_x86(a, b); }
-CPPWRF_HD inline float sint_min(float a, float b) { return fmin_x86(a, b); }
-#else
-CPPWRF_HD inline double sint_max(double a, double b) { return fmax(a, b); }
-CPPWRF_HD inline double sint_min(double a, double b) { return fmin(a, b); }
-CPPWRF_HD inline float sint_max(float a, float b) { return fmaxf(a, b); }
-CPPWRF_HD inline float sint_min(float a, float b) { return fminf(a, b); }
-#endif
-
-// 1D Donor-cell advection flux (the SINTB kernels: see smolarkiewicz_1d)
-template <class T>
-CPPWRF_HD inline T donor(T y1, T y2, T a) {
-  return (a >= T(0.0)) ? (y1 * a) : (y2 * a);
-}
-
 // share/sint.F:37 DONOR(Y1,Y2,A)=(Y1*AMAX1(0.,SIGN(1.,A))-Y2*AMIN1(0.,SIGN(1.,A)))*A as written: the products by 1
 // and 0 keep the signs of zero (Y1 = -0, Y2 < 0, A > 0: +0, where Y1*A is -0)
 template <class T>
@@ -82,60 +63,162 @@ CPPWRF_HD inline T pn(T x) { return x < T(0.0) ? x : T(0.0); }
 // MAX_EXPR / MIN_EXPR tree of its optimized code, both sweeps, REAL*8 and REAL*4); PP(X) = MAX_EXPR <X, 0.>,
 // PN(X) = MIN_EXPR <X, 0.>, AMIN1(1.,OV) = MIN_EXPR <OV, 1.>. Checked bit for bit, signed zeros included, against
 // WRF's SINT on fields of +0, -0 and small values (tests/nest/test_nest_differential.cpp).
-// kSintb: the kernel of the SINTB paths (share/sint.F SINTB: lateral boundaries, nest_bdy.hpp), unchanged: WRF's
-// SINTB is vectorized and its MAX / MIN trees differ between the vector body and the scalar remainder.
-template <class T, bool kSintb = false>
+template <class T>
 CPPWRF_HD inline T smolarkiewicz_1d(T ym2, T ym1, T y0, T yp1, T yp2, T a) {
   const T ep = T(1.0e-10);
-  if constexpr (kSintb) {
-    const T fl0 = donor(ym1, y0, a);
-    const T fl1 = donor(y0, yp1, a);
-    const T w = y0 - (fl1 - fl0);
-    const T mxm = sint_max(sint_max(ym1, y0), sint_max(yp1, w));
-    const T mn  = sint_min(sint_min(ym1, y0), sint_min(yp1, w));
-
-    T f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;
-    T f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
-
-    const T pp_f0 = pp(f0);
-    const T pn_f0 = pn(f0);
-    const T pp_f1 = pp(f1);
-    const T pn_f1 = pn(f1);
-
-    const T ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);
-    const T un = (w - mn) / (pp_f1 - pn_f0 + ep);
-
-    f0 = pp_f0 * sint_min(T(1.0), ov) + pn_f0 * sint_min(T(1.0), un);
-    f1 = pp_f1 * sint_min(T(1.0), un) + pn_f1 * sint_min(T(1.0), ov);
-
-    return w - (f1 - f0);
-  } else {
-    const T fl0 = sint_donor(ym1, y0, a);                                // sint.F:81-82 (y sweep: 144-145)
-    const T fl1 = sint_donor(y0, yp1, a);
-    const T w = y0 - (fl1 - fl0);                                        // sint.F:86
-    const T mxm = sint_gmax(sint_gmax(ym1, y0), sint_gmax(yp1, w));      // sint.F:90-92 (153)
-    const T mn = sint_gmin(sint_gmin(ym1, y0), sint_gmin(yp1, w));       // sint.F:93 (154)
-    T f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;                              // sint.F:98-109
-    T f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
-    const T pp_f0 = pp(f0), pn_f0 = pn(f0), pp_f1 = pp(f1), pn_f1 = pn(f1);
-    const T ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);                      // sint.F:114-117
-    const T un = (w - mn) / (pp_f1 - pn_f0 + ep);
-    const T mo = sint_gmin(ov, T(1.0)), mu = sint_gmin(un, T(1.0));      // AMIN1(1.,OV), AMIN1(1.,UN)
-    f0 = pp_f0 * mo + pn_f0 * mu;                                        // sint.F:122-125
-    f1 = pp_f1 * mu + pn_f1 * mo;
-    return w - (f1 - f0);                                                // sint.F:130
-  }
+  const T fl0 = sint_donor(ym1, y0, a);                                // sint.F:81-82 (y sweep: 144-145)
+  const T fl1 = sint_donor(y0, yp1, a);
+  const T w = y0 - (fl1 - fl0);                                        // sint.F:86
+  const T mxm = sint_gmax(sint_gmax(ym1, y0), sint_gmax(yp1, w));      // sint.F:90-92 (153)
+  const T mn = sint_gmin(sint_gmin(ym1, y0), sint_gmin(yp1, w));       // sint.F:93 (154)
+  T f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;                              // sint.F:98-109
+  T f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
+  const T pp_f0 = pp(f0), pn_f0 = pn(f0), pp_f1 = pp(f1), pn_f1 = pn(f1);
+  const T ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);                      // sint.F:114-117
+  const T un = (w - mn) / (pp_f1 - pn_f0 + ep);
+  const T mo = sint_gmin(ov, T(1.0)), mu = sint_gmin(un, T(1.0));      // AMIN1(1.,OV), AMIN1(1.,UN)
+  f0 = pp_f0 * mo + pn_f0 * mu;                                        // sint.F:122-125
+  f1 = pp_f1 * mu + pn_f1 * mo;
+  return w - (f1 - f0);                                                // sint.F:130
 }
 
 // 2D SINT point evaluation given a 5x5 stencil of coarse values around (ci, cj):
 // c_patch[j_idx][i_idx] where j_idx in 0..4 (j-2..j+2) and i_idx in 0..4 (i-2..i+2)
-template <class T, bool kSintb = false>
+template <class T>
 CPPWRF_HD inline T sint_point_2d(const T c_patch[5][5], T ax, T ay) {
   T z[5];
   for (int j = 0; j < 5; ++j) {
-    z[j] = smolarkiewicz_1d<T, kSintb>(c_patch[j][0], c_patch[j][1], c_patch[j][2], c_patch[j][3], c_patch[j][4], ax);
+    z[j] = smolarkiewicz_1d<T>(c_patch[j][0], c_patch[j][1], c_patch[j][2], c_patch[j][3], c_patch[j][4], ax);
   }
-  return smolarkiewicz_1d<T, kSintb>(z[0], z[1], z[2], z[3], z[4], ay);
+  return smolarkiewicz_1d<T>(z[0], z[1], z[2], z[3], z[4], ay);
+}
+
+// ----------------------------------------------------------------------------------------------------------------
+// SINTB (share/sint.F:203-349, the lateral-boundary interpolation) as WRF's gfortran build computes it
+// (-O2 -ftree-vectorize -funroll-loops, SSE2, gfortran 14.2). Both of its inner loops, DO 511 (the x sweep,
+// sint.F:279) and DO 911 (the y sweep, sint.F:318), are vectorized: REAL*8 in pairs (V2DF) with a scalar remainder,
+// REAL*4 in quads (V4SF), then a pair (V2SF epilogue), then a scalar remainder. DONOR, TR4 and AMIN1(1.,OV) are
+// SINT's in every copy; the signs of zero differ in the operand order of AMAX1 / AMIN1(Y(-1),Y(0),Y(1),W) and of
+// PN(F(0)). maxpd / maxps / maxsd / maxss "max src, dst" is dst > src ? dst : src: the second operand (src) when
+// they compare equal (+0, -0). The vector copies use gcc's ieee_max / ieee_min patterns (operand order fixed when
+// expanded), the scalar remainders the commutative smax / smin patterns (operand order the register allocator's).
+// The orders below are read from the objects' instructions (-fverbose-asm of the same compile, byte-identical to
+// the WRF build's share/sint.o). Of these orders only MN's last operand can change a result: a sweep's result
+// depends on them only where W = -0, Y(-1:1) are zeros and F(1) < 0 (MN's zero then sets the sign); the orders of
+// MXM and PN(F(0)) never show. They are kept as compiled all the same.
+// ----------------------------------------------------------------------------------------------------------------
+
+// MXM / MN of one loop copy: OP(OP(L[a],L[b]), OP(L[c],L[d])) with L = (m1, c0, p1, w) = (Y(-1), Y(0), Y(1), W) in
+// DO 511 or (Z(II,-1), Z(II,0), Z(II,1), W) in DO 911; packed a | b << 2 | c << 4 | d << 6
+constexpr int sintb_leaves(int a, int b, int c, int d) { return a | (b << 2) | (c << 4) | (d << 6); }
+enum : int { kSintbM1 = 0, kSintbC0 = 1, kSintbP1 = 2, kSintbW = 3 };
+
+template <class T, bool kMax>
+CPPWRF_HD inline T sintb_op(T x, T y) {
+  if constexpr (kMax) return sint_gmax(x, y);
+  else return sint_gmin(x, y);
+}
+template <class T, bool kMax>
+CPPWRF_HD inline T sintb_minmax(int leaves, T m1, T c0, T p1, T w) {
+  const T l[4] = {m1, c0, p1, w};
+  return sintb_op<T, kMax>(sintb_op<T, kMax>(l[leaves & 3], l[(leaves >> 2) & 3]),
+                           sintb_op<T, kMax>(l[(leaves >> 4) & 3], l[(leaves >> 6) & 3]));
+}
+
+// One loop copy of a sweep
+struct SintbCopy {
+  int mxm;        // sintb_leaves of MXM
+  int mn;         // sintb_leaves of MN
+  bool pn0_zero;  // PN(F(0)) as MIN(0., F(0)) (minss / minsd with the zero in dst): F(0) when both are zeros
+};
+
+// The copy of SINTB's loops that computes loop position p = II - N1STAR (0-based) of a trip count n = N1END - N1STAR + 1
+// (both sweeps loop over II = N1STAR..N1END, sint.F:279 and 318).
+// REAL*8: pairs from N1STAR while two points remain, the last point of an odd count in the scalar remainder (n = 1:
+// scalar only). REAL*4: quads from N1STAR (none when n <= 3), then one pair if two of the rest remain, then the last
+// point scalar.
+enum SintbLane : int { kSintbVector = 0, kSintbPair = 1, kSintbScalar = 2 };
+
+template <class T>
+CPPWRF_HD inline int sintb_lane(int p, int n) {
+  if constexpr (sizeof(T) == 8) {
+    return p < (n & ~1) ? kSintbVector : kSintbScalar;
+  } else {
+    const int n4 = n & ~3;
+    if (p < n4) return kSintbVector;
+    return p < n4 + ((n - n4) & ~1) ? kSintbPair : kSintbScalar;
+  }
+}
+
+// DO 511 (x sweep) copies
+template <class T>
+CPPWRF_HD inline SintbCopy sintb_xcopy(int lane) {
+  constexpr int m1 = kSintbM1, c0 = kSintbC0, p1 = kSintbP1, w = kSintbW;
+  if constexpr (sizeof(T) == 8) {
+    if (lane == kSintbVector)  // V2DF: MAX(MAX(Y(1),W), MAX(Y(-1),Y(0))), MIN likewise
+      return {sintb_leaves(p1, w, m1, c0), sintb_leaves(p1, w, m1, c0), false};
+    // scalar: MAX(MAX(Y(1),Y(-1)), MAX(W,Y(0))), MIN(MIN(Y(1),Y(-1)), MIN(Y(0),W)), MIN(0.,F(0))
+    return {sintb_leaves(p1, m1, w, c0), sintb_leaves(p1, m1, c0, w), true};
+  } else {
+    if (lane == kSintbVector)  // V4SF: MAX(MAX(Y(-1),Y(0)), MAX(Y(1),W)), MIN likewise
+      return {sintb_leaves(m1, c0, p1, w), sintb_leaves(m1, c0, p1, w), false};
+    if (lane == kSintbPair)  // V2SF: MAX(MAX(Y(-1),Y(1)), MAX(Y(0),W)), MIN likewise
+      return {sintb_leaves(m1, p1, c0, w), sintb_leaves(m1, p1, c0, w), false};
+    // scalar: as the pair, and MIN(0.,F(0))
+    return {sintb_leaves(m1, p1, c0, w), sintb_leaves(m1, p1, c0, w), true};
+  }
+}
+
+// DO 911 (y sweep) copies
+template <class T>
+CPPWRF_HD inline SintbCopy sintb_ycopy(int lane) {
+  constexpr int m1 = kSintbM1, c0 = kSintbC0, p1 = kSintbP1, w = kSintbW;
+  if constexpr (sizeof(T) == 8) {
+    if (lane == kSintbVector)  // V2DF: MAX(MAX(Z0,Z-1), MAX(W,Z1)), MIN likewise
+      return {sintb_leaves(c0, m1, w, p1), sintb_leaves(c0, m1, w, p1), false};
+    // scalar: MAX(MAX(W,Z1), MAX(Z0,Z-1)), MIN(MIN(Z1,W), MIN(Z0,Z-1)), MIN(0.,F(0))
+    return {sintb_leaves(w, p1, c0, m1), sintb_leaves(p1, w, c0, m1), true};
+  } else {
+    if (lane == kSintbVector)  // V4SF: MAX(MAX(Z0,Z-1), MAX(W,Z1)), MIN likewise
+      return {sintb_leaves(c0, m1, w, p1), sintb_leaves(c0, m1, w, p1), false};
+    if (lane == kSintbPair)  // V2SF: MAX(MAX(Z-1,Z0), MAX(Z1,W)), MIN likewise
+      return {sintb_leaves(m1, c0, p1, w), sintb_leaves(m1, c0, p1, w), false};
+    // scalar: MAX(MAX(Z0,Z-1), MAX(W,Z1)), MIN(MIN(Z0,Z-1), MIN(Z1,W)), MIN(0.,F(0))
+    return {sintb_leaves(c0, m1, w, p1), sintb_leaves(c0, m1, p1, w), true};
+  }
+}
+
+// One sweep of SINTB (sint.F:286-309 in x, 319-340 in y) in loop copy cp
+template <class T>
+CPPWRF_HD inline T sintb_1d(T ym2, T ym1, T y0, T yp1, T yp2, T a, SintbCopy cp) {
+  const T ep = T(1.0e-10);
+  const T fl0 = sint_donor(ym1, y0, a);                                // sint.F:286-287 (y sweep: 319-320)
+  const T fl1 = sint_donor(y0, yp1, a);
+  const T w = y0 - (fl1 - fl0);                                        // sint.F:288 (321)
+  const T mxm = sintb_minmax<T, true>(cp.mxm, ym1, y0, yp1, w);        // sint.F:289-291 (322)
+  const T mn = sintb_minmax<T, false>(cp.mn, ym1, y0, yp1, w);         // sint.F:292 (323)
+  T f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;                              // sint.F:293-300 (324-331)
+  T f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
+  const T pp_f0 = pp(f0), pp_f1 = pp(f1), pn_f1 = pn(f1);
+  const T pn_f0 = cp.pn0_zero ? sint_gmin(T(0.0), f0) : pn(f0);
+  const T ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);                      // sint.F:301-304 (332-335)
+  const T un = (w - mn) / (pp_f1 - pn_f0 + ep);
+  const T mo = sint_gmin(ov, T(1.0)), mu = sint_gmin(un, T(1.0));      // AMIN1(1.,OV), AMIN1(1.,UN)
+  f0 = pp_f0 * mo + pn_f0 * mu;                                        // sint.F:305-308 (336-339)
+  f1 = pp_f1 * mu + pn_f1 * mo;
+  return w - (f1 - f0);                                                // sint.F:309 (340)
+}
+
+// 2D SINTB point (c_patch as sint_point_2d's) whose column II is in loop copy `lane` of both sweeps: the five x sweep
+// rows Z(II,-2:2) and the y sweep at II share II
+template <class T>
+CPPWRF_HD inline T sintb_point_2d(const T c_patch[5][5], T ax, T ay, int lane) {
+  const SintbCopy cx = sintb_xcopy<T>(lane), cy = sintb_ycopy<T>(lane);
+  T z[5];
+  for (int j = 0; j < 5; ++j) {
+    z[j] = sintb_1d<T>(c_patch[j][0], c_patch[j][1], c_patch[j][2], c_patch[j][3], c_patch[j][4], ax, cx);
+  }
+  return sintb_1d<T>(z[0], z[1], z[2], z[3], z[4], ay, cy);
 }
 
 // Compute subgrid offset coordinates XIG and XJG for a given ratio and subgrid index
@@ -250,11 +333,12 @@ inline void sint_fortran_layout(
 }
 
 // ============================================================================
-// SINTB implementation matching WRF share/sint.F SINTB subroutine
-// Out-of-place: reads from xf1, writes to xf. Ignores mask.
+// SINTB implementation matching WRF share/sint.F SINTB subroutine (T: WRF's REAL, double for -r8, float for real*4)
+// Out-of-place: reads from xf1, writes to xf. Ignores mask. Each II's loop copy: sintb_lane.
 // ============================================================================
+template <class T>
 inline void sintb_fortran_layout(
-    const double* xf1, double* xf,
+    const T* xf1, T* xf,
     int ims, int ime, int jms, int jme,
     const int* /*icmask*/,
     int its, int ite, int jts, int jte,
@@ -267,48 +351,51 @@ inline void sintb_fortran_layout(
   };
 
   const int rr = static_cast<int>(std::round(std::sqrt(static_cast<double>(nf))));
-  double rioff = 0.0, rjoff = 0.0;
-  if (xstag && (rr % 2 == 0)) rioff = 1.0;
-  if (ystag && (rr % 2 == 0)) rjoff = 1.0;
+  T rioff = T(0.0), rjoff = T(0.0);
+  if (xstag && (rr % 2 == 0)) rioff = T(1.0);
+  if (ystag && (rr % 2 == 0)) rjoff = T(1.0);
 
-  std::vector<double> xig(nf + 1), xjg(nf + 1);
+  std::vector<T> xig(nf + 1), xjg(nf + 1);
   for (int i = 1; i <= rr; ++i) {
     for (int j = 1; j <= rr; ++j) {
       int m = j + (i - 1) * rr;
-      xig[m] = (static_cast<double>(rr) - 1.0 - rioff) / (2.0 * rr) - static_cast<double>(j - 1) / rr;
-      xjg[m] = (static_cast<double>(rr) - 1.0 - rjoff) / (2.0 * rr) - static_cast<double>(i - 1) / rr;
+      xig[m] = (static_cast<T>(rr) - T(1.0) - rioff) / static_cast<T>(2 * rr) - static_cast<T>(j - 1) / rr;
+      xjg[m] = (static_cast<T>(rr) - T(1.0) - rjoff) / static_cast<T>(2 * rr) - static_cast<T>(i - 1) / rr;
     }
   }
 
   const int ni_sub = ite - its + 1;
-  std::vector<double> z(static_cast<std::size_t>(ni_sub * 5));
+  if (ni_sub <= 0) return;
+  std::vector<T> z(static_cast<std::size_t>(ni_sub * 5));
   auto z_idx = [&](int ii, int j_rel) -> std::size_t {
     return static_cast<std::size_t>((ii - its) + (j_rel + 2) * ni_sub);
   };
 
   for (int iim = 1; iim <= nf; ++iim) {
-    const double ax = xig[iim];
-    const double ay = xjg[iim];
+    const T ax = xig[iim];
+    const T ay = xjg[iim];
 
     for (int jj = jts; jj <= jte; ++jj) {
       for (int j_rel = -2; j_rel <= 2; ++j_rel) {
-        for (int ii = its; ii <= ite; ++ii) {
-          double ym2 = xf1[idx(ii - 2, jj + j_rel, iim)];
-          double ym1 = xf1[idx(ii - 1, jj + j_rel, iim)];
-          double y0  = xf1[idx(ii,     jj + j_rel, iim)];
-          double yp1 = xf1[idx(ii + 1, jj + j_rel, iim)];
-          double yp2 = xf1[idx(ii + 2, jj + j_rel, iim)];
-          z[z_idx(ii, j_rel)] = smolarkiewicz_1d<double, true>(ym2, ym1, y0, yp1, yp2, ax);
+        for (int ii = its; ii <= ite; ++ii) {  // DO 511
+          T ym2 = xf1[idx(ii - 2, jj + j_rel, iim)];
+          T ym1 = xf1[idx(ii - 1, jj + j_rel, iim)];
+          T y0  = xf1[idx(ii,     jj + j_rel, iim)];
+          T yp1 = xf1[idx(ii + 1, jj + j_rel, iim)];
+          T yp2 = xf1[idx(ii + 2, jj + j_rel, iim)];
+          const SintbCopy cp = sintb_xcopy<T>(sintb_lane<T>(ii - its, ni_sub));
+          z[z_idx(ii, j_rel)] = sintb_1d<T>(ym2, ym1, y0, yp1, yp2, ax, cp);
         }
       }
 
-      for (int ii = its; ii <= ite; ++ii) {
-        double zm2 = z[z_idx(ii, -2)];
-        double zm1 = z[z_idx(ii, -1)];
-        double z0  = z[z_idx(ii,  0)];
-        double zp1 = z[z_idx(ii,  1)];
-        double zp2 = z[z_idx(ii,  2)];
-        xf[idx(ii, jj, iim)] = smolarkiewicz_1d<double, true>(zm2, zm1, z0, zp1, zp2, ay);
+      for (int ii = its; ii <= ite; ++ii) {  // DO 911
+        T zm2 = z[z_idx(ii, -2)];
+        T zm1 = z[z_idx(ii, -1)];
+        T z0  = z[z_idx(ii,  0)];
+        T zp1 = z[z_idx(ii,  1)];
+        T zp2 = z[z_idx(ii,  2)];
+        const SintbCopy cp = sintb_ycopy<T>(sintb_lane<T>(ii - its, ni_sub));
+        xf[idx(ii, jj, iim)] = sintb_1d<T>(zm2, zm1, z0, zp1, zp2, ay, cp);
       }
     }
   }

@@ -32,12 +32,22 @@ python3 "${SCRIPT_DIR}/extract_coarse_fields.py" "${DATASET}"
 # 2. CPU differential test: the C++ kernels and the bridge to WRF's routines in one program
 echo "Compiling CPU differential test suite..."
 CXXOPT=(-std=c++20 -DCPPWRF_DOUBLE -O3 -ffp-contract=off -fopenmp -I"${REPO_ROOT}/src" -I"${REPO_ROOT}")
+# WRF's REAL*4 SINTB (TEST 1c, 3b): share/sint.o of a WRF v4.8.0 build without -r8 (WRF_R4_DIR, optional), its
+# sintb_ renamed wrf_r4_sintb_ (no clash with the -r8 library's)
+R4OBJ=()
+if [ -n "${WRF_R4_DIR:-}" ]; then
+  grep -q '^PROMOTION *= *-fdefault-real-8' "${WRF_R4_DIR}/configure.wrf" && { echo "WRF_R4_DIR is an -r8 build"; exit 1; }
+  objcopy --redefine-sym sintb_=wrf_r4_sintb_ --redefine-sym sint_=wrf_r4_sint_ \
+    "${WRF_R4_DIR}/share/sint.o" "${OUT_DIR}/sint_r4.o"
+  CXXOPT+=(-DCPPWRF_TEST_WRF_R4)
+  R4OBJ=("${OUT_DIR}/sint_r4.o")
+fi
 "${HEAVY}" g++ "${CXXOPT[@]}" -c "${SCRIPT_DIR}/test_nest_differential.cpp" -o test_nest_differential.o
 for s in dyn/lateral_bc core/halo core/backend; do
   "${HEAVY}" g++ "${CXXOPT[@]}" -c "${REPO_ROOT}/src/${s}.cpp" -o "$(basename "$s").o"
 done
 wrf_fortran "${OUT_DIR}/test_nest_differential" "${SCRIPT_DIR}/fortran_nest_bridge.f90" test_nest_differential.o \
-  lateral_bc.o halo.o backend.o -fopenmp -lstdc++
+  lateral_bc.o halo.o backend.o "${R4OBJ[@]}" -fopenmp -lstdc++
 
 echo "Executing CPU differential test suite..."
 "${HEAVY}" "${OUT_DIR}/test_nest_differential" "${DATASET}"
