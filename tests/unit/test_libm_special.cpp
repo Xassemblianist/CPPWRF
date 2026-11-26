@@ -6,9 +6,11 @@
 // -NaN (core/glibc_math_compat.hpp, core/glibc_mathf_compat.hpp); every other function returns its kernel's value.
 // Checked (host): cppwrf::libm's double functions as the CUDA / HIP FP64 build's host computes them
 // (CPPWRF_GLIBC_MATH, set here in every build), libmvec's 2-lane exp / pow / sin / cos / atan and the vector log /
-// log10 of core/libmvec_x86.hpp on their scalar-callout lanes, cppwrf::vm::log10, glibc's float functions
-// (core/glibc_mathf.hpp and the wrappers) and the C functions an FP32 executable defines (core/glibc_mathf_host.cpp,
-// linked into this test), libmvec's 4-lane float functions. GPU builds: the same functions on the device against the
+// log10 of core/libmvec_x86.hpp, cppwrf::vm::log10, glibc's float functions (core/glibc_mathf.hpp and the wrappers)
+// and the C functions an FP32 executable defines (core/glibc_mathf_host.cpp, linked into this test), libmvec's 4-lane
+// float functions. The vector log / log10 and 4-lane powf lanes that take rcpps (CPU-defined) are compared on Intel
+// only, where WRF's references are made (elsewhere: SKIP, counted); their scalar-callout lanes and every other
+// function are compared on any CPU. GPU builds: the same functions on the device against the
 // system libm. A result must have the same bits; when an input is a NaN only NaN-ness is compared (the operand whose
 // NaN propagates is not fixed by C, and the device returns its canonical NaN). Meaningful where WRF's references are
 // made (glibc 2.41, x86-64): another glibc reports the differences and fails.
@@ -23,6 +25,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <limits>
 #include <vector>
@@ -32,6 +35,7 @@
 #include "core/glibc_mathf_compat.hpp"
 
 #if defined(__x86_64__)
+#include <cpuid.h>
 #include <emmintrin.h>
 #include <xmmintrin.h>
 extern "C" __m128d _ZGVbN2v_exp(__m128d);
@@ -51,6 +55,26 @@ extern "C" __m128 _ZGVbN4v_atanf(__m128);
 #endif
 
 namespace {
+// libmvec's vector log / log10 and 4-lane powf take rcpps, whose result the CPU defines: the ports reproduce Intel's
+// (core/libmvec_x86.hpp, libmvec_f4.hpp; WRF's references are made on Intel). Their lanes that use it are compared
+// with this machine's libmvec only on Intel (elsewhere counted as skipped); their scalar-callout lanes always.
+bool is_intel() {
+  if (const char* e = std::getenv("CPPWRF_TEST_NOT_INTEL"); e && *e == '1') return false;  // the other CPUs' path
+  unsigned a, b, c, d;
+  if (!__get_cpuid(0, &a, &b, &c, &d)) return false;
+  char v[13];
+  std::memcpy(v, &b, 4);
+  std::memcpy(v + 4, &d, 4);
+  std::memcpy(v + 8, &c, 4);
+  v[12] = 0;
+  return std::strcmp(v, "GenuineIntel") == 0;
+}
+const bool g_intel = is_intel();
+long g_skip = 0;
+// the lanes of _ZGVbN2v_log / log10 that do not call the scalar function: x in [DBL_MIN, DBL_MAX]
+bool log_rcpps_lane(double x) { return x >= DBL_MIN && x <= DBL_MAX; }
+// the lanes of _ZGVbN4vv_powf past its special_x / special_y masks (libmvec_f4.hpp: x in [FLT_MIN, FLT_MAX), y finite)
+bool powf_rcpps_lane(float x, float y) { return x >= FLT_MIN && x < FLT_MAX && std::isfinite(y); }
 std::uint64_t bits(double v) {
   std::uint64_t b;
   std::memcpy(&b, &v, 8);
@@ -226,7 +250,7 @@ int main() {
     const char* name;
     __m128d (*vec)(__m128d);
     D1 port;
-    bool callout_only;  // core/libmvec_x86.hpp: Intel's rcpps (the normal range differs on AMD; test_libmvec.cpp)
+    bool rcpps;  // core/libmvec_x86.hpp: Intel's rcpps in the normal range (log_rcpps_lane)
   };
   const V vec[] = {
       {"mvec exp", _ZGVbN2v_exp, [](double x) { return cppwrf::glibc::mvec::exp(x); }, false},
@@ -239,11 +263,16 @@ int main() {
   };
   for (const V& v : vec)
     for (double x : xs) {
-      if (v.callout_only && !(x < DBL_MIN) && !(x > DBL_MAX) && !std::isnan(x)) continue;
       double o[2];
       _mm_storeu_pd(o, v.vec(_mm_set_pd(-x, x)));
-      check(v.name, x, 0.0, v.port(x), o[0]);
-      check(v.name, -x, 0.0, v.port(-x), o[1]);
+      for (int l = 0; l < 2; ++l) {
+        const double xl = l ? -x : x;
+        if (v.rcpps && log_rcpps_lane(xl) && !g_intel) {
+          ++g_skip;
+          continue;
+        }
+        check(v.name, xl, 0.0, v.port(xl), o[l]);
+      }
     }
   {  // the scalar log10 of a trailing iteration
     D1 volatile s = sys<D1>("log10");
@@ -301,8 +330,10 @@ int main() {
 #if defined(CPPWRF_HAVE_MVEC_F4)
           float o[4];
           _mm_storeu_ps(o, _ZGVbN4vv_powf(_mm_set_ps(1.0f, 1.0f, y, x), _mm_set_ps(1.0f, 1.0f, x, y)));
-          check("v4 powf", x, y, cppwrf::mvec4::powf(x, y), o[0], true);
-          check("v4 powf", y, x, cppwrf::mvec4::powf(y, x), o[1], true);
+          if (g_intel || !powf_rcpps_lane(x, y)) check("v4 powf", x, y, cppwrf::mvec4::powf(x, y), o[0], true);
+          else ++g_skip;
+          if (g_intel || !powf_rcpps_lane(y, x)) check("v4 powf", y, x, cppwrf::mvec4::powf(y, x), o[1], true);
+          else ++g_skip;
 #endif
         }
   }
@@ -334,6 +365,9 @@ int main() {
 #endif
   const long host_n = g_n, host_bad = g_bad;
   std::printf("host: %ld results, %ld differ from libm %s\n", host_n, host_bad, gnu_get_libc_version());
+  if (g_skip)
+    std::printf("SKIP %ld libmvec lanes that use rcpps (log, log10, 4-lane powf): not an Intel CPU, the ports are "
+                "Intel's (test_libmvec / test_libmvec_f4 check them against Intel's results)\n", g_skip);
 
 #if defined(CPPWRF_GPUCC)
   {  // the device against the system libm (and the host ports)
