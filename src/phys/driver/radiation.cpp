@@ -424,6 +424,18 @@ RadiationDriver::RadiationDriver(const Grid& g, const RadiationOptions& o, const
 
 RadiationDriver::~RadiationDriver() = default;
 
+void RadiationDriver::set_latlon(const std::vector<rb>& xlat, const std::vector<rb>& xlong) {
+  if (xlat.size() != p_->xlat.size() || xlong.size() != p_->xlong.size())
+    throw std::logic_error("RadiationDriver::set_latlon: the domain's columns differ");
+  if (g_.patched()) throw std::logic_error("RadiationDriver::set_latlon: a decomposed run");
+  p_->xlat = xlat;
+  p_->xlong = xlong;
+#if defined(CPPWRF_USE_GPU)
+  if (!xlat.empty()) copy_to_dev(p_->xlat_d, xlat.data(), xlat.size() * sizeof(rb));
+  if (!xlong.empty()) copy_to_dev(p_->xlong_d, xlong.data(), xlong.size() * sizeof(rb));
+#endif
+}
+
 bool RadiationDriver::run(long itimestep, rb xtime, rb julian, int yr, const RadiationInputs& in,
                           const RadiationOutputs& out, bool adapt_step_flag, real curr_secs, real* radtacttime) {
   // run decision (module_radiation_driver.F:1083-1138); the adaptive time step's first call sets the activation time

@@ -1248,6 +1248,7 @@ void DomainRunner::wrf_timing_line(const std::string& what, std::chrono::steady_
 void DomainRunner::after_solve(long n) {
 #ifdef CPPWRF_HAVE_NETCDF
   if (write_wrfout_ && wrfout_ && (hist_due(n) || n == m_.nsteps || rst_due(n) || aux3_due(n))) wrfout_->after_solve(n);
+  else if (wrfout_ && wrfout_->move_build()) wrfout_->move_track(n);  // moving nests: every step's th_phy_m_t0
 #else
   (void)n;
 #endif

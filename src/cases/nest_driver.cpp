@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #include "cases/nest_driver.hpp"
+#include "cases/nest_move.hpp"
 
 #include <cstdlib>
 #include <algorithm>
@@ -8,6 +9,7 @@
 #include <filesystem>
 #include <iterator>
 #include <map>
+#include <mutex>
 #include <sstream>
 #include <stdexcept>
 
@@ -72,6 +74,14 @@ struct BaseParams {
 };
 
 BaseParams read_base_params_nc(const std::string& path) {
+  // read once per file (a moving nest's start_domain runs at every move)
+  static std::mutex mu;
+  static std::map<std::string, BaseParams> cache;
+  {
+    const std::lock_guard<std::mutex> lk(mu);
+    auto it = cache.find(path);
+    if (it != cache.end()) return it->second;
+  }
   int nc = 0;
   if (nc_open(path.c_str(), NC_NOWRITE, &nc) != NC_NOERR)
     throw std::runtime_error("nest_driver: cannot open " + path);
@@ -86,12 +96,20 @@ BaseParams read_base_params_nc(const std::string& path) {
   };
   BaseParams b{get("T00"), get("P00"), get("TLP"), get("TISO"), get("TLP_STRAT"), get("P_STRAT")};
   nc_close(nc);
+  const std::lock_guard<std::mutex> lk(mu);
+  cache.emplace(path, b);
   return b;
 }
 
 // Re-run WRF start_em base-state, hydrostatic al/p, optional press_adj on mu_2, halo fills,
 // and surface w initialization after terrain blending (child, press_adj=true) or feedback (parent, press_adj=false).
-void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* ht_fine_for_press_adj) {
+// start_em's base state from the terrain height (dyn_em/start_em.F:569-654 and, with max_dom > 1, 698-737): pb,
+// t_init, alb, mub, phb over the domain's points (k, j, i), the base fields' halos filled from the edge points
+struct StartEmBase {
+  BaseParams bp;
+  std::vector<double> ht_2d, pb, alb, t_init, mub, phb;
+};
+StartEmBase start_em_base(const io::Config& cfg, Model& m) {
   const std::string dir = cfg.get_string("real.dir");
   const std::string wi = dir + "/" + cfg.get_string("real.wrfinput", "wrfinput_d01");
   const BaseParams bp = read_base_params_nc(wi);
@@ -99,7 +117,6 @@ void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* h
   const int nx = g.nx, ny = g.ny, nz = g.nz;
   const int hypso = m.ap.hypsometric_opt;
   dyn::BaseState& b = *m.base;
-  dyn::State& s = *m.st;
 
   // A decomposed run: the worker's buffers laid out as whole fields (tile::local_whole; the points it does not hold
   // are 0 and their columns' results are not used: every column is computed from its own values, and the fills
@@ -107,13 +124,20 @@ void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* h
   std::vector<real> h_ht;
   const Layout Lht = tile::local_whole(b.ht, h_ht);
 
-  std::vector<double> ht_2d(std::size_t(nx) * ny);
+  StartEmBase out;
+  out.bp = bp;
+  std::vector<double>& ht_2d = out.ht_2d;
+  ht_2d.assign(std::size_t(nx) * ny, 0.0);
   for (int j = 0; j < ny; ++j)
     for (int i = 0; i < nx; ++i)
       ht_2d[std::size_t(j) * nx + i] = static_cast<double>(h_ht[Lht.index(i, j, 0)]);
 
-  std::vector<double> pb(std::size_t(nx) * ny * nz), alb(pb.size()), t_init(pb.size());
-  std::vector<double> mub(std::size_t(nx) * ny), phb(std::size_t(nx) * ny * (nz + 1));
+  std::vector<double>&pb = out.pb, &alb = out.alb, &t_init = out.t_init, &mub = out.mub, &phb = out.phb;
+  pb.assign(std::size_t(nx) * ny * nz, 0.0);
+  alb.assign(pb.size(), 0.0);
+  t_init.assign(pb.size(), 0.0);
+  mub.assign(std::size_t(nx) * ny, 0.0);
+  phb.assign(std::size_t(nx) * ny * (nz + 1), 0.0);
   if constexpr (std::is_same_v<real, float>) {
     // WRF real*4: start_em's locals and the base-state fields are REAL (every operation rounded to binary32, each
     // stored value read back as stored; the vectors hold the binary32 values exactly), as real_case.cpp's start.
@@ -218,6 +242,17 @@ void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* h
   b.alb.fill_host_halo(m3(alb, nz));
   b.t_init.fill_host_halo(m3(t_init, nz));
   b.phb.fill_host_halo(m3(phb, nz + 1));
+  return out;
+}
+
+void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* ht_fine_for_press_adj) {
+  const Grid& g = m.g;
+  const int nx = g.nx, ny = g.ny, nz = g.nz;
+  const int hypso = m.ap.hypsometric_opt;
+  dyn::BaseState& b = *m.base;
+  dyn::State& s = *m.st;
+  const StartEmBase sb = start_em_base(cfg, m);
+  const std::vector<double>&ht_2d = sb.ht_2d, &pb = sb.pb, &alb = sb.alb, &mub = sb.mub, &phb = sb.phb;
 
   std::vector<real> h_ph, h_mu, h_thm;
   const Layout Lph = tile::local_whole(s.ph_2, h_ph);
@@ -320,6 +355,172 @@ void recompute_start_domain(const io::Config& cfg, Model& m, const BaseField2* h
   dyn::set_w_surface(s.w_2, s.u_2, s.v_2, b, g, true);
   tile::exchange_all();  // w's surface values
 }
+
+}  // namespace
+
+namespace nestmove {
+
+// start_domain(nest, .FALSE.) after a move (share/mediation_nest_move.F:264-271, DM_PARALLEL without STUBMPI: WRF
+// dmpar, the reference build; grid%moved = .TRUE., not a restart, first_trip_for_this_domain = .TRUE.), the
+// dynamics' part of dyn_em/start_em.F over the domain's points:
+//  - 569-654 and 698-737: the base state from HGT over the whole patch (the points that kept their values get their
+//    values again; the new points from their interpolated HGT);
+//  - 655-683: t_1 = t_2 and mu_1 = mu_2 where imask_nostag = 1, ph_1 = ph_2 everywhere;
+//  - 809-856: al from ph_1, mu_1 (hypsometric_opt), p from t_1 (use_theta_m = 1: qvf = 1), p_hyd = p + pb,
+//    alt = al + alb; 861-871: p_hyd_w from p_surf of HGT (a real run);
+//  - press_adj is .FALSE. for a moved nest, set_w_surface runs only at the start of the simulation.
+// These compute the patch's points; then set_physical_bc2d / 3d fill the halo of the fields start_em lists (below).
+StartMoved start_domain_moved(const io::Config& cfg, Model& m, const std::vector<unsigned char>& strip) {
+  const Grid& g = m.g;
+  const int nx = g.nx, ny = g.ny, nz = g.nz;
+  const int hypso = m.ap.hypsometric_opt;
+  dyn::BaseState& b = *m.base;
+  dyn::State& s = *m.st;
+  if (strip.size() != std::size_t(nx) * ny) throw std::logic_error("start_domain_moved: the mask's size");
+  const StartEmBase sb = start_em_base(cfg, m);
+  const std::vector<double>&ht_2d = sb.ht_2d, &pb = sb.pb, &alb = sb.alb, &mub = sb.mub, &phb = sb.phb;
+  const BaseParams& bp = sb.bp;
+
+  std::vector<real> t1, t2, ph1, ph2, mu1, mu2, hal, hp, halt;
+  s.t_1.download(t1); s.t_2.download(t2);
+  s.ph_1.download(ph1); s.ph_2.download(ph2);
+  s.mu_1.download(mu1); s.mu_2.download(mu2);
+  s.al.download(hal); s.p.download(hp); s.alt.download(halt);
+  const Layout &Lt = s.t_1.layout(), &Lph = s.ph_1.layout(), &Lmu = s.mu_1.layout(), &Lal = s.al.layout(),
+               &Lp = s.p.layout(), &Lalt = s.alt.layout();
+  auto in_strip = [&](int i, int j) { return strip[std::size_t(j) * nx + i] != 0; };
+  // 655-683
+  for (int j = 0; j < ny; ++j)
+    for (int k = 0; k < nz; ++k)
+      for (int i = 0; i < nx; ++i)
+        if (in_strip(i, j)) t1[Lt.index(i, j, k)] = t2[Lt.index(i, j, k)];
+  for (int j = 0; j < ny; ++j)
+    for (int k = 0; k <= nz; ++k)
+      for (int i = 0; i < nx; ++i) ph1[Lph.index(i, j, k)] = ph2[Lph.index(i, j, k)];
+  for (int j = 0; j < ny; ++j)
+    for (int i = 0; i < nx; ++i)
+      if (in_strip(i, j)) mu1[Lmu.index(i, j, 0)] = mu2[Lmu.index(i, j, 0)];
+
+  auto idx3 = [&](int i, int j, int k) { return (std::size_t(k) * ny + j) * nx + i; };
+  StartMoved r;
+  r.p_hyd.assign(std::size_t(nx) * ny * nz, 0.0);
+  r.p_hyd_w.assign(std::size_t(nx) * ny * (nz + 1), 0.0);
+  if constexpr (std::is_same_v<real, float>) {  // WRF real*4: every operation in REAL, as recompute_start_domain
+    constexpr float gr = 9.81f, r_d = 287.f, cp = 7.f * r_d / 2.f, cpovcv = cp / (cp - r_d), p1000mb = 100000.f,
+                    t0 = 300.f;
+    const float p_top = float(b.p_top);
+    const float t00 = float(bp.t00), p00 = float(bp.p00), a = float(bp.a);
+    auto f = [](double x) { return float(x); };
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t n = idx3(i, j, k), n1 = idx3(i, j, k + 1);
+          const float mu = mu1[Lmu.index(i, j, 0)], mb = f(mub[std::size_t(j) * nx + i]);
+          const float ph0 = ph1[Lph.index(i, j, k)], phu = ph1[Lph.index(i, j, k + 1)];
+          const float thm = t1[Lt.index(i, j, k)], albk = f(alb[n]);
+          float al;
+          if (hypso == 2) {
+            const float pfu = f(b.c3f[k + 1]) * (mb + mu) + f(b.c4f[k + 1]) + p_top;
+            const float pfd = f(b.c3f[k]) * (mb + mu) + f(b.c4f[k]) + p_top;
+            const float phm = f(b.c3h[k]) * (mb + mu) + f(b.c4h[k]) + p_top;
+            al = (phu - ph0 + f(phb[n1]) - f(phb[n])) / phm / libm::log(pfd / pfu) - albk;
+          } else {
+            const float c1 = f(b.c1h[k]);
+            al = -1.f / ((c1 * mb + f(b.c2h[k])) + c1 * mu) * (albk * (c1 * mu) + f(b.rdnw[k]) * (phu - ph0));
+          }
+          const float p = p1000mb * libm::pow((r_d * (t0 + thm)) / (p1000mb * (al + albk)), cpovcv) - f(pb[n]);
+          hal[Lal.index(i, j, k)] = al;
+          hp[Lp.index(i, j, k)] = p;
+          r.p_hyd[n] = double(p + f(pb[n]));
+          halt[Lalt.index(i, j, k)] = al + albk;
+        }
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const float ht = f(ht_2d[std::size_t(j) * nx + i]);
+        const float p_surf = p00 * libm::exp(-t00 / a + libm::pow((t00 / a) * (t00 / a) - 2.f * gr * ht / a / r_d, 0.5f));
+        float w = hp[Lp.index(i, j, 0)] + f(b.c3f[0]) * (p_surf - p_top) + f(b.c4f[0]) + p_top;
+        r.p_hyd_w[idx3(i, j, 0)] = w;
+        for (int k = 1; k <= nz; ++k) {
+          w = 2.f * (hp[Lp.index(i, j, k - 1)] + f(pb[idx3(i, j, k - 1)])) - w;
+          r.p_hyd_w[idx3(i, j, k)] = w;
+        }
+      }
+  } else {
+    const double t00 = bp.t00, p00 = bp.p00, a = bp.a;
+    for (int k = 0; k < nz; ++k)
+      for (int j = 0; j < ny; ++j)
+        for (int i = 0; i < nx; ++i) {
+          const std::size_t n = idx3(i, j, k), n1 = idx3(i, j, k + 1);
+          const double mu = double(mu1[Lmu.index(i, j, 0)]);
+          const double mt = mub[std::size_t(j) * nx + i] + mu;
+          const double ph0 = double(ph1[Lph.index(i, j, k)]), phu = double(ph1[Lph.index(i, j, k + 1)]);
+          const double thm = double(t1[Lt.index(i, j, k)]);
+          double al;
+          if (hypso == 2) {
+            const double pfu = double(b.c3f[k + 1]) * mt + double(b.c4f[k + 1]) + b.p_top;
+            const double pfd = double(b.c3f[k]) * mt + double(b.c4f[k]) + b.p_top;
+            const double phm = double(b.c3h[k]) * mt + double(b.c4h[k]) + b.p_top;
+            al = (phu - ph0 + phb[n1] - phb[n]) / phm / libm::log(pfd / pfu) - alb[n];
+          } else {  // start_em.F:812: (c1h mub + c2h) + c1h mu_1
+            const double mb = mub[std::size_t(j) * nx + i];
+            al = -1.0 / ((double(b.c1h[k]) * mb + double(b.c2h[k])) + double(b.c1h[k]) * mu) *
+                 (alb[n] * (double(b.c1h[k]) * mu) + double(b.rdnw[k]) * (phu - ph0));
+          }
+          const double p =
+              cst::p1000mb * libm::pow((cst::r_d * (cst::t0 + thm)) / (cst::p1000mb * (al + alb[n])), cst::cpovcv) - pb[n];
+          hal[Lal.index(i, j, k)] = real(al);
+          hp[Lp.index(i, j, k)] = real(p);
+          r.p_hyd[n] = p + pb[n];
+          halt[Lalt.index(i, j, k)] = real(al + alb[n]);
+        }
+    for (int j = 0; j < ny; ++j)
+      for (int i = 0; i < nx; ++i) {
+        const double ht = ht_2d[std::size_t(j) * nx + i];
+        const double p_surf =
+            p00 * libm::exp(-t00 / a + libm::pow((t00 / a) * (t00 / a) - 2. * cst::g * ht / a / cst::r_d, 0.5));
+        double w = double(hp[Lp.index(i, j, 0)]) + double(b.c3f[0]) * (p_surf - b.p_top) + double(b.c4f[0]) + b.p_top;
+        r.p_hyd_w[idx3(i, j, 0)] = w;
+        for (int k = 1; k <= nz; ++k) {
+          w = 2. * (double(hp[Lp.index(i, j, k - 1)]) + pb[idx3(i, j, k - 1)]) - w;
+          r.p_hyd_w[idx3(i, j, k)] = w;
+        }
+      }
+  }
+  copy_to_dev(const_cast<void*>(s.t_1.base()), t1.data(), s.t_1.bytes());
+  copy_to_dev(const_cast<void*>(s.ph_1.base()), ph1.data(), s.ph_1.bytes());
+  copy_to_dev(const_cast<void*>(s.mu_1.base()), mu1.data(), s.mu_1.bytes());
+  copy_to_dev(const_cast<void*>(s.al.base()), hal.data(), s.al.bytes());
+  copy_to_dev(const_cast<void*>(s.p.base()), hp.data(), s.p.bytes());
+  copy_to_dev(const_cast<void*>(s.alt.base()), halt.data(), s.alt.bytes());
+
+  // start_em.F:1479-1507, 1669-1785, 1822-1829, 1975-2024: set_physical_bc3d / 2d over the whole patch (its = ips,
+  // ite = ipe: start_em.F:163) of the fields below; config_flags%nested: open_xs / xe / ys / ye copy the edge points
+  // outward into the halo (share/module_bc.F:388-427, 867-923; x, then y over the whole memory row). The base
+  // state's ht, mub, phb, pb, alb, t_init got theirs in start_em_base. p, ph0 and the other fields keep their halo
+  // (shifted) values. moist (1..num_moist), scalar (1..num_scalar) and tke_2: q_2's moist species, WRF scalars and
+  // TKE (not the tracers, which start_em does not touch).
+  {
+    if (!g.flat_x() || !g.flat_y()) throw std::logic_error("start_domain_moved: a nest without specified boundaries");
+    std::vector<HaloField> hf;
+    for (Field3* f : {&s.u_1, &s.u_2, &s.v_1, &s.v_2, &s.w_1, &s.w_2, &s.ph_1, &s.ph_2, &s.t_1, &s.t_2})
+      hf.emplace_back(*f);
+    hf.emplace_back(s.mu_1);
+    hf.emplace_back(s.mu_2);
+    for (Field3* f : {&s.php, &s.al, &s.alt})
+      if (f->layout().total > 0) hf.emplace_back(*f);
+    for (int q = 0; q < s.n_scalars(); ++q)
+      if ((q < s.n_moist || s.wrf_scalar(q) || q == s.P_TKE) && s.q_2[std::size_t(q)].layout().total > 0)
+        hf.emplace_back(s.q_2[std::size_t(q)]);
+    for (BaseField2* f : {&b.msftx, &b.msfty, &b.msfux, &b.msfuy, &b.msfvx, &b.msfvy, &b.sina, &b.cosa, &b.e, &b.f})
+      if (!f->uniform() && f->layout().total > 0) hf.emplace_back(*f);
+    fill_halos(hf, g);
+  }
+  return r;
+}
+
+}  // namespace nestmove
+
+namespace {
 #endif
 
 }  // namespace
@@ -336,7 +537,8 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
   // whose DomainRunner::start() rejects an unknown one); a [domains] key must be one of those read here
   static const char* const kDomainsKeys[] = {"max_dom", "feedback", "smooth_option", "spec_bdy_width", "blend_width",
                                              "parent_id", "i_parent_start", "j_parent_start", "parent_grid_ratio",
-                                             "parent_time_step_ratio"};
+                                             "parent_time_step_ratio", "num_moves", "move_id", "move_interval",
+                                             "move_cd_x", "move_cd_y"};
   for (const std::string& k : root_cfg.keys()) {
     if (k.rfind("domains.", 0) == 0) {
       const std::string n = k.substr(8);
@@ -484,8 +686,8 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
     auto map_key = [&](const std::string& sub, const std::string& val) {
       if (sub == "config" || sub == "parent_id" || sub == "i_parent_start" || sub == "j_parent_start" ||
           sub == "parent_grid_ratio" || sub == "parent_time_step_ratio" || sub == "feedback" ||
-          sub == "smooth_option" || sub == "blend_width") {
-        return;
+          sub == "smooth_option" || sub == "blend_width" || sub == "corral_dist") {
+        return;  // corral_dist: moving nests (cases/nest_move.cpp)
       }
       if (sub == "spec_bdy_width") ov.push_back("real.spec_bdy_width=" + val);
       else if (sub == "wrfinput" || sub == "wrfbdy" || sub == "dir" || sub == "bdy_interval" || sub == "nested" ||
@@ -524,7 +726,9 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       // Serialize non-domain-specific keys from root_cfg as base INI
       std::ostringstream base_ini;
       for (const std::string& k : root_cfg.keys()) {
-        if (k.rfind("domains.", 0) == 0) continue;
+        // domains.num_moves stays in every domain's configuration: its verification tier (io::check_option_tiers,
+        // the files' CPPWRF_UNVERIFIED_OPTIONS)
+        if (k.rfind("domains.", 0) == 0 && k != "domains.num_moves") continue;
         if (k.size() >= 4 && k[0] == 'd' && std::isdigit(k[1]) && std::isdigit(k[2]) && k[3] == '.') continue;
         if (id >= 2 && (k == "real.wrfbdy" || k == "real.bdy_interval" || k == "real.dx" || k == "real.dy" ||
                         k == "real.e_we" || k == "real.e_sn" || k == "real.e_vert" || k == "real.wrflowinp" ||
@@ -543,6 +747,7 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
     if (sp.cfg.get_int("fdda.obs_nudge_opt", 0) == 0)
       for (const std::string& k : sp.cfg.keys())
         if (k.rfind("fdda.obs_", 0) == 0 || k == "fdda.max_obs" || k == "fdda.fdda_end") sp.cfg.mark_accessed(k);
+    if (sp.cfg.has("domains.num_moves")) sp.cfg.mark_accessed("domains.num_moves");
   }
 
   // med_restart_out writes every domain when d01's restart alarm rings (restart_interval is one value); each
@@ -850,6 +1055,8 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     throw std::runtime_error("time.adaptive (WRF use_adaptive_time_step) with nests is not supported");
   std::vector<NestDomainSpec> specs = parse_nest_specs(root_cfg);
   const int max_dom = static_cast<int>(specs.size());
+  // moving nests with prescribed moves (WRF built with -DMOVE_NESTS, cases/nest_move.hpp)
+  nestmove::Moves moves = nestmove::parse_moves(root_cfg, max_dom);
   // verification tiers (io/option_tiers.hpp) of every domain's options, before any domain is built
   if (root_cfg.has("cppwrf.allow_unverified")) root_cfg.mark_accessed("cppwrf.allow_unverified");
   for (const NestDomainSpec& sp : specs) io::check_option_tiers(sp.cfg, sp.tag + ": ");
@@ -918,12 +1125,45 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       doms[doms[i].spec.parent_id - 1].children.push_back(i);
     }
   }
+  // moving nests: the nests a move names (time_for_move's innermost-nest branch with domain 1 as the parent; the
+  // until loop over moving parents is not ported), a run without a decomposition; every field of every domain is
+  // tracked from here on (nestmove::FieldRegistry)
+  std::unique_ptr<nestmove::Install> move_install;
+  std::vector<std::unique_ptr<nestmove::FieldRegistry>> move_regs;
+  auto move_scope = [&](int i) {
+    return std::make_unique<nestmove::Scope>(move_regs.empty() ? nullptr : move_regs[std::size_t(i)].get());
+  };
+  if (moves.any()) {
+    if (tile::tiled() || tile::options(root_cfg.get_string("run.tiles", "1")).on())
+      throw std::runtime_error("moving nests (domains.num_moves > 0) in a decomposed run (run.tiles, MPI ranks) are "
+                               "not supported");
+    for (int k = 0; k < moves.num_moves; ++k) {
+      const int id = moves.move_id[std::size_t(k)];
+      if (id < 2 || id > max_dom || moves.move_interval[std::size_t(k)] >= 999999999) continue;
+      const DomInstance& d = doms[std::size_t(id - 1)];
+      if (d.spec.parent_id != 1 || !d.children.empty())
+        throw std::runtime_error(d.spec.tag + ": moving nests are supported for a nest of domain 1 without nests of its "
+                                 "own (move_id)");
+      if (doms[0].children.size() > 1)
+        throw std::runtime_error("moving nests with sibling nests are not supported");
+    }
+    // a resumed run: WRF dmpar's wrfrst holds the moved nest (I/J_PARENT_START read back by input_wrf.F:887-903 and
+    // the moved arrays); CPPWRF's restart reading does not restore a moved nest's position and history fields
+    if (!root_cfg.get_string("run.restart_file", "").empty())
+      throw std::runtime_error("moving nests (domains.num_moves > 0) in a resumed run (run.restart_file) are not "
+                               "supported");
+    move_install = std::make_unique<nestmove::Install>();
+    for (int i = 0; i < max_dom; ++i) move_regs.push_back(std::make_unique<nestmove::FieldRegistry>());
+  }
 
   // 1. Build all domains; med_nest_initial of domain 1's children (WRF nests_to_open at the top of domain 1's
   // first step, before its t = 0 output). Deeper nests open at their parent's first step (open_children below).
   for (int i = 0; i < max_dom; ++i) {
+    const auto scope = move_scope(i);
     doms[i].model = Model::build(doms[i].spec.cfg);
   }
+  for (int i = 0; i < max_dom && moves.any(); ++i)
+    if (doms[i].model.adapt) throw std::runtime_error("moving nests with the adaptive time step are not supported");
   // module_convtrans_prep.F's SAVE stepave_count: one counter for every domain of the run (the first suite's)
   for (int i = 0, first = -1; i < max_dom; ++i)
     if (doms[i].model.suite) {
@@ -964,6 +1204,18 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
                                ") does not lie 2 cells inside its parent (" + std::to_string(pg.nx) + " x " +
                                std::to_string(pg.ny) + "): i_parent_start, j_parent_start >= 3 and 2 parent cells "
                                "beyond its east and north edges are supported");
+    // a nest a move names: the shift's width within the halo, the interpolation's window inside domain 1
+    bool moving = false;
+    for (int k = 0; k < moves.num_moves; ++k)
+      moving = moving || (moves.move_id[std::size_t(k)] == cs.dom_id && moves.move_interval[std::size_t(k)] < 999999999);
+    if (moving) {
+      if (r > Grid::halo)
+        throw std::runtime_error(cs.tag + ": a moving nest's parent_grid_ratio " + std::to_string(r) + " > " +
+                                 std::to_string(Grid::halo) + " is not supported");
+      nestmove::check_window(pg, cg, r, cs.i_parent_start, cs.j_parent_start, cs.tag);
+      // start_domain's phy_init on the new points at every move: its options checked before the first step
+      check_phy_init_moved(cs.cfg, doms[i].model, cs.tag);
+    }
   }
   // A resumed run opens every nest before the restart files are read (they overwrite the initial state).
   const bool resumed = !root_cfg.get_string("run.restart_file", "").empty();
@@ -971,6 +1223,7 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   for (int i = 0; i < max_dom; ++i)
     if (i == 0 || resumed)
       for (int c_idx : doms[i].children) {
+        const auto scope = move_scope(c_idx);
         med_nest_initial(doms[i].spec.cfg, doms[i].model, doms[c_idx].spec, doms[c_idx].model);
         opened[c_idx] = true;
       }
@@ -979,8 +1232,11 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   for (int i = 0; i < max_dom; ++i) {
     std::string dom_out = out_dir + "/" + doms[i].spec.tag;
     const tile::Use use(doms[i].model.g);
+    const auto scope = move_scope(i);
     doms[i].runner = std::make_unique<DomainRunner>(doms[i].spec.cfg, doms[i].model, dom_out, doms[i].spec.tag);
     if (doms[i].spec.parent_id > 0) doms[i].runner->set_defer_output(true);
+    // moving nests: the history fields the model does not carry move with the nest (WrfHistory's move arrays)
+    if (moves.any()) doms[i].runner->set_need_history(true);
   }
 
 #ifdef CPPWRF_HAVE_NETCDF
@@ -993,7 +1249,9 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       }
   for (int i = 0; i < max_dom; ++i) {
     const tile::Use use(doms[i].model.g);
+    const auto scope = move_scope(i);
     doms[i].runner->prepare_output();
+    if (moves.any() && doms[i].runner->history()) doms[i].runner->history()->set_move_build(true);
   }
 #endif
   // med_nest_initial: parent%ht_coarse = parent%ht; its feedback (feedback != 0) of the history fields the model
@@ -1039,6 +1297,7 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   auto open_children = [&](int idx) {
     for (int c_idx : doms[idx].children)
       if (!opened[c_idx]) {
+        const auto scope = move_scope(c_idx);
         med_nest_initial(doms[idx].spec.cfg, doms[idx].model, doms[c_idx].spec, doms[c_idx].model);
         initial_history_feedback(idx, c_idx);
 #ifdef CPPWRF_HAVE_NETCDF
@@ -1052,6 +1311,7 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   // a domain's start in its patch; then every field's halo from the other workers (the start sets fields on the host)
   auto start = [&](int i) {
     const tile::Use use(doms[i].model.g);
+    const auto scope = move_scope(i);
     const bool ok = doms[i].runner->start();
     tile::exchange_all();
     return ok;
@@ -1103,8 +1363,41 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   //     skips this loop and each nest feeds back at the end of its own integrate (should_do_last_io), i.e. before
   //     its next sibling is integrated.
   //   - dom_idx.runner->after_step(step) (writes the parent's history frame after the feedback, as in WRF)
+  // med_nest_move (frame/module_integrate.F:446-452): after the nest's feedback, when domain 1 is not at its stop
+  // time; a move changes the nest's i_parent_start / j_parent_start of the forcing, the feedback and the output
+  // attributes (WRF dmpar's nl_set_i/j_parent_start)
+  auto nest_move = [&](DomInstance& d, DomInstance& c) {
+    if (!moves.any()) return;
+    nestmove::Domain P, N;
+    const int pi = c.spec.parent_id - 1, ci = c.spec.dom_id - 1;
+    P.m = &d.model;
+    P.reg = move_regs[std::size_t(pi)].get();
+    P.hist = d.runner->history();
+    P.cfg = &d.spec.cfg;
+    P.id = d.spec.dom_id;
+    N.m = &c.model;
+    N.reg = move_regs[std::size_t(ci)].get();
+    N.hist = c.runner->history();
+    N.cfg = &c.spec.cfg;
+    N.id = c.spec.dom_id;
+    N.i_parent_start = c.spec.i_parent_start;
+    N.j_parent_start = c.spec.j_parent_start;
+    N.ratio = c.spec.parent_grid_ratio;
+    int dx = 0, dy = 0;
+    // the nest's clock since the clock's start time (a resumed run: the restart time), at the end of its last step
+    const long nsteps = c.step - c.runner->start_step;
+    if (nsteps > 2147483647L) throw std::runtime_error("moving nests: more than 2^31 - 1 steps of a nest");
+    const wrf_time::Interval ct = c.model.dt_clock * int(nsteps);
+    if (!nestmove::time_for_move(moves, P, N, ct, dx, dy)) return;
+    const auto scope = move_scope(ci);
+    nestmove::move_nest(P, N, dx, dy);
+    c.spec.i_parent_start = N.i_parent_start;
+    c.spec.j_parent_start = N.j_parent_start;
+  };
+
   std::function<bool(int)> advance_domain = [&](int idx) -> bool {
     DomInstance& d = doms[idx];
+    const auto scope = move_scope(idx);
     const long n = ++d.step;
     {
       const tile::Use use(d.model.g);
@@ -1148,7 +1441,10 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
       if (stop_time) feedback(d, c);
     }
     if (!stop_time)
-      for (int c_idx : d.children) feedback(d, doms[c_idx]);
+      for (int c_idx : d.children) {
+        feedback(d, doms[c_idx]);
+        nest_move(d, doms[c_idx]);
+      }
 
     const tile::Use use(d.model.g);
     if (!d.runner->after_step(n)) return false;

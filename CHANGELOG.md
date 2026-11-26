@@ -19,6 +19,19 @@ resumes across versions from WRF's wrfrst files.
   / fmin, lround, a * b + c written out, a + 0) against the host's and against explicit oracles (x86's maxsd / minsd,
   two roundings, signed zeros), bit for bit, edge values, signaling NaNs and subnormal results included (CPU and CUDA
   builds: unchanged results).
+- Moving nests with prescribed moves (docs/NESTING.md "Moving nests", USER_GUIDE section 6): `num_moves`, `move_id`,
+  `move_interval`, `move_cd_x`, `move_cd_y` and `corral_dist` as WRF 4.8.0 dmpar built with preset moves
+  (`-DMOVE_NESTS`) runs them: share/mediation_nest_move.F's time_for_move2 and corral check, shift_domain_em,
+  med_interp_domain in inc/nest_interpdown_interp.inc's order (data/wrf_schema/nest_interpdown-4.8.0.tsv), the moved
+  nest's start_domain (base state, terrain slopes, phy_init on the new points) and NEST_POS, I_PARENT_START /
+  J_PARENT_START of the moved nest in the files; translated by tools/wrf2cppwrf.py. For a nest of domain 1 without
+  nests of its own or siblings, parent_grid_ratio up to 3, the moving nest's physics mp_physics 0 / 6, cu_physics 0 / 1,
+  bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4, a fixed time
+  step, no tiles or MPI ranks and no resumed run; other cases stop with an error. Verified: the suite cases MV1 (four
+  moves, 3 parent steps and 1 h) and MV2 (moves cancelled by the corral) equal WRF's dmpar runs (one MPI rank) on both
+  domains at tolerance 0 on the CPU and in CUDA FP64, MV1 also in CPU FP32 against WRF real*4. The option has no row in
+  data/option_tiers.txt (the table is empty again) and needs no `allow_unverified`. Vortex following and
+  `time_to_move` stay rejected.
 
 ### Fixed
 - glibc's math in the GPU builds and the FP32 builds' own float functions: asin, acos, log10, tgamma (and asinf, acosf,
@@ -44,6 +57,13 @@ resumes across versions from WRF's wrfrst files.
   instantiated), a single kernel (the urban LSM's) reads its functor from a device copy; the fatal slot's shared-memory
   word is written and read with relaxed atomics. test_libmvec_f4 reports but does not fail its differences from a system
   libmvec of another glibc than 2.41 (as test_glibc_mathf).
+- Edge rows and spec zone of a moved nest as WRF has them: smag2d_km leaves the edge rows and columns of a specified or
+  nested domain untouched (module_diffusion_em.F computes xkmh, xkmv, xkhh on ids+1 .. ide-2 only; CPPWRF zeroed
+  them), grid%sr is zeroed over the whole array before the microphysics (solve_em.F), and moist_physics_prep_em /
+  moist_physics_finish_em run on the tile without the spec zone (solve_em.F). On a domain that does not move these
+  values were already WRF's: the full CPU suite passes unchanged.
+- tests/phys/libmvec_intel: Intel's 4-lane powf (_ZGVbN4vv_powf) in the preload as well, so WRF real*4 references made
+  on AMD runners equal the Intel ones.
 
 ## 1.5.0 (2026-11-24)
 

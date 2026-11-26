@@ -322,7 +322,8 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
             bad[v] += f" [{nframes[v]} frames]"
     meta = []
     for a, b in pairs:
-        # CPPWRF adds this tier marker when a case opts into an unverified option.
+        # CPPWRF_UNVERIFIED_OPTIONS: CPPWRF's mark of a run with options below the verified tier (data/option_tiers.txt;
+        # a case that proves such an option sets cppwrf.allow_unverified), never in WRF's files
         ignore = ("TITLE", "CPPWRF_UNVERIFIED_OPTIONS") + tuple(ignore_atts) if global_atts else \
             set(a.ncattrs()) | set(b.ncattrs())
         m = metadata(a, b, ignore, only=list(b.variables) if subset else None, grouped_records=True)

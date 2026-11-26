@@ -676,4 +676,15 @@ std::vector<const SchemaMember*> WrfSchema::boundary_members(const std::string& 
   return out;
 }
 
+std::vector<const SchemaMember*> WrfSchema::members_in_use(const std::string& array, const WrfConfig& c) const {
+  std::vector<const SchemaMember*> out;
+  std::set<std::string> seen;
+  for (const SchemaMember& m : members_) {
+    if (m.array != array || seen.count(m.member) || !in_use(m.conds, c)) continue;
+    seen.insert(m.member);
+    out.push_back(&m);
+  }
+  return out;
+}
+
 }  // namespace cppwrf::wrf_io

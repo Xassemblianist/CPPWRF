@@ -201,6 +201,9 @@ class RadiationDriver {
   rb solcon() const { return solcon_; }
   // a restart: grid%declin and grid%solcon of the restart file (the values of the last call before it)
   void set_solar(rb declin, rb solcon) { declin_ = declin; solcon_ = solcon; }
+  // a moved nest (share/mediation_nest_move.F): its latitudes and longitudes after the shift and the interpolation
+  // (the copies calc_coszen and the RRTMG columns read; the CAM ozone of oznini is domain 1's only)
+  void set_latlon(const std::vector<rb>& xlat, const std::vector<rb>& xlong);
 
  private:
   struct Impl;

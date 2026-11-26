@@ -68,8 +68,8 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 WRF's `namelist.input` works as is: `tools/wrf2cppwrf.py` translates it, including `physics_suite`. An option
 without a port is reported as an error and never silently ignored. MPI runs give WRF's bits in every tested layout
 on one machine: up to 48 CPU ranks, and CUDA FP64 on two GPUs; runs across several nodes use the same code and have
-not been tested yet ([docs/MPI.md](docs/MPI.md)). Moving nests, BEP urban and lake models, and other missing schemes
-are listed in [docs/STATUS.md](docs/STATUS.md#not-yet-implemented) and in
+not been tested yet ([docs/MPI.md](docs/MPI.md)). Vortex-following moving nests, BEP urban and lake models, and other
+missing schemes are listed in [docs/STATUS.md](docs/STATUS.md#not-yet-implemented) and in
 [docs/USER_GUIDE.md](docs/USER_GUIDE.md#rejected-options-and-why).
 
 ## How it is verified

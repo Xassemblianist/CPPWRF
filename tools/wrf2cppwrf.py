@@ -900,6 +900,83 @@ class WrfTranslator:
     def notice(self, msg: str):
         self.notices.append(msg)
 
+    def translate_moves(self, sections: Dict[str, Dict[str, Any]], num_moves: int, max_dom: int) -> None:
+        """&domains num_moves > 0: WRF's prescribed moves (share/mediation_nest_move.F time_for_move2) as [domains]
+        num_moves, move_id, move_interval, move_cd_x, move_cd_y (the first num_moves entries, a missing entry the
+        Registry default) and [d0N] corral_dist. CPPWRF moves a nest of domain 1 without nests of its own, by one
+        parent cell per move (src/cases/nest_move.cpp)."""
+        def entries(key: str) -> List[int]:
+            vals = list(self.get_opt_list("domains", key))[:num_moves]
+            vals += [REGISTRY_DEFAULTS[key][1]] * (num_moves - len(vals))
+            # an entry the namelist skips ("2, , 2"): the Registry default
+            vals = [REGISTRY_DEFAULTS[key][1] if v is None else v for v in vals]
+            for v in vals:
+                if not isinstance(v, int) or isinstance(v, bool):
+                    self.error(f"WRF &domains.{key} = {vals}: integers expected.")
+            return vals
+        ids, ivs, cdx, cdy = (entries(k) for k in ("move_id", "move_interval", "move_cd_x", "move_cd_y"))
+        parents = [self.get_dom_opt("domains", "parent_id", d, 0, fallback_d0=False) for d in range(max_dom)]
+        active = False
+        for k in range(num_moves):
+            mid = ids[k]
+            if not all(isinstance(v, int) and not isinstance(v, bool) for v in (mid, ivs[k], cdx[k], cdy[k])):
+                continue  # reported by entries()
+            if ivs[k] < 0:
+                self.error(f"WRF move {k + 1}: move_interval = {ivs[k]} must be >= 0 (minutes).")
+            # time_for_move2 skips a move with move_interval >= 999999999 (used); no nest of another id asks for it
+            if ivs[k] >= 999999999 or mid < 2 or mid > max_dom:
+                continue
+            active = True
+            if any(cdv not in (-1, 0, 1) for cdv in (cdx[k], cdy[k])):
+                # med_nest_move: wrf_error_fatal ' invalid move: dx, dy ' when |dx| or |dy| > 1
+                self.error(f"WRF move {k + 1}: move_cd_x = {cdx[k]}, move_cd_y = {cdy[k]}: WRF stops with "
+                           "'invalid move' (one parent cell per move).")
+            if parents[mid - 1] != 1:
+                self.error(f"WRF move {k + 1}: move_id = {mid} is a nest of domain {parents[mid - 1]}; CPPWRF "
+                           "moves nests of domain 1 only.")
+            if mid in parents:
+                self.error(f"WRF move {k + 1}: move_id = {mid} has nests of its own; not supported by CPPWRF.")
+            if sum(1 for p in parents if p == 1) > 1:
+                self.error("WRF moving nests with several nests of domain 1 are not supported by CPPWRF.")
+            ratio = self.get_dom_opt("domains", "parent_grid_ratio", mid - 1, 1, fallback_d0=False)
+            if isinstance(ratio, int) and ratio > 3:
+                # shift_domain_em moves the arrays by parent_grid_ratio points out of the halo (CPPWRF: 3 points)
+                self.error(f"WRF move {k + 1}: the moving nest's parent_grid_ratio = {ratio} > 3 is not supported "
+                           "by CPPWRF.")
+            ipos = self.get_dom_opt("domains", "i_parent_start", mid - 1, 1, fallback_d0=False)
+            jpos = self.get_dom_opt("domains", "j_parent_start", mid - 1, 1, fallback_d0=False)
+            ewe = [self.get_dom_opt("domains", "e_we", d, 0, fallback_d0=False) for d in (0, mid - 1)]
+            esn = [self.get_dom_opt("domains", "e_sn", d, 0, fallback_d0=False) for d in (0, mid - 1)]
+            if all(isinstance(v, int) and not isinstance(v, bool) for v in [ratio, ipos, jpos] + ewe + esn) and \
+                    ratio > 0 and not (ipos >= 5 and jpos >= 5 and ipos + ewe[1] // ratio + 5 <= ewe[0] - 1 and
+                                       jpos + esn[1] // ratio + 5 <= esn[0] - 1):
+                # the intermediate domain's search window (interp_mask_water_field, SINT) inside domain 1's points
+                self.error(f"WRF move {k + 1}: the moving nest d{mid:02d} at i_parent_start {ipos}, j_parent_start "
+                           f"{jpos} is too near domain 1's edge for CPPWRF (i_parent_start, j_parent_start >= 5 and "
+                           "i_parent_start + e_we / parent_grid_ratio + 5 <= e_we - 1 of domain 1, and in y).")
+        if not active:
+            self.warn(f"WRF num_moves = {num_moves}: no move is active (move_id of a nest and move_interval < "
+                      "999999999); the moves are not translated.")
+            return
+        self._moving_ids = {ids[k] for k in range(num_moves)
+                            if isinstance(ids[k], int) and isinstance(ivs[k], int) and 2 <= ids[k] <= max_dom
+                            and 0 <= ivs[k] < 999999999}
+        self._moves_domains = ({
+            "num_moves": num_moves,
+            "move_id": ",".join(str(v) for v in ids),
+            "move_interval": ",".join(str(v) for v in ivs),
+            "move_cd_x": ",".join(str(v) for v in cdx),
+            "move_cd_y": ",".join(str(v) for v in cdy),
+        })  # merged into [domains] below
+        corral = self.get_opt_list("domains", "corral_dist")
+        for d in range(1, max_dom):
+            c = corral[d] if d < len(corral) and corral[d] is not None else REGISTRY_DEFAULTS["corral_dist"][1]
+            if not isinstance(c, int) or isinstance(c, bool) or c < 1:
+                self.error(f"Domain d{d + 1:02d}: corral_dist = {c} is not supported (an integer >= 1: the nest "
+                           "keeps 2 parent cells from domain 1's edge).")
+            elif c != REGISTRY_DEFAULTS["corral_dist"][1]:
+                sections.setdefault(f"d{d + 1:02d}", {})["corral_dist"] = c
+
     def get_opt_list(self, group: str, key: str) -> List[Any]:
         grp = self.nml.get(group, {})
         self.used_keys.add((group, key))
@@ -3226,8 +3303,21 @@ class WrfTranslator:
             }
 
         # 14. Nested Domains [domains] and [d02]..[d0N]
-        for mv_key in ("vortex_interval", "max_vortex_speed", "corral_dist", "track_level",
-                       "time_to_move", "move_id", "move_interval", "move_cd_x", "move_cd_y"):
+        # moving nests: prescribed moves (WRF built with "preset moves", -DMOVE_NESTS) are translated below; vortex
+        # following (-DVORTEX_CENTER: vortex_interval, max_vortex_speed, track_level) and time_to_move are not
+        # supported. The move_* lists and corral_dist matter only with num_moves > 0 (time_for_move2).
+        num_moves = self.get_opt("domains", "num_moves", 0)
+        if num_moves is None:
+            num_moves = 0
+        if not isinstance(num_moves, int) or isinstance(num_moves, bool) or num_moves < 0 or num_moves > 50:
+            self.error(f"WRF num_moves = {num_moves} is invalid (0 .. max_moves = 50).")
+            num_moves = 0
+        if num_moves > 0 and max_dom > 1:
+            self.translate_moves(sections, num_moves, max_dom)
+        else:
+            for mv_key in ("move_id", "move_interval", "move_cd_x", "move_cd_y", "corral_dist"):
+                self.get_opt_list("domains", mv_key)  # no move: WRF does not read them
+        for mv_key in ("vortex_interval", "max_vortex_speed", "track_level", "time_to_move"):
             if self.has_opt("domains", mv_key):
                 reg = REGISTRY_DEFAULTS.get(mv_key)
                 reg_def = reg[1] if reg else 0
@@ -3236,7 +3326,9 @@ class WrfTranslator:
                 vals = self.get_opt_list("domains", mv_key)
                 checked = vals[:n_mv] if n_mv is not None else vals
                 if any(v is not None and not _same_value(v, reg_def) and v not in (0, False) for v in checked):
-                    self.error(f"WRF moving nest option &domains.{mv_key} = {vals} is not supported by CPPWRF.")
+                    self.error(f"WRF moving nest option &domains.{mv_key} = {vals} is not supported by CPPWRF "
+                               "(vortex following and time_to_move are not ported; prescribed moves are: num_moves, "
+                               "move_id, move_interval, move_cd_x, move_cd_y, corral_dist).")
 
         for vr_key in ("vert_refine_method", "vert_refine_fact"):
             if self.has_opt("domains", vr_key):
@@ -3267,6 +3359,7 @@ class WrfTranslator:
                 "feedback": feedback,
                 "smooth_option": smooth_option,
             }
+            sections["domains"].update(getattr(self, "_moves_domains", {}))
 
             if self.has_opt("domains", "save_topo_from_real"):  # a wrfinput variable, not a namelist option
                 self.error("save_topo_from_real is not a WRF namelist option (WRF reads it from wrfinput_d0N).")
@@ -3575,7 +3668,47 @@ class WrfTranslator:
                         self.error(f"WRF &{grp_name}.{key_name} = {vals[:n]} is not supported by CPPWRF (WRF's default "
                                    f"{reg[1] if reg else '?'}; CPPWRF has no port of it).")
 
+        if getattr(self, "_moving_ids", None):
+            self.check_moving_nest_physics(sections)
         return sections
+
+    def check_moving_nest_physics(self, sections: Dict[str, Dict[str, Any]]) -> None:
+        """The physics start_domain's phy_init runs on a moved nest's new points (dyn_em/start_em.F:1007-1101 with
+        grid%moved): CPPWRF ports it (src/cases/real_physics.cpp phy_init_moved / check_phy_init_moved) with the column
+        physics suite for mp_physics 0 / 6, cu_physics 0 / 1, bl_pbl_physics 0 / 1, sf_sfclay_physics 0 / 1,
+        sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4, without urban, fractional_seaice, sst_update,
+        tmn_update, usemonalb, gwd_opt, the terrain options and grid_fdda (fg_init's fddagdinit). The model checks
+        the same before the first step."""
+        phys = sections.get("phys", {})
+        allowed = {"mp_physics": (0, 6), "cu_physics": (0, 1), "bl_pbl_physics": (0, 1), "sf_sfclay_physics": (0, 1),
+                   "sf_surface_physics": (0, 2), "ra_lw_physics": (0, 4), "ra_sw_physics": (0, 4)}
+        off = ("sf_urban_physics", "fractional_seaice", "sst_update", "tmn_update", "usemonalb", "topo_wind",
+               "slope_rad", "topo_shading")
+        for mid in sorted(self._moving_ids):
+            tag = f"d{mid:02d}"
+            dsec = sections.get(tag, {})
+
+            def eff(sec: str, key: str) -> Any:
+                if f"{sec}_{key}" in dsec:
+                    return dsec[f"{sec}_{key}"]
+                return sections.get(sec, {}).get(key, 0)
+
+            vals = {k: eff("phys", k) for k in allowed}
+            if not any(vals[k] for k in ("sf_sfclay_physics", "sf_surface_physics", "bl_pbl_physics", "cu_physics")):
+                self.error(f"WRF moving nest {tag} without surface-layer, land-surface, PBL or cumulus physics is not "
+                           "supported by CPPWRF (phy_init of a moved nest is ported with the column physics only).")
+            bad = [f"{k} = {v}" for k, v in vals.items() if v not in allowed[k]]
+            bad += [f"{k} = {eff('phys', k)}" for k in off if eff("phys", k) not in (0, False, None)]
+            if eff("dyn", "gwd_opt") not in (0, None):
+                bad.append(f"gwd_opt = {eff('dyn', 'gwd_opt')}")
+            if eff("fdda", "grid_fdda") not in (0, None):
+                bad.append(f"grid_fdda = {eff('fdda', 'grid_fdda')}")
+            if bad:
+                self.error(f"WRF moving nest {tag} with {', '.join(bad)} is not supported by CPPWRF: phy_init of a "
+                           "moved nest is ported for mp_physics 0 / 6, cu_physics 0 / 1, bl_pbl_physics 0 / 1, "
+                           "sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4 without "
+                           "urban, fractional_seaice, sst_update, tmn_update, usemonalb, gwd_opt, the terrain options "
+                           "and grid_fdda.")
 
     def format_ini(self, sections: Dict[str, Dict[str, Any]]) -> str:
         """Format translated sections into standard CPPWRF INI string."""

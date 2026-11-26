@@ -176,6 +176,8 @@ chain_wrf_data.tar
 # WRF's run of the three-domain nest N3T (tests/verify/refs/nest3_refs.txt, tests/verify/cases/61_nest3.py) and its
 # inputs
 nest3_data.tar
+# The prescribed moving nests and their input files (MV1, MV2; one-rank WRF dmpar)
+movenest_data.tar
 # the WRF v4.8.0 objects (-r8, -r8 -fdefault-double-8 builds) and input subsets of the differential tests
 # (ctest -L diff; tools/gcp/stage_diff_data.sh, tools/gcp/run_diff_tests.sh)
 diff_data.tar

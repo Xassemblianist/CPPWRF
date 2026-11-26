@@ -67,7 +67,7 @@ updates, branches, constants and defaults. Every result is checked against WRF i
   WRF runs, continuing a WRF run).
 
 Every WRF option is either ported identically or rejected with an error. All verified MPI layouts ran on a single
-node, including CUDA FP64 on two GPUs. See [MPI.md](MPI.md). The missing features include moving nests, `ndown.exe`,
+node, including CUDA FP64 on two GPUs. See [MPI.md](MPI.md). The missing features include vortex-following moving nests, `ndown.exe`,
 I/O forms other than NetCDF, and the schemes listed under [Rejected Options and Why](#rejected-options-and-why).
 
 The design (one source for CPU and GPU kernels, the physics driver, the nests) is described in
@@ -465,7 +465,7 @@ an error, never silently:
 
 | WRF option | Why |
 |---|---|
-| moving nests, vertical nest refinement, nests with their own start or end time (a missing `start_*` / `end_*` entry of a nest is WRF's Registry default, not domain 1's value; with `run_*` a nest whose `end_*` is before domain 1's stop time stops early in WRF), ndown.exe | not ported |
+| vortex-following moving nests (`vortex_interval`, `max_vortex_speed`, `track_level`), `time_to_move`, moves of a nest of a nest, of a nest with nests or siblings, or in a decomposed run (prescribed moves are ported, section 6), vertical nest refinement, nests with their own start or end time (a missing `start_*` / `end_*` entry of a nest is WRF's Registry default, not domain 1's value; with `run_*` a nest whose `end_*` is before domain 1's stop time stops early in WRF), ndown.exe | not ported |
 | nests in ideal cases; Noah-MP with nests | not ported; wrf.exe 4.8.0 itself aborts with Noah-MP on nests (heap corruption in the nest's first history output) |
 | `io_form_*` other than 2, `nocolons`, auxiliary history / input streams other than auxhist3 and wrflowinp | CPPWRF reads and writes NetCDF; WRF writes no other stream by default |
 | `restart = .true.` in the namelist | resume with `run.restart_file` (section 9) |
@@ -515,6 +515,26 @@ forces the nest boundary as WRF's `med_nest_force` does (`bdy_interp1`, SINT), a
 domain, as the translator checks. Each domain's files go to `output.dir/d0N`. A nested configuration from the translator has a `[domains]` section and one
 `[d0N]` section per nest (section 8). Every domain writes its own `wrfout_d0N` and `wrfrst_d0N` files, identical to
 WRF's (cases N1, N2, N3, N3sib, N3gc of docs/STATUS.md). docs/NESTING.md and docs/NEST_NUMERICS.md describe the port.
+
+**Moving nests (prescribed moves).** `num_moves`, `move_id`, `move_interval`, `move_cd_x`, `move_cd_y` and
+`corral_dist` run as a dmpar wrf.exe (one MPI rank) built with "preset moves" (configure's nesting option 2,
+`-DMOVE_NESTS`) runs them: after the nest's feedback, when its clock reaches `move_interval` minutes from the run's
+start, the nest moves by one parent cell (`move_cd_x`, `move_cd_y` in -1, 0, 1); each move is used
+once, and a move that would bring the nest within `corral_dist` parent cells of domain 1's edge is cancelled in that
+direction ("MOAD can not move"). The nest's fields are shifted, the new strip is interpolated from the parent (every
+Registry "d" field, WRF's `med_interp_domain`), `start_domain` runs on the moved nest (its physics initialisation on
+the new points) and the time levels are copied, as `med_nest_move`; the output's `I_PARENT_START` / `J_PARENT_START`
+follow the move. Supported: a nest of domain 1 without nests of its own and without siblings, `parent_grid_ratio` up
+to 3, at least 5 parent cells (plus 5 beyond the nest) from domain 1's edges, the moving nest with the column physics
+(a surface layer, land surface, PBL or cumulus scheme) of mp_physics 0 / 6, cu_physics 0 / 1, bl_pbl_physics 0 / 1,
+sf_sfclay_physics 0 / 1, sf_surface_physics 0 / 2, ra_lw / ra_sw_physics 0 / 4, without urban physics,
+fractional_seaice, sst_update, tmn_update, usemonalb, gwd_opt, the terrain options and grid_fdda (the translator and
+the model check these before the first step), in a run without tiles or MPI ranks, without the adaptive time step
+and not resumed from a restart file, on the CPU and the GPU. The suite cases MV1 (four moves, 3 parent steps and 1 h)
+and MV2 (moves cancelled by the corral) are identical to WRF's dmpar runs (one MPI rank, preset moves) on both domains
+at tolerance 0 on the CPU and in CUDA FP64, MV1 also in CPU FP32 against WRF real*4 (docs/STATUS.md).
+Vortex following (`vortex_interval`, `max_vortex_speed`, `track_level`, configure's nesting option 3) and
+`time_to_move` are rejected.
 
 ---
 
@@ -742,6 +762,8 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[output]` | `wrf_timing` | bool | `false` | Print WRF's `Timing for main` / `Timing for Writing` lines (the rsl logs of `cppwrf-wrf`) | - |
 | `[tracers]` | `names` | string list | `""` | Comma-separated names of passive scalar tracers | Tracer variables |
 | `[domains]` | `max_dom`, `feedback`, `smooth_option`, `save_topo_from_real`, `blend_width`, `spec_bdy_width` | integer | `1`, `1`, `2`, `1`, `5`, `5` | Multi-domain nesting count, two-way feedback (`0, 1`), feedback smoother (`0..2`), terrain blending | `&domains` / `&bdy_control` |
+| `[domains]` | `num_moves`, `move_id`, `move_interval`, `move_cd_x`, `move_cd_y` | integer, comma lists | `0`, `0`, `999999999`, `0`, `0` | Prescribed nest moves (section 6): the count, and per move the domain, the time in minutes from the run's start and the move in parent cells (-1, 0, 1) | `&domains` |
+| `[d02]`..`[d0N]` | `corral_dist` | integer | `8` | Parent cells a moving nest keeps from domain 1's edge (>= 1) | `&domains corral_dist` |
 | `[d02]`..`[d0N]` | `wrfinput`, `dt`, `out_interval`, `diag_interval`, `parent_id`, `i_parent_start`, `j_parent_start`, `parent_grid_ratio`, `parent_time_step_ratio` | string/int/double | *per-domain* | Child domain input file, timestep, output intervals, parent link, and per-domain dynamics overrides | `&domains` / `&time_control` / `&dynamics` |
 
 ---

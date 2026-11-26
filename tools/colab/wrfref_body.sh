@@ -24,10 +24,13 @@ grep -v '^\s*#' $J/refs.txt | grep -v '^\s*$' | while read -r name base exe sets
 done > $J/cmds.txt
 xargs -P "$(nproc)" -I{} sh -c '{}' < $J/cmds.txt > $J/refs.out 2>&1; ref_rc=$?
 names=$(grep -v '^\s*#' $J/refs.txt | awk 'NF {print $1}')
-# shellcheck disable=SC2086
-CPPWRF_WRF_RUNS=$W bash $J/src/tests/verify/make_restart_refs.sh $names >> $J/refs.out 2>&1; rst_rc=$?
-# shellcheck disable=SC2086
-CPPWRF_WRF_RUNS=$W bash $J/src/tests/verify/make_resumed_refs.sh $names >> $J/refs.out 2>&1; rsm_rc=$?
+rst_rc=0 rsm_rc=0
+if [ "${NO_RESTART_REFS:-0}" != 1 ]; then  # NO_RESTART_REFS=1: no rst_ / rsm_ references (tools/colab/movenest_body.sh)
+  # shellcheck disable=SC2086
+  CPPWRF_WRF_RUNS=$W bash $J/src/tests/verify/make_restart_refs.sh $names >> $J/refs.out 2>&1; rst_rc=$?
+  # shellcheck disable=SC2086
+  CPPWRF_WRF_RUNS=$W bash $J/src/tests/verify/make_resumed_refs.sh $names >> $J/refs.out 2>&1; rsm_rc=$?
+fi
 dirs=$(for n in $names; do for p in run rst rsm; do [ -d "$W/${p}_$n" ] && echo "${p}_$n"; done; done)
 # shellcheck disable=SC2086
 ( cd $W && find $dirs -type f \( -name 'wrfout_*' -o -name 'wrfrst_*' -o -name 'auxhist*' -o -name 'wrfinput_*' \
@@ -48,12 +51,18 @@ if [ -n "$STAGE" ]; then  # the suite's tar of these references, to Drive (remot
     grep -qx "$n SUCCESS" $J/refs.out || stage_bad="${stage_bad:+$stage_bad; }run_$n"
     if [ "$steps" = 1 ]; then
       grep -qx "$n/steps SUCCESS" $J/refs.out || stage_bad="${stage_bad:+$stage_bad; }run_$n/steps"
-      grep -qE "^$n: (wrf\.log:)?[1-9][0-9]*( +\S+)* +[1-9][0-9]* restart files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rst_$n"
-      grep -qE "^$n: (wrf\.log:)?[1-9][0-9]*( +\S+)* +[1-9][0-9]* history files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rsm_$n"
+      # make_restart_refs.sh / make_resumed_refs.sh: "N" (wrf.log only) or "wrf.log:N rsl.error.0000:M" (a dmpar
+      # wrf.exe writes its messages to rsl.error.0000)
+      if [ "${NO_RESTART_REFS:-0}" != 1 ]; then
+        grep -qE "^$n: (wrf\.log:[0-9]+ )?((wrf\.log|rsl\.error\.0000):)?[1-9][0-9]*( +\S+)* +[1-9][0-9]* restart files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rst_$n"
+        grep -qE "^$n: (wrf\.log:[0-9]+ )?((wrf\.log|rsl\.error\.0000):)?[1-9][0-9]*( +\S+)* +[1-9][0-9]* history files$" $J/refs.out || files_bad="${files_bad:+$files_bad; }rsm_$n"
+      fi
     fi
   done
   [ "$rst_rc" = 0 ] || files_bad="${files_bad:+$files_bad; }make_restart_refs exit $rst_rc"
   [ "$rsm_rc" = 0 ] || files_bad="${files_bad:+$files_bad; }make_resumed_refs exit $rsm_rc"
+  # the staged cases may read the restart references (drop-in resumed cases): none of them staged from a failed set
+  [ -z "$files_bad" ] || stage_bad="${stage_bad:+$stage_bad; }restart/resumed runs failed ($files_bad)"
   if [ -n "$stage_bad" ]; then
     echo "STAGE_SKIPPED: WRF runs failed ($stage_bad)" > $J/stage.log
   else

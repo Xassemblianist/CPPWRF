@@ -605,31 +605,9 @@ inline void calculate_km_kh(const DiffusionParams& p,
                  KSmag2dKm{defor11, defor22, defor12, rdzw, zx, zy, msftx, msfty,
                            xkmh, xkmv, xkhh, xkhv, dx, dy, p.c_s, p.prandtl, p.diff_opt, nz});
 
-    if (p.specified) {
-      // the edge columns and rows, each on the workers at that edge for the positions they own
-      for (int side = 0; side < 2; ++side) {
-        const int ic = side == 0 ? 0 : nx - 1;
-        column_for_whole(tile::edge_rows(side == 0 ? tile::Edge::West : tile::Edge::East, 0, ny), [=] CPPWRF_HD (int, int j) {
-          for (int k = 0; k < nz; ++k) {
-            xkmh(ic, j, k) = real(0);
-            xkmv(ic, j, k) = real(0);
-            xkhh(ic, j, k) = real(0);
-            xkhv(ic, j, k) = real(0);
-          }
-        });
-      }
-      for (int side = 0; side < 2; ++side) {
-        const int jc = side == 0 ? 0 : ny - 1;
-        column_for_whole(tile::edge_cols(side == 0 ? tile::Edge::South : tile::Edge::North, 0, nx), [=] CPPWRF_HD (int i, int) {
-          for (int k = 0; k < nz; ++k) {
-            xkmh(i, jc, k) = real(0);
-            xkmv(i, jc, k) = real(0);
-            xkhh(i, jc, k) = real(0);
-            xkhv(i, jc, k) = real(0);
-          }
-        });
-      }
-    }
+    // smag2d_km (module_diffusion_em.F:1934-2044) never writes the edge rows and columns of a domain with specified or
+    // nested boundaries: they keep their values (0 from the allocation; on a moved nest the values the shift
+    // brought there), which horizontal_diffusion reads at the first interior points
   }
 }
 

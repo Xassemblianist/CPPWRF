@@ -114,6 +114,8 @@ class WrfSchema {
   }
   // 4-D array members written to wrfbdy (boundary_table true), e.g. QVAPOR, QCLOUD, ...
   std::vector<const SchemaMember*> boundary_members(const std::string& array, const WrfConfig& c) const;
+  // every member of a 4-D array in use for `c` (the order of the schema, each member once)
+  std::vector<const SchemaMember*> members_in_use(const std::string& array, const WrfConfig& c) const;
   bool in_use(const std::vector<SchemaCond>& conds, const WrfConfig& c) const;
   // namelist iofields_filename (frame/module_domain.F modify_io_masks1): lines op:stream:id:fields with op
   // + or -, stream h (history, auxhist id) or i (input, auxinput id); fields by DataName among the variables
