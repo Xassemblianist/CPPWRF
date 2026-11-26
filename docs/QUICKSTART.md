@@ -9,6 +9,7 @@ docker run --rm -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cpu quick
 ```
 
 For NVIDIA GPUs, install NVIDIA Container Toolkit and use a CUDA 13.0-compatible driver (Linux 580.65.06 or later).
+The CUDA image is compiled for sm_75 (T4, RTX 20xx), sm_80, sm_86, sm_89, sm_90 and sm_120 GPUs.
 
 ```bash
 docker run --rm --gpus all -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cuda quickstart
@@ -20,17 +21,28 @@ Both inputs are cached in `out/`. Allow several GB of free disk space and more f
 The example uses the archived 2026-10-12 00 UTC GFS cycle. Set `-e GFS_DATE=YYYYMMDD -e GFS_CYCLE=HH`
 before the image name to use another archived cycle.
 
+The container runs as root, so on Linux the files in `out/` belong to root. To own them yourself, create `out`
+first and add `--user "$(id -u):$(id -g)"` before the image name.
+
 Add `--hours 6` after `quickstart` to request a six-hour forecast (any whole number from 1 to 24).
 Add `--mode cpu-fp32` or `--mode cpu-fp64` on the CPU image (default `cpu-fp64`). The CUDA image has
-`gpu-fp32` (default), `gpu-fp64` and `cpu-fp64`. These images ship with WPS 4.6.0, the WRF 4.8.0 run tables,
-CPPWRF's replacement for `real.exe` and the plotting dependencies.
+`gpu-fp32` (default), `gpu-fp64` and `cpu-fp64`. These images ship with WPS 4.6.0 (with two upstream fixes, listed
+in `/opt/weather/notices/README.md`), the WRF 4.8.0 run tables, CPPWRF's replacement for `real.exe` and the plotting
+dependencies. The run has two domains (15 km and a 5 km nest). On the CPU it is slow: `cpu-fp64` took 222 to 273 s
+for three hours on 48 threads (see step 3 below), so expect tens of minutes on a desktop.
 
-The Debian 13 CPU image uses GCC 14 and glibc 2.41. CPU FP64 bit identity with GNU WRF 4.8.0 real*8 applies to
-the verified configurations with glibc 2.41 and matching build flags. CPU and CUDA FP32 use identity mode
-for the verified GNU WRF 4.8.0 real*4 cases and carry the required glibc 2.41 float functions. The CUDA image
-uses Ubuntu 24.04 (glibc 2.39), so verify either of its FP64 modes against the reference before relying on
-bit identity. See [INSTALL.md](INSTALL.md#the-glibc-math-options-and-why-they-exist) and
-[FP32_IDENTITY.md](FP32_IDENTITY.md).
+What the images have been checked for: the publishing workflow builds both images on a machine without a GPU, runs
+the small self-test case (`examples/selftest`) of the CPU image's two builds and the CUDA image's `cpu-fp64` build
+without network access, and checks that the WPS programs find their libraries. The images themselves have not been
+run through the verification suite, and their GPU builds have not been run by the workflow.
+
+The CPU image is Debian 13 with GCC 14 and glibc 2.41, the system of the proofs, and its builds use the same strict
+floating-point settings; bit identity with WRF 4.8.0 applies to the verified configurations of
+[STATUS.md](STATUS.md) and [FP32_IDENTITY.md](FP32_IDENTITY.md), not to every namelist. The FP32 builds carry glibc
+2.41's float functions, so their results do not depend on the image's libm. The CUDA image is Ubuntu 24.04 (glibc
+2.39), and the host code of its FP64 builds calls that libm: compare `gpu-fp64` or `cpu-fp64` there with
+`cppwrf-compare` against a reference before relying on bit identity. See
+[INSTALL.md](INSTALL.md#the-glibc-math-options-and-why-they-exist).
 
 ## Without Docker
 
@@ -89,7 +101,7 @@ This step is WPS as usual. CPPWRF does not replace WPS. For another date, change
 mkdir -p ~/qs/run && cd ~/qs/run
 cp $CPPWRF/examples/quickstart/namelist.input .   # set num_metgrid_levels / num_land_cat as in the met_em files
 ln -sf ~/qs/wps/met_em.d0* .
-cppwrf-realexe
+cppwrf-realexe                                     # FP32 modes: cppwrf-realexe --precision float
 ```
 
 `cppwrf-realexe` writes `wrfinput_d01`, `wrfinput_d02` and `wrfbdy_d01`, the files of WRF's real.exe. They are

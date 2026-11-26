@@ -199,7 +199,8 @@ cd case && apptainer run --nv ../cppwrf-cuda.sif --mode gpu-fp64
   code of the FP64 builds calls glibc's libm. In that image, check `gpu-fp64` against `cpu-fp64` with `cppwrf-compare`
   before relying on bit identity with WRF. The FP32 builds carry glibc 2.41's float functions (x86-64) and their FP32
   results do not depend on the image's libm.
-- The Dockerfiles pin exact base-image tags. Registry builds record the CPPWRF source revision in the image labels.
+- The Dockerfiles pin the base images by tag and digest. Registry builds record the CPPWRF source revision in the
+  image labels.
 
 A Spack recipe is in `packaging/spack` (`spack repo add packaging/spack; spack install cppwrf +cuda cuda_arch=89`).
 

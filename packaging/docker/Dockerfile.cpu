@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Build from the repository root. The Debian 13 runtime supplies glibc 2.41.
-FROM debian:13.8-slim AS build
+# The base images are pinned by digest (multi-architecture index, 2026-11-25); update tag and digest together.
+FROM debian:13.8-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0 AS build
 RUN apt-get update && apt-get install -y --no-install-recommends \
       ca-certificates cmake curl file g++-14 gcc gfortran libnetcdf-dev libnetcdff-dev \
       m4 make patch perl python3 tcsh \
@@ -14,7 +15,7 @@ ARG VCS_REF
 COPY . /src
 RUN bash /src/packaging/docker/build-cppwrf.sh cpu-fp64 cpu-fp64 cpu-fp32
 
-FROM debian:13.8-slim
+FROM debian:13.8-slim@sha256:8aa5a7bf5a1955bddbe7d74fcdd0b91ab30e74362a8b73af672b0481b35b44a0
 ARG VCS_REF
 LABEL org.opencontainers.image.source="https://github.com/Xassemblianist/CPPWRF" \
       org.opencontainers.image.revision="${VCS_REF}"
