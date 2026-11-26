@@ -9,7 +9,10 @@ tests/verify/refs/vortexnest_refs.txt, data vortexnest_data.tar), at tolerance 0
   case);
 - VX2: vortex_interval 1, max_vortex_speed 20, track_level 70000, time_to_move 2, corral_dist 28 for d02 (the search
   box around the last centre every minute, no move before 2 min, the corral cancelling a move toward d01's edge):
-  10 min, history every minute.
+  10 min, history every minute. WRF writes d02's eleven frames to two files: frames_per_outfile is 10000 for d01
+  only, so d02 has the Registry default 10 (registry.io_boilerplate:28; med_hist_out closes the file after the 00:09
+  frame) and its 00:10 frame is wrfout_d02_2026-10-12_00:10:00, compared as part of the reference's stream
+  (wrf_suite.reference_stream).
 A resumed run with moving nests is refused by CPPWRF (no restart cases).
 The option is "unverified" (data/option_tiers.txt) until these cases have passed; they set cppwrf.allow_unverified.
 
