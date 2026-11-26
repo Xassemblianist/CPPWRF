@@ -4,7 +4,10 @@
 # CPPWRF: differential (CPU) and CUDA test of the nest numerics: interpolation, boundary forcing, feedback and
 # initialisation kernels against WRF v4.8.0's own compiled routines (the -r8 build, WRF_DIR; called through
 # fortran_nest_bridge.f90, linked by tests/phys/wrf_fortran.sh) on the coarse fields of the R0 reference run
-# (CPPWRF_WRF_RUNS). CPU FP64: tolerance 0; CUDA FP64 (with nvcc and a GPU): relative 1e-12.
+# (CPPWRF_WRF_RUNS). CPU FP64 and CUDA FP64 (with nvcc and a GPU): tolerance 0. The CUDA objects take the model's
+# CUDA FP64 flags (CMakeLists.txt): the GPU of the build machine (-arch=native; an sm_70+ target also gives kernels
+# the 32 KB parameter space the batched lateral_bc kernels need, the default sm_52 target allows 4 KB), no fused
+# multiply-add (--fmad=false) and no contraction in host code.
 # ==============================================================================
 set -euo pipefail
 
@@ -42,14 +45,15 @@ echo "Executing CPU differential test suite..."
 # 3. CUDA FP64 device kernel test
 if command -v nvcc &>/dev/null && nvidia-smi &>/dev/null; then
   echo "Compiling CUDA device objects..."
-  NVOPT=(-std=c++20 -O3 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA --expt-relaxed-constexpr --extended-lambda
-         -I"${REPO_ROOT}/src" -I"${REPO_ROOT}")
-  for s in dyn/lateral_bc core/halo core/backend; do
+  NVOPT=(-std=c++20 -O3 -arch=native --fmad=false -Xcompiler=-ffp-contract=off -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA
+         --expt-relaxed-constexpr --extended-lambda -I"${REPO_ROOT}/src" -I"${REPO_ROOT}")
+  # core/column_work: the device column scratch backend.cpp's CUDA path releases (release_thread_device)
+  for s in dyn/lateral_bc core/halo core/backend core/column_work; do
     "${HEAVY}" nvcc -x cu -c "${NVOPT[@]}" "${REPO_ROOT}/src/${s}.cpp" -o "$(basename "$s")_cuda.o"
   done
   "${HEAVY}" nvcc -c "${NVOPT[@]}" "${SCRIPT_DIR}/test_nest_cuda.cu" -o test_nest_cuda.o
   wrf_fortran "${OUT_DIR}/test_nest_cuda" "${SCRIPT_DIR}/fortran_nest_bridge.f90" test_nest_cuda.o \
-    lateral_bc_cuda.o halo_cuda.o backend_cuda.o -lcudart -lstdc++
+    lateral_bc_cuda.o halo_cuda.o backend_cuda.o column_work_cuda.o -lcudart -lstdc++
   echo "Executing CUDA FP64 device kernel test on GPU..."
   "${HEAVY}" "${OUT_DIR}/test_nest_cuda" "${DATASET}"
 else
