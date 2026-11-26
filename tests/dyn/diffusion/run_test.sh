@@ -3,7 +3,8 @@
 # Diffusion and damping kernels (km_opt 1-4, diff_6th, w_damp, damping layers): WRF v4.8.0's own module_diffusion_em,
 # module_big_step_utilities_em, ... (the -r8 build, WRF_DIR; tests/phys/wrf_fortran.sh) called by driver_diffusion.f90
 # against the C++ kernels (driver_diffusion.cpp), tolerance 0 in CPU FP64; with nvcc and a GPU also the CUDA FP64
-# build (relative 1e-12).
+# build, tolerance 0, compiled with the model's CUDA FP64 flags (CMakeLists.txt: -arch=native, --fmad=false, no
+# contraction in host code).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,12 +38,14 @@ echo "== 4. WRF and C++ CPU runs, comparison (tolerance 0)"
 python3 "${SCRIPT_DIR}/compare.py" "${FORT_OUT}" "${CPP_OUT}" --tol 0
 
 if command -v nvcc > /dev/null && nvidia-smi > /dev/null 2>&1; then
-  echo "== 5. C++ CUDA FP64 driver (relative 1e-12)"
-  "${HEAVY}" nvcc -std=c++20 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA -O3 --expt-relaxed-constexpr --extended-lambda \
-    -I "${REPO_ROOT}/src" -x cu "${SCRIPT_DIR}/driver_diffusion_cuda.cu" -x cu "${REPO_ROOT}/src/core/backend.cpp" \
-    -lmvec -o "${BUILD_DIR}/driver_diffusion_cuda"
+  echo "== 5. C++ CUDA FP64 driver, comparison (tolerance 0)"
+  # core/column_work: the device column scratch backend.cpp's CUDA path releases (release_thread_device)
+  "${HEAVY}" nvcc -std=c++20 -DCPPWRF_DOUBLE -DCPPWRF_USE_CUDA -O3 -arch=native --fmad=false \
+    -Xcompiler=-ffp-contract=off --expt-relaxed-constexpr --extended-lambda -I "${REPO_ROOT}/src" \
+    -x cu "${SCRIPT_DIR}/driver_diffusion_cuda.cu" -x cu "${REPO_ROOT}/src/core/backend.cpp" \
+    -x cu "${REPO_ROOT}/src/core/column_work.cpp" -lmvec -o "${BUILD_DIR}/driver_diffusion_cuda"
   "${HEAVY}" "${BUILD_DIR}/driver_diffusion_cuda" "${INPUT_BIN}" "${CUDA_OUT}"
-  python3 "${SCRIPT_DIR}/compare.py" "${FORT_OUT}" "${CUDA_OUT}" --tol 1e-12
+  python3 "${SCRIPT_DIR}/compare.py" "${FORT_OUT}" "${CUDA_OUT}" --tol 0
 else
   echo "== 5. no nvcc / GPU: the CUDA build is not checked"
 fi

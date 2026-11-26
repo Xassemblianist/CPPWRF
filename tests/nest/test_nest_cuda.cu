@@ -29,10 +29,14 @@ using namespace cppwrf::nest::test;
   } \
 } while(0)
 
+// Tolerance 0, as the CPU differential test (test_nest_differential.cpp) and tests/verify/exact.py: a value passes
+// only with the same value as WRF's (NaN equals only NaN, -0 differs from +0); max |diff| and max rel diff are for
+// the report.
 struct DiffStats {
   double max_abs_diff = 0.0;
   double max_rel_diff = 0.0;
   std::size_t count = 0;
+  std::size_t mismatches = 0;
 
   void update(double a, double b) {
     double diff = std::abs(a - b);
@@ -40,12 +44,12 @@ struct DiffStats {
     double rel = (denom > 1.0e-30) ? (diff / denom) : 0.0;
     if (diff > max_abs_diff) max_abs_diff = diff;
     if (rel > max_rel_diff) max_rel_diff = rel;
+    const bool same = (std::isnan(a) && std::isnan(b)) || (a == b && std::signbit(a) == std::signbit(b));
+    if (!same) mismatches++;
     count++;
   }
 
-  bool passed(double tol = 1.0e-12) const {
-    return max_rel_diff <= tol;
-  }
+  bool passed() const { return count > 0 && mismatches == 0; }
 };
 
 // ============================================================================
@@ -566,7 +570,7 @@ int main(int argc, char** argv) {
   run_cuda_initialisation_tests(ds);
 
   std::cout << "\n======================================================\n";
-  std::cout << "ALL NEST NUMERICS CUDA TESTS PASSED! <= 1e-12\n";
+  std::cout << "ALL NEST NUMERICS CUDA TESTS PASSED (bit-identical)\n";
   std::cout << "======================================================\n";
 
   return 0;
