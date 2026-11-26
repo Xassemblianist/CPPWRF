@@ -1,262 +1,500 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""tools/colab/colab_guard.sh, the one way the Colab tools ask for a runtime, offline: a mock `colab` (and `rclone`)
-first on PATH answers success, 503 (with and without an exit status) or Colab's "abusive activity" block and logs
-every call. Checks: one attempt and no retry on failure (also none inside the CLI), the 10-minute and 24-hour limits,
-the block lock, CPPWRF_COLAB_FORCE=1 for one call, the session stopped on exit after success, failure, an error later
-in the script and SIGTERM, --keep, colab_lib.sh's cj_start, and that no other file of the repository calls
-`colab new` / `colab run`. Never runs the real CLI (each script checks that `colab` is the mock)."""
+"""tools/colab/colab_guard.sh (the one way the Colab tools ask for a runtime) and tools/colab/colab_api.py (the client
+of Google's Colab API), offline: a mock of the API's MCP endpoint (JSON-RPC tools/call) and of a runtime's Jupyter
+file server runs on 127.0.0.1 and logs every call. Checks: one create request per spec, one fallback only on "no
+capacity", no retry otherwise; at most 2 of this project's runtimes (the account's other runtimes neither counted nor
+touched); the block lock; no CPU runtimes; the runtime deleted on exit after success, failure, an error later and
+SIGTERM, and --keep; DEADLINE_EXCEEDED waits on the same request; upload / download / exec; colab_lib.sh's cj_start;
+and that nothing else in the repository asks for a runtime. Never talks to the real endpoint (every script checks the
+URL)."""
+import base64
+import json
 import os
 import re
 import signal
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import unquote, urlparse
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
 GUARD = os.path.join(REPO, "tools", "colab", "colab_guard.sh")
 LIB = os.path.join(REPO, "tools", "colab", "colab_lib.sh")
+API = os.path.join(REPO, "tools", "colab", "colab_api.py")
 
-MOCK_COLAB = r"""#!/usr/bin/env bash
-echo "$* RETRIES=${COLAB_CLI_ASSIGN_RETRIES-unset}" >> "$MOCK_COLAB_LOG"
-case $1 in
-  new)
-    case ${MOCK_COLAB_MODE:-ok} in
-      ok) echo "[colab] Creating session '$3'..."; echo "[colab] Session READY." ;;
-      503) echo "[colab] Creating session '$3'..."; echo "colab_cli.client.ColabRequestError: 503 Service Unavailable" >&2
-           exit 1 ;;
-      503rc0) echo "[colab] Creating session '$3'..."; echo "503 Service Unavailable" ;;
-      rc1) exit 1 ;;
-      abusive) echo "[colab] Creating session '$3'..."
-               echo "Error: this account's access to Colab runtimes is blocked on suspicion of abusive activity" >&2
-               exit 1 ;;
-    esac ;;
-  stop) echo "[colab] Session stopped." ;;
-  exec) cat > /dev/null; printf '%s\n' "${MOCK_EXEC_OUT:-}" ;;
-  *) ;;
-esac
-"""
-MOCK_RCLONE = """#!/usr/bin/env bash
-case $1 in listremotes) echo "cppwrf-drive:" ;; esac
-"""
+SPECS = [{"eligible": True, "key": {"variant": v, "accelerator": a, "shape": s}} for v, a, s in (
+    ("VARIANT_CPU", "NONE", "SHAPE_STANDARD"), ("VARIANT_GPU", "G4", "SHAPE_STANDARD"),
+    ("VARIANT_GPU", "A100", "SHAPE_STANDARD"), ("VARIANT_GPU", "A100", "SHAPE_HIGHMEM"),
+    ("VARIANT_GPU", "L4", "SHAPE_STANDARD"))]
+
+
+class Err(Exception):
+    def __init__(self, status, text):
+        super().__init__(text)
+        self.status, self.text = status, text
+
+
+class Mock:
+    """The API's state: runtimes, what create_runtime answers per accelerator, the call log, the runtime's files."""
+
+    def __init__(self, root):
+        self.root = root
+        self.runtimes = {}                  # name -> spec key
+        self.create = {}                    # accelerator -> ok | precondition | abusive | unavailable | deadline_once
+        self.deadline_seen = set()
+        self.calls = []
+        self.lock = threading.Lock()
+        self.url = None
+
+    def log(self, tool, args):
+        with self.lock:
+            self.calls.append((tool, args))
+
+    def tool(self, name, a):
+        self.log(name, a)
+        if name == "list_runtime_specs":
+            return {"runtimeSpecs": SPECS}
+        if name == "list_runtimes":
+            return {"runtimes": [{"name": n, "runtimeSpec": k} for n, k in self.runtimes.items()]}
+        if name == "get_subscription":
+            return {"tier": "PRO_PLUS"}
+        if name == "create_runtime":
+            key = a["runtime"]["runtimeSpec"]
+            mode = self.create.get(key["accelerator"], "ok")
+            if mode == "precondition":
+                raise Err("FAILED_PRECONDITION", "no capacity for this accelerator")
+            if mode == "unavailable":
+                raise Err("UNAVAILABLE", "503 Service Unavailable")
+            if mode == "abusive":
+                raise Err("PERMISSION_DENIED", "this account's access to Colab runtimes is blocked on suspicion of "
+                          "abusive activity")
+            if mode == "deadline_once" and a["requestId"] not in self.deadline_seen:
+                self.deadline_seen.add(a["requestId"])
+                raise Err("DEADLINE_EXCEEDED", "the runtime is still being created")
+            name = "runtimes/" + a["runtimeId"]
+            self.runtimes[name] = key
+            return {"name": name, "runtimeSpec": key}
+        if name == "get_runtime":
+            if a["name"] not in self.runtimes:
+                raise Err("NOT_FOUND", a["name"])
+            return {"name": a["name"], "connectionInfo": {"url": self.url, "token": "tok-" + a["name"],
+                                                          "expireTime": "2099-01-01T00:00:00Z"}}
+        if name == "delete_runtime":
+            if a["name"] not in self.runtimes and not a.get("allowMissing"):
+                raise Err("NOT_FOUND", a["name"])
+            self.runtimes.pop(a["name"], None)
+            return {}
+        if name == "delete_session":
+            return {}
+        if name == "execute_code":
+            rt = a["session"].rsplit("/sessions/", 1)[0]
+            if rt not in self.runtimes:
+                raise Err("NOT_FOUND", rt)
+            code = a["code"].replace("/content", self.root + "/content")
+            try:
+                r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=1.5,
+                                   cwd=self.root)
+            except subprocess.TimeoutExpired:
+                raise Err("DEADLINE_EXCEEDED", "execution cut off")
+            out = {"stdout": r.stdout, "stderr": r.stderr if r.returncode == 0 else ""}
+            if r.returncode:
+                out["executionError"] = {"ename": "Error", "evalue": "", "traceback": [r.stderr]}
+            return out
+        raise Err("INVALID_ARGUMENT", "unknown tool " + name)
+
+
+def handler(mock):
+    class H(BaseHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+        def reply(self, code, body=b"", ctype="application/json", extra=None):
+            self.send_response(code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            for k, v in (extra or {}).items():
+                self.send_header(k, v)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def file_path(self, prefix):
+            p = unquote(urlparse(self.path).path)[len(prefix):]
+            return os.path.join(mock.root, p.lstrip("/"))
+
+        def token_ok(self):
+            tok = self.headers.get("X-Colab-Runtime-Proxy-Token", "")
+            return tok.startswith("tok-runtimes/") and tok[4:] in mock.runtimes
+
+        def do_POST(self):
+            if self.path != "/mcp":
+                return self.reply(404)
+            req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            if self.headers.get("Authorization") != "Bearer offline-test":
+                return self.reply(401)
+            p = req["params"]
+            try:
+                res = mock.tool(p["name"], p.get("arguments", {}))
+                body = {"jsonrpc": "2.0", "id": req["id"], "result": {
+                    "content": [{"type": "text", "text": json.dumps(res)}], "structuredContent": res}}
+            except Err as e:
+                body = {"jsonrpc": "2.0", "id": req["id"], "result": {
+                    "isError": True, "content": [{"type": "text", "text": f"{e.status}: {e.text}"}]}}
+            self.reply(200, json.dumps(body).encode())
+
+        def do_GET(self):
+            if not self.token_ok():
+                return self.reply(404)
+            u = urlparse(self.path)
+            if u.path.startswith("/files/"):
+                mock.log("http_get", u.path)
+                p = self.file_path("/files/")
+                if not os.path.isfile(p):
+                    return self.reply(404)
+                with open(p, "rb") as fh:
+                    data = fh.read()
+                rng = self.headers.get("Range")
+                if rng:
+                    start = int(rng.split("=")[1].split("-")[0])
+                    return self.reply(206, data[start:], "application/octet-stream",
+                                      {"Content-Range": f"bytes {start}-{len(data) - 1}/{len(data)}"})
+                return self.reply(200, data, "application/octet-stream")
+            if u.path.startswith("/api/contents/"):
+                p = self.file_path("/api/contents/")
+                if os.path.isdir(p):
+                    return self.reply(200, json.dumps({"type": "directory"}).encode())
+                if os.path.isfile(p):
+                    return self.reply(200, json.dumps({"type": "file", "size": os.path.getsize(p)}).encode())
+                return self.reply(404)
+            self.reply(404)
+
+        def do_PUT(self):
+            if not self.token_ok():
+                return self.reply(404)
+            p = self.file_path("/api/contents/")
+            m = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            mock.log("http_put", {k: v for k, v in m.items() if k != "content"})
+            if m["type"] == "directory":
+                if not os.path.isdir(p):
+                    os.mkdir(p)
+                return self.reply(201, b"{}")
+            if not os.path.isdir(os.path.dirname(p)):
+                return self.reply(404)
+            chunk = m.get("chunk")
+            with open(p, "ab" if chunk not in (None, 1) else "wb") as f:
+                f.write(base64.b64decode(m["content"]))
+            self.reply(201, b"{}")
+    return H
+
 
 PRE = """set -euo pipefail
-[ "$(command -v colab)" = "$MOCK_DIR/colab" ] || { echo "NOT THE MOCK: $(command -v colab)"; exit 99; }
+case $CPPWRF_COLAB_API_URL in http://127.0.0.1:*) ;; *) echo "NOT THE MOCK: $CPPWRF_COLAB_API_URL"; exit 99 ;; esac
 . "$GUARD"
 """
 
 
-class Guard(unittest.TestCase):
+class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="colab_guard_test.")
         self.d = self.tmp.name
-        self.mock = os.path.join(self.d, "bin")
-        os.makedirs(self.mock)
-        for name, body in (("colab", MOCK_COLAB), ("rclone", MOCK_RCLONE)):
-            p = os.path.join(self.mock, name)
-            with open(p, "w") as f:
-                f.write(body)
-            os.chmod(p, 0o755)
+        self.root = os.path.join(self.d, "runtime")
+        os.makedirs(os.path.join(self.root, "content"))
+        self.mock = Mock(self.root)
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), handler(self.mock))
+        self.mock.url = f"http://127.0.0.1:{self.srv.server_address[1]}"
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        self.hdr = os.path.join(self.d, "headers.sh")
+        with open(self.hdr, "w") as f:
+            f.write('#!/bin/sh\necho \'{"Authorization": "Bearer offline-test"}\'\n')
+        os.chmod(self.hdr, 0o755)
         self.state = os.path.join(self.d, "state")
-        self.log = os.path.join(self.d, "colab.log")
+        # the account's other runtimes: never counted, never touched
+        self.mock.runtimes["runtimes/owner-notebook"] = SPECS[4]["key"]
+        self.mock.runtimes["runtimes/cppmpas-opm14-gpu"] = SPECS[4]["key"]
 
     def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        for tool, a in self.mock.calls:
+            if tool in ("delete_runtime", "delete_session", "execute_code", "get_runtime"):
+                name = a.get("name") or a.get("session")
+                self.assertTrue(name.startswith("runtimes/cppwrf-"), f"{tool} on {name}")
+        self.assertIn("runtimes/owner-notebook", self.mock.runtimes)
+        self.assertIn("runtimes/cppmpas-opm14-gpu", self.mock.runtimes)
         self.tmp.cleanup()
 
     def env(self, **kw):
-        e = {k: v for k, v in os.environ.items() if not k.startswith(("CPPWRF_COLAB", "MOCK_", "COLAB_CLI"))}
-        e.update(PATH=self.mock + os.pathsep + os.environ["PATH"], MOCK_DIR=self.mock, MOCK_COLAB_LOG=self.log,
+        e = {k: v for k, v in os.environ.items() if not k.startswith(("CPPWRF_COLAB", "KEEP"))}
+        e.update(CPPWRF_COLAB_API_URL=self.mock.url + "/mcp", CPPWRF_COLAB_API_HEADERS=self.hdr,
                  CPPWRF_COLAB_GUARD_DIR=self.state, GUARD=GUARD, LIB=LIB, HOME=self.d)
-        e.pop("KEEP", None)
-        e.update(kw)
+        e.update({k: v for k, v in kw.items() if v is not None})
         return e
 
     def bash(self, script, **kw):
         r = subprocess.run(["bash", "-c", PRE + script], env=self.env(**kw), capture_output=True, text=True,
-                           timeout=60)
+                           timeout=120)
         self.assertNotEqual(r.returncode, 99, r.stdout + r.stderr)
         return r
 
-    def calls(self, verb=None):
-        if not os.path.exists(self.log):
-            return []
-        with open(self.log) as f:
-            ls = [l.split() for l in f.read().splitlines() if l.strip()]
-        return [l for l in ls if verb is None or l[0] == verb]
+    def api(self, *args, stdin=None, **kw):
+        return subprocess.run([sys.executable, API, *args], env=self.env(**kw), input=stdin, capture_output=True,
+                              text=True, timeout=120)
 
-    def attempts(self, *ages, forced=False):
-        """Writes attempts AGES seconds ago into the state file."""
-        os.makedirs(self.state, exist_ok=True)
-        now = int(time.time())
-        with open(os.path.join(self.state, "attempts"), "a") as f:
-            for a in ages:
-                f.write(f"{now - a} old-{a} {'forced' if forced else 'normal'}\n")
+    def creates(self):
+        return [a for t, a in self.mock.calls if t == "create_runtime"]
 
-    NEW = 'trap "echo CALLER_CLEANUP" EXIT\ncolab_guard_new sess1 --gpu G4 || exit 1\necho SESSION_IS_UP\n'
+    def deletes(self):
+        return [a["name"] for t, a in self.mock.calls if t == "delete_runtime"]
 
-    # ---- one attempt, no retry
-    def test_failure_is_one_attempt_and_stops(self):
-        r = self.bash(self.NEW, MOCK_COLAB_MODE="503")
+    def ours(self):
+        return sorted(n for n in self.mock.runtimes if n.startswith("runtimes/cppwrf-"))
+
+
+class Guard(Base):
+    NEW = ('trap "echo CALLER_CLEANUP" EXIT\ncolab_guard_new cppwrf-g4-20261126_101010 --gpu G4 {fb}|| exit 1\n'
+           'echo "UP $COLAB_GUARD_GPU"\n')
+    RT = "runtimes/cppwrf-g4-20261126-101010"
+
+    def new(self, fb="", extra="", **kw):
+        return self.bash(self.NEW.format(fb=f"--fallback {fb} " if fb else "") + extra, **kw)
+
+    # ---- once
+    def test_success_one_request_deleted_on_exit(self):
+        r = self.new()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("UP G4", r.stdout)
+        self.assertIn("CALLER_CLEANUP", r.stdout)
+        c = self.creates()
+        self.assertEqual(len(c), 1)
+        self.assertEqual(c[0]["runtimeId"], self.RT.split("/")[1])
+        self.assertEqual(c[0]["runtime"]["runtimeSpec"]["accelerator"], "G4")
+        self.assertRegex(c[0]["requestId"], r"^[0-9a-f-]{36}$")
+        self.assertEqual(self.deletes(), [self.RT])
+        self.assertEqual(self.ours(), [])
+
+    # ---- a failure: one request, no retry, no fallback unless "no capacity"
+    def test_failure_is_one_request_and_stops(self):
+        self.mock.create["G4"] = "unavailable"
+        r = self.new(fb="A100")
         self.assertNotEqual(r.returncode, 0)
-        self.assertNotIn("SESSION_IS_UP", r.stdout)
-        self.assertEqual(len(self.calls("new")), 1, self.calls())
+        self.assertNotIn("UP ", r.stdout)
         self.assertIn("FAILED", r.stderr)
         self.assertIn("CALLER_CLEANUP", r.stdout)
-        self.assertEqual([c[:3] for c in self.calls("stop")], [["stop", "-s", "sess1"]])
+        self.assertEqual(len(self.creates()), 1)
+        self.assertEqual(self.deletes(), [self.RT])
 
-    def test_cli_retries_switched_off(self):
-        self.bash(self.NEW, MOCK_COLAB_MODE="503", COLAB_CLI_ASSIGN_RETRIES="3")
-        self.assertEqual(self.calls("new")[0][-1], "RETRIES=0")
-
-    def test_503_with_exit_status_zero_is_a_failure(self):
-        r = self.bash(self.NEW, MOCK_COLAB_MODE="503rc0")
+    def test_no_capacity_without_fallback_is_one_request(self):
+        self.mock.create["G4"] = "precondition"
+        r = self.new()
         self.assertNotEqual(r.returncode, 0)
-        self.assertNotIn("SESSION_IS_UP", r.stdout)
-        self.assertEqual(len(self.calls("new")), 1)
+        self.assertEqual(len(self.creates()), 1)
 
-    def test_silent_non_zero_exit_is_a_failure(self):
-        r = self.bash(self.NEW, MOCK_COLAB_MODE="rc1")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertNotIn("SESSION_IS_UP", r.stdout)
-        self.assertIn("FAILED", r.stderr)
-
-    # ---- the rate limit
-    def test_ten_minute_limit(self):
-        self.assertEqual(self.bash(self.NEW).returncode, 0)
-        r = self.bash(self.NEW)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("REFUSED", r.stderr)
-        self.assertEqual(len(self.calls("new")), 1)
-
-    def test_failed_attempt_counts(self):
-        self.bash(self.NEW, MOCK_COLAB_MODE="503")
-        r = self.bash(self.NEW)
-        self.assertIn("REFUSED", r.stderr)
-        self.assertEqual(len(self.calls("new")), 1)
-
-    def test_attempt_older_than_ten_minutes_allows(self):
-        self.attempts(700)
-        self.assertEqual(self.bash(self.NEW).returncode, 0)
-        self.assertEqual(len(self.calls("new")), 1)
-
-    def test_day_limit(self):
-        self.attempts(3600, 7200, 10800, 14400, 18000, 21600)  # 6 in the last 24 h, none in the last 10 min
-        r = self.bash(self.NEW)
-        self.assertNotEqual(r.returncode, 0)
-        self.assertIn("REFUSED: 6 runtime requests", r.stderr)
-        self.assertEqual(self.calls("new"), [])
-
-    def test_day_limit_counts_only_the_last_day(self):
-        self.attempts(3600, 7200, 10800, 14400, 18000, 90000, 100000)  # 5 in the last 24 h
-        self.assertEqual(self.bash(self.NEW).returncode, 0)
-        self.assertEqual(len(self.calls("new")), 1)
-
-    def test_status(self):
-        self.attempts(3600)
-        r = subprocess.run(["bash", GUARD, "status"], env=self.env(), capture_output=True, text=True, timeout=60)
+    def test_no_capacity_takes_the_fallback_once(self):
+        self.mock.create["G4"] = "precondition"
+        r = self.new(fb="A100")
         self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("old-3600", r.stderr)
-        self.assertEqual(self.calls(), [])
+        self.assertIn("UP A100", r.stdout)
+        self.assertEqual([c["runtime"]["runtimeSpec"]["accelerator"] for c in self.creates()], ["G4", "A100"])
+        self.assertEqual(self.ours(), [])
+
+    def test_no_capacity_anywhere_is_two_requests(self):
+        self.mock.create["G4"] = self.mock.create["A100"] = "precondition"
+        r = self.new(fb="A100")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(len(self.creates()), 2)
+        self.assertIn("FAILED: no runtime", r.stderr)
+
+    def test_still_being_created_waits_on_the_same_request(self):
+        self.mock.create["G4"] = "deadline_once"
+        r = self.new()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        c = self.creates()
+        self.assertEqual(len(c), 2)
+        self.assertEqual(c[0], c[1])   # the identical call: same requestId and runtimeId
+
+    # ---- the 2-runtime limit
+    def test_two_of_ours_refuse(self):
+        self.mock.runtimes["runtimes/cppwrf-a"] = SPECS[1]["key"]
+        self.mock.runtimes["runtimes/cppwrf-b"] = SPECS[1]["key"]
+        r = self.new()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("REFUSED: 2 of this project's runtimes", r.stderr)
+        self.assertEqual(self.creates(), [])
+        self.assertEqual(self.ours(), ["runtimes/cppwrf-a", "runtimes/cppwrf-b"])  # not deleted: not this tool's
+
+    def test_one_of_ours_and_others_allow(self):
+        self.mock.runtimes["runtimes/cppwrf-a"] = SPECS[1]["key"]
+        r = self.new()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(len(self.creates()), 1)
+        self.mock.runtimes.pop("runtimes/cppwrf-a")
+
+    def test_third_runtime_in_one_shell_is_refused(self):
+        r = self.new(extra="colab_guard_new cppwrf-x --gpu L4\ncolab_guard_new cppwrf-y --gpu L4 || echo THIRD_REFUSED\n")
+        self.assertIn("THIRD_REFUSED", r.stdout)
+        self.assertEqual(len(self.creates()), 2)
+        self.assertEqual(self.ours(), [])   # both deleted on exit
 
     # ---- the block lock
     def test_abusive_writes_the_lock_and_it_blocks_everything(self):
-        r = self.bash(self.NEW, MOCK_COLAB_MODE="abusive")
+        self.mock.create["G4"] = "abusive"
+        r = self.new(fb="A100")
         self.assertNotEqual(r.returncode, 0)
         lock = os.path.join(self.state, "BLOCKED")
         self.assertTrue(os.path.exists(lock))
-        self.assertIn(lock, r.stderr)
         with open(lock) as f:
             self.assertIn("abusive", f.read())
-        os.remove(os.path.join(self.state, "attempts"))   # no rate limit left: only the lock refuses
-        r = self.bash(self.NEW, CPPWRF_COLAB_FORCE="1")
+        self.assertEqual(len(self.creates()), 1)   # no fallback after a block
+        self.mock.create["G4"] = "ok"
+        r = self.new()
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("BLOCKED exists", r.stderr)
-        self.assertEqual(len(self.calls("new")), 1)
+        self.assertEqual(len(self.creates()), 1)
 
     def test_lock_file_refuses(self):
         os.makedirs(self.state)
         with open(os.path.join(self.state, "BLOCKED"), "w") as f:
             f.write("by hand\n")
-        r = self.bash(self.NEW)
+        r = self.new()
         self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(self.calls("new"), [])
+        self.assertEqual(self.mock.calls, [])
 
-    # ---- CPPWRF_COLAB_FORCE=1
-    def test_force_once(self):
-        self.attempts(60)
-        r = self.bash(self.NEW + 'colab_guard_new sess2 || echo SECOND_REFUSED\n', CPPWRF_COLAB_FORCE="1")
-        self.assertIn("SESSION_IS_UP", r.stdout)
-        self.assertIn("SECOND_REFUSED", r.stdout)
-        self.assertEqual([c[2] for c in self.calls("new")], ["sess1"])
-        with open(os.path.join(self.state, "attempts")) as f:
-            self.assertIn("forced", f.read())
+    # ---- GPU only
+    def test_no_cpu_runtimes(self):
+        for args in ("", "--gpu CPU", "--gpu none"):
+            r = self.bash(f"colab_guard_new cppwrf-c {args} || echo REFUSED_CPU\n")
+            self.assertIn("REFUSED_CPU", r.stdout)
+        r = self.api("new", "-s", "cppwrf-c")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(self.mock.calls, [])
 
-    def test_force_has_its_own_day_limit(self):
-        self.attempts(60)
-        self.attempts(1000, 2000, 3000, forced=True)
-        r = self.bash(self.NEW, CPPWRF_COLAB_FORCE="1")
-        self.assertNotEqual(r.returncode, 0)
-        self.assertEqual(self.calls("new"), [])
-
-    # ---- the session is stopped on exit
-    def test_success_stops_on_exit_and_keeps_the_callers_trap(self):
-        r = self.bash(self.NEW)
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertIn("SESSION_IS_UP", r.stdout)
-        self.assertIn("CALLER_CLEANUP", r.stdout)
-        self.assertEqual([c[:3] for c in self.calls("stop")], [["stop", "-s", "sess1"]])
-
-    def test_error_after_success_stops(self):
-        r = self.bash(self.NEW + "false\necho NOT_HERE\n")
+    # ---- the delete trap
+    def test_error_after_success_deletes(self):
+        r = self.new(extra="false\necho NOT_HERE\n")
         self.assertNotEqual(r.returncode, 0)
         self.assertNotIn("NOT_HERE", r.stdout)
-        self.assertEqual(len(self.calls("stop")), 1)
+        self.assertEqual(self.deletes(), [self.RT])
+        self.assertEqual(self.ours(), [])
 
-    def test_sigterm_stops(self):
-        p = subprocess.Popen(["bash", "-c", PRE + self.NEW + "sleep 30 & wait $!\n"], env=self.env(),
+    def test_sigterm_deletes(self):
+        p = subprocess.Popen(["bash", "-c", PRE + self.NEW.format(fb="") + "sleep 60 > /dev/null 2>&1 & wait $!\n"], env=self.env(),
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        for _ in range(100):
-            if self.calls("new"):
+        for _ in range(300):
+            if self.ours():
                 break
             time.sleep(0.1)
-        time.sleep(0.5)
+        time.sleep(1)
         p.send_signal(signal.SIGTERM)
-        p.communicate(timeout=30)
-        p.wait()
-        self.assertEqual(len(self.calls("stop")), 1, self.calls())
+        p.communicate(timeout=60)
+        self.assertEqual(self.deletes(), [self.RT])
+        self.assertEqual(self.ours(), [])
 
-    def test_keep_leaves_a_session_that_came_up(self):
-        r = self.bash(self.NEW, KEEP="1")
+    def test_keep_leaves_a_runtime_that_came_up(self):
+        r = self.new(KEEP="1")
         self.assertEqual(r.returncode, 0)
-        self.assertEqual(self.calls("stop"), [])
+        self.assertEqual(self.deletes(), [])
+        self.assertEqual(self.ours(), [self.RT])
+        self.mock.runtimes.pop(self.RT)
 
-    def test_keep_still_stops_a_failed_request(self):
-        self.bash(self.NEW, KEEP="1", MOCK_COLAB_MODE="503")
-        self.assertEqual(len(self.calls("stop")), 1)
+    def test_keep_still_deletes_a_failed_request(self):
+        self.mock.create["G4"] = "unavailable"
+        self.new(KEEP="1")
+        self.assertEqual(self.deletes(), [self.RT])
+
+    def test_status(self):
+        r = subprocess.run(["bash", GUARD, "status"], env=self.env(), capture_output=True, text=True, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("no lock", r.stderr)
+        self.assertEqual(self.creates(), [])
 
     # ---- colab_lib.sh
-    def test_cj_start_failure_returns_at_once_and_stops(self):
-        r = self.bash('OUT=$HOME TAG=t S= KEEP=0 BK=; REPO=x\n. "$LIB"\n'
-                      'if cj_start G4; then echo STARTED; else echo "CJ_RC $?"; fi\n', MOCK_COLAB_MODE="503",
-                      MOCK_EXEC_OUT="Intel Xeon | 8")
-        self.assertIn("CJ_RC 1", r.stdout)
-        self.assertNotIn("CPU:", r.stdout)
-        self.assertEqual(len(self.calls("new")), 1)
-        self.assertGreaterEqual(len(self.calls("stop")), 1)
-
-    def test_cj_start_success(self):
-        r = self.bash('OUT=$HOME TAG=t S= KEEP=0 BK=; REPO=x\n. "$LIB"\ncj_start G4\necho "NPROC $NPROC"\n',
-                      MOCK_EXEC_OUT="Intel Xeon | 8\nOK")
+    def test_cj_start_success_failure_cpu(self):
+        lib = 'OUT=$HOME TAG=t S= KEEP=0 BK= ANY_CPU=1; REPO=x\n. "$LIB"\n'
+        bindir = os.path.join(self.d, "bin")
+        os.makedirs(bindir)
+        with open(os.path.join(bindir, "rclone"), "w") as f:
+            f.write('#!/bin/sh\n[ "$1" = listremotes ] && echo cppwrf-drive:\n')
+        os.chmod(os.path.join(bindir, "rclone"), 0o755)
+        path = bindir + os.pathsep + os.environ["PATH"]
+        r = self.bash(lib + 'cj_start G4\necho "NPROC $NPROC"\n', PATH=path)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertIn("NPROC 8", r.stdout)
-        self.assertEqual(len(self.calls("new")), 1)
-        self.assertEqual(len(self.calls("stop")), 2)  # cj_cleanup's stop and the guard's
+        self.assertRegex(r.stdout, r"NPROC \d+")
+        self.assertTrue(os.path.isdir(os.path.join(self.root, "content", "cpu", "in")))
+        self.assertEqual(self.ours(), [])
+        self.mock.create["G4"] = "unavailable"
+        n = len(self.creates())
+        r = self.bash(lib + 'if cj_start G4; then echo STARTED; else echo "CJ_RC $?"; fi\n', PATH=path)
+        self.assertIn("CJ_RC 1", r.stdout)
+        self.assertEqual(len(self.creates()), n + 1)
+        r = self.bash(lib + 'cj_start CPU || echo CPU_REFUSED\n', PATH=path)
+        self.assertIn("CPU_REFUSED", r.stdout)
+        self.assertEqual(len(self.creates()), n + 1)
+
+
+class Client(Base):
+    S = "cppwrf-l4-x"
+
+    def setUp(self):
+        super().setUp()
+        self.mock.runtimes["runtimes/" + self.S] = SPECS[4]["key"]
+
+    def tearDown(self):
+        self.mock.runtimes.pop("runtimes/" + self.S, None)
+        super().tearDown()
+
+    def test_upload_download_round_trip(self):
+        for size, piece in ((0, None), (1000, None), (250_000, "100000")):
+            src = os.path.join(self.d, f"src{size}")
+            with open(src, "wb") as f:
+                f.write(os.urandom(size))
+            r = self.api("upload", "-s", self.S, src, f"/content/a/b/f{size}", CPPWRF_COLAB_API_PIECE=piece)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("Uploaded", r.stdout)
+            dst = os.path.join(self.d, f"back{size}")
+            r = self.api("download", "-s", self.S, f"/content/a/b/f{size}", dst)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(dst, "rb") as a, open(src, "rb") as b:
+                self.assertEqual(a.read(), b.read())
+        chunks = [a.get("chunk") for t, a in self.mock.calls if t == "http_put" and a["type"] == "file"]
+        self.assertEqual(chunks, [None, None, 1, 2, -1])
+
+    def test_download_missing_fails(self):
+        r = self.api("download", "-s", self.S, "/content/nope", os.path.join(self.d, "x"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse(os.path.exists(os.path.join(self.d, "x")))
+        self.assertFalse(os.path.exists(os.path.join(self.d, "x.part")))
+
+    def test_exec_env_output_and_error(self):
+        r = self.api("exec", "-s", self.S, "--env", "A=1 2", stdin="import os\nprint('A', os.environ['A'])\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout.strip(), "A 1 2")
+        r = self.api("exec", "-s", self.S, stdin="raise ValueError('boom')\n")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("boom", r.stderr)
+
+    def test_exec_reattaches_then_times_out_and_closes_the_session(self):
+        r = self.api("exec", "-s", self.S, "--timeout", "4", stdin="import time\ntime.sleep(30)\n")
+        self.assertEqual(r.returncode, 124)
+        ex = [a for t, a in self.mock.calls if t == "execute_code"]
+        self.assertGreaterEqual(len(ex), 2)
+        self.assertEqual(len({a["executionId"] for a in ex}), 1)   # the identical call, reattached
+        self.assertIn("delete_session", [t for t, a in self.mock.calls])
+
+    def test_runtime_names_always_ours(self):
+        r = self.api("stop", "-s", "owner-notebook")      # becomes cppwrf-owner-notebook: never the owner's
+        self.assertEqual(r.returncode, 0)
+        self.assertEqual(self.deletes(), ["runtimes/cppwrf-owner-notebook"])
+        r = self.api("own")
+        self.assertEqual(r.stdout.splitlines()[0], "1")
 
 
 class Repository(unittest.TestCase):
     def test_no_runtime_request_outside_the_guard(self):
-        """`colab new` / `colab run` (both assign a runtime) only in colab_guard.sh; the four request sites use it."""
+        """The old CLI (`colab new|run|exec|upload|download|stop`) nowhere; `colab_api.py new` only in the guard."""
         bad = []
         for root, dirs, files in os.walk(REPO):
             dirs[:] = [d for d in dirs if d not in (".git", "build") and not d.startswith("build")]
@@ -264,7 +502,7 @@ class Repository(unittest.TestCase):
                 if not f.endswith((".sh", ".py", ".yml", ".yaml")):
                     continue
                 p = os.path.join(root, f)
-                if p in (GUARD, os.path.abspath(__file__)):
+                if p in (GUARD, API, os.path.abspath(__file__)):
                     continue
                 try:
                     with open(p, encoding="utf-8") as fh:
@@ -273,7 +511,10 @@ class Repository(unittest.TestCase):
                     continue
                 for n, line in enumerate(text.splitlines(), 1):
                     code = line.split("#", 1)[0] if f.endswith(".sh") else line
-                    if re.search(r"(^|[\s;&|(`\"'])colab\s+(new|run)\b", code) or re.search(r"[\"']colab[\"']\s*,\s*[\"'](new|run)[\"']", code):
+                    if (re.search(r"(^|[\s;&|(`\"'])colab\s+(new|run|exec|upload|download|stop)\b", code)
+                            or re.search(r"[\"']colab[\"']\s*,\s*[\"'](new|run)[\"']", code)
+                            or re.search(r"(COLAB_API\}?\"?|colab_api\.py)\s+new\b", code)
+                            or "create_runtime" in code):
                         bad.append(f"{os.path.relpath(p, REPO)}:{n}: {line.strip()}")
         self.assertEqual(bad, [])
         for rel in ("tools/colab/colab_lib.sh", "tools/colab/colab_run.sh", "tools/colab/drive_sync.sh",

@@ -5,9 +5,9 @@
 # (local results; OUT/src.tar.gz is the source to send), TAG (log prefix), S (session; empty: a new one), KEEP (1:
 # leave the session running) and optionally DRIVE_RESULTS (a folder of the Drive remote, e.g.
 # cppwrf-g4results/wrfref_<date>: the runtime also puts results.tar.gz and the job's fetch/ files there, and
-# cj_results / cj_fetch read them from there when `colab download` fails), then call:
-#   cj_start GPU          new session (or S; GPU CPU: a CPU-only runtime) through colab_guard_new (one attempt, no
-#                         retry; refused by the rate limit or the block lock), stop it on exit; fails unless the CPU is
+# cj_results / cj_fetch read them from there when `tools/colab/colab_api.py download` fails), then call:
+#   cj_start GPU          new GPU runtime (or S) through colab_guard_new (one request, no retry; refused at 2 runtimes
+#                         or by the block lock; no CPU runtimes), deleted on exit; fails unless the CPU is
 #                         Intel or ANY_CPU=1 (then the job runs with CPPWRF_ANY_CPU=1); sets NPROC
 #   cj_send FILE NAME     local FILE -> /content/cpu/NAME (in/NAME: an input of the job, copied to /opt/job)
 #   cj_launch BODY DATA ARG...   the job: `bash BODY /opt/job ARG...` in the chroot after DATA's tars are unpacked
@@ -15,22 +15,22 @@
 #                         token each time while the data are fetched (it expires with the workstation's gcloud token,
 #                         5 to 60 min; the runtime retries a 401 for 20 min); fails when the job died or took longer
 #   cj_results            OUT gets the job's logs (results.tar.gz), prints versions.txt and data.txt
-#   cj_fetch NAME DEST    the job's large result /content/cpu/fetch/NAME -> DEST (colab download, else DRIVE_RESULTS)
+#   cj_fetch NAME DEST    the job's large result /content/cpu/fetch/NAME -> DEST (colab_api.py download, else DRIVE_RESULTS)
 #   cj_salvage            after a failed cj_wait: the logs so far (runtime and job) -> OUT/partial/, before the stop
 # Download errors go to OUT/download.log; a partial file of a failed download is deleted.
 # The runtime gets only the rclone section of the Drive remote cppwrf-drive and, with a bucket, read-only bucket tokens
 # (tools/colab/gcs_token.py); the token is deleted when the data are in place, both at the end and on exit.
 
-# every runtime request goes through tools/colab/colab_guard.sh (one attempt, rate limit, block lock, stop on exit)
+# every runtime request goes through tools/colab/colab_guard.sh (one request, 2 runtimes at most, block lock, delete on exit)
 . "$(dirname "${BASH_SOURCE[0]}")/colab_guard.sh"
 
-rx() { timeout "$(( $1 + 120 ))" colab exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'; }  # python on stdin
+rx() { timeout "$(( $1 + 120 ))" $COLAB_API exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'; }  # python on stdin
 
 cj_cleanup() {
   rm -f "$OUT/gcs.tok" "$OUT/rclone.conf"
   echo 'import subprocess; subprocess.run("rm -f /content/cpu/gcs.tok* /content/cpu/rclone.conf", shell=True)' | rx 60 > /dev/null || true
-  if [ "$KEEP" = 1 ]; then echo "[$TAG] --keep: session $S left running (colab stop -s $S)"
-  else timeout 300 colab stop -s "$S" || echo "[$TAG] WARNING: could not stop $S, check: colab sessions"; fi
+  if [ "$KEEP" = 1 ]; then echo "[$TAG] --keep: session $S left running ($COLAB_API stop -s $S)"
+  else timeout 300 $COLAB_API stop -s "$S" || echo "[$TAG] WARNING: could not stop $S, check: $COLAB_API sessions"; fi
 }
 
 cj_start() {
@@ -40,7 +40,7 @@ cj_start() {
   if [ -z "$S" ]; then
     S=cppwrf-cpu-$(echo "$gpu" | tr A-Z a-z)-$(date +%Y%m%d_%H%M%S)
     echo "[$TAG] new session $S ($gpu)"
-    if [ "$gpu" = CPU ]; then colab_guard_new "$S" || return 1; else colab_guard_new "$S" --gpu "$gpu" || return 1; fi
+    colab_guard_new "$S" --gpu "$gpu" ${FALLBACK:+--fallback "$FALLBACK"} || return 1
   fi
   cpu=$(echo 'print(open("/proc/cpuinfo").read().split("model name")[1].split("\n")[0].strip(" \t:"), "|", __import__("os").cpu_count())' | rx 60 | grep . || true)
   echo "[$TAG] CPU: $cpu"
@@ -56,7 +56,7 @@ cj_start() {
 }
 
 cj_send() {  # the contents API takes files up to ~100 MB (the source and the inputs are a few MB)
-  timeout 900 colab upload -s "$S" "$1" "/content/cpu/$2" 2>&1 | grep Uploaded > /dev/null || { echo "[$TAG] upload of $1 failed"; return 1; }
+  timeout 900 $COLAB_API upload -s "$S" "$1" "/content/cpu/$2" 2>&1 | grep Uploaded > /dev/null || { echo "[$TAG] upload of $1 failed"; return 1; }
 }
 
 cj_token() {  # a new read-only bucket token (at most 1 h); nothing without a bucket
@@ -106,9 +106,9 @@ EOF
   done
 }
 
-cj_get() {  # REMOTE DEST DRIVE_NAME TIMEOUT: colab download, else the Drive copy (DRIVE_RESULTS); errors in download.log
+cj_get() {  # REMOTE DEST DRIVE_NAME TIMEOUT: colab_api.py download, else the Drive copy (DRIVE_RESULTS); errors in download.log
   echo "== $(date +%H:%M) $1" >> "$OUT/download.log"
-  timeout "$4" colab download -s "$S" "$1" "$2" >> "$OUT/download.log" 2>&1 && return 0
+  timeout "$4" $COLAB_API download -s "$S" "$1" "$2" >> "$OUT/download.log" 2>&1 && return 0
   rm -f "$2"
   [ -n "${DRIVE_RESULTS:-}" ] || return 1
   timeout "$4" rclone copyto "cppwrf-drive:$DRIVE_RESULTS/$3" "$2" >> "$OUT/download.log" 2>&1 &&
@@ -126,7 +126,7 @@ cj_results() {
        $1 == "DATA_TOTAL" {printf "[%s] data: %s\n", tag, substr($0, 12)}' tag="$TAG" "$OUT/data.txt" 2>/dev/null || true
 }
 
-cj_fetch() {  # NAME DEST: /content/cpu/fetch/NAME by colab download, else from DRIVE_RESULTS
+cj_fetch() {  # NAME DEST: /content/cpu/fetch/NAME by colab_api.py download, else from DRIVE_RESULTS
   cj_get "/content/cpu/fetch/$1" "$2" "$1" 7200
 }
 
@@ -140,7 +140,7 @@ with tarfile.open("/content/cpu/partial.tar.gz", "w:gz") as t:
 print("SALVAGED")
 EOF
   mkdir -p "$OUT/partial"
-  timeout 900 colab download -s "$S" /content/cpu/partial.tar.gz "$OUT/partial.tar.gz" >> "$OUT/download.log" 2>&1 &&
+  timeout 900 $COLAB_API download -s "$S" /content/cpu/partial.tar.gz "$OUT/partial.tar.gz" >> "$OUT/download.log" 2>&1 &&
     tar xzf "$OUT/partial.tar.gz" -C "$OUT/partial" && rm -f "$OUT/partial.tar.gz" &&
     echo "[$TAG] the logs so far in $OUT/partial"
 }

@@ -4,7 +4,7 @@
 # runtime, WRF's process layouts screened, the models timed in interleaved blocks after a warm-up, the GPU's power
 # sampled, the bit identity and FP32 accuracy checked on the timed runs' outputs, the report and figures made.
 # No cloud bucket and no gcloud: the data come from Drive (rclone remote cppwrf-drive, folder cppwrf-data), else from
-# the public GitHub release cppwrf-data data-v1; the results come back with `colab download` and are also on Drive
+# the public GitHub release cppwrf-data data-v1; the results come back with `tools/colab/colab_api.py download` and are also on Drive
 # (cppwrf-drive:cppwrf-g4results/paper_<date>/).
 #
 #   tools/bench/colab_paper.sh [--gpu G4|L4|A100] [--set full|gpu] [--cases C1,C2,C3,C4] [--wps DIR] [--out DIR]
@@ -24,7 +24,7 @@
 # the data, tools/bench/paper_gpu.sh, tools/bench/paper_body.sh). Results in OUT (default
 # ${CPPWRF_SCRATCH:-~/cppwrf_scratch}/colab/paper_<date>): paper/ (raw_runs.jsonl, verify.jsonl, manifest.json,
 # cases.json, best.json, accuracy/, logs/), job/ (the job's logs), report.md and summary.json made here with the
-# session's rate (`colab usage`), runs.csv, svg/, usage.txt. The session is stopped at the end unless --keep.
+# session's rate (`tools/colab/colab_api.py usage`), runs.csv, svg/, usage.txt. The session is stopped at the end unless --keep.
 # Exit 1 when the job failed, data or a build is missing, or the results did not come back.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -92,14 +92,14 @@ fi
 [ $SAVE = 1 ] && date > "$OUT/in/save_lday"
 echo "[colab_paper] commit $(cat "$OUT/in/commit.txt"), $GPU, set $SET, cases $CASES, data $DATA, paper_run.py ${PR[*]:-}"
 TAG=colab_paper
-. "$REPO/tools/colab/colab_guard.sh"  # the only way to ask for a runtime: one attempt, rate limit, block lock
-rx() { timeout "$(( $1 + 120 ))" colab exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'; }
+. "$REPO/tools/colab/colab_guard.sh"  # the only way to ask for a runtime: one request per spec, 2 runtimes at most, block lock
+rx() { timeout "$(( $1 + 120 ))" $COLAB_API exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'; }
 cleanup() {
   rm -f "$OUT/in/rclone.conf"
   [ -n "$S" ] || return 0
   echo 'import subprocess; subprocess.run("rm -f /content/in/rclone.conf", shell=True)' | rx 60 > /dev/null 2>&1 || true
-  if [ "$KEEP" = 1 ]; then echo "[$TAG] --keep: session $S left running (colab stop -s $S)"
-  else timeout 300 colab stop -s "$S" || echo "[$TAG] WARNING: could not stop $S, check: colab sessions"; fi
+  if [ "$KEEP" = 1 ]; then echo "[$TAG] --keep: session $S left running ($COLAB_API stop -s $S)"
+  else timeout 300 $COLAB_API stop -s "$S" || echo "[$TAG] WARNING: could not stop $S, check: $COLAB_API sessions"; fi
 }
 trap cleanup EXIT
 if [ -z "$S" ]; then  # one request, no retry (tools/colab/colab_guard.sh)
@@ -115,7 +115,7 @@ UPLOADS=(src.tar.gz commit.txt rclone.conf)
 [ $SAVE = 1 ] && UPLOADS+=(save_lday)
 for f in "${UPLOADS[@]}"; do
   ok=0
-  for t in 1 2 3; do timeout 900 colab upload -s "$S" "$OUT/in/$f" "/content/in/$f" 2>&1 | grep -q Uploaded && { ok=1; break; }; sleep 20; done
+  for t in 1 2 3; do timeout 900 $COLAB_API upload -s "$S" "$OUT/in/$f" "/content/in/$f" 2>&1 | grep -q Uploaded && { ok=1; break; }; sleep 20; done
   [ $ok = 1 ] || { echo "[$TAG] upload of $f failed"; exit 1; }
 done
 rm -f "$OUT/in/rclone.conf"
@@ -142,10 +142,10 @@ EOF
   case $st in *JOB-RUNNING*) miss=0 ;; *) miss=$((miss + 1)); [ $miss -lt 6 ] || { echo "[$TAG] session lost"; bad=1; break; } ;; esac
   [ $SECONDS -lt $end ] || { echo "[$TAG] the job did not end within $HOURS h"; bad=1; break; }
 done
-timeout 120 colab usage 2>&1 | grep -v '^\[colab\]' > "$OUT/usage.txt" || true
+timeout 120 $COLAB_API usage 2>&1 | grep -v '^\[colab\]' > "$OUT/usage.txt" || true
 for f in paper.tar.gz results.tar.gz; do
   got=0
-  for t in 1 2 3; do timeout 1800 colab download -s "$S" "/content/paper_job/$f" "$OUT/$f" > /dev/null 2>&1 && { got=1; break; }; sleep 30; done
+  for t in 1 2 3; do timeout 1800 $COLAB_API download -s "$S" "/content/paper_job/$f" "$OUT/$f" > /dev/null 2>&1 && { got=1; break; }; sleep 30; done
   [ $got = 1 ] || { rclone copyto "cppwrf-drive:cppwrf-g4results/paper_$STAMP/$f" "$OUT/$f" > /dev/null 2>&1 && got=1; }  # the job's Drive copy
   [ $got = 1 ] || { echo "[$TAG] $f: not downloaded (colab nor Drive)"; bad=1; continue; }
   case $f in paper.tar.gz) tar xzf "$OUT/$f" -C "$OUT" ;; *) mkdir -p "$OUT/job" && tar xzf "$OUT/$f" -C "$OUT/job" ;; esac && rm -f "$OUT/$f"

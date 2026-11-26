@@ -33,7 +33,7 @@ stays reproducible; it is the 1-hour comparison of releases 1.0 to 1.2.
 | Session | Runtime | What | Estimate | Compute units |
 |---|---|---|---|---|
 | 1 (required) | Colab G4: AMD EPYC 9B45 (24 cores, 48 vCPUs) + RTX PRO 6000 Blackwell (96 GB) | WRF v4.8.0 (stock real*4 / real*8 and tuned real*4) and every CPPWRF build, cases C1-C4 | 8.6 h (`paper_run.py plan --nc0`; 8.0 h with `--reps 4`), at most 10 h | about 86, at most 100 (10.05 per hour in November 2026) |
-| 2 (optional) | Colab L4, then Colab A100 | CPPWRF's three CUDA builds timed, cases C1, C2; CPU FP64 / FP32 only as untimed proof runs | about 2-3 h each (not measured) | `colab usage`'s rate x hours (the L4 and A100 rates were not checked here) |
+| 2 (optional) | Colab L4, then Colab A100 | CPPWRF's three CUDA builds timed, cases C1, C2; CPU FP64 / FP32 only as untimed proof runs | about 2-3 h each (not measured) | `tools/colab/colab_api.py usage`'s rate x hours (the L4 and A100 rates were not checked here) |
 
 The estimate comes from the G4 times of docs/PERF.md (stepping per simulated hour of every model, WRF in one
 process from the b30ec5b session's logs, the write time per history frame), 30 s per GPU cool-down after a GPU run,
@@ -223,7 +223,7 @@ A run of S simulated seconds is split into its fixed part (start-up, input, the 
 per run) and its marginal part (the steps at the steady rate and the frames after t = 0). One simulated day costs
 fixed + marginal x 86400 / S: the start-up is counted once per forecast, not scaled with the run length (scaling
 the whole wall time by 86400 / S would count a 6 h case's start-up four times). The report gives, at the session's
-rate (`colab usage`, read at the end: 10.05 compute units per hour for the G4 in November 2026), the compute units
+rate (`tools/colab/colab_api.py usage`, read at the end: 10.05 compute units per hour for the G4 in November 2026), the compute units
 of the measured run, of the fixed part, of the marginal part per simulated day and of one forecast day. The runtime
 costs the same whichever processor a run uses, so for WRF this is its price on the GPU runtime with the GPU idle:
 an upper bound for WRF, not a CPU-only price. `--cpu-rate R` adds WRF's and CPPWRF CPU's price at R units per hour,
@@ -318,7 +318,7 @@ release are working copies, not the archive.
 No cloud bucket and no gcloud. The workstation needs the Colab CLI and the rclone remote cppwrf-drive; the runtime
 gets only that remote's section (deleted at the end). `tools/bench/paper_job.sh` on the runtime streams each data
 tar from Drive (`rclone cat | tar x`), else from the GitHub release data-v1 (whole file or 512 MiB parts checked against its
-SHA256SUMS), recording each tar's SHA-256. The results come back with `colab download` and are also copied to
+SHA256SUMS), recording each tar's SHA-256. The results come back with `tools/colab/colab_api.py download` and are also copied to
 `cppwrf-drive:cppwrf-g4results/paper_<date>/` (paper.tar.gz, results.tar.gz), from where the launcher takes them if
 the download fails. A failed phase (prepare, screen, timed, proof, verify, report), translation, build or download,
 or a failed local report makes the launcher exit non-zero. `--dry-run` prints the job's arguments, the estimate and

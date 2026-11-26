@@ -43,7 +43,7 @@ finish() {
   ( cd $J 2> /dev/null && cp -f ./*.log ./*.out ./*.txt $C/res/ 2> /dev/null )
   cat $C/res/setup.out >> $C/setup.out 2> /dev/null; rm -f $C/res/setup.out
   [ -d $J/fetch ] && mv $J/fetch $C/fetch
-  # the results on Drive too (the caller's fallback to colab download): the large files first, so that their RESULTS
+  # the results on Drive too (the caller's fallback to tools/colab/colab_api.py download): the large files first, so that their RESULTS
   # lines and drive_results.log are in results.tar.gz; results.tar.gz itself last
   todrive() {
     rclone --config $C/rclone.conf copyto "$1" "cppwrf-drive:$DRES/$(basename "$1")" --drive-chunk-size 256M \
