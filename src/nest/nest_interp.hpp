@@ -34,11 +34,28 @@ CPPWRF_HD inline float sint_max(float a, float b) { return fmaxf(a, b); }
 CPPWRF_HD inline float sint_min(float a, float b) { return fminf(a, b); }
 #endif
 
-// 1D Donor-cell advection flux
+// 1D Donor-cell advection flux (the SINTB kernels: see smolarkiewicz_1d)
 template <class T>
 CPPWRF_HD inline T donor(T y1, T y2, T a) {
   return (a >= T(0.0)) ? (y1 * a) : (y2 * a);
 }
+
+// share/sint.F:37 DONOR(Y1,Y2,A)=(Y1*AMAX1(0.,SIGN(1.,A))-Y2*AMIN1(0.,SIGN(1.,A)))*A as written: the products by 1
+// and 0 keep the signs of zero (Y1 = -0, Y2 < 0, A > 0: +0, where Y1*A is -0)
+template <class T>
+CPPWRF_HD inline T sint_donor(T y1, T y2, T a) {
+  const T s = std::copysign(T(1.0), a);
+  const T s1 = s > T(0.0) ? s : T(0.0);  // AMAX1(0., SIGN(1., A))
+  const T s2 = s < T(0.0) ? s : T(0.0);  // AMIN1(0., SIGN(1., A))
+  return (y1 * s1 - y2 * s2) * a;
+}
+
+// gfortran's MAX / MIN of share/sint.F (MAX_EXPR <a, b> / MIN_EXPR <a, b>, maxsd / minsd): b when a and b compare
+// equal (+0 and -0)
+template <class T>
+CPPWRF_HD inline T sint_gmax(T a, T b) { return a > b ? a : b; }
+template <class T>
+CPPWRF_HD inline T sint_gmin(T a, T b) { return a < b ? a : b; }
 
 // 4th-order Crowley / Smolarkiewicz polynomial advective flux
 template <class T>
@@ -59,42 +76,66 @@ CPPWRF_HD inline T pp(T x) { return x > T(0.0) ? x : T(0.0); }
 template <class T>
 CPPWRF_HD inline T pn(T x) { return x < T(0.0) ? x : T(0.0); }
 
-// 1D non-oscillatory MPDATA/FCT limiting step
-template <class T>
+// 1D non-oscillatory MPDATA/FCT limiting step, one sweep of share/sint.F's SINT (sint.F:81-130 in x, 144-191 in y).
+// The signs of zero are SINT's as WRF's gfortran -O2 build computes them: DONOR as written (sint_donor); MXM =
+// AMAX1(Y(-1),Y(0),Y(1),W) evaluated as MAX(MAX(Y(-1),Y(0)), MAX(Y(1),W)) and MN likewise with MIN (the reassociated
+// MAX_EXPR / MIN_EXPR tree of its optimized code, both sweeps, REAL*8 and REAL*4); PP(X) = MAX_EXPR <X, 0.>,
+// PN(X) = MIN_EXPR <X, 0.>, AMIN1(1.,OV) = MIN_EXPR <OV, 1.>. Checked bit for bit, signed zeros included, against
+// WRF's SINT on fields of +0, -0 and small values (tests/nest/test_nest_differential.cpp).
+// kSintb: the kernel of the SINTB paths (share/sint.F SINTB: lateral boundaries, nest_bdy.hpp), unchanged: WRF's
+// SINTB is vectorized and its MAX / MIN trees differ between the vector body and the scalar remainder.
+template <class T, bool kSintb = false>
 CPPWRF_HD inline T smolarkiewicz_1d(T ym2, T ym1, T y0, T yp1, T yp2, T a) {
   const T ep = T(1.0e-10);
-  const T fl0 = donor(ym1, y0, a);
-  const T fl1 = donor(y0, yp1, a);
-  const T w = y0 - (fl1 - fl0);
-  const T mxm = sint_max(sint_max(ym1, y0), sint_max(yp1, w));
-  const T mn  = sint_min(sint_min(ym1, y0), sint_min(yp1, w));
+  if constexpr (kSintb) {
+    const T fl0 = donor(ym1, y0, a);
+    const T fl1 = donor(y0, yp1, a);
+    const T w = y0 - (fl1 - fl0);
+    const T mxm = sint_max(sint_max(ym1, y0), sint_max(yp1, w));
+    const T mn  = sint_min(sint_min(ym1, y0), sint_min(yp1, w));
 
-  T f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;
-  T f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
+    T f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;
+    T f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
 
-  const T pp_f0 = pp(f0);
-  const T pn_f0 = pn(f0);
-  const T pp_f1 = pp(f1);
-  const T pn_f1 = pn(f1);
+    const T pp_f0 = pp(f0);
+    const T pn_f0 = pn(f0);
+    const T pp_f1 = pp(f1);
+    const T pn_f1 = pn(f1);
 
-  const T ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);
-  const T un = (w - mn) / (pp_f1 - pn_f0 + ep);
+    const T ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);
+    const T un = (w - mn) / (pp_f1 - pn_f0 + ep);
 
-  f0 = pp_f0 * sint_min(T(1.0), ov) + pn_f0 * sint_min(T(1.0), un);
-  f1 = pp_f1 * sint_min(T(1.0), un) + pn_f1 * sint_min(T(1.0), ov);
+    f0 = pp_f0 * sint_min(T(1.0), ov) + pn_f0 * sint_min(T(1.0), un);
+    f1 = pp_f1 * sint_min(T(1.0), un) + pn_f1 * sint_min(T(1.0), ov);
 
-  return w - (f1 - f0);
+    return w - (f1 - f0);
+  } else {
+    const T fl0 = sint_donor(ym1, y0, a);                                // sint.F:81-82 (y sweep: 144-145)
+    const T fl1 = sint_donor(y0, yp1, a);
+    const T w = y0 - (fl1 - fl0);                                        // sint.F:86
+    const T mxm = sint_gmax(sint_gmax(ym1, y0), sint_gmax(yp1, w));      // sint.F:90-92 (153)
+    const T mn = sint_gmin(sint_gmin(ym1, y0), sint_gmin(yp1, w));       // sint.F:93 (154)
+    T f0 = tr4(ym2, ym1, y0, yp1, a) - fl0;                              // sint.F:98-109
+    T f1 = tr4(ym1, y0, yp1, yp2, a) - fl1;
+    const T pp_f0 = pp(f0), pn_f0 = pn(f0), pp_f1 = pp(f1), pn_f1 = pn(f1);
+    const T ov = (mxm - w) / (-pn_f1 + pp_f0 + ep);                      // sint.F:114-117
+    const T un = (w - mn) / (pp_f1 - pn_f0 + ep);
+    const T mo = sint_gmin(ov, T(1.0)), mu = sint_gmin(un, T(1.0));      // AMIN1(1.,OV), AMIN1(1.,UN)
+    f0 = pp_f0 * mo + pn_f0 * mu;                                        // sint.F:122-125
+    f1 = pp_f1 * mu + pn_f1 * mo;
+    return w - (f1 - f0);                                                // sint.F:130
+  }
 }
 
 // 2D SINT point evaluation given a 5x5 stencil of coarse values around (ci, cj):
 // c_patch[j_idx][i_idx] where j_idx in 0..4 (j-2..j+2) and i_idx in 0..4 (i-2..i+2)
-template <class T>
+template <class T, bool kSintb = false>
 CPPWRF_HD inline T sint_point_2d(const T c_patch[5][5], T ax, T ay) {
   T z[5];
   for (int j = 0; j < 5; ++j) {
-    z[j] = smolarkiewicz_1d(c_patch[j][0], c_patch[j][1], c_patch[j][2], c_patch[j][3], c_patch[j][4], ax);
+    z[j] = smolarkiewicz_1d<T, kSintb>(c_patch[j][0], c_patch[j][1], c_patch[j][2], c_patch[j][3], c_patch[j][4], ax);
   }
-  return smolarkiewicz_1d(z[0], z[1], z[2], z[3], z[4], ay);
+  return smolarkiewicz_1d<T, kSintb>(z[0], z[1], z[2], z[3], z[4], ay);
 }
 
 // Compute subgrid offset coordinates XIG and XJG for a given ratio and subgrid index
@@ -257,7 +298,7 @@ inline void sintb_fortran_layout(
           double y0  = xf1[idx(ii,     jj + j_rel, iim)];
           double yp1 = xf1[idx(ii + 1, jj + j_rel, iim)];
           double yp2 = xf1[idx(ii + 2, jj + j_rel, iim)];
-          z[z_idx(ii, j_rel)] = smolarkiewicz_1d(ym2, ym1, y0, yp1, yp2, ax);
+          z[z_idx(ii, j_rel)] = smolarkiewicz_1d<double, true>(ym2, ym1, y0, yp1, yp2, ax);
         }
       }
 
@@ -267,7 +308,7 @@ inline void sintb_fortran_layout(
         double z0  = z[z_idx(ii,  0)];
         double zp1 = z[z_idx(ii,  1)];
         double zp2 = z[z_idx(ii,  2)];
-        xf[idx(ii, jj, iim)] = smolarkiewicz_1d(zm2, zm1, z0, zp1, zp2, ay);
+        xf[idx(ii, jj, iim)] = smolarkiewicz_1d<double, true>(zm2, zm1, z0, zp1, zp2, ay);
       }
     }
   }

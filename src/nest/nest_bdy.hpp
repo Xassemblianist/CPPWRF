@@ -358,7 +358,7 @@ struct KBdySlab {
         patch[dj + 2][di + 2] = cfld[c_idx];
       }
     }
-    double interp_val = sint_point_2d(patch, ax, ay);
+    double interp_val = sint_point_2d<double, true>(patch, ax, ay);  // SINTB
 
     int n_stride_k = xstag ? n_nx + 1 : n_nx;
     int n_stride_j = (xstag ? n_nx + 1 : n_nx) * nk;
@@ -433,7 +433,7 @@ struct KBdySlabView3D {
         patch[dj + 2][di + 2] = static_cast<nreal>(cfld(ci0 + di, cj0 + dj, k));
       }
     }
-    nreal interp_val = sint_point_2d(patch, ax, ay);
+    nreal interp_val = sint_point_2d<nreal, true>(patch, ax, ay);  // SINTB
     nreal cur_val = static_cast<nreal>(nfld(ni - 1, nj - 1, k));
     // WRF (share/interp_fcn.F): REAL*8 rdt = 1.D0/cdt, also in its single-precision build; the difference is taken
     // in the model's precision and multiplied in double
@@ -493,7 +493,7 @@ struct KBdySlabView2D {
         patch[dj + 2][di + 2] = static_cast<nreal>(cfld(ci0 + di, cj0 + dj));
       }
     }
-    nreal interp_val = sint_point_2d(patch, ax, ay);
+    nreal interp_val = sint_point_2d<nreal, true>(patch, ax, ay);  // SINTB
     nreal cur_val = static_cast<nreal>(nfld(ni - 1, nj - 1));
     // WRF (share/interp_fcn.F): REAL*8 rdt = 1.D0/cdt, also in its single-precision build; the difference is taken
     // in the model's precision and multiplied in double

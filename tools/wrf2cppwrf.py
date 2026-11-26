@@ -832,7 +832,8 @@ class WrfTranslator:
                  real_dir: Optional[str] = None,
                  table_dir: Optional[str] = None,
                  output_format: str = "native",
-                 explicit_files: bool = False):
+                 explicit_files: bool = False,
+                 vortex_following: bool = False):
         self.nml = namelist
         self.namelist_path = os.path.abspath(namelist_path) if namelist_path else ""
         self.override_case = override_case
@@ -840,6 +841,8 @@ class WrfTranslator:
         self.table_dir = table_dir
         self.output_format = output_format
         self.explicit_files = explicit_files
+        # the namelist is for a wrf.exe built with vortex following (configure nesting 3, -DVORTEX_CENTER)
+        self.vortex_following = vortex_following
 
         self.warnings: List[str] = []
         self.errors: List[str] = []
@@ -900,6 +903,81 @@ class WrfTranslator:
     def notice(self, msg: str):
         self.notices.append(msg)
 
+    def moving_nest_geometry(self, mid: int, what: str) -> None:
+        """A moving nest's ratio and position that CPPWRF's move serves (src/cases/nest_move.cpp)."""
+        ratio = self.get_dom_opt("domains", "parent_grid_ratio", mid - 1, 1, fallback_d0=False)
+        if isinstance(ratio, int) and ratio > 3:
+            # shift_domain_em moves the arrays by parent_grid_ratio points out of the halo (CPPWRF: 3 points)
+            self.error(f"{what}the moving nest's parent_grid_ratio = {ratio} > 3 is not supported by CPPWRF.")
+        ipos = self.get_dom_opt("domains", "i_parent_start", mid - 1, 1, fallback_d0=False)
+        jpos = self.get_dom_opt("domains", "j_parent_start", mid - 1, 1, fallback_d0=False)
+        ewe = [self.get_dom_opt("domains", "e_we", d, 0, fallback_d0=False) for d in (0, mid - 1)]
+        esn = [self.get_dom_opt("domains", "e_sn", d, 0, fallback_d0=False) for d in (0, mid - 1)]
+        if all(isinstance(v, int) and not isinstance(v, bool) for v in [ratio, ipos, jpos] + ewe + esn) and \
+                ratio > 0 and not (ipos >= 5 and jpos >= 5 and ipos + ewe[1] // ratio + 5 <= ewe[0] - 1 and
+                                   jpos + esn[1] // ratio + 5 <= esn[0] - 1):
+            # the intermediate domain's search window (interp_mask_water_field, SINT) inside domain 1's points
+            self.error(f"{what}the moving nest d{mid:02d} at i_parent_start {ipos}, j_parent_start "
+                       f"{jpos} is too near domain 1's edge for CPPWRF (i_parent_start, j_parent_start >= 5 and "
+                       "i_parent_start + e_we / parent_grid_ratio + 5 <= e_we - 1 of domain 1, and in y).")
+
+    def translate_vortex(self, sections: Dict[str, Dict[str, Any]], max_dom: int) -> None:
+        """A wrf.exe built with vortex following (configure nesting 3: -DMOVE_NESTS -DVORTEX_CENTER;
+        share/mediation_nest_move.F time_for_move2's vortex branch): every nest follows the vortex (the lowest
+        track_level height) after each of its parent's steps. [domains] vortex_following, track_level; [d0N]
+        vortex_interval, max_vortex_speed, time_to_move, corral_dist (non-default values). The preset move lists are
+        not compiled into such a build. CPPWRF moves one nest of domain 1 without nests of its own."""
+        num_moves = self.get_opt("domains", "num_moves", 0)
+        for mv_key in ("move_id", "move_interval", "move_cd_x", "move_cd_y"):
+            self.get_opt_list("domains", mv_key)
+        if isinstance(num_moves, int) and not isinstance(num_moves, bool) and num_moves > 0:
+            self.warn(f"WRF num_moves = {num_moves}: a wrf.exe built with vortex following ignores the prescribed "
+                      "moves (not translated).")
+        if max_dom < 2:
+            self.warn("vortex following without nests: nothing moves (not translated).")
+            for mv_key in ("vortex_interval", "max_vortex_speed", "track_level", "time_to_move", "corral_dist"):
+                self.get_opt_list("domains", mv_key)
+            return
+        parents = [self.get_dom_opt("domains", "parent_id", d, 0, fallback_d0=False) for d in range(max_dom)]
+        if max_dom > 2 or parents[1] != 1:
+            self.error("WRF vortex following moves every nest; CPPWRF supports one nest of domain 1 (max_dom = 2).")
+        self.moving_nest_geometry(2, "vortex following: ")
+        self._moving_ids = {2}  # check_moving_nest_physics
+
+        def int_ok(key: str, v: Any, lo: int) -> bool:
+            if not isinstance(v, int) or isinstance(v, bool) or v < lo:
+                self.error(f"WRF &domains.{key} = {v} is not supported by CPPWRF vortex following (an integer >= "
+                           f"{lo}).")
+                return False
+            return True
+
+        tl = self.get_opt("domains", "track_level", REGISTRY_DEFAULTS["track_level"][1])
+        if int_ok("track_level", tl, 1):
+            if tl >= 2 ** 24:  # float(track_level) in WRF's real*4 build is exact below 2^24
+                self.error(f"WRF &domains.track_level = {tl} Pa is not supported by CPPWRF (< 2^24).")
+            elif tl != REGISTRY_DEFAULTS["track_level"][1]:
+                self._moves_domains["track_level"] = tl
+        for d in range(1, max_dom):
+            sec = f"d{d + 1:02d}"
+            vals = {}
+            for key in ("vortex_interval", "max_vortex_speed", "corral_dist", "time_to_move"):
+                v = self.get_dom_opt("domains", key, d, None, fallback_d0=False)
+                vals[key] = REGISTRY_DEFAULTS[key][1] if v is None else v
+            ok = int_ok("vortex_interval", vals["vortex_interval"], 0)
+            ok = int_ok("max_vortex_speed", vals["max_vortex_speed"], 0) and ok
+            if ok and (60 * vals["vortex_interval"] > 2 ** 31 - 1 or
+                       60 * vals["vortex_interval"] * vals["max_vortex_speed"] > 2 ** 31 - 1):
+                # time_for_move2's INTEGER search radius 60 * vortex_interval * max_vortex_speed
+                self.error(f"Domain {sec}: 60 * vortex_interval * max_vortex_speed overflows WRF's integer.")
+            int_ok("corral_dist", vals["corral_dist"], 1)
+            ttm = vals["time_to_move"]
+            if isinstance(ttm, bool) or not isinstance(ttm, (int, float)):
+                self.error(f"WRF &domains.time_to_move = {ttm}: a number of minutes expected.")
+                ok = False
+            for key, v in vals.items():
+                if not _same_value(v, REGISTRY_DEFAULTS[key][1]) and not isinstance(v, bool):
+                    sections.setdefault(sec, {})[key] = float(v) if key == "time_to_move" else v
+
     def translate_moves(self, sections: Dict[str, Dict[str, Any]], num_moves: int, max_dom: int) -> None:
         """&domains num_moves > 0: WRF's prescribed moves (share/mediation_nest_move.F time_for_move2) as [domains]
         num_moves, move_id, move_interval, move_cd_x, move_cd_y (the first num_moves entries, a missing entry the
@@ -938,22 +1016,7 @@ class WrfTranslator:
                 self.error(f"WRF move {k + 1}: move_id = {mid} has nests of its own; not supported by CPPWRF.")
             if sum(1 for p in parents if p == 1) > 1:
                 self.error("WRF moving nests with several nests of domain 1 are not supported by CPPWRF.")
-            ratio = self.get_dom_opt("domains", "parent_grid_ratio", mid - 1, 1, fallback_d0=False)
-            if isinstance(ratio, int) and ratio > 3:
-                # shift_domain_em moves the arrays by parent_grid_ratio points out of the halo (CPPWRF: 3 points)
-                self.error(f"WRF move {k + 1}: the moving nest's parent_grid_ratio = {ratio} > 3 is not supported "
-                           "by CPPWRF.")
-            ipos = self.get_dom_opt("domains", "i_parent_start", mid - 1, 1, fallback_d0=False)
-            jpos = self.get_dom_opt("domains", "j_parent_start", mid - 1, 1, fallback_d0=False)
-            ewe = [self.get_dom_opt("domains", "e_we", d, 0, fallback_d0=False) for d in (0, mid - 1)]
-            esn = [self.get_dom_opt("domains", "e_sn", d, 0, fallback_d0=False) for d in (0, mid - 1)]
-            if all(isinstance(v, int) and not isinstance(v, bool) for v in [ratio, ipos, jpos] + ewe + esn) and \
-                    ratio > 0 and not (ipos >= 5 and jpos >= 5 and ipos + ewe[1] // ratio + 5 <= ewe[0] - 1 and
-                                       jpos + esn[1] // ratio + 5 <= esn[0] - 1):
-                # the intermediate domain's search window (interp_mask_water_field, SINT) inside domain 1's points
-                self.error(f"WRF move {k + 1}: the moving nest d{mid:02d} at i_parent_start {ipos}, j_parent_start "
-                           f"{jpos} is too near domain 1's edge for CPPWRF (i_parent_start, j_parent_start >= 5 and "
-                           "i_parent_start + e_we / parent_grid_ratio + 5 <= e_we - 1 of domain 1, and in y).")
+            self.moving_nest_geometry(mid, f"WRF move {k + 1}: ")
         if not active:
             self.warn(f"WRF num_moves = {num_moves}: no move is active (move_id of a nest and move_interval < "
                       "999999999); the moves are not translated.")
@@ -1435,6 +1498,15 @@ class WrfTranslator:
             sections["cppwrf"] = {"allow_unverified": allow}
         self.tier_hits: List[Tuple[str, str, Any, str]] = []
         for row in OPTION_TIERS:
+            if row["config_key"] == "domains.vortex_following":
+                # the build, not a namelist value, selects vortex following (--vortex-following)
+                if self.vortex_following and self._max_dom > 1:
+                    then = ("runs because &cppwrf allow_unverified = .true." if allow else
+                            "CPPWRF stops on it unless &cppwrf allow_unverified = .true.")
+                    self.tier_hits.append(("domains", "vortex_following", "vortex following", row["tier"]))
+                    self.warn(f"Vortex following (--vortex-following): verification tier {row['tier']} "
+                              f"({row['note']}), not compared with a whole WRF run; {then}")
+                continue
             if not row["wrf_key"]:
                 continue
             vals = self.nml.get(row["wrf_group"], {}).get(row["wrf_key"], [])
@@ -3304,31 +3376,39 @@ class WrfTranslator:
 
         # 14. Nested Domains [domains] and [d02]..[d0N]
         # moving nests: prescribed moves (WRF built with "preset moves", -DMOVE_NESTS) are translated below; vortex
-        # following (-DVORTEX_CENTER: vortex_interval, max_vortex_speed, track_level) and time_to_move are not
-        # supported. The move_* lists and corral_dist matter only with num_moves > 0 (time_for_move2).
-        num_moves = self.get_opt("domains", "num_moves", 0)
-        if num_moves is None:
-            num_moves = 0
-        if not isinstance(num_moves, int) or isinstance(num_moves, bool) or num_moves < 0 or num_moves > 50:
-            self.error(f"WRF num_moves = {num_moves} is invalid (0 .. max_moves = 50).")
-            num_moves = 0
-        if num_moves > 0 and max_dom > 1:
-            self.translate_moves(sections, num_moves, max_dom)
+        # following (a wrf.exe built with -DVORTEX_CENTER: --vortex-following) by translate_vortex. time_to_move is
+        # verified for vortex following only. The move_* lists and corral_dist matter only with num_moves > 0
+        # (time_for_move2).
+        if self.vortex_following:
+            self._moves_domains = {"vortex_following": True}
+            self.translate_vortex(sections, max_dom)
+            if max_dom < 2:
+                self._moves_domains = {}
         else:
-            for mv_key in ("move_id", "move_interval", "move_cd_x", "move_cd_y", "corral_dist"):
-                self.get_opt_list("domains", mv_key)  # no move: WRF does not read them
-        for mv_key in ("vortex_interval", "max_vortex_speed", "track_level", "time_to_move"):
-            if self.has_opt("domains", mv_key):
-                reg = REGISTRY_DEFAULTS.get(mv_key)
-                reg_def = reg[1] if reg else 0
-                n_mv = max(1, self._max_dom) if reg and reg[2] == "max_domains" else (
-                    1 if reg and reg[2] == "1" else None)
-                vals = self.get_opt_list("domains", mv_key)
-                checked = vals[:n_mv] if n_mv is not None else vals
-                if any(v is not None and not _same_value(v, reg_def) and v not in (0, False) for v in checked):
-                    self.error(f"WRF moving nest option &domains.{mv_key} = {vals} is not supported by CPPWRF "
-                               "(vortex following and time_to_move are not ported; prescribed moves are: num_moves, "
-                               "move_id, move_interval, move_cd_x, move_cd_y, corral_dist).")
+            num_moves = self.get_opt("domains", "num_moves", 0)
+            if num_moves is None:
+                num_moves = 0
+            if not isinstance(num_moves, int) or isinstance(num_moves, bool) or num_moves < 0 or num_moves > 50:
+                self.error(f"WRF num_moves = {num_moves} is invalid (0 .. max_moves = 50).")
+                num_moves = 0
+            if num_moves > 0 and max_dom > 1:
+                self.translate_moves(sections, num_moves, max_dom)
+            else:
+                for mv_key in ("move_id", "move_interval", "move_cd_x", "move_cd_y", "corral_dist"):
+                    self.get_opt_list("domains", mv_key)  # no move: WRF does not read them
+            for mv_key in ("vortex_interval", "max_vortex_speed", "track_level", "time_to_move"):
+                if self.has_opt("domains", mv_key):
+                    reg = REGISTRY_DEFAULTS.get(mv_key)
+                    reg_def = reg[1] if reg else 0
+                    n_mv = max(1, self._max_dom) if reg and reg[2] == "max_domains" else (
+                        1 if reg and reg[2] == "1" else None)
+                    vals = self.get_opt_list("domains", mv_key)
+                    checked = vals[:n_mv] if n_mv is not None else vals
+                    if any(v is not None and not _same_value(v, reg_def) for v in checked):
+                        self.error(f"WRF moving nest option &domains.{mv_key} = {vals} is not supported by CPPWRF "
+                                   "without --vortex-following (a wrf.exe built with vortex following, configure "
+                                   "nesting 3; with prescribed moves time_to_move is not verified; prescribed moves "
+                                   "are: num_moves, move_id, move_interval, move_cd_x, move_cd_y, corral_dist).")
 
         for vr_key in ("vert_refine_method", "vert_refine_fact"):
             if self.has_opt("domains", vr_key):
@@ -3773,6 +3853,11 @@ Examples:
                         help="Output format (native binary, WRF NetCDF wrfout, or both)")
     parser.add_argument("--explicit-files", action="store_true",
                         help="Explicitly write wrfinput = wrfinput_d01 and wrfbdy = wrfbdy_d01 in [real]")
+    parser.add_argument("--vortex-following", action="store_true",
+                        help="The namelist is for a wrf.exe built with vortex following (configure nesting option 3, "
+                             "-DMOVE_NESTS -DVORTEX_CENTER): the nest follows the vortex (vortex_interval, "
+                             "max_vortex_speed, track_level, time_to_move, corral_dist); the prescribed moves are "
+                             "ignored, as in such a build")
     parser.add_argument("--strict", action="store_true",
                         help="Treat warnings as errors and exit with non-zero code")
 
@@ -3802,7 +3887,8 @@ Examples:
         real_dir=args.real_dir,
         table_dir=args.table_dir,
         output_format=args.format,
-        explicit_files=args.explicit_files
+        explicit_files=args.explicit_files,
+        vortex_following=args.vortex_following
     )
 
     sections = translator.translate()

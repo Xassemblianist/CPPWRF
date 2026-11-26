@@ -11,7 +11,7 @@ name, so the remote side sets CPPWRF_WRF_RUNS to the unpacked directory and runs
 followed. Left out: other history and restart files, rsl/log files, met_em input, executables and the
 large tables no ported scheme reads; the Thompson .dat tables only for mp_physics = 8 and 28 (and not with
 --no-thompson-tables: CPPWRF then computes them, close to but not bit-identical with WRF's files). The reference
-wrfout files keep only the frames the cases compare, and every variable for a tolerance-0 case (wrf_suite.py
+wrfout files (with WRF's later files of the same history stream: frames_per_outfile, wrf_suite.reference_stream) keep only the frames the cases compare, and every variable for a tolerance-0 case (wrf_suite.py
 compares all of them) or else the variables tests/verify/compare_real.py compares. The ideal cases' references
 come with their namelist.input (wrf_suite.py checks the configuration and the global attributes with it).
 --whole: the reference files whole (every frame and variable: wrf_suite.py then compares every frame up to the case's
@@ -187,6 +187,8 @@ def main():
                         os.path.join(os.path.dirname(path), "namelist.input")):
                     sys.exit(f"{name}: missing chain namelist beside {path}")
         refs = {r for r in refs if not a.no_refs and not (a.no_steps and "/steps/" in r)}
+        # WRF's later files of each reference's history stream (frames_per_outfile), compared as the first one
+        refs |= {f for r in list(refs) if os.path.isfile(r) for f in wrf_suite.reference_stream(r)[1:]}
         mid = wrf_suite.restart_at(sets)
         for r in sorted(refs):
             dirs.setdefault(os.path.dirname(r), False)

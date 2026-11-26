@@ -170,14 +170,20 @@ def config_vs_namelist(cfg, sets, nml):
     """Options of the case's configuration (cfg and its --set) that differ from tools/wrf2cppwrf.py's translation of
     the namelist.input of the WRF run that made the reference (options both set; paths by their real path; the run
     length, output and restart settings aside), or the translation's errors. A case with output.auxhist3=true (the
-    translation of io_form_auxhist3 = 2, which needs WRF history output) is translated with --format wrfout."""
+    translation of io_form_auxhist3 = 2, which needs WRF history output) is translated with --format wrfout; a case
+    with domains.vortex_following = true with --vortex-following."""
     nl = read_namelist(nml)
     from tools.wrf2cppwrf import WrfTranslator
-    tr = WrfTranslator(nl, namelist_path=nml, output_format="wrfout" if auxhist3_check(sets, cfg) else "native")
+    conf = configuration(cfg, sets)
+    # a vortex-following case's reference comes from a wrf.exe built with vortex following, which the namelist does
+    # not say (tools/wrf2cppwrf.py --vortex-following)
+    vortex = str(conf.get("domains", {}).get("vortex_following", "false")).strip().lower() in ("true", "1", ".true.",
+                                                                                                "t", "yes")
+    tr = WrfTranslator(nl, namelist_path=nml, output_format="wrfout" if auxhist3_check(sets, cfg) else "native",
+                       vortex_following=vortex)
     gen = tr.translate()
     if tr.errors:
         return [f"{nml} does not translate: {tr.errors}"]
-    conf = configuration(cfg, sets)
 
     def norm(v):
         v = os.path.expandvars(str(v)).strip().strip("'\"").replace(" ", "")
@@ -233,6 +239,35 @@ def stream_files(out, kind, dom):
     return sorted(glob.glob(os.path.join(out, pattern)) + glob.glob(os.path.join(out, dom, pattern)))
 
 
+def reference_stream(w):
+    """WRF's history stream that starts with the reference file `w`: `w` and the files of the same stream and domain
+    WRF went on to write beside it. med_hist_out (share/mediation_integrate.F:1251-1261) closes a history file after
+    frames_per_outfile frames (one value per domain, default 10: Registry/registry.io_boilerplate:28) and open_hist_w
+    names the next one by its first frame. A later file belongs to the stream only if its first frame follows the
+    previous file's last one; the chain stops at the first file that does not."""
+    import netCDF4
+    import exact
+    name, d = os.path.basename(w), os.path.dirname(w)
+    later = sorted(p for p in glob.glob(os.path.join(glob.escape(d), glob.escape(name[:-19]) + "*"))
+                   if len(os.path.basename(p)) == len(name) and os.path.basename(p) > name)
+    out = [w]
+    if not later:
+        return out
+    with _NC:
+        with netCDF4.Dataset(w) as ds:
+            n = len(ds["Times"])
+            last = exact.text(ds["Times"], n - 1).decode() if n else None
+        for p in later:
+            with netCDF4.Dataset(p) as ds:
+                n = len(ds["Times"])
+                first = exact.text(ds["Times"], 0).decode() if n else None
+                if last is None or first is None or first <= last or first != os.path.basename(p)[-19:]:
+                    break
+                last = exact.text(ds["Times"], n - 1).decode()
+            out.append(p)
+    return out
+
+
 def auxhist3_settings(sets, cfg=None, dom="d01"):
     """The opt-in and seconds between auxhist3 records from the effective inputs."""
     value, minutes = "false", None
@@ -283,10 +318,14 @@ def _exact_case(refs, out, t, sets, after, ignore_atts, cfg, required_times, spl
     first, *resumed = out if isinstance(out, list) else [out]
     for dom, w in refs.items():
         d = dom or re.search(r"wrfout_(d\d\d)_", os.path.basename(w)).group(1)
-        with netCDF4.Dataset(w) as ds:
-            xt = [float(x) * 60.0 for x in ds["XTIME"][:]]
-            final = [exact.text(ds["Times"], i).decode() for i, x in enumerate(xt) if abs(x - t) < 1e-6]
-            origin = getattr(ds, "SIMULATION_START_DATE", None)
+        wstream = reference_stream(w)  # WRF's later files of this history stream (frames_per_outfile)
+        final = []
+        for f in wstream:
+            with netCDF4.Dataset(f) as ds:
+                xt = [float(x) * 60.0 for x in ds["XTIME"][:]]
+                final += [exact.text(ds["Times"], i).decode() for i, x in enumerate(xt) if abs(x - t) < 1e-6]
+                if f == w:
+                    origin = getattr(ds, "SIMULATION_START_DATE", None)
         if not final:
             bad.append(f"{d}: the reference has no frame at t={t:g}s")
             continue
@@ -298,7 +337,7 @@ def _exact_case(refs, out, t, sets, after, ignore_atts, cfg, required_times, spl
         scheduled = (required_times[d] if split is not None else required_times) or ()
         reference_times = reference_schedules[d] if reference_schedules else set()
         optional_times = reference_times - set(scheduled) if split is not None else ()
-        dif, _ = exact.compare_stream(mine, [w], subset=True, until=final[0], global_atts=has_nl, after=after,
+        dif, _ = exact.compare_stream(mine, wstream, subset=True, until=final[0], global_atts=has_nl, after=after,
                                       ignore_atts=ignore_atts, stats=stats,
                                       common_only=required_times is not None and split is None,
                                       continuation=continuation, split=split, required_times=scheduled, wrf_reference=True,

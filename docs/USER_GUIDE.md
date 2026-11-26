@@ -67,7 +67,7 @@ updates, branches, constants and defaults. Every result is checked against WRF i
   WRF runs, continuing a WRF run).
 
 Every WRF option is either ported identically or rejected with an error. All verified MPI layouts ran on a single
-node, including CUDA FP64 on two GPUs. See [MPI.md](MPI.md). The missing features include vortex-following moving nests, `ndown.exe`,
+node, including CUDA FP64 on two GPUs. See [MPI.md](MPI.md). The missing features include moving nests in decomposed runs, `ndown.exe`,
 I/O forms other than NetCDF, and the schemes listed under [Rejected Options and Why](#rejected-options-and-why).
 
 The design (one source for CPU and GPU kernels, the physics driver, the nests) is described in
@@ -465,7 +465,7 @@ an error, never silently:
 
 | WRF option | Why |
 |---|---|
-| vortex-following moving nests (`vortex_interval`, `max_vortex_speed`, `track_level`), `time_to_move`, moves of a nest of a nest, of a nest with nests or siblings, or in a decomposed run (prescribed moves are ported, section 6), vertical nest refinement, nests with their own start or end time (a missing `start_*` / `end_*` entry of a nest is WRF's Registry default, not domain 1's value; with `run_*` a nest whose `end_*` is before domain 1's stop time stops early in WRF), ndown.exe | not ported |
+| vortex following without `--vortex-following` (the translator cannot tell the build), `time_to_move` with prescribed moves, vortex following with more than one nest, moves of a nest of a nest, of a nest with nests or siblings, or in a decomposed run (prescribed moves are ported, section 6), vertical nest refinement, nests with their own start or end time (a missing `start_*` / `end_*` entry of a nest is WRF's Registry default, not domain 1's value; with `run_*` a nest whose `end_*` is before domain 1's stop time stops early in WRF), ndown.exe | not ported |
 | nests in ideal cases; Noah-MP with nests | not ported; wrf.exe 4.8.0 itself aborts with Noah-MP on nests (heap corruption in the nest's first history output) |
 | `io_form_*` other than 2, `nocolons`, auxiliary history / input streams other than auxhist3 and wrflowinp | CPPWRF reads and writes NetCDF; WRF writes no other stream by default |
 | `restart = .true.` in the namelist | resume with `run.restart_file` (section 9) |
@@ -533,8 +533,20 @@ the model check these before the first step), in a run without tiles or MPI rank
 and not resumed from a restart file, on the CPU and the GPU. The suite cases MV1 (four moves, 3 parent steps and 1 h)
 and MV2 (moves cancelled by the corral) are identical to WRF's dmpar runs (one MPI rank, preset moves) on both domains
 at tolerance 0 on the CPU and in CUDA FP64, MV1 also in CPU FP32 against WRF real*4 (docs/STATUS.md).
-Vortex following (`vortex_interval`, `max_vortex_speed`, `track_level`, configure's nesting option 3) and
-`time_to_move` are rejected.
+`time_to_move` with prescribed moves is rejected.
+
+**Vortex-following nests.** A wrf.exe built with vortex following (configure's nesting option 3,
+`-DMOVE_NESTS -DVORTEX_CENTER`) moves the nest toward the lowest `track_level` height instead of reading the
+prescribed moves: translate its namelist with `tools/wrf2cppwrf.py --vortex-following` (or run
+`tools/cppwrf-wrf --vortex-following`; the namelist cannot say how WRF was built), which writes `[domains]
+vortex_following = true` and the non-default `track_level` (Pa, one value),
+`vortex_interval` (minutes between centre searches), `max_vortex_speed` (m/s, the search box around the last centre),
+`time_to_move` (minutes before the first move) and `corral_dist` per nest. After each parent step the centre is
+searched again when the vortex alarm rings, and the nest moves by one parent cell toward it while it is at least one
+parent cell from the nest's centre (docs/NESTING.md, "Vortex-following nests"). The output, the restrictions and the
+physics are those of the prescribed moves above, with one nest (`max_dom = 2`) and no restart file written within the
+run. The suite cases VX1 and VX2 are identical to WRF's dmpar runs built with vortex following (one MPI rank) on
+both domains at tolerance 0 on the CPU and in CUDA FP64, VX1 also in CPU FP32 against WRF real*4 (docs/STATUS.md).
 
 ---
 
@@ -764,6 +776,9 @@ nested; a `[d0N]` key reaches that domain's configuration and is checked there.
 | `[domains]` | `max_dom`, `feedback`, `smooth_option`, `save_topo_from_real`, `blend_width`, `spec_bdy_width` | integer | `1`, `1`, `2`, `1`, `5`, `5` | Multi-domain nesting count, two-way feedback (`0, 1`), feedback smoother (`0..2`), terrain blending | `&domains` / `&bdy_control` |
 | `[domains]` | `num_moves`, `move_id`, `move_interval`, `move_cd_x`, `move_cd_y` | integer, comma lists | `0`, `0`, `999999999`, `0`, `0` | Prescribed nest moves (section 6): the count, and per move the domain, the time in minutes from the run's start and the move in parent cells (-1, 0, 1) | `&domains` |
 | `[d02]`..`[d0N]` | `corral_dist` | integer | `8` | Parent cells a moving nest keeps from domain 1's edge (>= 1) | `&domains corral_dist` |
+| `[domains]` | `vortex_following` | bool | `false` | Vortex-following nests (section 6): WRF built with configure nesting 3 | `wrf2cppwrf.py --vortex-following` |
+| `[domains]` | `track_level` | integer | `50000` | Pressure (Pa) of the height whose minimum the vortex search follows | `&domains track_level` |
+| `[d02]`..`[d0N]` | `vortex_interval`, `max_vortex_speed`, `time_to_move` | integer, integer, number | `15`, `40`, `0` | Minutes between vortex searches; the largest vortex speed (m/s) setting the search box; minutes before the first move | `&domains` |
 | `[d02]`..`[d0N]` | `wrfinput`, `dt`, `out_interval`, `diag_interval`, `parent_id`, `i_parent_start`, `j_parent_start`, `parent_grid_ratio`, `parent_time_step_ratio` | string/int/double | *per-domain* | Child domain input file, timestep, output intervals, parent link, and per-domain dynamics overrides | `&domains` / `&time_control` / `&dynamics` |
 
 ---

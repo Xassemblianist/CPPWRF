@@ -156,11 +156,13 @@ class WrfRun:
     """A drop-in wrf.exe run of a WRF run directory: its configuration and command line (prepare), then the run."""
 
     def __init__(self, run_dir: str = ".", mode: Optional[str] = None, threads: Optional[int] = None,
-                 exe: Optional[str] = None, sets: Sequence[str] = (), native_restart: bool = False):
+                 exe: Optional[str] = None, sets: Sequence[str] = (), native_restart: bool = False,
+                 vortex_following: bool = False):
         self.run_dir = os.path.abspath(run_dir)
         self.mode, self.threads, self.exe_arg = mode, threads, exe
         self.user_sets = list(sets)
         self.native_restart = native_restart
+        self.vortex_following = vortex_following  # wrf.exe built with vortex following (configure nesting 3)
         self.work = os.path.join(self.run_dir, WORK)
         self.nml_path = os.path.join(self.run_dir, "namelist.input")
         self.exe = ""
@@ -187,7 +189,7 @@ class WrfRun:
         self.max_dom = int(nlm.get(nml, "domains", "max_dom", 1))
         tables = self.run_dir if os.path.exists(os.path.join(self.run_dir, "LANDUSE.TBL")) else None
         tr = nlm.translate(nml_t, namelist_path=self.nml_path, output_format="wrfout", real_dir=self.run_dir,
-                           table_dir=tables)
+                           table_dir=tables, vortex_following=self.vortex_following)
         if restart:
             tr.errors.extend(nlm.restart_errors(nml))
         self.translation = tr
@@ -265,11 +267,13 @@ def wrf_main(argv: Optional[Sequence[str]] = None) -> int:
                     help="an extra CPPWRF configuration key (advanced; repeatable)")
     ap.add_argument("--native-restart", action="store_true",
                     help="also write CPPWRF's own restart_<step>.nc files (cppwrf_work/out)")
+    ap.add_argument("--vortex-following", action="store_true",
+                    help="run the nest as a wrf.exe built with vortex following (configure nesting option 3)")
     ap.add_argument("--echo", action="store_true", help="also print the log on the terminal")
     ap.add_argument("--dry-run", action="store_true", help="translate and print the command, do not run")
     ap.add_argument("--version", action="version", version=f"cppwrf-wrf {__version__}")
     a = ap.parse_args(argv)
-    r = WrfRun(a.dir, a.mode, a.threads, a.exe, a.set, a.native_restart)
+    r = WrfRun(a.dir, a.mode, a.threads, a.exe, a.set, a.native_restart, a.vortex_following)
     if not os.path.isdir(r.run_dir):
         sys.stderr.write(f"cppwrf-wrf: {r.run_dir}: no such directory\n")
         return 2

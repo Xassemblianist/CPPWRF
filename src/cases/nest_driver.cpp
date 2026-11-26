@@ -538,7 +538,7 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
   static const char* const kDomainsKeys[] = {"max_dom", "feedback", "smooth_option", "spec_bdy_width", "blend_width",
                                              "parent_id", "i_parent_start", "j_parent_start", "parent_grid_ratio",
                                              "parent_time_step_ratio", "num_moves", "move_id", "move_interval",
-                                             "move_cd_x", "move_cd_y"};
+                                             "move_cd_x", "move_cd_y", "vortex_following", "track_level"};
   for (const std::string& k : root_cfg.keys()) {
     if (k.rfind("domains.", 0) == 0) {
       const std::string n = k.substr(8);
@@ -686,8 +686,9 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
     auto map_key = [&](const std::string& sub, const std::string& val) {
       if (sub == "config" || sub == "parent_id" || sub == "i_parent_start" || sub == "j_parent_start" ||
           sub == "parent_grid_ratio" || sub == "parent_time_step_ratio" || sub == "feedback" ||
-          sub == "smooth_option" || sub == "blend_width" || sub == "corral_dist") {
-        return;  // corral_dist: moving nests (cases/nest_move.cpp)
+          sub == "smooth_option" || sub == "blend_width" || sub == "corral_dist" || sub == "vortex_interval" ||
+          sub == "max_vortex_speed" || sub == "time_to_move") {
+        return;  // corral_dist, vortex_interval, max_vortex_speed, time_to_move: moving nests (cases/nest_move.cpp)
       }
       if (sub == "spec_bdy_width") ov.push_back("real.spec_bdy_width=" + val);
       else if (sub == "wrfinput" || sub == "wrfbdy" || sub == "dir" || sub == "bdy_interval" || sub == "nested" ||
@@ -720,15 +721,19 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       }
     }
 
+    // the moving-nest switches reach every domain's configuration, an external one too: their verification tiers
+    // (io::check_option_tiers, the files' CPPWRF_UNVERIFIED_OPTIONS)
+    for (const char* k : {"domains.num_moves", "domains.vortex_following"})
+      if (root_cfg.has(k)) ov.push_back(std::string(k) + "=" + root_cfg.get_string(k));
     if (!ext_cfg_path.empty()) {
       sp.cfg = io::Config::load(ext_cfg_path, ov);
     } else {
       // Serialize non-domain-specific keys from root_cfg as base INI
       std::ostringstream base_ini;
       for (const std::string& k : root_cfg.keys()) {
-        // domains.num_moves stays in every domain's configuration: its verification tier (io::check_option_tiers,
-        // the files' CPPWRF_UNVERIFIED_OPTIONS)
-        if (k.rfind("domains.", 0) == 0 && k != "domains.num_moves") continue;
+        // domains.num_moves and domains.vortex_following stay in every domain's configuration: their verification
+        // tier (io::check_option_tiers, the files' CPPWRF_UNVERIFIED_OPTIONS)
+        if (k.rfind("domains.", 0) == 0 && k != "domains.num_moves" && k != "domains.vortex_following") continue;
         if (k.size() >= 4 && k[0] == 'd' && std::isdigit(k[1]) && std::isdigit(k[2]) && k[3] == '.') continue;
         if (id >= 2 && (k == "real.wrfbdy" || k == "real.bdy_interval" || k == "real.dx" || k == "real.dy" ||
                         k == "real.e_we" || k == "real.e_sn" || k == "real.e_vert" || k == "real.wrflowinp" ||
@@ -748,6 +753,7 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       for (const std::string& k : sp.cfg.keys())
         if (k.rfind("fdda.obs_", 0) == 0 || k == "fdda.max_obs" || k == "fdda.fdda_end") sp.cfg.mark_accessed(k);
     if (sp.cfg.has("domains.num_moves")) sp.cfg.mark_accessed("domains.num_moves");
+    if (sp.cfg.has("domains.vortex_following")) sp.cfg.mark_accessed("domains.vortex_following");
   }
 
   // med_restart_out writes every domain when d01's restart alarm rings (restart_interval is one value); each
@@ -1135,11 +1141,18 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
   };
   if (moves.any()) {
     if (tile::tiled() || tile::options(root_cfg.get_string("run.tiles", "1")).on())
-      throw std::runtime_error("moving nests (domains.num_moves > 0) in a decomposed run (run.tiles, MPI ranks) are "
-                               "not supported");
+      throw std::runtime_error("moving nests (domains.num_moves > 0, domains.vortex_following) in a decomposed run "
+                               "(run.tiles, MPI ranks) are not supported");
+    // vortex following moves every nest (med_nest_move after each kid's feedback)
+    std::vector<int> moving_ids;
     for (int k = 0; k < moves.num_moves; ++k) {
       const int id = moves.move_id[std::size_t(k)];
       if (id < 2 || id > max_dom || moves.move_interval[std::size_t(k)] >= 999999999) continue;
+      moving_ids.push_back(id);
+    }
+    if (moves.vortex)
+      for (int id = 2; id <= max_dom; ++id) moving_ids.push_back(id);
+    for (const int id : moving_ids) {
       const DomInstance& d = doms[std::size_t(id - 1)];
       if (d.spec.parent_id != 1 || !d.children.empty())
         throw std::runtime_error(d.spec.tag + ": moving nests are supported for a nest of domain 1 without nests of its "
@@ -1150,8 +1163,18 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     // a resumed run: WRF dmpar's wrfrst holds the moved nest (I/J_PARENT_START read back by input_wrf.F:887-903 and
     // the moved arrays); CPPWRF's restart reading does not restore a moved nest's position and history fields
     if (!root_cfg.get_string("run.restart_file", "").empty())
-      throw std::runtime_error("moving nests (domains.num_moves > 0) in a resumed run (run.restart_file) are not "
-                               "supported");
+      throw std::runtime_error("moving nests (domains.num_moves > 0, domains.vortex_following) in a resumed run "
+                               "(run.restart_file) are not supported");
+    // writing wrfrst with vortex following: WRF's restart stream holds the vortex state (Registry XI, XJ, VC_I, VC_J,
+    // io "r") and the COMPUTE_VORTEX_CENTER_ALARM, which CPPWRF does not write
+    if (moves.vortex) {
+      const double ri = root_cfg.get_double("restart.interval", root_cfg.get_double("output.restart_interval", 0.0));
+      const double rt = root_cfg.get_double("run.run_time", 0.0);
+      if (ri > 0.0 && (rt <= 0.0 || ri <= rt))
+        throw std::runtime_error("vortex following (domains.vortex_following) with restart files (restart.interval = " +
+                                 std::to_string(ri) + " s within the run) is not supported: WRF's wrfrst holds the "
+                                 "vortex centre (XI, XJ, VC_I, VC_J), CPPWRF's does not");
+    }
     move_install = std::make_unique<nestmove::Install>();
     for (int i = 0; i < max_dom; ++i) move_regs.push_back(std::make_unique<nestmove::FieldRegistry>());
   }
@@ -1205,7 +1228,7 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
                                std::to_string(pg.ny) + "): i_parent_start, j_parent_start >= 3 and 2 parent cells "
                                "beyond its east and north edges are supported");
     // a nest a move names: the shift's width within the halo, the interpolation's window inside domain 1
-    bool moving = false;
+    bool moving = moves.vortex;
     for (int k = 0; k < moves.num_moves; ++k)
       moving = moving || (moves.move_id[std::size_t(k)] == cs.dom_id && moves.move_interval[std::size_t(k)] < 999999999);
     if (moving) {
@@ -1386,9 +1409,7 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     int dx = 0, dy = 0;
     // the nest's clock since the clock's start time (a resumed run: the restart time), at the end of its last step
     const long nsteps = c.step - c.runner->start_step;
-    if (nsteps > 2147483647L) throw std::runtime_error("moving nests: more than 2^31 - 1 steps of a nest");
-    const wrf_time::Interval ct = c.model.dt_clock * int(nsteps);
-    if (!nestmove::time_for_move(moves, P, N, ct, dx, dy)) return;
+    if (!nestmove::time_for_move(moves, P, N, c.model.dt_clock, nsteps, dx, dy)) return;
     const auto scope = move_scope(ci);
     nestmove::move_nest(P, N, dx, dy);
     c.spec.i_parent_start = N.i_parent_start;
