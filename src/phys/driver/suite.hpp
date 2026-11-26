@@ -4,7 +4,7 @@
 // phy_prep_part2 for
 //   sf_sfclay_physics = 1 (sfclayrev), sf_surface_physics = 2 (Noah, 4 soil layers),
 //   bl_pbl_physics = 1 (YSU), mp/cu/ra = 0, isfflx = 1, fractional_seaice = 0, use_theta_m = 1,
-//   real data (specified boundaries), sf_urban_physics = 0 or 1 (single-layer UCM with Noah), no lake model,
+//   real data (specified boundaries), sf_urban_physics = 0 or 1 (single-layer UCM with Noah), sf_lake_physics = 0 or 1,
 //   no SST update.
 // Statement-by-statement port of the WRF driver path (call map: docs/PHYSICS_SUITE.md); the
 // column schemes are the verified ports in src/phys/{sf_sfclayrev,lsm_noah,bl_ysu}.
@@ -142,6 +142,10 @@ struct SuiteOptions {
   // sf_surface_physics = 2; use_wudapt_lcz 0: URBPARM.TBL (3 categories), 1: URBPARM_LCZ.TBL (11 LCZ categories)
   int sf_urban_physics = 0, use_wudapt_lcz = 0;
   int opt_thcnd = 1;  // Noah soil thermal conductivity (1 or 2)
+  // the lake model (module_sf_lake.F, sf_lake_physics = 1): lakeini's options (Registry defaults) and the input's
+  // LAKEFLAG / LAKE_DEPTH_FLAG (wrfinput scalars)
+  int sf_lake_physics = 0, use_lakedepth = 1;
+  double lakedepth_default = 50., lake_min_elev = 5.;
   int seaice_albedo_opt = 0;
   double seaice_albedo_default = 0.65;
   int seaice_thickness_opt = 0;
@@ -327,6 +331,24 @@ class PhysicsSuite : public dyn::ColumnPhysics {
     IntField2 is_urb;  // lsm ran the UCM at the point this step
   };
   std::unique_ptr<UrbanFields> urb_;
+  // sf_lake_physics = 1 (allocated then): the Registry package simple_lake (lake2d aside: no I/O, not read by Lake),
+  // grid% names; levels 1..10 (lake_sll), -4..10 (lake_ssl: k = level + 4), -5..10 (lake_intl: k = level + 5); XLAT
+  // (Lake's XLAT_URB2D)
+  struct LakeFields {
+    LakeFields(const Grid& g);
+    Field2 lakedepth2d, savedtke12d, snowdp2d, h2osno2d, snl2d, t_grnd2d, xlat;
+    Field3 t_lake3d, lake_icefrac3d, z_lake3d, dz_lake3d, watsat3d, csol3d, tkmg3d, tkdry3d, tksatu3d;  // 10
+    Field3 t_soisno3d, h2osoi_ice3d, h2osoi_liq3d, h2osoi_vol3d, z3d, dz3d;                            // 15
+    Field3 zi3d;                                                                                        // 16
+  };
+  std::unique_ptr<LakeFields> lake_;
+  // bl_init's lakeini (module_sf_lake.F:4886-5397; not on restarts): call after the LSM's init with XLAT, TSK, SNOW,
+  // XICE, XLAND, IVGTYP, ISLTYP and LAKEMASK of the input in place; ht, lake_depth: wrfinput HGT and LAKE_DEPTH
+  // (i + nx*j); lakeflag, lake_depth_flag: wrfinput LAKEFLAG, LAKE_DEPTH_FLAG. Changes IVGTYP, XLAND, XICE at lake
+  // points with sea ice and LAKEMASK (LAKEFLAG 0) as WRF does; xland_host (i + nx*j), when given, gets the patch's
+  // XLAND after lakeini (start_em's topo_wind reads grid%xland after phy_init).
+  void init_lake(const std::vector<double>& ht, const std::vector<double>& lake_depth, int lakeflag,
+                 int lake_depth_flag, std::vector<double>* xland_host = nullptr);
   urban::UrbanTables urban_tables_;  // urban_param_init (URBPARM.TBL / URBPARM_LCZ.TBL)
   // phy_init's urban_var_init (module_sf_urban.F:3525-4044, not a restart): UTYPE, FRC_URB2D (frc_in: wrfinput's
   // FRC_URB2D, empty: 0), the state from TSK and TSLB; call after TSK, TSLB and IVGTYP hold the input's values.

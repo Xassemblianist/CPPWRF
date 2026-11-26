@@ -1135,6 +1135,9 @@ enum FatalCode : int {
   kFatalObsRegime = 31,              // obs nudging compute_VIH: a REGIME other than 1 ... 4 (WRF stops)
   kFatalObsKpblObs = 32,             // obs nudging nudob: kpbl_obs read (never set in WRF's serial build)
   kFatalObsSoundingLevels = 33,      // obs nudging nudob: a sounding's last level is not its count (WRF stops)
+  kFatalLakeSnl = 40,                // lake model ShalLakeFluxes: snl outside -5..0 (WRF stops)
+  kFatalLakeTsoisno = 41,            // lake model ShalLakeTemperature: |t_soisno - 288| > 150 (WRF stops)
+  kFatalLakeImelt = 42,              // lake model: a new snow layer compacted by WRF's undefined imelt (not a WRF stop)
 };
 struct FatalError : std::runtime_error {
   int code;

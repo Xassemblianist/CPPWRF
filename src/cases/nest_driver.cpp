@@ -359,6 +359,14 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
     if ((k == "phys.sf_surface_physics" || (k.size() > 18 && k.compare(k.size() - 18, 18, "sf_surface_physics") == 0)) &&
         root_cfg.get_int(k, 0) == 3)
       throw std::runtime_error("nested runs with the RUC LSM (sf_surface_physics = 3) are not supported");
+  // lake model with nests: the lake fields' nest interpolation (interp_mask_water_field with ISLAKE), lakeini on the
+  // parent after the feedback and the per-domain lake options are not ported (also with the lake on domain 1 only)
+  if (max_dom > 1)
+    for (const std::string& k : root_cfg.keys())
+      if ((k == "phys.sf_lake_physics" || (k.size() > 15 && k.compare(k.size() - 15, 15, "sf_lake_physics") == 0)) &&
+          root_cfg.get_int(k, 0) != 0)
+        throw std::runtime_error("nested runs with the lake model (sf_lake_physics = " +
+                                 std::to_string(root_cfg.get_int(k, 0)) + ") are not supported");
   // aerosol-aware Thompson: the nest's QNWFA2D / QNIFA2D (Registry "d" / "u") are not interpolated / fed back
   if (max_dom > 1 && root_cfg.get_int("phys.mp_physics", 0) == 28)
     throw std::runtime_error("nested runs with mp_physics = 28 (aerosol-aware Thompson) are not supported");

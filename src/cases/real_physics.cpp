@@ -37,8 +37,10 @@
 namespace cppwrf::cases {
 
 bool wants_column_physics(const io::Config& cfg) {
+  // sf_lake_physics: the suite then refuses the lake without Noah / Noah-MP instead of skipping it
   return cfg.get_int("phys.sf_sfclay_physics", 0) != 0 || cfg.get_int("phys.sf_surface_physics", 0) != 0 ||
-         cfg.get_int("phys.bl_pbl_physics", 0) != 0 || cfg.get_int("phys.cu_physics", 0) != 0;
+         cfg.get_int("phys.bl_pbl_physics", 0) != 0 || cfg.get_int("phys.cu_physics", 0) != 0 ||
+         cfg.get_int("phys.sf_lake_physics", 0) != 0;
 }
 
 LanduseInit landuse_init(const std::string& table_dir, const std::string& mminlu, int julday, double cen_lat,
@@ -365,6 +367,17 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   if (o.sf_urban_physics != 0 && cfg.get_bool("real.nested", false))
     throw std::runtime_error("sf_urban_physics = " + std::to_string(o.sf_urban_physics) +
                              " on a nest is not supported");
+  // the lake model (module_sf_lake.F): one domain (the nest interpolation of the lake fields, interp_mask_water_field
+  // with ISLAKE, is not ported)
+  o.sf_lake_physics = int(cfg.get_int("phys.sf_lake_physics", 0));
+  o.use_lakedepth = int(cfg.get_int("phys.use_lakedepth", 1));
+  o.lakedepth_default = cfg.get_double("phys.lakedepth_default", 50.);
+  o.lake_min_elev = cfg.get_double("phys.lake_min_elev", 5.);
+  if (o.sf_lake_physics != 0 && cfg.get_bool("real.nested", false))
+    throw std::runtime_error("sf_lake_physics = " + std::to_string(o.sf_lake_physics) + " on a nest is not supported");
+  if (o.sf_lake_physics != 0 && cfg.get_bool("time.adaptive", false))
+    throw std::runtime_error("sf_lake_physics = " + std::to_string(o.sf_lake_physics) +
+                             " with the adaptive time step (use_adaptive_time_step) is not supported");
   // terrain options (start_em, pre_radiation_driver, surface_driver): one domain, a fixed time step
   o.topo_wind = int(cfg.get_int("phys.topo_wind", 0));
   o.slope_rad = int(cfg.get_int("phys.slope_rad", 0));
@@ -617,7 +630,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
   }
   if (o.fractional_seaice == 1 || o.sst_update == 1 || o.sst_skin == 1) put2(su.sst, rd2("SST"));
   if (o.fractional_seaice == 1) put2(su.tsk_save, rd2("TSK"));  // phy_init: TSK_SAVE = TSK
-  if (o.sst_update == 1) put2(su.xicem, xice);                    // landuse_init: XICEM = XICE
+  if (o.sst_update == 1 || o.sf_lake_physics == 1) put2(su.xicem, xice);  // landuse_init: XICEM = XICE
   su.init_tmn_update();  // phy_init (tmn_update = 1): TYR, TLAG = the input's TMN, before the LSM's init
   put2(su.water_depth, in.has("WATER_DEPTH") ? rd2("WATER_DEPTH") : std::vector<double>(n2, 0.0));
   const std::pair<const char*, Field2*> diag[] = {{"T2", &su.t2}, {"TH2", &su.th2}, {"Q2", &su.q2},
@@ -667,6 +680,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
                             &emiss = li.emiss, &mavail = li.mavail, &xland = li.xland;
   put2(su.albbck, albbck); put2(su.albedo, albedo); put2(su.z0, z0); put2(su.znt, z0);
   put2(su.embck, embck); put2(su.emiss, emiss); put2(su.mavail, mavail); put2(su.xland, xland);
+  std::vector<double> xland_phy = xland;  // grid%xland after phy_init (lakeini changes frozen lake points)
   if (o.sf_surface_physics == 1) put2(su.thc, li.thc);
 
   auto put_soil = [&](Field3& f, const std::vector<double>& a) {
@@ -777,6 +791,25 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     if (in.has("SNOWH")) put2(su.snowh, rd2("SNOWH"));
     su.init_noahmp(in.has("SNOWH"));
   }
+  if (su.lake_) {
+    // bl_init's lakeini after the land surface model's init. The proven inputs: LAKEFLAG = 1 (real.exe with the ISLAKE
+    // category: LAKEMASK from LU_INDEX) and no lake depth data in use (LAKE_DEPTH_FLAG = 0, or use_lakedepth = 0)
+    auto scalar = [&](const char* n) {
+      if (!in.has(n)) throw std::runtime_error(std::string("sf_lake_physics = 1: wrfinput lacks ") + n);
+      return int(std::lround(in.var(n, 1)[0]));
+    };
+    const int lakeflag = scalar("LAKEFLAG"), lake_depth_flag = scalar("LAKE_DEPTH_FLAG");
+    if (lakeflag != 1)
+      throw std::runtime_error("sf_lake_physics = 1 with LAKEFLAG = " + std::to_string(lakeflag) +
+                               " (an input without the ISLAKE land-use category: lakes from IVGTYP and lake_min_elev) "
+                               "is not supported (not proven against a WRF run)");
+    if (lake_depth_flag == 1 && o.use_lakedepth == 1)
+      throw std::runtime_error("sf_lake_physics = 1 with LAKE_DEPTH from the input (LAKE_DEPTH_FLAG = 1, use_lakedepth "
+                               "= 1) is not supported (not proven against a WRF run): set use_lakedepth = 0");
+    put2(su.lake_->xlat, m.xlat);
+    su.init_lake(rd2("HGT"), in.has("LAKE_DEPTH") ? rd2("LAKE_DEPTH") : std::vector<double>(), lakeflag,
+                 lake_depth_flag, &xland_phy);
+  }
   // CANWAT = 0 (lsminit / NoahmpInitMain; the slab's from wrfinput), the accumulations and fluxes stay zero
   su.init_radiation(m.xlat, m.xlong);
   if (su.obs_) {  // fddaobs_init's inputs: wrfinput's base state, XLAT(1,1), XLONG(1,1) and projection
@@ -800,7 +833,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
       throw std::runtime_error("topo_wind requires VAR_SSO data");  // start_em.F:236-239 (grid%got_var_sso)
     const std::vector<double> zero(n2, 0.0);
     su.init_topo(rd2("HGT"), rd2("MAPFAC_MX"), rd2("MAPFAC_MY"), rd2("SINALPHA"), rd2("COSALPHA"), m.xlat, m.xlong,
-                 xland, in.has("VAR_SSO") ? rd2("VAR_SSO") : zero, in.has("VAR") ? in.rec("VAR", mass) : zero);
+                 xland_phy, in.has("VAR_SSO") ? rd2("VAR_SSO") : zero, in.has("VAR") ? in.rec("VAR", mass) : zero);
   }
   if (auto* pc = m.rk->physics(); pc && pc->params().microp_re)
     su.set_effective_radii(&pc->re_cloud, &pc->re_ice, pc->p3() ? nullptr : &pc->re_snow);  // P3: has_reqs = 0
@@ -825,8 +858,9 @@ void phy_init_after_feedback(const io::Config& cfg, Model& m) {
   if (!m.suite) return;
   phys::driver::PhysicsSuite& su = *m.suite;
   const phys::driver::SuiteOptions& o = su.options();
-  if (o.sf_surface_physics == 3 || o.sf_surface_physics == 4 || su.urb_)  // not ported for nests (refused)
-    throw std::runtime_error("phy_init after the nest feedback: RUC, Noah-MP and the UCM are not ported for nests");
+  if (o.sf_surface_physics == 3 || o.sf_surface_physics == 4 || su.urb_ || su.lake_)  // not ported for nests (refused)
+    throw std::runtime_error("phy_init after the nest feedback: RUC, Noah-MP, the UCM and the lake model are not ported "
+                             "for nests");
   // the model keeps no LU_INDEX of its own (IVGTYP stands for it below): Noah's NLCD40 remapping of IVGTYP (23, 25 ->
   // 24, init_real_physics) would give landuse_init other categories than WRF's fed-back LU_INDEX
   if (o.sf_surface_physics == 2 && o.mminlu == "NLCD40")

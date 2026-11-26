@@ -1648,6 +1648,44 @@ class TestWrfNamelistSemantics(unittest.TestCase):
                                                                                   "&time_control restart = .true. /")
         self.assertTrue(any("restart = .true. with sf_urban_physics" in e for e in self.errors(complete(rst))))
 
+    def test_lake_model(self):
+        # sf_lake_physics = 1 (the CLM lake model) with Noah / Noah-MP on one domain with a fixed time step; the
+        # lakeini options pass on; other values, other land surfaces, nests, SST update / skin SST / fractional sea
+        # ice and the adaptive time step are errors
+        noah = self.FULL.replace("bl_pbl_physics = 0,", "bl_pbl_physics = 1,").replace(
+            "sf_sfclay_physics = 0, sf_surface_physics = 0", "sf_sfclay_physics = 1, sf_surface_physics = 2")
+        t, sec = self.translate(noah.replace("&physics ", "&physics sf_lake_physics = 1, use_lakedepth = 0, "
+                                                          "lakedepth_default = 10., lake_min_elev = 3., "))
+        self.assertEqual(t.errors, [])
+        self.assertEqual((sec["phys"]["sf_lake_physics"], sec["phys"]["use_lakedepth"]), (1, 0))
+        self.assertEqual((sec["phys"]["lakedepth_default"], sec["phys"]["lake_min_elev"]), (10.0, 3.0))
+        t, sec = self.translate(noah.replace("&physics ", "&physics sf_lake_physics = 1, "))
+        self.assertEqual(t.errors, [])
+        self.assertEqual((sec["phys"]["use_lakedepth"], sec["phys"]["lakedepth_default"],
+                          sec["phys"]["lake_min_elev"]), (1, 50.0, 5.0))
+        t, sec = self.translate(noah)
+        self.assertNotIn("sf_lake_physics", sec.get("phys", {}))
+        # without the lake model its options have no effect (WRF reads them only in lakeini / Lake)
+        t, sec = self.translate(noah.replace("&physics ", "&physics sf_lake_physics = 0, use_lakedepth = 0, "
+                                                          "lakedepth_default = 10., lake_min_elev = 10., "))
+        self.assertEqual(t.errors, [])
+        self.assertFalse(any(k in sec.get("phys", {}) for k in ("use_lakedepth", "lakedepth_default", "lake_min_elev")))
+        for extra, msg in (("sf_lake_physics = 2", "sf_lake_physics = [2]"),
+                           ("sf_lake_physics = 1, use_lakedepth = 2", "use_lakedepth = 2"),
+                           ("sf_lake_physics = 1, sst_update = 1", "sst_update = 1"),
+                           ("sf_lake_physics = 1, fractional_seaice = 2", "fractional_seaice = 2"),
+                           ("sf_lake_physics = 1, sst_skin = 1", "sst_skin = 1"),
+                           ("sf_lake_physics = 1, fractional_seaice = 1", "fractional_seaice = 1")):
+            errs = self.errors(complete(noah.replace("&physics ", "&physics " + extra + ", ")))
+            self.assertTrue(any(msg in e for e in errs), (extra, errs))
+        slab = self.FULL.replace("sf_sfclay_physics = 0, sf_surface_physics = 0", "sf_sfclay_physics = 1, "
+                                 "sf_surface_physics = 1").replace("&physics ", "&physics sf_lake_physics = 1, ")
+        self.assertTrue(any("Noah (2) and Noah-MP (4)" in e for e in self.errors(complete(slab))))
+        adapt = noah.replace("&physics ", "&physics sf_lake_physics = 1, ").replace(
+            "&domains ", "&domains use_adaptive_time_step = .true., ")
+        self.assertTrue(any("sf_lake_physics = 1 with use_adaptive_time_step" in e
+                            for e in self.errors(complete(adapt))))
+
     def test_terrain_options(self):
         # topo_wind 1 / 2, slope_rad 1, topo_shading 1 (with shadlen) on one real-data domain; other values, nests and
         # slope_rad / topo_shading with the adaptive time step are errors

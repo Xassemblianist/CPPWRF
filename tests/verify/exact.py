@@ -322,7 +322,9 @@ def _compare_stream(A, B, subset, until, global_atts, ignore_atts=(), stats=None
             bad[v] += f" [{nframes[v]} frames]"
     meta = []
     for a, b in pairs:
-        ignore = ("TITLE",) + tuple(ignore_atts) if global_atts else set(a.ncattrs()) | set(b.ncattrs())
+        # CPPWRF adds this tier marker when a case opts into an unverified option.
+        ignore = ("TITLE", "CPPWRF_UNVERIFIED_OPTIONS") + tuple(ignore_atts) if global_atts else \
+            set(a.ncattrs()) | set(b.ncattrs())
         m = metadata(a, b, ignore, only=list(b.variables) if subset else None, grouped_records=True)
         meta += [x for x in m if x not in meta]
     if meta:

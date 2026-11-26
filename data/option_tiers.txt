@@ -21,3 +21,5 @@
 #
 # Example (a scheme ported with a column driver, not yet compared with a whole WRF run; WSM5 itself is verified):
 #   phys.mp_physics   physics.mp_physics   4   column_verified   WSM5 (tests/phys/mp_wsm35)
+
+phys.sf_lake_physics  physics.sf_lake_physics  1  column_verified  CLM lake model (tests/phys/sf_lake; suite cases LK1-LKN in tests/verify/cases/51_lake.py await their WRF references)

@@ -742,6 +742,12 @@ const char* fatal_message(int code) {
       return "obs nudging: a single-level upper-air observation whose influence layer holds the PBL top level is not "
              "supported (WRF's nudob reads kpbl_obs there, which its serial build never sets)";
     case kFatalObsSoundingLevels: return "wrf_fddaobs_in: in4dob";
+    case kFatalLakeSnl: return "snl: out of range value";
+    case kFatalLakeTsoisno: return " WARNING: Extreme t_soisno at c, level";
+    case kFatalLakeImelt:
+      return "sf_lake_physics = 1: a snow layer made this step on a lake with liquid water in it: WRF's SnowCompaction "
+             "reads the undefined imelt(0) of LakeMain there (PhaseChange_Lake sets imelt only for existing layers); "
+             "not supported";
     default: return "unknown fatal condition in a physics kernel";
   }
 }

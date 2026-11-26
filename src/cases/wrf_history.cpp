@@ -202,6 +202,9 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
     c.set("tmn_update", std::to_string(o.tmn_update));
     c.set("lagday", std::to_string(o.lagday));
     c.set("num_soil_layers", std::to_string(o.num_soil_layers));
+    c.set("sf_lake_physics", std::to_string(o.sf_lake_physics));  // package simple_lake, SF_LAKE_PHYSICS
+    c.set("use_lakedepth", std::to_string(o.use_lakedepth));
+    c.set("lakedepth_default", str(o.lakedepth_default)); c.set("lake_min_elev", str(o.lake_min_elev));
     c.set("ishallow", std::to_string(o.ishallow)); c.set("isfflx", std::to_string(o.isfflx));
     c.set("convtrans_avglen_m", str(o.convtrans_avglen_m));
     c.set("isftcflx", std::to_string(o.isftcflx)); c.set("iz0tlnd", std::to_string(o.iz0tlnd));
@@ -496,8 +499,10 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
     for (int q = 0; q < s.n_scalars(); ++q)
       if (s.q_names[std::size_t(q)] == "tke" && base == "TKE") return copy_field(s.q_1[std::size_t(q)], dims, out);
   }
-  // landuse_init and the surface driver set XICEM = XICE (the previous step's sea ice)
-  if (name == "XICEM" && !(m_.suite && m_.suite->options().sst_update == 1) && value("SEAICE", "SEAICE", dims, out))
+  // landuse_init and the surface driver set XICEM = XICE (the previous step's sea ice); the model carries its own
+  // XICEM with sst_update and with the lake model (lakeini zeroes XICE at frozen lake points, not XICEM)
+  if (name == "XICEM" && !(m_.suite && (m_.suite->options().sst_update == 1 || m_.suite->options().sf_lake_physics == 1)) &&
+      value("SEAICE", "SEAICE", dims, out))
     return true;
   if (name == "U") return copy_field(s.u_2, dims, out);
   if (name == "V") return copy_field(s.v_2, dims, out);

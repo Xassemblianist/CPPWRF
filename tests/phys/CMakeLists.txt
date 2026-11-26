@@ -101,6 +101,7 @@ foreach(t "kessler;mp_kessler;${PHYS_BIN}"
           "bl_qnse;bl_qnse;${PHYS_BIN}/bl_qnse_test"
           "bl_mfshconv;bl_mfshconv;${PHYS_BIN}/bl_mfshconv_test"
           "sf_urban;sf_urban;${PHYS_BIN}/sf_urban_test"
+          "sf_lake;sf_lake;${PHYS_BIN}/sf_lake_test"
           "lsm_ruc;lsm_ruc;${PHYS_BIN}/lsm_ruc_test"
           "topo;topo;${PHYS_BIN}/topo_test")
   list(GET t 0 name)
@@ -110,6 +111,6 @@ foreach(t "kessler;mp_kessler;${PHYS_BIN}"
            WORKING_DIRECTORY ${PHYS_BIN})
   set_tests_properties(test_phys_${name} PROPERTIES LABELS diff SKIP_RETURN_CODE 77)
 endforeach()
-# the QNSE and EDKF drivers build with the parent's -march choice (CPPWRF_NATIVE)
-set_tests_properties(test_phys_bl_qnse test_phys_bl_mfshconv PROPERTIES ENVIRONMENT
+# the QNSE, EDKF and lake drivers build with the parent's -march choice (CPPWRF_NATIVE)
+set_tests_properties(test_phys_bl_qnse test_phys_bl_mfshconv test_phys_sf_lake PROPERTIES ENVIRONMENT
                      "CPPWRF_TEST_MARCH=${CPPWRF_TEST_MARCH}")

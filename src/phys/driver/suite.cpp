@@ -32,6 +32,7 @@
 #include "phys/lsm_ruc/ruc.hpp"
 #include "phys/lsm_ruc/ruc_tables.hpp"
 #include "phys/lsm_slab/slab.hpp"
+#include "phys/sf_lake/lake_init.hpp"
 #include "phys/sf_urban/urban_tables.hpp"
 
 namespace cppwrf::phys::driver {
@@ -420,6 +421,22 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   if (o.sf_urban_physics == 1 && o.num_soil_layers != 4)
     throw std::runtime_error("PhysicsSuite: sf_urban_physics = 1 needs num_soil_layers = 4 (the 4 roof, wall and "
                              "road layers of URBPARM.TBL)");
+  // the lake model with the land surface models whose drivers leave the water points alone (Noah, Noah-MP; RUC
+  // skips lake points in its own driver and the slab is not proven), no SST update / skin SST / fractional sea ice
+  // (their lake branches in surface_driver are not ported)
+  if (o.sf_lake_physics != 0 && o.sf_lake_physics != 1)
+    throw std::runtime_error("PhysicsSuite: sf_lake_physics = " + std::to_string(o.sf_lake_physics) +
+                             " is not supported (0 or 1: the CLM lake model)");
+  if (o.sf_lake_physics == 1) {
+    if (o.sf_surface_physics != 2 && o.sf_surface_physics != 4)
+      throw std::runtime_error("PhysicsSuite: sf_lake_physics = 1 is supported with Noah (sf_surface_physics = 2) and "
+                               "Noah-MP (4) only");
+    if (o.sst_update != 0 || o.sst_skin != 0 || o.fractional_seaice != 0)
+      throw std::runtime_error("PhysicsSuite: sf_lake_physics = 1 with sst_update, sst_skin or fractional_seaice "
+                               "is not supported (the lake branches of surface_driver's SST update are not ported)");
+    if (o.use_lakedepth != 0 && o.use_lakedepth != 1)
+      throw std::runtime_error("PhysicsSuite: use_lakedepth must be 0 or 1");
+  }
   if (o.use_wudapt_lcz != 0 && o.use_wudapt_lcz != 1)
     throw std::runtime_error("PhysicsSuite: use_wudapt_lcz must be 0 or 1");
   if (o.cu_physics == 1 && o.kfeta_trigger != 1 && o.kfeta_trigger != 3)
@@ -444,7 +461,9 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
   if (o.topo_shading == 1 && !(o.shadlen > 0.0))
     throw std::runtime_error("PhysicsSuite: topo_shading = 1 needs shadlen > 0");
   if (o.slope_rad == 1 || o.topo_shading == 1) topo_ = std::make_unique<TopoFields>(g);
-  if (o.sst_update == 1) xicem = Field2(g, Stagger::M, "xicem");
+  // XICEM: landuse_init's copy of XICE, which only the SST update changes afterwards; with the lake model it keeps
+  // the sea ice of frozen lake points that lakeini sets to 0 in XICE (module_sf_lake.F:5039-5047)
+  if (o.sst_update == 1 || o.sf_lake_physics == 1) xicem = Field2(g, Stagger::M, "xicem");
   // sst_skin / tmn_update: surface_driver every step (module_surface_driver.F:1855-1895). Ported with the Noah LSM
   // (the reference runs); check_a_mundo stops tmn_update = 1 with lagday = 1
   if (o.sst_skin != 0 && o.sst_skin != 1) throw std::runtime_error("PhysicsSuite: sst_skin must be 0 or 1");
@@ -787,6 +806,26 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
               &rainncvstd};
     for (std::size_t k = 0; k < clwrf_.size(); ++k) *clwrf_[k] = Field2(g, Stagger::M, names[k]);
   }
+  if (o.sf_lake_physics == 1) lake_ = std::make_unique<LakeFields>(g);
+}
+
+PhysicsSuite::LakeFields::LakeFields(const Grid& g) {
+  for (auto [f, n] : std::initializer_list<std::pair<Field2*, const char*>>{
+           {&lakedepth2d, "lakedepth2d"}, {&savedtke12d, "savedtke12d"}, {&snowdp2d, "snowdp2d"},
+           {&h2osno2d, "h2osno2d"}, {&snl2d, "snl2d"}, {&t_grnd2d, "t_grnd2d"}, {&xlat, "xlat_lake"}})
+    *f = Field2(g, Stagger::M, n);
+  Grid g10 = g, g15 = g, g16 = g;
+  g10.nz = 10; g15.nz = 15; g16.nz = 16;
+  for (auto [f, n] : std::initializer_list<std::pair<Field3*, const char*>>{
+           {&t_lake3d, "t_lake3d"}, {&lake_icefrac3d, "lake_icefrac3d"}, {&z_lake3d, "z_lake3d"},
+           {&dz_lake3d, "dz_lake3d"}, {&watsat3d, "watsat3d"}, {&csol3d, "csol3d"}, {&tkmg3d, "tkmg3d"},
+           {&tkdry3d, "tkdry3d"}, {&tksatu3d, "tksatu3d"}})
+    *f = Field3(g10, Stagger::M, n);
+  for (auto [f, n] : std::initializer_list<std::pair<Field3*, const char*>>{
+           {&t_soisno3d, "t_soisno3d"}, {&h2osoi_ice3d, "h2osoi_ice3d"}, {&h2osoi_liq3d, "h2osoi_liq3d"},
+           {&h2osoi_vol3d, "h2osoi_vol3d"}, {&z3d, "z3d"}, {&dz3d, "dz3d"}})
+    *f = Field3(g15, Stagger::M, n);
+  zi3d = Field3(g16, Stagger::M, "zi3d");
 }
 
 std::array<Field2*, 16> PhysicsSuite::acrad() {
@@ -952,6 +991,76 @@ struct KUrbanInit {
   }
 };
 }  // namespace
+
+void PhysicsSuite::init_lake(const std::vector<double>& ht, const std::vector<double>& lake_depth, int lakeflag,
+                             int lake_depth_flag, std::vector<double>* xland_host) {
+  if (!lake_) return;
+  LakeFields& lk = *lake_;
+  const int nx = g_.nx;
+  lake::LakeIniOptions lo;
+  lo.lake_min_elev = real(o_.lake_min_elev);
+  lo.lakedepth_default = real(o_.lakedepth_default);
+  lo.xice_threshold = real(0.5);  // bl_init: fractional_seaice = 0
+  lo.lakeflag = lakeflag;
+  lo.use_lakedepth = o_.use_lakedepth;
+  lo.iswater = o_.iswater;
+  lo.lake_depth_flag = lake_depth_flag;
+  std::vector<real> htsk, hsnow, hxice, hxland, hmask;
+  std::vector<int> hivg, hisl;
+  tsk.download(htsk); snow.download(hsnow); xice.download(hxice); xland.download(hxland); lakemask.download(hmask);
+  ivgtyp.download(hivg); isltyp.download(hisl);
+  const Layout& L = tsk.layout();
+  const Layout& Li = ivgtyp.layout();
+  std::vector<lake::LakeIniIn> pts;
+  std::vector<int> iv;
+  std::vector<real> xl, xi, lm;
+  for (int j = L.j0(); j < L.j1(); ++j)  // the patch, WRF's tile
+    for (int i = L.i0(); i < L.i1(); ++i) {
+      const std::size_t q = L.index(i, j, 0), qi = Li.index(i, j, 0), p = std::size_t(i) + std::size_t(nx) * j;
+      pts.push_back({real(ht[p]), hsnow[q], htsk[q], lake_depth.empty() ? real(0) : real(lake_depth[p]), hisl[qi]});
+      iv.push_back(hivg[qi]); xl.push_back(hxland[q]); xi.push_back(hxice[q]); lm.push_back(hmask[q]);
+    }
+  std::vector<lake::LakeInitPoint> st;
+  lake::lakeini_points(lo, pts, iv, xl, xi, lm, st);
+  std::size_t n = 0;
+  for (int j = L.j0(); j < L.j1(); ++j)
+    for (int i = L.i0(); i < L.i1(); ++i, ++n) {
+      const std::size_t q = L.index(i, j, 0), qi = Li.index(i, j, 0);
+      hivg[qi] = iv[n]; hxland[q] = xl[n]; hxice[q] = xi[n]; hmask[q] = lm[n];
+      if (xland_host) (*xland_host)[std::size_t(i) + std::size_t(nx) * j] = double(xl[n]);
+    }
+  copy_to_dev(xland.data() - L.offset, hxland.data(), xland.bytes());
+  copy_to_dev(xice.data() - L.offset, hxice.data(), xice.bytes());
+  copy_to_dev(lakemask.data() - L.offset, hmask.data(), lakemask.bytes());
+  ivgtyp.upload(hivg);
+  // the patch point's index in st
+  auto at = [&](int i, int j) -> const lake::LakeInitPoint& {
+    return st[std::size_t(j - L.j0()) * std::size_t(L.i1() - L.i0()) + std::size_t(i - L.i0())];
+  };
+  lk.lakedepth2d.fill_host([&](int i, int j, int) { return at(i, j).lakedepth2d; });
+  lk.savedtke12d.fill_host([&](int i, int j, int) { return at(i, j).savedtke12d; });
+  lk.snowdp2d.fill_host([&](int i, int j, int) { return at(i, j).snowdp2d; });
+  lk.h2osno2d.fill_host([&](int i, int j, int) { return at(i, j).h2osno2d; });
+  lk.snl2d.fill_host([&](int i, int j, int) { return at(i, j).snl2d; });
+  lk.t_grnd2d.fill_host([&](int i, int j, int) { return at(i, j).t_grnd2d; });
+  // levels: lake_sll k = level - 1, lake_ssl k = level + 4, lake_intl k = level + 5
+  lk.t_lake3d.fill_host([&](int i, int j, int k) { return at(i, j).t_lake[k + 1]; });
+  lk.lake_icefrac3d.fill_host([&](int i, int j, int k) { return at(i, j).lake_icefrac[k + 1]; });
+  lk.z_lake3d.fill_host([&](int i, int j, int k) { return at(i, j).z_lake[k + 1]; });
+  lk.dz_lake3d.fill_host([&](int i, int j, int k) { return at(i, j).dz_lake[k + 1]; });
+  lk.watsat3d.fill_host([&](int i, int j, int k) { return at(i, j).watsat[k + 1]; });
+  lk.csol3d.fill_host([&](int i, int j, int k) { return at(i, j).csol[k + 1]; });
+  lk.tkmg3d.fill_host([&](int i, int j, int k) { return at(i, j).tkmg[k + 1]; });
+  lk.tkdry3d.fill_host([&](int i, int j, int k) { return at(i, j).tkdry[k + 1]; });
+  lk.tksatu3d.fill_host([&](int i, int j, int k) { return at(i, j).tksatu[k + 1]; });
+  lk.t_soisno3d.fill_host([&](int i, int j, int k) { return at(i, j).t_soisno[k]; });
+  lk.h2osoi_ice3d.fill_host([&](int i, int j, int k) { return at(i, j).h2osoi_ice[k]; });
+  lk.h2osoi_liq3d.fill_host([&](int i, int j, int k) { return at(i, j).h2osoi_liq[k]; });
+  lk.h2osoi_vol3d.fill_host([&](int i, int j, int k) { return at(i, j).h2osoi_vol[k]; });
+  lk.z3d.fill_host([&](int i, int j, int k) { return at(i, j).z[k]; });
+  lk.dz3d.fill_host([&](int i, int j, int k) { return at(i, j).dz[k]; });
+  lk.zi3d.fill_host([&](int i, int j, int k) { return at(i, j).zi[k]; });
+}
 
 void PhysicsSuite::init_urban(const std::vector<double>& frc_in, const std::vector<double>& hgt_urb) {
   if (!urb_) return;
@@ -1138,7 +1247,7 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
     v.emplace_back("sfc_sst", &sst);
     v.emplace_back("sfc_tsk_save", &tsk_save);
   }
-  if (o_.sst_update == 1) v.emplace_back("sfc_xicem", &xicem);
+  if (o_.sst_update == 1 || o_.sf_lake_physics == 1) v.emplace_back("sfc_xicem", &xicem);
   if (o_.sst_skin == 1) {
     if (o_.fractional_seaice != 1 && o_.sst_update != 1) v.emplace_back("sfc_sst", &sst);
     v.emplace_back("sfc_sstsk", &sstsk);
@@ -1194,6 +1303,10 @@ std::vector<std::pair<std::string, Field2*>> PhysicsSuite::carried2() {
                       &acc_qsevaxy, &eflxbxy, &acc_dwaterxy, &acc_prcpxy, &acc_ecanxy, &acc_etranxy, &acc_edirxy, &acc_glaflwxy, &fsatxy, &wsurfxy})
       v.emplace_back("sfc_" + f->name(), f);
   }
+  if (lake_)  // package simple_lake (Registry i012rhd)
+    for (Field2* f : {&lake_->lakedepth2d, &lake_->savedtke12d, &lake_->snowdp2d, &lake_->h2osno2d, &lake_->snl2d,
+                      &lake_->t_grnd2d})
+      v.emplace_back("sfc_" + f->name(), f);
   return v;
 }
 
@@ -1264,6 +1377,13 @@ std::vector<std::pair<std::string, Field3*>> PhysicsSuite::carried3() {
       v.emplace_back("sfc_" + f->name(), f);
   for (Field3* f : {re_cloud_, re_ice_, re_snow_})
     if (f) v.emplace_back("sfc_" + f->name(), f);
+  if (lake_) {
+    LakeFields& l = *lake_;
+    for (Field3* f : {&l.t_lake3d, &l.lake_icefrac3d, &l.z_lake3d, &l.dz_lake3d, &l.t_soisno3d, &l.h2osoi_ice3d,
+                      &l.h2osoi_liq3d, &l.h2osoi_vol3d, &l.z3d, &l.dz3d, &l.zi3d, &l.watsat3d, &l.csol3d, &l.tkmg3d,
+                      &l.tkdry3d, &l.tksatu3d})
+      v.emplace_back("sfc_" + f->name(), f);
+  }
   return v;
 }
 
@@ -1483,7 +1603,7 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
   if (o_.bl_pbl_physics == 5 && o_.mynn.edmf > 0)  // package mynn_dmp_edmf1
     v.insert(v.end(), {&maxwidth, &maxmf, &ztop_plume, &excess_h, &excess_q});
   if (o_.fractional_seaice == 1 || o_.sst_update == 1) v.insert(v.end(), {&sst, &tsk_save});
-  if (o_.sst_update == 1) v.push_back(&xicem);
+  if (o_.sst_update == 1 || o_.sf_lake_physics == 1) v.push_back(&xicem);
   if (o_.sst_skin == 1) {
     if (o_.fractional_seaice != 1 && o_.sst_update != 1) v.push_back(&sst);
     v.insert(v.end(), {&sstsk, &dtw});
@@ -1509,6 +1629,10 @@ std::vector<const Field2*> PhysicsSuite::fields2() const {
                        &u.chr_sfcdif, &u.cmc_sfcdif, &u.chc_sfcdif, &u.tgr_urb2d, &u.tvg_urb2d, &u.tt_urb2d});
   }
   if (topo_) v.insert(v.end(), {&topo_->ht_shad, &topo_->swnorm});  // HGT_SHAD, SWNORM (0 without the option)
+  if (lake_) {
+    const LakeFields& l = *lake_;
+    v.insert(v.end(), {&l.lakedepth2d, &l.savedtke12d, &l.snowdp2d, &l.h2osno2d, &l.snl2d, &l.t_grnd2d});
+  }
   return v;
 }
 
@@ -1537,6 +1661,12 @@ std::vector<const Field3*> PhysicsSuite::fields3() const {
     const UrbanFields& u = *urb_;
     v.insert(v.end(), {&u.trl_urb3d, &u.tbl_urb3d, &u.tgl_urb3d, &u.tgrl_urb3d, &u.tvgl_urb3d, &u.smr_urb3d,
                        &u.smg_urb3d});
+  }
+  if (lake_) {
+    const LakeFields& l = *lake_;
+    v.insert(v.end(), {&l.t_lake3d, &l.lake_icefrac3d, &l.z_lake3d, &l.dz_lake3d, &l.t_soisno3d, &l.h2osoi_ice3d,
+                       &l.h2osoi_liq3d, &l.h2osoi_vol3d, &l.z3d, &l.dz3d, &l.zi3d, &l.watsat3d, &l.csol3d, &l.tkmg3d,
+                       &l.tkdry3d, &l.tksatu3d});
   }
   return v;
 }
