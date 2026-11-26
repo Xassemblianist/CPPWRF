@@ -348,6 +348,13 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
   const tile::PatchBox mp_ob = tile::own_box(g);
   const Range2D mp_own{std::max(sx, mp_ob.i0), std::min(g.nx - sx, mp_ob.i1), std::max(sy, mp_ob.j0),
                        std::min(g.ny - sy, mp_ob.j1)};
+  // solve_em.F:3852: grid%sr = 0. over the whole array before microphysics_driver (the schemes then set it on the
+  // tile without the spec zone; the spec zone of a moved nest would otherwise keep the shifted values)
+  if (sr.layout().total > 0) {
+    const View2<real> v = sr.view();
+    const Layout& L = sr.layout();
+    parallel_for(Range3D{L.wi0, L.wi1, L.wj0, L.wj1, 0, 1}, [=] CPPWRF_HD(int i, int j, int) { v(i, j) = real(0); });
+  }
   if (p_.mp_physics == 4) {
     // debug (CPPWRF_VM_DUMP): WSM5 inputs and outputs, for a replay through WRF's wsm5
     vmdump::dump("vm_mp_in", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS], &rho,
