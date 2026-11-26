@@ -15,6 +15,7 @@
 #include "nest/nest_init.hpp"
 #include "tests/nest/test_data_loader.hpp"
 #include "tests/nest/fortran_nest_bridge.h"
+#include "tests/nest/bdy_signed_zero.hpp"
 
 using namespace cppwrf;
 using namespace cppwrf::nest;
@@ -73,6 +74,13 @@ __global__ void k_run_bdy_slab(KBdySlab k, int npos, int nk, int width) {
   if (pos < npos && kk < nk && b < width) {
     k(pos, kk, b);
   }
+}
+
+__global__ void k_run_bdy_view3d(KBdySlabView3D k, int npos, int nk, int width) {
+  int pos = blockIdx.x * blockDim.x + threadIdx.x;
+  int kk  = blockIdx.y * blockDim.y + threadIdx.y;
+  int b   = blockIdx.z * blockDim.z + threadIdx.z;
+  if (pos < npos && kk < nk && b < width) k(pos, kk, b);
 }
 
 __global__ void k_run_copy_fcn(KCopyFcn k, int ci_start, int ci_end, int cj_start, int cj_end, int ck_start, int ck_end) {
@@ -359,6 +367,59 @@ void run_cuda_bdy_tests(const CoarseDataset& ds) {
 // ============================================================================
 // Test 3: Feedback Averaging on Device
 // ============================================================================
+// The model's slab kernel KBdySlabView3D on the GPU on signed-zero parent fields against WRF's bdy_interp1, as the
+// CPU test's TEST 3b (tests/nest/bdy_signed_zero.hpp): SINTB's loop copies (sintb_bdy_lane) in CUDA FP64
+void run_cuda_bdy_signed_zero_tests() {
+  std::cout << "\n======================================================\n";
+  std::cout << "CUDA TEST 3b: Boundary forcing with signed zeros (KBdySlabView3D on device vs bdy_interp1)\n";
+  std::cout << "======================================================\n";
+  wrf_bridge_init_constants();  // spec_zone 1, relax_zone 4, spec_bdy_width 5 (bdy_interp1's namelist)
+  SzRng rng(97531);
+  std::size_t differ = 0, entries = 0;
+  for (BdyZeroCase c : bdy_zero_cases()) {
+    for (int trial = 0; trial < 4; ++trial) {
+      c.make(rng, trial & 1);
+      double *d_c, *d_n, *d_val, *d_tend;
+      CUDA_CHECK(cudaMalloc(&d_c, c.cfld.size() * sizeof(double)));
+      CUDA_CHECK(cudaMalloc(&d_n, c.nfld.size() * sizeof(double)));
+      CUDA_CHECK(cudaMemcpy(d_c, c.cfld.data(), c.cfld.size() * sizeof(double), cudaMemcpyHostToDevice));
+      CUDA_CHECK(cudaMemcpy(d_n, c.nfld.data(), c.nfld.size() * sizeof(double), cudaMemcpyHostToDevice));
+      for (int side = 0; side < 4; ++side) {
+        const int npos = c.npos(side);
+        const std::size_t n = static_cast<std::size_t>(npos) * c.nk * c.kWidth;
+        std::vector<double> val(n, 7.0), tend(n, 7.0);
+        CUDA_CHECK(cudaMalloc(&d_val, n * sizeof(double)));
+        CUDA_CHECK(cudaMalloc(&d_tend, n * sizeof(double)));
+        CUDA_CHECK(cudaMemcpy(d_val, val.data(), n * sizeof(double), cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_tend, tend.data(), n * sizeof(double), cudaMemcpyHostToDevice));
+        dim3 block(32, 2, 1), grid((npos + 31) / 32, (c.nk + 1) / 2, c.kWidth);
+        k_run_bdy_view3d<<<grid, block>>>(c.functor(side, d_c, d_n, d_val, d_tend), npos, c.nk, c.kWidth);
+        CUDA_CHECK(cudaGetLastError());
+        CUDA_CHECK(cudaMemcpy(val.data(), d_val, n * sizeof(double), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaMemcpy(tend.data(), d_tend, n * sizeof(double), cudaMemcpyDeviceToHost));
+        CUDA_CHECK(cudaFree(d_val));
+        CUDA_CHECK(cudaFree(d_tend));
+        for (int b = 0; b < c.kSz; ++b)
+          for (int kk = 0; kk < c.nk; ++kk)
+            for (int pos = 0; pos < npos; ++pos) {
+              const std::size_t i = static_cast<std::size_t>(pos) + static_cast<std::size_t>(kk) * npos +
+                                    static_cast<std::size_t>(b) * npos * c.nk;
+              for (int t = 0; t < 2; ++t) {
+                const double m = t ? tend[i] : val[i], w = c.wrf(side, t == 1, pos, kk, b);
+                ++entries;
+                if (!(m == w && std::signbit(m) == std::signbit(w))) ++differ;
+              }
+            }
+      }
+      CUDA_CHECK(cudaFree(d_c));
+      CUDA_CHECK(cudaFree(d_n));
+    }
+  }
+  std::cout << "  KBdySlabView3D on device (signed zeros) CUDA FP64: " << differ << " of " << entries
+            << " slab entries differ [" << (differ == 0 ? "PASS" : "FAIL") << "]" << std::endl;
+  assert(differ == 0);
+}
+
 void run_cuda_feedback_tests(const CoarseDataset& ds) {
   std::cout << "\n======================================================\n";
   std::cout << "TEST 3 (CUDA): Feedback Averaging (KCopyFcn)\n";
@@ -566,6 +627,7 @@ int main(int argc, char** argv) {
 
   run_cuda_sint_tests(ds);
   run_cuda_bdy_tests(ds);
+  run_cuda_bdy_signed_zero_tests();
   run_cuda_feedback_tests(ds);
   run_cuda_initialisation_tests(ds);
 
