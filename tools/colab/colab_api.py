@@ -296,7 +296,8 @@ def cmd_exec(a):
     if xe:
         if isinstance(xe, dict):
             tb = xe.get("traceback")
-            xe = "\n".join(tb) if isinstance(tb, list) else f"{xe.get('ename', '')}: {xe.get('evalue', '')}"
+            head = f"{xe.get('name', '')}: {xe.get('value', '')}"
+            xe = "\n".join(tb) + "\n" + head if isinstance(tb, list) and tb else head
         sys.stderr.write(f"{xe}\n")
         return 1
     return 0

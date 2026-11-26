@@ -103,7 +103,7 @@ class Mock:
                 raise Err("DEADLINE_EXCEEDED", "execution cut off")
             out = {"stdout": r.stdout, "stderr": r.stderr if r.returncode == 0 else ""}
             if r.returncode:
-                out["executionError"] = {"ename": "Error", "evalue": "", "traceback": [r.stderr]}
+                out["executionError"] = {"name": "Error", "value": r.stderr.strip().splitlines()[-1], "traceback": []}
             return out
         raise Err("INVALID_ARGUMENT", "unknown tool " + name)
 
