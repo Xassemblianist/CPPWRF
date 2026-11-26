@@ -425,6 +425,20 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       ov.push_back("real.i_parent_start=" + std::to_string(sp.i_parent_start));
       ov.push_back("real.j_parent_start=" + std::to_string(sp.j_parent_start));
       ov.push_back("real.spec_bdy_width=" + std::to_string(sp.spec_bdy_width));
+      // obs nudging: the domain's id (OBS_DOMAIN<id>01, nudob's INEST), nest level (fddaobs_init's levidn), ratio to its
+      // parent and domain 1's obs_twindo (a nest's window when its own obs_twindo is 0); only for a nest that nudges
+      const std::string obs_on = root_cfg.has(pfx + "fdda_obs_nudge_opt")    ? root_cfg.get_string(pfx + "fdda_obs_nudge_opt")
+                                 : root_cfg.has(dpfx + "fdda_obs_nudge_opt") ? root_cfg.get_string(dpfx + "fdda_obs_nudge_opt")
+                                 : root_cfg.has("fdda.obs_nudge_opt")         ? root_cfg.get_string("fdda.obs_nudge_opt")
+                                                                              : "0";
+      if (std::stoi(obs_on) != 0) {
+        ov.push_back("fdda.obs_grid_id=" + std::to_string(id));
+        int lev = 1;
+        for (int p = sp.parent_id; p > 1; p = specs[p - 1].parent_id) ++lev;
+        ov.push_back("fdda.obs_levidn=" + std::to_string(lev));
+        ov.push_back("fdda.obs_parent_grid_ratio=" + std::to_string(sp.parent_grid_ratio));
+        if (root_cfg.has("fdda.obs_twindo")) ov.push_back("fdda.obs_twindo_cg=" + root_cfg.get_string("fdda.obs_twindo"));
+      }
       {
         std::ostringstream oss;
         oss.precision(17);
@@ -516,6 +530,11 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
       sp.cfg = io::Config::from_string(base_ini.str(), ov);
     }
     if (sp.cfg.has("output.dir")) sp.cfg.mark_accessed("output.dir");
+    // obs_nudge_opt is a max_domains option: a domain without observation nudging reads none of the [fdda] obs keys
+    // that another domain's nudging puts into the shared configuration (WRF ignores them there too)
+    if (sp.cfg.get_int("fdda.obs_nudge_opt", 0) == 0)
+      for (const std::string& k : sp.cfg.keys())
+        if (k.rfind("fdda.obs_", 0) == 0 || k == "fdda.max_obs" || k == "fdda.fdda_end") sp.cfg.mark_accessed(k);
   }
 
   // med_restart_out writes every domain when d01's restart alarm rings (restart_interval is one value); each

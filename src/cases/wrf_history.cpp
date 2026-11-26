@@ -211,6 +211,16 @@ WrfHistory::WrfHistory(const io::Config& cfg, const Model& m, std::string out_di
     c.set("bucket_mm", str(o.bucket_mm)); c.set("bucket_j", str(o.bucket_j));
     c.set("prec_acc_dt", str(o.prec_acc_dt));
     c.set("output_diagnostics", std::to_string(o.output_diagnostics));
+    c.set("obs_nudge_opt", std::to_string(o.obs.obs_nudge_opt));  // OBS_NUDGE_OPT and the OBS_* attributes
+    if (o.obs.obs_nudge_opt == 1) {
+      c.set("fdda_end", str(o.obs.fdda_end));
+      c.set("obs_nudge_wind", std::to_string(o.obs.nudge_wind)); c.set("obs_coef_wind", str(o.obs.coef_wind));
+      c.set("obs_nudge_temp", std::to_string(o.obs.nudge_temp)); c.set("obs_coef_temp", str(o.obs.coef_temp));
+      c.set("obs_nudge_mois", std::to_string(o.obs.nudge_mois)); c.set("obs_coef_mois", str(o.obs.coef_mois));
+      c.set("obs_nudge_pstr", std::to_string(o.obs.nudge_pstr)); c.set("obs_coef_pstr", str(o.obs.coef_pstr));
+      if (dom == 1) c.set("obs_ionf", std::to_string(o.obs.ionf));  // output_wrf.F writes domain 1's
+      c.set("obs_idynin", std::to_string(o.obs.idynin)); c.set("obs_dtramp", str(o.obs.dtramp));
+    }
     if (o.sf_surface_physics == 4) {
       c.set("dveg", std::to_string(o.noahmp.dveg));
       c.set("opt_crs", std::to_string(o.noahmp.opt_crs));

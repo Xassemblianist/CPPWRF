@@ -1132,6 +1132,9 @@ enum FatalCode : int {
   kFatalUrbanSurface = 19,           // SLUCM: an urban category point that is water or sea ice (not a WRF stop)
   kFatalUrbanInput = 20,             // SLUCM: NUDAPT morphology (HGT_URB2D > 0)
   kFatalRucVilka = 30,               // RUC LSM VILKA: the saturation table index leaves 1..5000
+  kFatalObsRegime = 31,              // obs nudging compute_VIH: a REGIME other than 1 ... 4 (WRF stops)
+  kFatalObsKpblObs = 32,             // obs nudging nudob: kpbl_obs read (never set in WRF's serial build)
+  kFatalObsSoundingLevels = 33,      // obs nudging nudob: a sounding's last level is not its count (WRF stops)
 };
 struct FatalError : std::runtime_error {
   int code;

@@ -96,7 +96,7 @@ silently. `physics_suite` and the `-1` options work as in WRF.
 - the schemes outside the ported list: other microphysics, cumulus, PBL, surface-layer and land-surface schemes,
   including the Pleim-Xiu land surface model;
 - Noah-MP's options outside the listed values;
-- spectral and observation nudging, stochastic physics, chemistry;
+- spectral nudging, observation nudging on grids other than Lambert conformal or with tiles / MPI ranks, stochastic physics, chemistry;
 - the adaptive time step with nests;
 - I/O forms other than NetCDF.
 

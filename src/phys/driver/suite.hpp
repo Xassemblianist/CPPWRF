@@ -31,6 +31,7 @@
 #include "phys/cu_kf/kf.hpp"
 #include "phys/cu_kf/kf_tables.hpp"
 #include "phys/sf_urban/urban.hpp"
+#include "phys/driver/obs_nudging.hpp"
 #include "phys/driver/phy_prep.hpp"
 #include "phys/driver/radiation.hpp"
 #include "phys/driver/tendency_coupling.hpp"
@@ -162,6 +163,7 @@ struct SuiteOptions {
   int output_diagnostics = 0;
   int auxhist3_interval = 0;
   FddaOptions fdda;  // grid nudging (fddagd_driver)
+  ObsNudgeOptions obs;  // observation nudging (obs_nudge_opt = 1: fddaobs_driver)
   // terrain options (src/phys/driver/topo.hpp): topo_wind 1 / 2 (start_em's CTOPO / CTOPO2, read by YSU), slope_rad 1
   // (surface_driver: SWDOWN and GSW of the surface schemes over sloping terrain), topo_shading 1
   // (pre_radiation_driver: the shadow mask, searched over shadlen metres)
@@ -432,6 +434,12 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   bool t1_lag_set_ = false;
 
   const SuiteOptions& options() const { return o_; }
+  // obs_nudge_opt = 1 (allocated then): grid%fdob and obs_savwt (src/phys/driver/obs_nudging.hpp)
+  std::unique_ptr<ObsNudging> obs_;
+  // med_before_solve_io's wrf_fddaobs_in before the step after itimestep steps (grid%xtime of the step start)
+  void obs_before_step() {
+    if (obs_) obs_->in4dob(itimestep, wrf_time::minutes<real>(dt_clock_ * int(itimestep)));
+  }
 
   // State WRF carries between steps (written to and read from restart files): the persistent
   // grid% fields above, R*BLTEN/RTHRATEN, EXCH_H/M, the soil state and the lagged t_1.
@@ -489,6 +497,7 @@ class PhysicsSuite : public dyn::ColumnPhysics {
   void convtrans_prep(const dyn::State& s);
   void advance_ppt(const dyn::State& s);
   void fddagd_driver(const dyn::State& s, const dyn::BaseState& b);
+  void fddaobs_driver(const dyn::State& s, const dyn::BaseState& b, dyn::Tendencies& t);
 };
 
 }  // namespace cppwrf::phys::driver

@@ -63,7 +63,8 @@ refs_bad=$(grep -v '^\s*#' "$REFS" | awk 'NF {
     for (i = 4; i <= NF; i++) {
       if ($i !~ /^[a-z_0-9]+\.[A-Za-z_0-9]+=[^ ]+$/) print $1 ": " $i " is no section.key=value"
       if ($i ~ /^run\.real=/ && $i !~ /^run\.real=real_r8(d8)?\.exe:[^ :]+$/) print $1 ": " $i " (run.real=real_r8[d8].exe:DIR,...)"
-      if ($i ~ /^run\./ && $i !~ /^run\.(real|steps|segment)=/) print $1 ": " $i " (run.real, run.steps, run.segment)"
+      if ($i ~ /^run\./ && $i !~ /^run\.(real|steps|segment|copy)=/) print $1 ": " $i " (run.real, run.steps, run.segment, run.copy)"
+      if ($i ~ /^run\.copy=/ && $i !~ /^run\.copy=[^ :,]+:[^ :,]+(,[^ :,]+:[^ :,]+)*$/) print $1 ": " $i " (run.copy=SRC:DEST,...)"
     } }')
 [ -z "$refs_bad" ] || { echo "[colab_wrfref] $REFS:"; echo "$refs_bad"; exit 2; }
 names=$(grep -v '^\s*#' "$REFS" | awk 'NF {print $1}')

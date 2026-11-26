@@ -488,6 +488,9 @@ PhysicsSuite::PhysicsSuite(const Grid& g, const SuiteOptions& o)
     pt.rthndgdten = Field3(g, Stagger::M, "rthndgdten");
     pt.rqvndgdten = Field3(g, Stagger::M, "rqvndgdten");
   }
+  if (o.obs.obs_nudge_opt != 0 && o.obs.obs_nudge_opt != 1)
+    throw std::runtime_error("PhysicsSuite: obs_nudge_opt = " + std::to_string(o.obs.obs_nudge_opt) + " (0 or 1)");
+  if (o.obs.obs_nudge_opt == 1) obs_ = std::make_unique<ObsNudging>(g, o.obs);
   if (o.seaice_thickness_opt != 0 || o.seaice_snowdepth_opt != 0)
     throw std::runtime_error("PhysicsSuite: seaice_thickness_opt/seaice_snowdepth_opt 1 need ICEDEPTH/SNOWSI input");
   if (o.seaice_albedo_opt != 0)
@@ -1366,6 +1369,9 @@ void PhysicsSuite::part2(const dyn::State& s, const dyn::BaseState& b, dyn::Tend
                         o_.bl_pbl_physics != 8 && o_.bl_pbl_physics != 4};
   calculate_phy_tend(pt, s, b, g_, f);
   update_phy_ten(t, pt, s, g_, f);
+  // obs_nudge_opt = 1: fddaobs_driver after damptop / tke_rhs (which change neither tendency here), before
+  // conv_t_tendf_to_moist (module_first_rk_step_part2.F:941-1003)
+  if (obs_) fddaobs_driver(s, b, t);
   if (o_.use_theta_m == 1) {
     vmdump::dump("vm_conv_in", 0, {&t.t_tendf, &t.q_tendf[s.P_QV], wrf_t1_lag && t1_lag_set_ ? &t1_lag_ : &s.t_1,
                                    &s.q_1[s.P_QV]});

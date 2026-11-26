@@ -63,7 +63,7 @@ running.
   - moving nests;
   - vertical nest refinement, ndown.exe;
   - the urban models other than the single-layer UCM with Noah, and the lake model;
-  - spectral and observation nudging;
+  - spectral nudging; observation nudging on grids other than Lambert conformal, with tiles or MPI ranks;
   - stochastic physics and chemistry;
   - I/O forms other than NetCDF;
   - the other schemes not listed below.
@@ -226,7 +226,6 @@ CPPWRF runs these features only at WRF's default value (another value is an erro
 | `&physics.ra_sw_eclipse` | `0` | solar eclipse in the shortwave radiation (ECOBSC, ECMASK) |
 | `&diags.solar_diagnostics` | `0` | solar diagnostics (radiation_driver's Solar_step every step, SZA, CLRNIDX ...) |
 | `&fdda.grid_sfdda` | `0` | surface grid nudging (needs wrfsfdda_d0N from OBSGRID) |
-| `&fdda.obs_nudge_opt` | `0` | observation nudging |
 | `&fire.ifire` | `0` | wildland fire model |
 | `&stoch.multi_perturb` | `0` | stochastic multi-physics perturbations |
 | `&stoch.sppt` | `0` | stochastically perturbed physics tendencies |
@@ -309,6 +308,8 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `epssm` | Acoustic divergence damping parameter (default 0.1) |
 | `eta_levels` | real.exe only |
 | `extrap_type` | real.exe only |
+| `fdda_end` | obs_nudge_opt = 1 only |
+| `fdda_start` | not used by WRF 4.8's observation nudging |
 | `feedback` | Two-way nesting feedback |
 | `fgdt` | grid_fdda = 1 only |
 | `fgdtzero` | grid_fdda = 1 only |
@@ -372,6 +373,7 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `linear_interp` | real.exe only |
 | `lowest_lev_from_sfc` | real.exe only |
 | `max_dz` | real.exe only |
+| `max_obs` | obs_nudge_opt = 1 only |
 | `max_step_increase_pct` | adaptive time step only |
 | `max_time_step` | adaptive time step only |
 | `max_time_step_den` | adaptive time step only |
@@ -393,6 +395,58 @@ WRF reads them but they do not change the run here (WPS / real.exe options, infr
 | `num_metgrid_levels` | Metgrid vertical levels used by real.exe |
 | `num_metgrid_soil_levels` | Metgrid soil levels used by real.exe |
 | `num_soil_layers` | Set from sf_surface_physics as check_a_mundo does: 4 (Noah, Noah-MP), 5 (slab), 6 or 9 (RUC) |
+| `obs_coef_mois` | obs_nudge_opt = 1 only |
+| `obs_coef_pstr` | obs_nudge_opt = 1 only |
+| `obs_coef_temp` | obs_nudge_opt = 1 only |
+| `obs_coef_wind` | obs_nudge_opt = 1 only |
+| `obs_dpsmx` | obs_nudge_opt = 1 only |
+| `obs_dtramp` | obs_nudge_opt = 1 only |
+| `obs_idynin` | obs_nudge_opt = 1 only |
+| `obs_ionf` | obs_nudge_opt = 1 only |
+| `obs_ipf_errob` | observation nudging printouts only |
+| `obs_ipf_in4dob` | observation nudging printouts only |
+| `obs_ipf_init` | observation nudging printouts only |
+| `obs_ipf_nudob` | observation nudging printouts only |
+| `obs_max_sndng_gap` | obs_nudge_opt = 1 only |
+| `obs_no_pbl_nudge_q` | obs_nudge_opt = 1 only |
+| `obs_no_pbl_nudge_t` | obs_nudge_opt = 1 only |
+| `obs_no_pbl_nudge_uv` | obs_nudge_opt = 1 only |
+| `obs_npfi` | observation nudging printouts only |
+| `obs_nudge_mois` | obs_nudge_opt = 1 only |
+| `obs_nudge_pstr` | obs_nudge_opt = 1 only |
+| `obs_nudge_temp` | obs_nudge_opt = 1 only |
+| `obs_nudge_wind` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullmin` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr1_q` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr1_t` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr1_uv` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr2_q` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr2_t` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr2_uv` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr4_q` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr4_t` | obs_nudge_opt = 1 only |
+| `obs_nudgezfullr4_uv` | obs_nudge_opt = 1 only |
+| `obs_nudgezmax` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampmin` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr1_q` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr1_t` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr1_uv` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr2_q` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr2_t` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr2_uv` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr4_q` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr4_t` | obs_nudge_opt = 1 only |
+| `obs_nudgezrampr4_uv` | obs_nudge_opt = 1 only |
+| `obs_prt_freq` | obs_nudge_opt = 1 only |
+| `obs_prt_max` | observation nudging printouts only |
+| `obs_rinsig` | not used by WRF 4.8's observation nudging |
+| `obs_rinxy` | obs_nudge_opt = 1 only |
+| `obs_scl_neg_qv_innov` | obs_nudge_opt = 1 only |
+| `obs_sfc_scheme_horiz` | obs_nudge_opt = 1 only |
+| `obs_sfc_scheme_vert` | obs_nudge_opt = 1 only |
+| `obs_sfcfacr` | obs_nudge_opt = 1 only |
+| `obs_sfcfact` | obs_nudge_opt = 1 only |
+| `obs_twindo` | obs_nudge_opt = 1 only |
 | `override_restart_timers` | restart runs only |
 | `p_top_requested` | Real case p_top read directly from wrfinput_d01 |
 | `parent_grid_ratio` | Nesting grid refinement ratio |

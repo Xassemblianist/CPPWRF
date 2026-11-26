@@ -15,12 +15,16 @@ lasts), and merges each domain's history files into the first part's (each part 
 interval past its end, so that the history frames and wrfrst files at the part's end come from within the run as in
 an uninterrupted run: at a run's last step WRF's nest history differs); with the environment WRFREF_PARTS (a bucket
 prefix) the run directory goes there after each part and a new run continues after the last part found there.
+run.copy=SRC:DEST,... copies the repository files SRC (paths from the repository root, e.g. an
+observation file of tests/data/obs) into run_NAME and run_NAME/steps as DEST (a copy, so that the reference's data
+tar carries it).
 Prints one line per run: NAME[/steps] SUCCESS | WRF-FAILED [error lines] (NAME REAL-FAILED [error lines] when
 real.exe fails)."""
 import datetime
 import glob
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -28,7 +32,7 @@ args = [a for a in sys.argv[1:] if a != "--prepare-only"]
 prepare_only = len(args) != len(sys.argv) - 1
 runs, dest, wrfexe, name, base = args[:5]
 sets = [a.split("=", 1) for a in args[5:]]
-special = {k: v for k, v in sets if k in ("run.real", "run.steps", "run.segment")}
+special = {k: v for k, v in sets if k in ("run.real", "run.steps", "run.segment", "run.copy")}
 sets = [(k, v) for k, v in sets if k not in special]
 src = os.path.join(runs, base)
 INPUTS = r"(wrfinput.*|wrfbdy.*|wrflowinp.*|wrffdda.*)$"
@@ -190,6 +194,11 @@ runs_now = [R]
 if special.get("run.steps", "1") != "0":
     prepare(os.path.join(R, "steps"), steps, R if real else src)
     runs_now.append(os.path.join(R, "steps"))
+REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+for pair in filter(None, special.get("run.copy", "").split(",")):
+    s_, d_ = pair.split(":", 1)
+    for d in runs_now:
+        shutil.copyfile(os.path.join(REPO, s_), os.path.join(d, d_))
 if prepare_only:
     sys.exit(0)
 seg = int(special.get("run.segment", "0"))
