@@ -67,7 +67,7 @@ class Mock:
             key = a["runtime"]["runtimeSpec"]
             mode = self.create.get(key["accelerator"], "ok")
             if mode == "precondition":
-                raise Err("FAILED_PRECONDITION", "no capacity for this accelerator")
+                raise Err("", "Precondition check failed.")   # the real API's text for FAILED_PRECONDITION
             if mode == "unavailable":
                 raise Err("UNAVAILABLE", "503 Service Unavailable")
             if mode == "abusive":
@@ -143,7 +143,7 @@ def handler(mock):
                     "content": [{"type": "text", "text": json.dumps(res)}], "structuredContent": res}}
             except Err as e:
                 body = {"jsonrpc": "2.0", "id": req["id"], "result": {
-                    "isError": True, "content": [{"type": "text", "text": f"{e.status}: {e.text}"}]}}
+                    "isError": True, "content": [{"type": "text", "text": f"{e.status}: {e.text}" if e.status else e.text}]}}
             self.reply(200, json.dumps(body).encode())
 
         def do_GET(self):

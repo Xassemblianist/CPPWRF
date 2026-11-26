@@ -81,9 +81,23 @@ def headers():
     return h
 
 
+# Google's canonical messages for the status codes: the Colab API's tool errors carry these texts, not the code names
+# (a create without capacity answered "Precondition check failed." on 2026-11-26)
+MESSAGES = (("precondition check failed", "FAILED_PRECONDITION"), ("deadline exceeded", "DEADLINE_EXCEEDED"),
+            ("resource has been exhausted", "RESOURCE_EXHAUSTED"), ("quota exceeded", "RESOURCE_EXHAUSTED"),
+            ("service is currently unavailable", "UNAVAILABLE"), ("requested entity was not found", "NOT_FOUND"),
+            ("already exists", "ALREADY_EXISTS"), ("does not have permission", "PERMISSION_DENIED"),
+            ("invalid authentication credentials", "UNAUTHENTICATED"), ("invalid argument", "INVALID_ARGUMENT"),
+            ("operation was aborted", "ABORTED"))
+
+
 def status_of(text):
     for s in STATUSES:
         if s in text:
+            return s
+    low = text.lower()
+    for m, s in MESSAGES:
+        if m in low:
             return s
     return "ERROR"
 
