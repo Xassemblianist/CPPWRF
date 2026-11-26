@@ -107,6 +107,52 @@ void run_sint_sintb_tests(const CoarseDataset& ds) {
   }
 }
 
+// SINT on fields of +0, -0 and small values (a moved nest's surface W over water, zero moisture): the sign of each
+// zero as WRF's SINT computes it (DONOR as written, its MAX / MIN trees). The SINTB paths are not checked here (their
+// kernel, smolarkiewicz_1d<T, true>, is not WRF's SINTB in the signs of zero).
+void run_sint_signed_zero_tests() {
+  std::cout << "\n======================================================\n";
+  std::cout << "TEST 1b: SINT with signed zeros (Ratio 3 and Ratio 5)\n";
+  std::cout << "======================================================\n";
+  unsigned long long state = 12345;
+  auto next = [&state]() {
+    state = state * 6364136223846793005ULL + 1442695040888963407ULL;
+    return static_cast<unsigned>(state >> 33);
+  };
+  const double pick[] = {0.0, -0.0, 0.0, -0.0, 1.0, -1.0, 0.5, -2.0, 1.0e-12, -1.0e-12};
+  for (int ratio : {3, 5}) {
+    for (bool xstag : {false, true}) {
+      for (bool ystag : {false, true}) {
+        const int nf = ratio * ratio;
+        const int ims = 1, ime = 40, jms = 1, jme = 40;
+        const int its = 3, ite = 38, jts = 3, jte = 38;
+        const int ni = ime - ims + 1, nj = jme - jms + 1;
+        DiffStats stats;
+        for (int trial = 0; trial < 20; ++trial) {
+          std::vector<double> xf_cpp(ni * nj * nf), xf_f(ni * nj * nf);
+          std::vector<int> mask(ni * nj, 1);
+          for (int j = 0; j < nj; ++j)
+            for (int i = 0; i < ni; ++i) {
+              const double v = pick[next() % 10];
+              for (int m = 0; m < nf; ++m) xf_cpp[i + j * ni + m * ni * nj] = xf_f[i + j * ni + m * ni * nj] = v;
+            }
+          for (int j = 0; j < nj; ++j)
+            for (int i = 0; i < ni; ++i)
+              if (next() % 8 == 0) mask[i + j * ni] = 0;
+          sint_fortran_layout(xf_cpp.data(), ims, ime, jms, jme, mask.data(), its, ite, jts, jte, nf, xstag, ystag);
+          wrf_bridge_sint(xf_f.data(), ims, ime, jms, jme, mask.data(), its, ite, jts, jte, nf, xstag ? 1 : 0,
+                          ystag ? 1 : 0);
+          for (std::size_t idx = 0; idx < xf_cpp.size(); ++idx) stats.update(xf_cpp[idx], xf_f[idx]);
+        }
+        std::cout << "  sint (signed zeros) ratio=" << ratio << " xstag=" << xstag << " ystag=" << ystag
+                  << " -> " << stats.mismatches << " of " << stats.count << " differ"
+                  << " [" << (stats.passed() ? "PASS" : "FAIL") << "]\n";
+        assert(stats.passed());
+      }
+    }
+  }
+}
+
 void run_interp_fcn_sint_tests(const CoarseDataset& ds) {
   std::cout << "\n======================================================\n";
   std::cout << "TEST 2: interp_fcn_sint & KSint3D Device Kernel\n";
@@ -591,6 +637,7 @@ int main(int argc, char** argv) {
   wrf_bridge_init_constants();
 
   run_sint_sintb_tests(ds);
+  run_sint_signed_zero_tests();
   run_interp_fcn_sint_tests(ds);
   run_bdy_interp_tests(ds);
   run_feedback_tests(ds);
