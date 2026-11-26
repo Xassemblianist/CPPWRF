@@ -59,16 +59,16 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 | Microphysics | Kessler, WSM3, WSM5, WSM6, WDM5, WDM6, Thompson, aerosol-aware Thompson (mp 28), Morrison two-moment, P3 (one ice category), NSSL 2-moment with hail (mp 18 / 17); radar reflectivity |
 | Cumulus | Kain-Fritsch, multi-scale Kain-Fritsch, Betts-Miller-Janjic, Grell-Freitas-Li, Grell-3D ensemble, Tiedtke, New Tiedtke |
 | PBL and surface layer | YSU, MYJ, ACM2, MYNN-EDMF with most of its options, BouLac, QNSE with the EDKF mass flux; revised MM5, Eta, Pleim-Xiu, MYNN and QNSE surface layers; gravity wave drag |
-| Land surface | 5-layer slab, Noah, Noah-MP (its options without extra input fields), RUC; single-layer urban canopy model; fractional sea ice, SST update |
+| Land surface | 5-layer slab, Noah, Noah-MP (its options without extra input fields), RUC; single-layer urban canopy model; CLM lake model (one domain, with Noah or Noah-MP); fractional sea ice, SST update |
 | Radiation | RRTMG LW and SW, RRTM LW, Dudhia SW, cumulus clouds in radiation, McICA |
-| Nesting and nudging | static one-way and two-way nests with feedback and smoothing; grid (analysis) nudging |
+| Nesting and nudging | one-way and two-way nests with feedback and smoothing, prescribed moves of a nest of domain 1; grid (analysis) nudging; observation nudging (Lambert conformal grids) |
 | Pre-processing | `cppwrf_real` (real.exe from WPS met_em files) and WRF's ideal.exe cases |
 | Diagnostics and I/O | buckets, precipitation windows, output_diagnostics (auxhist3), WRF NetCDF wrfout / wrfrst, iofields |
 
 WRF's `namelist.input` works as is: `tools/wrf2cppwrf.py` translates it, including `physics_suite`. An option
 without a port is reported as an error and never silently ignored. MPI runs give WRF's bits in every tested layout
 on one machine: up to 48 CPU ranks, and CUDA FP64 on two GPUs; runs across several nodes use the same code and have
-not been tested yet ([docs/MPI.md](docs/MPI.md)). Vortex-following moving nests, BEP urban and lake models, and other
+not been tested yet ([docs/MPI.md](docs/MPI.md)). Vortex-following moving nests, the BEP urban models, and other
 missing schemes are listed in [docs/STATUS.md](docs/STATUS.md#not-yet-implemented) and in
 [docs/USER_GUIDE.md](docs/USER_GUIDE.md#rejected-options-and-why).
 

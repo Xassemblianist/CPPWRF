@@ -179,9 +179,9 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | W3 | P4 with WSM3 (mp_physics 3) instead of WSM6; restarted at 30 min | 1 h |
 | G3P8 | P8 with the Grell-3D cumulus (cu_physics 5, ishallow 1; restarted at 30 min) | 1 h |
 | G3P4 | P4 with Grell-3D instead of Kain-Fritsch (cugd_avedx 1 and 3) | 1 h |
-| V1 | tropics (Bay of Bengal), Mercator, 15 km, P4 physics | 2 h |
-| V2 | Arctic (Svalbard), polar stereographic, 15 km, P4 physics (sea ice, glacier land ice) | 2 h |
-| V3 | Alps, Lambert, 3 km, Thompson + MYJ + Eta + Noah-MP + RRTMG (radt 5), no cumulus | 30 min |
+| V1 | tropics (Bay of Bengal), Mercator, 15 km, P4 physics | 6 h |
+| V2 | Arctic (Svalbard), polar stereographic, 15 km, P4 physics (sea ice, glacier land ice) | 6 h |
+| V3 | Alps, Lambert, 3 km, Thompson + MYJ + Eta + Noah-MP + RRTMG (radt 5), no cumulus | 2 h |
 | Q1 | P1 with the QNSE PBL and surface layer (bl_pbl_physics 4, sf_sfclay_physics 4, mfshconv 0) | 1 h |
 | Q4 | P4 with the QNSE PBL and surface layer (restarted at 30 min) | 1 h |
 | Q1M | Q1 with the EDKF mass flux of the QNSE PBL (mfshconv 1; restarted at 30 min) | 1 h |
@@ -200,7 +200,7 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | MO4 | P4 with monotonic moist / scalar advection (moist_adv_opt 2, scalar_adv_opt 2) | 1 h |
 | MOK4 | P4 with diff_opt 2 / km_opt 2, monotonic moist and TKE advection (moist_adv_opt 2, tke_adv_opt 2) | 1 h |
 | MOMY | MYNN with monotonic moist / scalar advection (qni, qnr, qke_adv) | 1 h |
-| MON3 | two-way nest N3 with monotonic moist / scalar advection on both domains (3 min: both domains compared; 1 h: d01 only) | 3 min, 1 h |
+| MON3 | two-way nest N3 with monotonic moist / scalar advection on both domains | 1 h |
 | WE4 | P4 with WENO moist / scalar advection (moist_adv_opt 3, scalar_adv_opt 3) | 1 h |
 | WP4 | P4 with positive-definite WENO moist / scalar advection (4, 4) | 1 h |
 | WM4 | P4 with WENO momentum advection (momentum_adv_opt 3) | 1 h |
@@ -221,6 +221,10 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | SR3 | P4 with slope_rad = 1 alone (radt 1) | 5 h |
 | SR4 | SR1 with the Dudhia shortwave (ra_sw_physics 1) | 5 h |
 | HY1 | P1 with hypsometric_opt 1 (real.exe and wrf.exe) | 1 h |
+| LK1 | P4 with the CLM lake model (sf_lake_physics 1, use_lakedepth 0, lakedepth_default 50 m) | 1 h |
+| LK2 / LK3 | LK1 with lakedepth_default 10 m / 0 (spval column) | 1 h |
+| LKV | V2 (Svalbard, polar night) with the CLM lake model | 1 h |
+| LKN | NMP1 (Noah-MP) with the CLM lake model | 1 h |
 | SLAB1 / SLAB4 | P1 / P4 with the 5-layer thermal diffusion land surface (sf_surface_physics 1; inputs from real.exe) | 1 h |
 | NMP1 | P1 with Noah-MP | 1 h |
 | RUC4 | P4 with the RUC LSM (sf_surface_physics 3, 9 levels) instead of Noah; restarted at 30 min | 1 h |
@@ -235,13 +239,14 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | N2S1 / N2S2 | N2 with smooth_option 1 / 2 (smoothing of the fed-back fields, ht included) | 1 h |
 | N3F1 / N3M | N3 with d02 land use differing at the fed-back points / with MYNN and km_opt 4, 2 | 3 parent steps |
 | N3 | two-way nest with the P4 physics on both domains (physics feedback, nest ozone from the parent) | 1 h |
+| N3T | three domains, d03 (1.67 km) inside d02 (5 km) inside d01 (15 km), two-way feedback, smooth_option 2, P4 physics on every domain: every domain bit-identical with WRF (3 steps and 1 h) | 1 h |
 | MV1 | N3 with d02 moved by one parent cell at 1, 2, 20 and 40 min ((+1, 0), (0, +1), (-1, -1), (+1, -1); num_moves, WRF dmpar with one MPI rank built with preset moves): both domains (3 parent steps and 1 h) | 1 h |
 | MV2 | N3 with two moves cancelled by the corral (corral_dist 39 on d02: the x part of the move at 1 min, the whole move at 2 min) | 3 parent steps |
 | P4, P6, P9, N3 long runs | inputs from real.exe for 24 h / 72 h (wrfbdy every 6 h; 24-72 h from the GFS forecast through WPS), history every 3 h, CPPWRF restarted in the middle from its own wrfrst files | 24 h; 72 h (P4, P6, P9) |
-| D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains | resumed from CPPWRF's wrfrst and native restart files (SR1: native only) between the radiation, PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run's | 15-20 min (SR1: 280 min) |
+| D0, P4, G2, P8, NMP1, SR1, SLAB1, N3 chains | resumed from CPPWRF's wrfrst and native restart files (SR1: native only) between the radiation, PBL and cumulus calls (radt, bldt, cudt > dt): every later wrfout frame and wrfrst file equals the straight run's, and the straight and resumed runs equal WRF's run of the same configuration (every domain) at tolerance 0 | 15-20 min |
 | P4D16 | P4 with dt = 16 s and radt = 10 min on the 72 h inputs, history every hour (WRF's clock past one day: XTIME, coszen) | 30 h |
 | N3D50 | N3 with d01 dt = 50 s, so a nest step of 50/3 s (WRF's clock with a fraction of a second: XTIME, julian) | 1 h |
-| RSA | P4 with dt = 50 s and restart_interval = 2 min (not a multiple of dt), history every 150 s; the wrfrst files too; resumed from its wrfrst file of 150 s with restart_interval = 2 and = 0 (WRF's restart alarm of a resumed run: the first ring at the file's seconds to the next ring) | 600 s |
+| RSA | P4 with dt = 50 s and restart_interval = 2 min (not a multiple of dt), history every 150 s; the wrfrst files too; resumed from its wrfrst file of 150 s with restart_interval = 2 and = 0 (WRF's restart alarm of a resumed run: the first ring at the file's seconds to the next ring) | 700 s |
 | OVL1 | P4 with cldovrlp 1 (RRTMG McICA random overlap) | 1 h |
 | OVL3 | P4 with cldovrlp 3 (maximum overlap) | 1 h |
 | OVL4I | P4 with cldovrlp 4 (exponential overlap) and idcor 1 (latitude-dependent decorrelation length) | 1 h |
@@ -256,6 +261,75 @@ CPU, FP64 against WRF real*8 (tolerance 0: every compared value identical):
 | MPDFM2 | MYNN with bl_mynn_cloudpdf -2 (subgrid clouds zeroed) | 1 h |
 | G9F6C | N3 with the multi-scale Kain-Fritsch on d01 only and icloud = 0 (WRF: icloud 1 on both domains) | 3 steps |
 | G9F2 | P4 with output_diagnostics and QVAPOR / QCLOUD added to auxhist3 by iofields_filename | 3 steps |
+| TROP | WRF's tropical suite on P4 (WSM6, New Tiedtke, RRTMG, YSU, sfclayrev, Noah) | 10 min |
+| CONL | WRF's CONUS suite on the two-way nest N3 (Thompson, Tiedtke, MYJ / Eta, radt 15, gwd_opt 1 on d01, fractional_seaice 1, diff_opt 2 / km_opt 4) | 20 min |
+| ADCB | P4 with the adaptive time step and cudt 5 / bldt 2 | 20 min |
+| ADGT | P8 (Grell-Freitas-Li) with the adaptive time step, target_cfl 1.0, cudt 5 / bldt 3 | 20 min |
+| CB53 | P4 with cudt 5 and bldt 3 | 20 min |
+| MYKR | MYNN with Kain-Fritsch and cu_rad_feedback, RRTMG every step | 10 min |
+| MYBR | MYNN with BMJ, bmj_rad_feedback and icloud_bl 0, RRTMG every step | 10 min |
+| UMYJ | P4 with the urban canopy model under MYJ / Eta | 10 min |
+| RRDD | P4 in daylight (06 UTC) with RRTM LW and Dudhia SW (swrad_scat 1.5) | 10 min |
+| G3N / GFN | N3 (two-way nest) with Grell-3D / Grell-Freitas-Li and cu_rad_feedback on both domains | 10 min |
+| N3OW | N3 one-way (feedback 0) with the P4 physics on both domains | 10 min |
+| MPRE0 | P4 with use_mp_re 0 | 10 min |
+| O3G0 | P4 with o3input 0 and ghg_input 0 | 10 min |
+| ISF0 | P4 with isfflx 0 | 10 min |
+| ADV64 | P4 with the advection orders 6 (horizontal) and 4 (vertical) | 10 min |
+| HAIL | P4 with hail_opt 1 (WSM6) and do_radar_ref 1 | 10 min |
+| SFT1 | P4 with isftcflx 1 and iz0tlnd 1 | 10 min |
+| LESK2 | P4 with bl_pbl_physics 0 (no PBL) and diff_opt 2 / km_opt 2 (1.5-order TKE) over the Noah LSM | 10 min |
+| NMPMY | P6 in daylight (06 UTC) with Noah-MP, MYNN surface layer and MYNN-EDMF PBL, RRTMG every step | 10 min |
+| NMPAC | P4 in daylight (06 UTC) with Noah-MP and the ACM2 PBL over sfclayrev | 10 min |
+| NMPBL | P4 in daylight (06 UTC) with Noah-MP and the BouLac PBL over sfclayrev | 10 min |
+| NMPQN | P4 in daylight (06 UTC) with Noah-MP and the QNSE surface layer and PBL (mfshconv 1) | 10 min |
+| RUCL | P4 in daylight (06 UTC) with the RUC LSM (9 soil levels) and rdlai2d | 10 min |
+| GS1Y | P4 with grav_settling 1 and the YSU PBL | 10 min |
+| GS2J | P4 with grav_settling 2 and the MYJ PBL / Eta surface layer | 10 min |
+| MX2I | P6 with diff_opt 2 / km_opt 2, diff_6th_opt 2, mix_isotropic 1 and all *_mix2_off / *_mix6_off flags | 10 min |
+| MX1I | P6 with diff_opt 1 / km_opt 3, diff_6th_opt 2, mix_isotropic 1 and moist/scalar *_mix2_off / *_mix6_off | 10 min |
+| MOGF | P4 with Morrison two-moment microphysics and Grell-Freitas-Li cumulus (ishallow 1) | 10 min |
+| MOMK | P4 with Morrison two-moment microphysics and multi-scale Kain-Fritsch cumulus | 10 min |
+| NSNT | P4 with NSSL 2-moment microphysics and New Tiedtke cumulus | 10 min |
+| NSMK | P4 with NSSL 2-moment microphysics and multi-scale Kain-Fritsch cumulus | 10 min |
+| SFT2 | P4 with isftcflx 2 and iz0tlnd 2 | 10 min |
+| MYF10 | MYNN in daylight (06 UTC) with sf_mynn_sfcflux_land 1 and sf_mynn_sfcflux_water 0, RRTMG every step | 10 min |
+| MYFW2 | MYNN in daylight (06 UTC) with sf_mynn_sfcflux_water 2, RRTMG every step | 10 min |
+| L58P4 | P4 with 57 layers (e_vert 58, real.exe) | 10 min |
+| L58MOGF | MOGF (Morrison, Grell-Freitas-Li) with 57 layers (e_vert 58, real.exe) | 10 min |
+| L58NSMK | NSMK (NSSL 2-moment, multi-scale KF) with 57 layers (e_vert 58, real.exe) | 10 min |
+| L58MYF10 | MYF10 (Thompson, MYNN, RRTMG every step; 06 UTC) with 57 layers (e_vert 58, real.exe) | 10 min |
+| L58NMPBL | NMPBL (Noah-MP, BouLac; 06 UTC) with 57 layers (e_vert 58, real.exe) | 10 min |
+| L58NMPAC | NMPAC (Noah-MP, ACM2; 06 UTC) with 57 layers (e_vert 58, real.exe) | 10 min |
+| L58NMPQN | NMPQN (Noah-MP, QNSE + EDKF; 06 UTC) with 57 layers (e_vert 58, real.exe) | 10 min |
+| L58GS2J | GS2J (MYJ, Eta surface layer, grav_settling 2) with 57 layers (e_vert 58, real.exe) | 10 min |
+| L90P4 | P4 with 89 layers (e_vert 90, real.exe) | 10 min |
+| L90MOGF | MOGF (Morrison, Grell-Freitas-Li) with 89 layers (e_vert 90, real.exe) | 10 min |
+| L90NSMK | NSMK (NSSL 2-moment, multi-scale KF) with 89 layers (e_vert 90, real.exe) | 10 min |
+| L90MYF10 | MYF10 (Thompson, MYNN, RRTMG every step; 06 UTC) with 89 layers (e_vert 90, real.exe) | 10 min |
+| L90NMPBL | NMPBL (Noah-MP, BouLac; 06 UTC) with 89 layers (e_vert 90, real.exe) | 10 min |
+| L90NMPAC | NMPAC (Noah-MP, ACM2; 06 UTC) with 89 layers (e_vert 90, real.exe) | 10 min |
+| L90NMPQN | NMPQN (Noah-MP, QNSE + EDKF; 06 UTC) with 89 layers (e_vert 90, real.exe) | 10 min |
+| L90GS2J | GS2J (MYJ, Eta surface layer, grav_settling 2) with 89 layers (e_vert 90, real.exe) | 10 min |
+| YSUT0 | P4 in daylight (06 UTC) with YSU ysu_topdown_pblmix = 0 | 10 min |
+| KFT3 | P4 with Kain-Fritsch kfeta_trigger = 3 (RH-dependent trigger) | 10 min |
+| GFSH0 | P8 (Grell-Freitas-Li) with ishallow = 0 | 10 min |
+| GFC1 | P8 (Grell-Freitas-Li) with clos_choice = 1 (Grell stability closure) | 10 min |
+| GFC4 | P8 (Grell-Freitas-Li) with clos_choice = 4 (low-level vertical velocity closure) | 10 min |
+| GFC7 | P8 (Grell-Freitas-Li) with clos_choice = 7 (moisture-convergence closure) | 10 min |
+| GFC10 | P8 (Grell-Freitas-Li) with clos_choice = 10 (CAPE / Arakawa-Schubert closure) | 10 min |
+| G3SH0 | P8 with Grell-3D (cu_physics = 5) and ishallow = 0 | 10 min |
+| G3C1 | P8 with Grell-3D (cu_physics = 5) and clos_choice = 1 (Grell stability closure) | 10 min |
+| G3C4 | P8 with Grell-3D (cu_physics = 5) and clos_choice = 4 (low-level vertical velocity closure) | 10 min |
+| G3C7 | P8 with Grell-3D (cu_physics = 5) and clos_choice = 7 (moisture-convergence closure) | 10 min |
+| G3C10 | P8 with Grell-3D (cu_physics = 5) and clos_choice = 10 (CAPE / Arakawa-Schubert closure) | 10 min |
+| NTN3 | N3 (two-way nest, d02 dx 5 km < 15 km) with New Tiedtke (cu_physics = 16) on both domains | 10 min |
+| THCND2 | P4 in daylight (06 UTC) with Noah opt_thcnd = 2 (McCumber-Pielke thermal conductivity) | 10 min |
+| SLAB0 | P4 in daylight (06 UTC) with the 5-layer thermal diffusion (slab) LSM and ifsnow = 0 | 10 min |
+| KTOFD | P4 in daylight (06 UTC) with sfclayrev kim_tofd = true (turbulent orographic form drag) | 10 min |
+| DMP1 | P4 with damp_opt = 1 and dampcoef 0.01 (upper diffusive damping, cal_dampkm) | 10 min |
+| TOPLID | P4 with top_lid = true (rigid-lid top boundary condition) | 10 min |
+| DUDW3 | P4 in daylight (06 UTC) with WSM3 (mp_physics = 3), RRTMG LW and Dudhia SW (qi absent) | 10 min |
 | W1 | active w_damping (dt 450 s) | 10 steps |
 
 V1-V3, T6, G2, F1, F2, D0, D0V, SU1 and SU2 are compared in every wrfout variable over the whole run; V1-V3 start from the

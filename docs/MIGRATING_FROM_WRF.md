@@ -62,7 +62,8 @@ running.
 - **Options without a port** stop the run at start-up with the option, the value and what is supported. They are:
   - vortex-following moving nests and moves outside the ported prescribed moves (docs/NESTING.md);
   - vertical nest refinement, ndown.exe;
-  - the urban models other than the single-layer UCM with Noah, and the lake model;
+  - the urban models other than the single-layer UCM with Noah; the lake model on nests, with land surface models
+    other than Noah / Noah-MP or with WRF's lake depth in use (one domain with Noah / Noah-MP is ported);
   - spectral nudging; observation nudging on grids other than Lambert conformal, with tiles or MPI ranks;
   - stochastic physics and chemistry;
   - I/O forms other than NetCDF;
