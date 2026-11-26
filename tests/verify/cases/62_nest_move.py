@@ -9,7 +9,6 @@ tests/verify/refs/movenest_refs.txt, data movenest_data.tar), at tolerance 0 on 
 - MV2: the corral (d02's corral_dist 39): the x part of the move at 1 min and the whole move at 2 min are cancelled
   ("MOAD can not move").
 A resumed run with moving nests is refused by CPPWRF (no restart cases).
-The option is "unverified" (data/option_tiers.txt) until these cases have passed; they set cppwrf.allow_unverified.
 
 CASES: see tests/verify/cases/__init__.py."""
 from cases.common import WR  # noqa: F401
@@ -18,11 +17,10 @@ _D = "2026-10-12_00:00:00"
 _DOMS = ("d01", "d02")
 _VARS = ("U", "V", "W", "PH", "MU", "THM", "QV", "QCLOUD", "QRAIN", "HGT", "XLAT", "XLONG")
 _TOL = {f"{d}.{x}": 0.0 for d in _DOMS for x in _VARS}
-_ALLOW = ["cppwrf.allow_unverified=true"]
 _MV1 = ["domains.num_moves=4", "domains.move_id=2,2,2,2", "domains.move_interval=1,2,20,40",
-        "domains.move_cd_x=1,0,-1,1", "domains.move_cd_y=0,1,-1,-1"] + _ALLOW
+        "domains.move_cd_x=1,0,-1,1", "domains.move_cd_y=0,1,-1,-1"]
 _MV2 = ["domains.num_moves=2", "domains.move_id=2,2", "domains.move_interval=1,2", "domains.move_cd_x=-1,1",
-        "domains.move_cd_y=1,0", "d02.corral_dist=39"] + _ALLOW
+        "domains.move_cd_y=1,0", "d02.corral_dist=39"]
 
 
 def _steps(run, moves):
@@ -50,8 +48,12 @@ CASES = [
      _refs(f"{WR}/run_MV1_cpu_sp"), 3600, _TOL),
 ]
 
-# no STATUS rows yet: docs/STATUS.md's table lists verified cases; MV1 / MV2 rows come with the proof (the option's
-# row of data/option_tiers.txt removed)
+STATUS = [
+    ('MV1', 'N3 with d02 moved by one parent cell at 1, 2, 20 and 40 min ((+1, 0), (0, +1), (-1, -1), (+1, -1); '
+     'num_moves, WRF dmpar with one MPI rank built with preset moves): both domains (3 parent steps and 1 h)', '1 h'),
+    ('MV2', 'N3 with two moves cancelled by the corral (corral_dist 39 on d02: the x part of the move at 1 min, the '
+     'whole move at 2 min)', '3 parent steps'),
+]
 
 # the data tars (tests/verify/vm_data.txt) each case reads, in that file's order
 DATA = {c[0]: 'movenest_data.tar' for c in CASES}

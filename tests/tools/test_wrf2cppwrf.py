@@ -2557,7 +2557,7 @@ class TestWrfNamelistSemantics(unittest.TestCase):
 
     def test_prescribed_moves_translated(self):
         # num_moves > 0 (WRF "preset moves"): [domains] lists of num_moves entries, missing entries the Registry
-        # defaults; a non-default corral_dist goes to [d02]; the option is below the verified tier until its proof
+        # defaults; a non-default corral_dist goes to [d02]; verified (MV1, MV2): no tier warning, no allow_unverified
         moves = ("num_moves = 3, move_id = 2, 2, 2, move_interval = 15, 30, move_cd_x = 1, -1, 0,"
                  " move_cd_y = 0, 1, -1, corral_dist = 8, 10, ")
         t, gen = self.translate((self.NEST + self.MOVEPHYS).replace("&domains ", "&domains " + moves))
@@ -2568,6 +2568,8 @@ class TestWrfNamelistSemantics(unittest.TestCase):
         self.assertEqual(gen["domains"]["move_cd_x"], "1,-1,0")
         self.assertEqual(gen["domains"]["move_cd_y"], "0,1,-1")
         self.assertEqual(gen["d02"]["corral_dist"], 10)
+        self.assertFalse(any("verification tier" in w for w in t.warnings), t.warnings)
+        self.assertNotIn("cppwrf", gen)
         for bad, msg in (("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 2, ", "invalid move"),
                          ("num_moves = 51, ", "num_moves = 51"),
                          ("num_moves = 1, move_id = 2, move_interval = 5, move_cd_x = 1, corral_dist = 8, 0, ",

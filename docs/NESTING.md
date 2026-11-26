@@ -3,7 +3,7 @@
 Scope: WRF 4.8.0 two-way (feedback = 1) and one-way (feedback = 0) static nests with odd
 parent_grid_ratio, the same vertical levels in all domains (no vertical refinement), nests that read
 their own wrfinput_d0N (input_from_file = .true.), real-data cases; prescribed moves of a nest of domain 1
-(unverified, section "Moving nests" below). Not implemented: ideal-case nests, vortex-following moving nests, vertical
+(section "Moving nests" below). Not implemented: ideal-case nests, vortex-following moving nests, vertical
 refinement.
 
 ## WRF call sequence (frame/module_integrate.F integrate, recursive per domain)
@@ -106,3 +106,8 @@ moving nest that is not a nest of domain 1, has nests or siblings; tiles or MPI 
 `parent_grid_ratio` > 3; a nest whose interpolation window leaves domain 1's points (i/j_parent_start < 5 or within
 5 parent cells plus the nest of the east / north edge); a resumed run (`run.restart_file`); vortex following;
 `time_to_move`.
+
+Verification: the suite cases MV1 (N3 with four moves of d02 at 1, 2, 20 and 40 min; 3 parent steps with history
+every step and 1 h) and MV2 (two moves cancelled by the corral) against WRF 4.8.0 dmpar with one MPI rank built with
+preset moves (tests/verify/refs/movenest_refs.txt, tests/verify/cases/62_nest_move.py): both domains identical at
+tolerance 0 on the CPU and in CUDA FP64, and MV1 in CPU FP32 against WRF real*4's run.

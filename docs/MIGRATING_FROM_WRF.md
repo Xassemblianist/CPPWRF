@@ -60,7 +60,7 @@ running.
   (`cppwrf-fit` estimates it). The CPU result does not depend on
   the thread count.
 - **Options without a port** stop the run at start-up with the option, the value and what is supported. They are:
-  - moving nests;
+  - vortex-following moving nests and moves outside the ported prescribed moves (docs/NESTING.md);
   - vertical nest refinement, ndown.exe;
   - the urban models other than the single-layer UCM with Noah, and the lake model;
   - spectral and observation nudging;
