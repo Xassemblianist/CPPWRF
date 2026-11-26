@@ -68,6 +68,11 @@ class PhysicsCoupling {
   }
   // WDM: the land mask XLAND (1 land, 2 water) of the column physics; the autoconversion threshold qc0 / qc1
   void set_xland(const Field2* xland) { xland_ = xland; }
+  // a scheme without SR (Kessler) with column physics: the suite's grid%sr, which solve_em.F:3852 zeroes for every
+  // mp_physics /= 0 (a resumed run's SR from wrfrst does not survive the first microphysics call)
+  void set_grid_sr(Field2* sr) { grid_sr_ = sr; }
+  // the array solve_em zeroes before microphysics_driver: this coupling's sr (ice_precip()) or the suite's
+  Field2* grid_sr() { return sr.layout().total > 0 ? &sr : grid_sr_; }
   // WRF grid fields moist_physics_prep/finish_em leave (rho, qv_diabatic, qc_diabatic), by WRF name
   std::vector<const Field3*> fields() const;
   Field2 rainnc, rainncv;  // accumulated / last-step grid-scale precipitation [mm]
@@ -103,6 +108,7 @@ class PhysicsCoupling {
   std::shared_ptr<const std::pair<Buffer, phys::mp_p3::P3Tables<real>>> p3t_;  // its tables on the device
   const Field3 *cu_qr_ = nullptr, *cu_qs_ = nullptr, *cu_qi_ = nullptr;  // Morrison: RQRCUTEN, RQSCUTEN, RQICUTEN
   const Field2* xland_ = nullptr;  // WDM: XLAND
+  Field2* grid_sr_ = nullptr;  // set_grid_sr
   const Field3* cu_qc_ = nullptr;                                          // NSSL also RQCCUTEN
   std::shared_ptr<const phys::mp_nssl::NsslScheme<real>> nssl_;  // nssl_2mom_init's values and tables
   Field3 nssl_zero_;  // NSSL without cumulus: the zero RQ*CUTEN WRF passes

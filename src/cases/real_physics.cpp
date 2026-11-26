@@ -854,6 +854,7 @@ void init_real_physics(const io::Config& cfg, Model& m) {
     su.set_microphysics_precip(&pc->rainncv, has_ice_precip ? &pc->sr : nullptr,
                                has_ice_precip ? &pc->snowncv : nullptr,
                                has_ice_precip ? &pc->graupelncv : nullptr, pc->nssl() ? &pc->hailncv : nullptr);
+    if (!has_ice_precip) pc->set_grid_sr(&su.sr);  // Kessler: solve_em.F:3852 zeroes the suite's grid%sr
   }
   m.rk->set_column_physics(m.suite.get());
 }
