@@ -54,7 +54,7 @@
 #include "core/libm.hpp"
 // the device's float functions: glibc's in the default identity build, or device libm in the fast build (CPPWRF_GF)
 #if defined(CPPWRF_FP32_IDENTITY)
-#include "core/glibc_mathf.hpp"
+#include "core/glibc_mathf_compat.hpp"
 #define CPPWRF_GF(f) ::cppwrf::glibcf::f
 #else
 #define CPPWRF_GF(f) ::f
@@ -417,7 +417,9 @@ CPPWRF_HD inline float cos(float a, int i, int n) {
 #endif
 }
 CPPWRF_HD inline float log10(float a, int, int) {
-#if defined(CPPWRF_DEVICE_CODE)
+#if defined(CPPWRF_DEVICE_CODE) && defined(CPPWRF_FP32_IDENTITY)
+  return ::cppwrf::glibcf::compat::log10f(a);  // libm's log10f: the SVID wrapper (core/glibc_mathf_compat.hpp)
+#elif defined(CPPWRF_DEVICE_CODE)
   return CPPWRF_GF(log10f)(a);
 #else
   return std::log10(a);

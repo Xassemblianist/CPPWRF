@@ -6,8 +6,10 @@
 // functions themselves (core/glibc_mathf_host.cpp), so that a float call on the host computes those whatever libm the
 // host has.
 // CUDA FP64 build (CPPWRF_GLIBC_MATH, core/backend.hpp): the double functions are glibc's own algorithms
-// (core/glibc_math.hpp) on the device and on the host, so that the GPU computes what WRF's real*8 build and the CPU
-// build compute; float arguments still call std:: (CUDA's float functions on the device). Compile-time constants: gcc
+// (core/glibc_math.hpp; asin, acos, log10, tgamma and their float versions through the x86-64 libm's SVID wrappers,
+// core/glibc_math_compat.hpp, core/glibc_mathf_compat.hpp) on the device and on the host, so that the GPU computes
+// what WRF's real*8 build and the CPU build compute; float arguments still call std:: (CUDA's float functions on the
+// device). Compile-time constants: gcc
 // folds a math call with constant arguments (correctly rounded, as WRF's gfortran build and the CPU build) and
 // pow(x, c) for a constant c = 2, 1, -1, 0 into x * x, x, 1 / x, 1; the host side of the FP64 CUDA build keeps these
 // folds (__builtin_constant_p). Device code has no such test: a kernel writes them as WRF's compiled code computes
@@ -18,10 +20,10 @@
 #include "core/gpu_runtime.hpp"
 
 #if defined(CPPWRF_GLIBC_MATH)
-#include "core/glibc_math.hpp"
+#include "core/glibc_math_compat.hpp"
 #endif
 #if defined(CPPWRF_FP32_IDENTITY)
-#include "core/glibc_mathf.hpp"
+#include "core/glibc_mathf_compat.hpp"
 #endif
 
 namespace cppwrf::libm {
@@ -72,17 +74,17 @@ using std::tgamma;
   }
 CPPWRF_LM_FUNC1F(exp, glibc::exp, glibcf::expf)
 CPPWRF_LM_FUNC1F(log, glibc::log, glibcf::logf)
-CPPWRF_LM_FUNC1F(log10, glibc::log10, glibcf::log10f)
+CPPWRF_LM_FUNC1F(log10, glibc::compat::log10, glibcf::compat::log10f)
 CPPWRF_LM_FUNC1F(atan, glibc::atan, glibcf::atanf)
 CPPWRF_LM_FUNC1F(tanh, glibc::tanh, glibcf::tanhf)
 CPPWRF_LM_FUNC1F(sin, glibc::sin, glibcf::sinf)
 CPPWRF_LM_FUNC1F(cos, glibc::cos, glibcf::cosf)
 CPPWRF_LM_FUNC1F(sinh, glibc::sinh, glibcf::sinhf)
 CPPWRF_LM_FUNC1F(erf, glibc::erf, glibcf::erff)
-CPPWRF_LM_FUNC1F(asin, glibc::asin, glibcf::asinf)
-CPPWRF_LM_FUNC1F(acos, glibc::acos, glibcf::acosf)
+CPPWRF_LM_FUNC1F(asin, glibc::compat::asin, glibcf::compat::asinf)
+CPPWRF_LM_FUNC1F(acos, glibc::compat::acos, glibcf::compat::acosf)
 CPPWRF_LM_FUNC1F(tan, glibc::tan, glibcf::tanf)
-CPPWRF_LM_FUNC1F(tgamma, glibc::tgamma, glibcf::tgammaf)
+CPPWRF_LM_FUNC1F(tgamma, glibc::compat::tgamma, glibcf::compat::tgammaf)
 #undef CPPWRF_LM_FUNC1F
 #undef CPPWRF_LM_FLOAT
 // atan2: two arguments as std:: (float, float) -> float, otherwise double
