@@ -6,8 +6,9 @@
 //   nvcc -std=c++20 -O3 --fmad=false -arch=native -DCPPWRF_GLIBC_MATH -Isrc -Itools -Xcompiler -fopenmp,-ffp-contract=off
 //        tools/glibc_math_proof_cuda.cu -o glibc_math_proof_cuda
 //   ./glibc_math_proof_cuda [N] [FUNCTION,...]
+// AMD HIP: the same source with hipcc -x hip (tools/proof_gpu_runtime.hpp).
 // Exit 1 when any result differs.
-#include <cuda_runtime.h>
+#include "proof_gpu_runtime.hpp"  // <cuda_runtime.h>, or HIP's
 
 #include <cstdio>
 #include <cstdlib>
@@ -91,7 +92,11 @@ int main(int argc, char** argv) {
   const std::string only = argc > 2 ? argv[2] : "";
   cudaDeviceProp p;
   cudaGetDeviceProperties(&p, 0);
+#if defined(__HIP__)
+  std::printf("glibc_math_proof_cuda: %s (%s), %lld random inputs per function\n", p.name, p.gcnArchName, n);
+#else
   std::printf("glibc_math_proof_cuda: %s (sm_%d%d), %lld random inputs per function\n", p.name, p.major, p.minor, n);
+#endif
   const long long bad = run_all(n, only, std::make_integer_sequence<int, kNumFuncs>{});
   std::printf(bad ? "glibc_math_proof_cuda: %lld DIFFER\n" : "glibc_math_proof_cuda: identical\n", bad);
   return bad ? 1 : 0;

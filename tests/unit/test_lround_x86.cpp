@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // lround_x86 (core/backend.hpp): gfortran's NINT as on x86-64 (LONG_MIN for NaN, +-Inf, |x| >= 2^63), also on the
-// device, whose own conversion saturates (+Inf: LONG_MAX, int -1 where the CPU's int is 0). A CUDA build checks the
-// device against the host.
+// device, whose own conversion saturates (+Inf: LONG_MAX, int -1 where the CPU's int is 0). A GPU build (CUDA, HIP)
+// checks the device against the host, also below -2^63 (an AMD GPU has no saturating 64-bit conversion: the HIP
+// device tests that side).
 #include <climits>
 #include <cmath>
 #include <cstdio>
@@ -11,8 +12,9 @@
 #include "core/backend.hpp"
 
 namespace {
-constexpr int kN = 12;
-const double kX[kN] = {INFINITY, -INFINITY, NAN, 1e19, -1e19, 9.3e18, 3e9, -3e9, 2.5, -2.5, 0.49999999999999994, 7.0};
+constexpr int kN = 16;
+const double kX[kN] = {INFINITY, -INFINITY, NAN, 1e19, -1e19, 9.3e18, 3e9, -3e9, 2.5, -2.5, 0.49999999999999994, 7.0,
+                       -9.3e18, -9223372036854775808.0, -9223372036854773760.0, 9223372036854773760.0};
 
 struct K {
   const double* x;
@@ -27,7 +29,7 @@ struct K {
 int main() {
   int fails = 0;
   const long want[kN] = {LONG_MIN, LONG_MIN, LONG_MIN, LONG_MIN, LONG_MIN, LONG_MIN, 3000000000L, -3000000000L,
-                         3, -3, 0, 7};
+                         3, -3, 0, 7, LONG_MIN, LONG_MIN, -9223372036854773760L, 9223372036854773760L};
   for (int i = 0; i < kN; ++i) {
     const long h = lround_x86(kX[i]);
     if (h != want[i]) {
@@ -35,7 +37,7 @@ int main() {
       ++fails;
     }
   }
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_GPU)
   double* dx = static_cast<double*>(cppwrf::dev_alloc(sizeof kX));
   long* dout = static_cast<long*>(cppwrf::dev_alloc(sizeof(long) * 2 * kN));
   cppwrf::copy_to_dev(dx, kX, sizeof kX);

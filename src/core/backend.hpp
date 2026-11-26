@@ -94,10 +94,15 @@ CPPWRF_HD inline double rpow(double a, double b) {
 #endif
 }
 // gfortran's NINT on x86-64 (lround / lroundf): LONG_MIN for NaN, +-Inf and values at or beyond 2^63. The device's
-// conversion saturates (+Inf -> LONG_MAX, whose int is -1, where the CPU's int is 0): the same result on both.
+// conversion saturates (+Inf -> LONG_MAX, whose int is -1, where the CPU's int is 0): the same result on both. Below
+// -2^63 x86 gives LONG_MIN too; CUDA's conversion saturates there to the same value, while an AMD GPU has no 64-bit
+// conversion instruction (an out-of-range double -> long is undefined in LLVM): the HIP device tests that side as well.
 CPPWRF_HD inline long lround_x86(double x) {
 #if defined(CPPWRF_DEVICE_CODE)
   if (!(x < 9223372036854775808.0)) return LONG_MIN;
+#if defined(__HIP_DEVICE_COMPILE__)
+  if (x < -9223372036854775808.0) return LONG_MIN;
+#endif
   return ::lround(x);
 #else
   return std::lround(x);
@@ -106,11 +111,61 @@ CPPWRF_HD inline long lround_x86(double x) {
 CPPWRF_HD inline long lround_x86(float x) {
 #if defined(CPPWRF_DEVICE_CODE)
   if (!(x < 9223372036854775808.0f)) return LONG_MIN;
+#if defined(__HIP_DEVICE_COMPILE__)
+  if (x < -9223372036854775808.0f) return LONG_MIN;
+#endif
   return ::lroundf(x);
 #else
   return std::lround(x);
 #endif
 }
+// fmax / fmin as x86-64 computes them: glibc 2.41's fmax / fmin (sysdeps/x86_64/fpu/s_fmax.S, s_fmin.S), which the
+// CPU build calls, are SSE's maxsd / minsd with x as the destination: x when x > y (fmin: x < y), else y, so two
+// zeros of opposite sign give y (fmax(-0, +0) = +0, fmax(+0, -0) = -0); a quiet NaN gives the other operand, a
+// signaling NaN or two NaNs x + y. g++ passes a constant as the second argument whatever the source order, so
+// MAX(k, x) with a constant k first keeps k on a tie, as gfortran's maxsd / minsd do: fmax_x86_k(k, x).
+// CPU and CUDA builds: fmax_x86 is v1.5.0's std::fmax (a macro: the same tokens, the same code), glibc's on the host
+// and PTX max / min on the CUDA device (+0 for fmax and -0 for fmin of two opposite zeros, the other operand for any
+// NaN). HIP builds, host pass and device: the comparisons written out (ROCm's fmax is v_max_f64, which can return
+// either zero, and clang's host pass inlines std::fmax as a maxsd of its own operand order);
+// tests/unit/test_device_ieee.cpp checks them.
+#if defined(CPPWRF_USE_HIP) || defined(__HIP__)
+namespace cppwrf::detail {
+CPPWRF_HD inline bool snan_x86(double v) {
+  return v != v && !((__builtin_bit_cast(unsigned long long, v) >> 51) & 1u);
+}
+CPPWRF_HD inline bool snan_x86(float v) { return v != v && !((__builtin_bit_cast(unsigned, v) >> 22) & 1u); }
+template <class T>
+CPPWRF_HD inline T fmax_glibc(T x, T y) {
+  if (x == x && y == y) return x > y ? x : y;  // maxsd
+  if (y != y && x == x) return snan_x86(y) ? x + y : x;
+  if (x != x && y == y) return snan_x86(x) ? x + y : y;
+  return x + y;
+}
+template <class T>
+CPPWRF_HD inline T fmin_glibc(T x, T y) {
+  if (x == x && y == y) return x < y ? x : y;  // minsd
+  if (y != y && x == x) return snan_x86(y) ? x + y : x;
+  if (x != x && y == y) return snan_x86(x) ? x + y : y;
+  return x + y;
+}
+}  // namespace cppwrf::detail
+CPPWRF_HD inline double fmax_x86(double x, double y) { return ::cppwrf::detail::fmax_glibc(x, y); }
+CPPWRF_HD inline double fmin_x86(double x, double y) { return ::cppwrf::detail::fmin_glibc(x, y); }
+CPPWRF_HD inline float fmax_x86(float x, float y) { return ::cppwrf::detail::fmax_glibc(x, y); }
+CPPWRF_HD inline float fmin_x86(float x, float y) { return ::cppwrf::detail::fmin_glibc(x, y); }
+// MAX(k, x) / MIN(k, x) with a constant k first in the Fortran: the constant on a tie, as the CPU build's call
+#define fmax_x86_k(k, x) fmax_x86((x), (k))
+#define fmin_x86_k(k, x) fmin_x86((x), (k))
+#else
+// CPU and CUDA builds: the very calls of v1.5.0 (std::fmax / std::fmin: glibc's on the host, CUDA's on the device),
+// token for token, so that g++'s operand order at every call site, and with it the code, stays the same (g++ passes
+// a constant second: fmax_x86_k(k, x) is glibc's fmax(x, k))
+#define fmax_x86 std::fmax
+#define fmin_x86 std::fmin
+#define fmax_x86_k(k, x) std::fmax(k, x)
+#define fmin_x86_k(k, x) std::fmin(k, x)
+#endif
 // x**2.0 with the constant exponent 2.0: gcc folds pow(x, 2.0) into x * x (WRF's gfortran build and the CPU build);
 // the device cannot test for a constant, so the GPU FP64 build writes the product out
 template <typename T>
@@ -520,6 +575,29 @@ inline unsigned fatal_launch_smem() {
   return 0u;
 #endif
 }
+// HIP: a launch carries its slot as a last kernel argument, which every thread of the kernel stores into a word of
+// the block's shared memory (fatal_slot_lds) before it runs the kernel's body; raise_fatal reads it back. (A HIP
+// kernel cannot read the size of its dynamic shared memory, which carries the slot on CUDA.) The stores and the load
+// are relaxed atomics: every thread of the block stores the same value and then reads its own store or another
+// thread's equal one, with no data race and no barrier. CUDA and CPU builds: the kernels and launches are unchanged
+// (the macros are empty). CPPWRF_HIP_KSLOT: a HIP compilation of the model (CPPWRF_USE_HIP); a HIP translation unit
+// without it (a standalone tool) raises into slot 0.
+#if defined(CPPWRF_USE_HIP) && defined(__HIP__)
+#define CPPWRF_HIP_KSLOT 1
+#define CPPWRF_KSLOT_PARAM , int fatal_slot_arg
+#define CPPWRF_KSLOT_ARG , ::cppwrf::detail::fatal_slot
+#define CPPWRF_KSLOT_ARG0 , 0
+#if !defined(CPPWRF_HIP_MAX_KERNARG)
+#define CPPWRF_HIP_MAX_KERNARG 4096  // the kernarg segment of a launch, hidden arguments included (bytes)
+#endif
+#define CPPWRF_KSLOT_SET() \
+  __hip_atomic_store(&::cppwrf::detail::fatal_slot_lds, fatal_slot_arg, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP)
+#else
+#define CPPWRF_KSLOT_PARAM
+#define CPPWRF_KSLOT_ARG
+#define CPPWRF_KSLOT_ARG0
+#define CPPWRF_KSLOT_SET() ((void)0)
+#endif
 // a failed transfer or wait of a fatal check: throws (the run stops with the runtime's message, also when the flag
 // could not be read)
 void fatal_transfer_failed(int err, const char* what);
@@ -645,19 +723,26 @@ inline gpuStream_t gpu_launch_stream() {
   return static_cast<gpuStream_t>(gpu_stream_raw());
 }
 namespace detail {
-template <class K> __global__ void k3d(K k, Range3D r) {
+#if defined(CPPWRF_HIP_KSLOT)
+// the slot of the running launch (CPPWRF_KSLOT_SET; each thread stores the same value before it reads it)
+static __shared__ int fatal_slot_lds;
+#endif
+template <class K> __global__ void k3d(K k, Range3D r CPPWRF_KSLOT_PARAM) {
+  CPPWRF_KSLOT_SET();
   int i = r.i0 + blockIdx.x * blockDim.x + threadIdx.x;
   int j = r.j0 + blockIdx.y * blockDim.y + threadIdx.y;
   int kk = r.k0 + blockIdx.z;
   if (i < r.i1 && j < r.j1) k(i, j, kk);
 }
-template <class K> __global__ void k2d(K k, Range2D r) {
+template <class K> __global__ void k2d(K k, Range2D r CPPWRF_KSLOT_PARAM) {
+  CPPWRF_KSLOT_SET();
   int i = r.i0 + blockIdx.x * blockDim.x + threadIdx.x;
   int j = r.j0 + blockIdx.y * blockDim.y + threadIdx.y;
   if (i < r.i1 && j < r.j1) k(i, j);
 }
 // One block per k plane; fixed-order tree => deterministic.
-template <class F, bool MAX> __global__ void kred(F f, Range3D r, double* part) {
+template <class F, bool MAX> __global__ void kred(F f, Range3D r, double* part CPPWRF_KSLOT_PARAM) {
+  CPPWRF_KSLOT_SET();
   __shared__ double sh[256];
   int kk = r.k0 + blockIdx.x;
   double acc = MAX ? -1e308 : 0.0;
@@ -678,13 +763,53 @@ template <class F, bool MAX> __global__ void kred(F f, Range3D r, double* part) 
   if (threadIdx.x == 0) part[blockIdx.x] = sh[0];
 }
 // The GPU FP64 and FP32 identity builds' sums: one thread per k plane adds its values in the CPU build's (j, i) order
-template <class F> __global__ void kred_seq(F f, Range3D r, double* part) {
+template <class F> __global__ void kred_seq(F f, Range3D r, double* part CPPWRF_KSLOT_PARAM) {
+  CPPWRF_KSLOT_SET();
   const int kk = r.k0 + blockIdx.x;
   double acc = 0.0;
   for (int j = r.j0; j < r.j1; ++j)
     for (int i = r.i0; i < r.i1; ++i) acc = acc + f(i, j, kk);
   part[blockIdx.x] = acc;
 }
+#if defined(CPPWRF_HIP_KSLOT)
+// AMDGPU kernel arguments (HIP): the explicit ones laid out as a struct's members, then (code object v5) 256 bytes of
+// hidden arguments at the next multiple of 8; .amdhsa_kernarg_size is the sum. ROCm does not document a kernarg
+// segment above 4 KiB: a launch whose segment would exceed CPPWRF_HIP_MAX_KERNARG (default 4096, the whole segment,
+// hidden arguments included) does not pass its functors as arguments. A single kernel (parallel_for, column_for)
+// then reads its functor from a device copy (k3d_ref, k2d_ref); a batch or fused launch runs its parts one by one.
+// The same kernel bodies and the same results; CUDA builds are unchanged (none of this exists there).
+inline constexpr std::size_t kHipHiddenKernarg = 256;
+template <class... A>
+constexpr std::size_t hip_kernarg_bytes() {
+  std::size_t o = 0;
+  ((o = (o + alignof(A) - 1) / alignof(A) * alignof(A) + sizeof(A)), ...);
+  return (o + 7) / 8 * 8 + kHipHiddenKernarg;
+}
+template <class... A>
+inline constexpr bool hip_kernarg_fits = hip_kernarg_bytes<A...>() <= std::size_t(CPPWRF_HIP_MAX_KERNARG);
+template <class K> __global__ void k3d_ref(const K* kp, Range3D r CPPWRF_KSLOT_PARAM) {
+  CPPWRF_KSLOT_SET();
+  int i = r.i0 + blockIdx.x * blockDim.x + threadIdx.x;
+  int j = r.j0 + blockIdx.y * blockDim.y + threadIdx.y;
+  int kk = r.k0 + blockIdx.z;
+  if (i < r.i1 && j < r.j1) (*kp)(i, j, kk);
+}
+template <class K> __global__ void k2d_ref(const K* kp, Range2D r CPPWRF_KSLOT_PARAM) {
+  CPPWRF_KSLOT_SET();
+  int i = r.i0 + blockIdx.x * blockDim.x + threadIdx.x;
+  int j = r.j0 + blockIdx.y * blockDim.y + threadIdx.y;
+  if (i < r.i1 && j < r.j1) (*kp)(i, j);
+}
+// the functor of a launch in device memory: one buffer per host thread and functor type, refilled on the thread's
+// stream before each launch (stream order: the previous launch has read it). The source is the caller's functor in
+// pageable memory, which hipMemcpyAsync has copied (staged) when it returns.
+template <class K> const K* functor_on_device(const K& k) {
+  static thread_local K* d = nullptr;
+  if (!d) d = static_cast<K*>(dev_alloc(sizeof(K)));
+  copy_to_dev_async(d, &k, sizeof(K));
+  return d;
+}
+#endif
 }  // namespace detail
 
 template <class K> void parallel_for(const Range3D& r0, const K& k) {
@@ -696,11 +821,25 @@ template <class K> void parallel_for(const Range3D& r0, const K& k) {
   const unsigned int by = (r.j1 - r.j0 == 1) ? 1u : 2u;
   dim3 b(64, by, 1);
   dim3 g((r.i1 - r.i0 + 63) / 64, (r.j1 - r.j0 + by - 1) / by, r.k1 - r.k0);
+#if !defined(CPPWRF_HIP_KSLOT)
   static thread_local const bool reserved = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k3d<K>), typeid(K).name()), true);
   (void)reserved;
+#endif
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::k3d<<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(k, r);
+#if defined(CPPWRF_HIP_KSLOT)
+  if constexpr (!detail::hip_kernarg_fits<K, Range3D, int>) {
+    static thread_local const bool reserved_ref = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k3d_ref<K>), typeid(K).name()), true);
+    (void)reserved_ref;
+    detail::k3d_ref<K><<<g, b, 0, gpu_launch_stream()>>>(detail::functor_on_device(k), r CPPWRF_KSLOT_ARG);
+  } else {
+    static thread_local const bool reserved = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k3d<K>), typeid(K).name()), true);
+    (void)reserved;
+    detail::k3d<<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(k, r CPPWRF_KSLOT_ARG);
+  }
+#else
+  detail::k3d<<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(k, r CPPWRF_KSLOT_ARG);
+#endif
   gpu_check_launch("parallel_for");
   if (kt) ktime::end(typeid(K).name());
 }
@@ -713,11 +852,25 @@ template <class K> void column_for(const Range2D& r0, const K& k) {
   static const ColumnBlock cb = column_block();
   dim3 b(cb.x, cb.y, 1);
   dim3 g((r.i1 - r.i0 + cb.x - 1) / cb.x, (r.j1 - r.j0 + cb.y - 1) / cb.y, 1);
+#if !defined(CPPWRF_HIP_KSLOT)
   static thread_local const bool reserved = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k2d<K>), typeid(K).name()), true);
   (void)reserved;
+#endif
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::k2d<<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(k, r);
+#if defined(CPPWRF_HIP_KSLOT)
+  if constexpr (!detail::hip_kernarg_fits<K, Range2D, int>) {
+    static thread_local const bool reserved_ref = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k2d_ref<K>), typeid(K).name()), true);
+    (void)reserved_ref;
+    detail::k2d_ref<K><<<g, b, 0, gpu_launch_stream()>>>(detail::functor_on_device(k), r CPPWRF_KSLOT_ARG);
+  } else {
+    static thread_local const bool reserved = (detail::reserve_local_memory(reinterpret_cast<const void*>(&detail::k2d<K>), typeid(K).name()), true);
+    (void)reserved;
+    detail::k2d<<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(k, r CPPWRF_KSLOT_ARG);
+  }
+#else
+  detail::k2d<<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(k, r CPPWRF_KSLOT_ARG);
+#endif
   gpu_check_launch("column_for");
   if (kt) ktime::end(typeid(K).name());
 }
@@ -782,7 +935,20 @@ inline constexpr bool kFuseMulAdd = false;
 #else
 inline constexpr bool kFuseMulAdd = true;
 #endif
+// The largest kernel parameters one launch passes: CUDA 12.1 and later take 32764 bytes (the batches stay below
+// 32000); HIP: detail::hip_kernarg_fits (the whole kernarg segment within CPPWRF_HIP_MAX_KERNARG), else a batch or
+// fused launch runs its parts one by one (the same results: the parts are independent), and its fused kernel is not
+// instantiated at all.
 template <class K> concept Fusable = kFuseMulAdd || requires { requires K::kNoMulAdd; };
+namespace detail {
+template <class A> constexpr bool args_fit() {
+#if defined(CPPWRF_HIP_KSLOT)
+  return hip_kernarg_fits<A, int>;
+#else
+  return true;
+#endif
+}
+}  // namespace detail
 template <class K> struct Part {
   Range3D r;
   K k;
@@ -819,7 +985,10 @@ template <int M, class K, int N> __device__ __forceinline__ void batch_call(cons
     batch_call<M + 1>(a, z);
   }
 }
-template <class K, int N> __global__ void kbatch(const BatchArgs<K, N> a) { batch_call<0>(a, int(blockIdx.z)); }
+template <class K, int N> __global__ void kbatch(const BatchArgs<K, N> a CPPWRF_KSLOT_PARAM) {
+  CPPWRF_KSLOT_SET();
+  batch_call<0>(a, int(blockIdx.z));
+}
 template <class... K> struct FusedArgs {};
 template <class K0, class... R> struct FusedArgs<K0, R...> {
   K0 k;
@@ -836,7 +1005,10 @@ template <class K0, class... R> __device__ __forceinline__ void fused_call(const
     fused_call(a.rest, z);
   }
 }
-template <class... K> __global__ void kfused(const FusedArgs<K...> a) { fused_call(a, int(blockIdx.z)); }
+template <class... K> __global__ void kfused(const FusedArgs<K...> a CPPWRF_KSLOT_PARAM) {
+  CPPWRF_KSLOT_SET();
+  fused_call(a, int(blockIdx.z));
+}
 inline void fused_fill(FusedArgs<>&, LaunchShape&) {}
 template <class K0, class... R>
 void fused_fill(FusedArgs<K0, R...>& a, LaunchShape& s, const Part<K0>& p, const Part<R>&... rest) {
@@ -858,21 +1030,29 @@ template <class K, int N = 8> class LaunchBatch {
   LaunchBatch(const LaunchBatch&) = delete;
   LaunchBatch& operator=(const LaunchBatch&) = delete;
 #if defined(CPPWRF_USE_GPU)
-  static_assert(sizeof(detail::BatchArgs<K, N>) <= 32000, "kernel parameters too large: use a smaller batch");
+  // fused: the parts go to one kbatch launch (CUDA: every Fusable K; HIP: and its arguments fit, detail::args_fit)
+  static constexpr bool kFused = Fusable<K> && detail::args_fit<detail::BatchArgs<K, N>>();
+  static_assert(!kFused || sizeof(detail::BatchArgs<K, N>) <= 32000, "kernel parameters too large: use a smaller batch");
   ~LaunchBatch() { run(); }
   void add(const Range3D& r0, const K& k) {
-    if constexpr (!Fusable<K>) {
+    if constexpr (!kFused) {
       parallel_for(r0, k);
       return;
+    } else {
+      Range3D r = r0;
+      tile::clip(r);
+      if (detail::range_empty(r)) return;
+      a_.k[a_.n] = k;
+      a_.r[a_.n] = r;
+      if (++a_.n == N) run();
     }
-    Range3D r = r0;
-    tile::clip(r);
-    if (detail::range_empty(r)) return;
-    a_.k[a_.n] = k;
-    a_.r[a_.n] = r;
-    if (++a_.n == N) run();
   }
   void run() {
+    if constexpr (kFused) launch();
+  }
+
+ private:
+  void launch() {
     if (a_.n == 0) return;
     detail::LaunchShape s;
     for (int m = 0; m < a_.n; ++m) {
@@ -884,13 +1064,11 @@ template <class K, int N = 8> class LaunchBatch {
     const dim3 b(64, by, 1), g(s.gx, (s.nj + by - 1) / by, s.nz);
     const bool kt = ktime::on();
     if (kt) ktime::begin();
-    detail::kbatch<K, N><<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(a_);
+    detail::kbatch<K, N><<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(a_ CPPWRF_KSLOT_ARG);
     a_.n = 0;
     gpu_check_launch("LaunchBatch");
     if (kt) ktime::end(typeid(K).name());
   }
-
- private:
   detail::BatchArgs<K, N> a_{};
 #else
   void add(const Range3D& r, const K& k) { parallel_for(r, k); }
@@ -900,11 +1078,11 @@ template <class K, int N = 8> class LaunchBatch {
 
 template <class... K> void parallel_fused(const Part<K>&... parts) {
 #if defined(CPPWRF_USE_GPU)
-  if constexpr (!(Fusable<K> && ...)) {
+  using Args = detail::FusedArgs<K...>;
+  if constexpr (!(Fusable<K> && ...) || !detail::args_fit<Args>()) {
     (parallel_for(parts.r, parts.k), ...);
     return;
-  }
-  using Args = detail::FusedArgs<K...>;
+  } else {
   static_assert(sizeof(Args) <= 32000, "kernel parameters too large");
   Args a{};
   detail::LaunchShape s;
@@ -915,9 +1093,10 @@ template <class... K> void parallel_fused(const Part<K>&... parts) {
   const dim3 b(64, by, 1), g(s.gx, (s.nj + by - 1) / by, s.nz);
   const bool kt = ktime::on();
   if (kt) ktime::begin();
-  detail::kfused<K...><<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(a);
+  detail::kfused<K...><<<g, b, detail::fatal_launch_smem(), gpu_launch_stream()>>>(a CPPWRF_KSLOT_ARG);
   gpu_check_launch("parallel_fused");
   if (kt) ktime::end(typeid(Args).name());
+  }
 #else
   (parallel_for(parts.r, parts.k), ...);
 #endif
@@ -963,10 +1142,9 @@ struct FatalError : std::runtime_error {
 // thread that launches them (column_for / parallel_for). On a CUDA device each translation unit's flag has one
 // word per slot; a launch of column_for / parallel_for / LaunchBatch / parallel_fused carries its slot as the bytes
 // of dynamic shared memory it asks for (0 outside an ensemble: the launches are unchanged), which raise_fatal reads
-// back (%dynamic_smem_size) only when it raises. HIP: the device has one word for every launch (slot 0), which the
-// checks of every thread read and clear (detail::fatal_offset); the host flags keep their slots. In a HIP threads
-// ensemble a code raised on the device therefore stops the member whose check reads it first, and that member's
-// error stops the others: the ensemble stops, but the member it names can be another one (cases/ensemble.cpp says so).
+// back (%dynamic_smem_size) only when it raises. HIP: the launches carry the slot as a last kernel argument, which
+// each thread of the kernel stores into a shared-memory word that raise_fatal reads (CPPWRF_KSLOT_PARAM): the same
+// per-member flags as on CUDA.
 // the calling thread's slot (0 <= slot < kFatalSlots; an ensemble member's thread before its first launch)
 void set_fatal_slot(int slot);
 #if defined(CPPWRF_GPUCC)
@@ -981,8 +1159,13 @@ CPPWRF_HD inline void raise_fatal(int code) {
   unsigned slot;
   asm("mov.u32 %0, %%dynamic_smem_size;" : "=r"(slot));
   if (slot >= unsigned(kFatalSlots)) slot = 0;
+#elif defined(CPPWRF_HIP_KSLOT)
+  // HIP: the launch's kernel argument, stored in the block's shared memory (CPPWRF_KSLOT_SET)
+  unsigned slot =
+      unsigned(__hip_atomic_load(&detail::fatal_slot_lds, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_WORKGROUP));
+  if (slot >= unsigned(kFatalSlots)) slot = 0;
 #else
-  const unsigned slot = 0;
+  const unsigned slot = 0;  // a HIP translation unit outside the model (no CPPWRF_USE_HIP): slot 0
 #endif
   int* f = &detail::fatal_code_dev[slot];
   int old = *static_cast<volatile int*>(f);
@@ -1000,9 +1183,13 @@ CPPWRF_HD inline void raise_fatal(int code) {
 }
 #if defined(CPPWRF_USE_GPU) && defined(CPPWRF_GPUCC)
 namespace detail {
-// the device word of the calling thread's checks: the one its launches raise into (fatal_launch_smem: the slot on
-// CUDA; word 0 on HIP, where raise_fatal writes word 0 whatever the thread's slot)
+// the device word of the calling thread's checks: the one its launches raise into (the thread's slot: CUDA's launches
+// carry it as their dynamic shared memory, HIP's as a kernel argument)
+#if defined(CPPWRF_USE_CUDA)
 inline std::size_t fatal_offset() { return std::size_t(fatal_launch_smem()) * sizeof(int); }
+#else
+inline std::size_t fatal_offset() { return std::size_t(fatal_slot) * sizeof(int); }
+#endif
 inline void fatal_ck(gpuError_t e, const char* what) {
   if (e != gpuSuccess) fatal_transfer_failed(int(e), what);
 }
@@ -1144,10 +1331,10 @@ class Reducer {
 #if defined(CPPWRF_GPUCC)
 #if defined(CPPWRF_FP32_IDENTITY) || defined(CPPWRF_DOUBLE)
     // the FP64 and FP32 identity builds: the CPU build's order (diag.csv as the CPU build's)
-    if constexpr (!MAX) detail::kred_seq<F><<<nk, 1, 0, gpu_launch_stream()>>>(f, r, dpart_);
-    else detail::kred<F, MAX><<<nk, 256, 0, gpu_launch_stream()>>>(f, r, dpart_);
+    if constexpr (!MAX) detail::kred_seq<F><<<nk, 1, 0, gpu_launch_stream()>>>(f, r, dpart_ CPPWRF_KSLOT_ARG0);
+    else detail::kred<F, MAX><<<nk, 256, 0, gpu_launch_stream()>>>(f, r, dpart_ CPPWRF_KSLOT_ARG0);
 #else
-    detail::kred<F, MAX><<<nk, 256, 0, gpu_launch_stream()>>>(f, r, dpart_);
+    detail::kred<F, MAX><<<nk, 256, 0, gpu_launch_stream()>>>(f, r, dpart_ CPPWRF_KSLOT_ARG0);
 #endif
     gpu_check_launch("Reducer");
     copy_to_host(hpart_.data(), dpart_, sizeof(double) * nk);

@@ -12,10 +12,8 @@
 //      minimum): a large domain whose last column raises the smallest code; a decomposed run (tiles in this process)
 //      stops every worker with the smallest code any worker raised (tile::hooks.first_code), as one patch does;
 //  (e) the fatal slots of ensemble members (set_fatal_slot): a code raised by a kernel of a thread with slot 3
-//      (CUDA: the launch carries the slot) stops that thread only; a thread with slot 0 and one with slot 5 that
-//      raise nothing see no code, also while the other thread raises. HIP: the device has one word for every slot,
-//      read by the checks of every slot (detail::fatal_offset): the two threads run one after the other, each
-//      stops with its own code.
+//      (the launch carries the slot) stops that thread only; a thread with slot 0 and one with slot 5 that
+//      raise nothing see no code, also while the other thread raises.
 // The kernels run on the backend of the build (CPU or CUDA device flag).
 #include <cstdio>
 #include <cstring>
@@ -235,16 +233,11 @@ int main() {
       a = stop_code([] { column_for(Range2D{0, 40, 0, 30}, KRaise{kFatalKfIstop}); });
       dev_sync();
     });
-#if defined(CPPWRF_USE_HIP)
-    ta.join();  // HIP: one device word for every slot (core/backend.hpp): each thread's code read by its own check
-#endif
     std::thread tb([&] {
       set_fatal_slot(5);
       b = stop_code([] { column_for(Range2D{0, 40, 0, 30}, KRaise{0x7fffffff}); column_for(one, KGlacial{real(0.2), real(0.8)}); });
     });
-#if !defined(CPPWRF_USE_HIP)
     ta.join();
-#endif
     tb.join();
     // (KRaise{INT_MAX} raises the largest code: a slot shared with ta would read 3)
     CHECK(a == kFatalKfIstop, "slot 3 stopped with %d (rep %d)", a, rep);

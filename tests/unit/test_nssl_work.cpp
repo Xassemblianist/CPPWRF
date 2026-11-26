@@ -2,11 +2,11 @@
 // NSSL 2-moment microphysics: the work space of one row (NsslScheme::work_bytes) holds what nssl_row takes, also for
 // many levels (the row's arrays and sediment1d's are live together: about 97 nx nz doubles). The row runs on the host
 // over a buffer of twice the bound filled with a marker; the last byte the row changed is its high-water mark. The
-// bound is the same in every build; a CUDA build (this file compiled as CUDA) skips the host run.
+// bound is the same in every build; a GPU build (this file compiled as CUDA or HIP) skips the host run.
 #include <cstdio>
-#if defined(CPPWRF_USE_CUDA)
+#if defined(CPPWRF_USE_CUDA) || defined(CPPWRF_USE_HIP)
 int main() {
-  std::printf("skipped in the CUDA build (the CPU build runs the row)\n");
+  std::printf("skipped in the GPU build (the CPU build runs the row)\n");
   return 0;
 }
 #else

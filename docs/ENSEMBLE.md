@@ -90,10 +90,8 @@ dynamic shared memory they ask for (0, the launches unchanged, outside an ensemb
 (`%dynamic_smem_size`) only when it raises. A member's check reads and clears its own slot on its own stream, with
 every transfer checked. A member that stops (another member failed) reads its pending checks at a point where a
 raised code is its own error, before the destructors that free device memory; an error already on its way drops
-them unread. HIP: the device flag has one word for every launch (no per-launch slot), and every thread's checks
-read and clear that word (the host flags keep their slots). A code raised in a device kernel therefore always stops
-the ensemble, but the member named as failing first can be another member than the one that raised it (the run
-says so at its start); `mode = sequential` or `ensemble.member=I` names it.
+them unread. HIP: a launch carries the slot as a kernel argument instead, which the kernel's threads keep in a word
+of shared memory for `raise_fatal`: the same per-member flags as on CUDA.
 
 The output writer thread keeps each member's records apart: a writer error stops the member whose file it was
 writing (its message names the file and the member), the writer goes on with the other members' records, and a

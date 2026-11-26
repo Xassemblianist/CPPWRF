@@ -19,6 +19,8 @@ Binaries: --cpu-dp the CPU FP64 build (cases cpu_dp, against WRF's real*8 build)
 build (-DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF; cases cuda, compared by relative L2), --cuda-dp the CUDA
 FP64 build, --cuda-sp-id the default CUDA FP32 identity build (-DCPPWRF_DOUBLE=OFF, CPPWRF_CUDA_FP32_IDENTITY=ON by
 default; cases cuda_sp_id: the cpu_sp cases on the GPU, against the same WRF real*4 references at tolerance 0).
+The AMD HIP builds run the GPU cases under the same names: --hip-dp is --cuda-dp, --hip-sp-id is --cuda-sp-id and
+--hip is --cuda (docs/HIP.md; tools/amd/amd_run.sh).
 Cases with tolerance 0 (CPU FP64, CPU FP32) run with WRF history output and their wrfout files are compared with WRF's at
 tolerance 0 (exact.py: NaN equals only NaN, -0 differs from +0, integers in their own types): every variable of
 the reference file (those without a Time dimension too), every reference frame up to the case's time (the final one
@@ -76,7 +78,15 @@ def run(binary, cfg, sets, out, extra_env=None, *, clear_env=()):
     env = dict(os.environ, OMP_NUM_THREADS=os.environ.get("OMP_NUM_THREADS", "3"), **(extra_env or {}))
     for name in clear_env:
         env.pop(name, None)
-    r = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True)
+    # CPPWRF_SUITE_RUN_TIMEOUT (seconds, unset: none): a model run that hangs fails (exit 124) instead of holding its
+    # worker (tools/amd/amd_run.sh sets it)
+    tmo = float(os.environ.get("CPPWRF_SUITE_RUN_TIMEOUT") or 0) or None
+    try:
+        r = subprocess.run(cmd, cwd=REPO, env=env, capture_output=True, text=True, timeout=tmo)
+    except subprocess.TimeoutExpired as e:
+        def txt(x):
+            return x.decode(errors="replace") if isinstance(x, bytes) else (x or "")
+        r = subprocess.CompletedProcess(cmd, 124, txt(e.stdout), txt(e.stderr) + f"\ntimeout after {tmo:g} s")
     log = r.stdout + r.stderr
     if r.returncode != 0:
         # the whole log next to the output directory, and the lines that name the error at the end of the text
@@ -1556,15 +1566,19 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cpu-dp")
     ap.add_argument("--cpu-sp", help="the CPU FP32 build (-DCPPWRF_DOUBLE=OFF): the cpu_sp cases")
-    ap.add_argument("--cuda-sp-id", help="the default CUDA FP32 identity build (CPPWRF_CUDA_FP32_IDENTITY=ON, "
-                    "default): the cuda_sp_id cases (the cpu_sp cases on the GPU)")
-    ap.add_argument("--cuda", help="the fast CUDA FP32 build (-DCPPWRF_CUDA_FP32_IDENTITY=OFF): the cuda cases")
-    ap.add_argument("--cuda-dp")
+    ap.add_argument("--cuda-sp-id", "--hip-sp-id", help="the default CUDA (or HIP) FP32 identity build "
+                    "(CPPWRF_CUDA_FP32_IDENTITY=ON, default): the cuda_sp_id cases (the cpu_sp cases on the GPU)")
+    ap.add_argument("--cuda", "--hip", help="the fast CUDA (or HIP) FP32 build (-DCPPWRF_CUDA_FP32_IDENTITY=OFF): "
+                    "the cuda cases")
+    ap.add_argument("--cuda-dp", "--hip-dp", help="the CUDA (or HIP) FP64 build: the cuda_dp cases")
     ap.add_argument("--out", default=os.path.expanduser("~/cppwrf_scratch/wrf_suite"))
     ap.add_argument("--only", help="comma-separated substrings of case names")
     ap.add_argument("--exact", action="store_true", help="--only names are exact case names")
     ap.add_argument("--jobs", type=int, default=1, help="CPU cases run at the same time (GPU cases: one at a time)")
     ap.add_argument("--keep", action="store_true", help="keep the outputs of passing cases (default: deleted)")
+    ap.add_argument("--hash-out", metavar="FILE", help="append the hashes of every variable of the netCDF outputs of "
+                    "each passing check to FILE before they are deleted (tests/verify/out_hashes.py: a CUDA build's "
+                    "against a HIP build's)")
     ap.add_argument("--allow-skip", action="store_true", help="permit reported SKIPs for missing data, even if all checks skip")
     ap.add_argument("--slow", action="store_true", help="also the slow cases (suite.slow: the 24 h and 72 h runs)")
     ap.add_argument("--list", action="store_true", help="print every case (all its fields) and the restart and special "
@@ -1611,7 +1625,14 @@ def main():
         print(f"ERROR no case named {', '.join(unknown)}", flush=True)
         sys.exit(2)
 
+    hash_lock = threading.Lock()
+
     def done(path, good):  # the outputs of passing cases are deleted (they take tens of GB)
+        if good and a.hash_out:  # (out_hashes.py; FILE paths relative to --out)
+            import out_hashes
+            lines = out_hashes.hash_tree(a.out, path)
+            with hash_lock, open(a.hash_out, "a") as f:
+                f.writelines(ln + "\n" for ln in lines)
         if good and not a.keep:
             shutil.rmtree(path, ignore_errors=True)
 

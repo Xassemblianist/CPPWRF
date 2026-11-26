@@ -43,6 +43,12 @@ elseif(CPPWRF_ENABLE_HIP)
   set(CMAKE_HIP_STANDARD 20)
   set(CMAKE_HIP_STANDARD_REQUIRED ON)
   find_package(hip REQUIRED)
+  # LLVM 17 (ROCm 6.0) and later round the AMDGPU double square root correctly (earlier: v_sqrt_f64, not correctly
+  # rounded), which glibc's ports and the kernels need
+  if(CMAKE_HIP_COMPILER_VERSION VERSION_LESS 17)
+    message(FATAL_ERROR "CPPWRF's HIP build needs ROCm 6.0 or later (amdclang++ / LLVM 17: correctly rounded double "
+                        "square root on the device); found ${CMAKE_HIP_COMPILER_ID} ${CMAKE_HIP_COMPILER_VERSION}")
+  endif()
 else()
   find_package(OpenMP REQUIRED COMPONENTS CXX)
 endif()
@@ -122,9 +128,15 @@ foreach(_cppwrf_cfg IN LISTS _cppwrf_configs)
 endforeach()
 if(CPPWRF_ENABLE_HIP)
   set(CMAKE_HIP_FLAGS_RELEASE "-O3")
-  # Strict IEEE on both host and device passes: no FMA contraction, IEEE subnormals (no flush-to-zero)
+  # Strict IEEE on both host and device passes: no FMA contraction, IEEE subnormals (no flush-to-zero), correctly
+  # rounded float division and square root (clang's default for HIP, made explicit). The host pass is clang's, not
+  # gcc's as under nvcc: -fno-builtin-exp2(f) keeps clang from turning pow(2, x) into exp2(x), which gcc and nvcc's
+  # host compiler leave as the pow call WRF's build makes (glibc's pow and exp2 may round differently).
   add_compile_options($<$<COMPILE_LANGUAGE:HIP>:-ffp-contract=off>
-                      $<$<COMPILE_LANGUAGE:HIP>:-fno-gpu-flush-denormals-to-zero>)
+                      $<$<COMPILE_LANGUAGE:HIP>:-fno-gpu-flush-denormals-to-zero>
+                      $<$<COMPILE_LANGUAGE:HIP>:-fhip-fp32-correctly-rounded-divide-sqrt>
+                      $<$<COMPILE_LANGUAGE:HIP>:-fno-builtin-exp2>
+                      $<$<COMPILE_LANGUAGE:HIP>:-fno-builtin-exp2f>)
   option(CPPWRF_HIP_GLIBC_MATH "HIP FP64 build: glibc's math functions on the device (bit-identical to WRF / CPU)" ON)
   if(CPPWRF_DOUBLE AND NOT CPPWRF_HIP_GLIBC_MATH)
     add_compile_definitions(CPPWRF_HIP_LIBM)
@@ -140,7 +152,7 @@ if(CPPWRF_ENABLE_HIP)
   foreach(_cppwrf_cfg IN LISTS _cppwrf_configs)
     string(TOUPPER "${_cppwrf_cfg}" _cppwrf_bt)
     if("${CMAKE_HIP_FLAGS} ${CMAKE_HIP_FLAGS_${_cppwrf_bt}}" MATCHES
-       "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only|gpu-flush-denormals-to-zero|gpu-approx-transcendentals)|-ffp-contract=(fast|on)|${_cppwrf_x87})")
+       "(-Ofast|-f(fast-math|unsafe-math-optimizations|associative-math|reciprocal-math|finite-math-only|approx-func|no-signed-zeros|gpu-flush-denormals-to-zero|gpu-approx-transcendentals|cuda-flush-denormals-to-zero|cuda-approx-transcendentals|no-hip-fp32-correctly-rounded-divide-sqrt|no-honor-nans|no-honor-infinities|denormal-fp-math[-a-z0-9]*=[a-z-]*,?(preserve-sign|positive-zero|dynamic))|-ffp-model=(fast|aggressive)|-ffp-contract=(fast|on|fast-honor-pragmas)|-munsafe-fp-atomics|${_cppwrf_x87})")
       message(FATAL_ERROR "CMAKE_HIP_FLAGS: '${CMAKE_MATCH_1}' changes the floating-point results (CPPWRF needs strict IEEE)")
     endif()
   endforeach()
