@@ -77,6 +77,7 @@ src/phys/sf_qnsesfc/**               sf_sfclay_physics=4
 src/phys/sf_mynn/**                  sf_sfclay_physics=5
 src/phys/sf_pxsfclay/**              sf_sfclay_physics=7
 src/phys/sf_urban/**                 sf_urban_physics=1
+src/phys/sf_lake/**                  sf_lake_physics=1
 # --- land surface
 src/phys/lsm_slab/**                 sf_surface_physics=1
 src/phys/lsm_noah/**                 sf_surface_physics=2
