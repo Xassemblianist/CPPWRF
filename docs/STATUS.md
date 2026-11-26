@@ -363,6 +363,11 @@ The differential tests run WRF's objects on the test machine: their Fortran driv
 tests/phys/libmvec_intel.cpp, whose `_ZGVbN2v_log` / `_ZGVbN2v_log10` are these Intel-equivalent functions
 (on Intel identical to libmvec), so WRF's side gives Intel's bits on AMD too (with libmvec's own log / log10 it
 differed on AMD EPYC by 1 ulp in KF, Noah-MP, the MYNN surface layer and the WSM6 / Thompson reflectivity).
+The WRF reference runs preload the same object; it also replaces the float powf and the other SSE4 functions of
+WRF's objects that take rsqrtps / rcpps, acos / asin / tan and acosf / asinf / tanf (src/core/libmvec_sse4_trig.hpp,
+glibc's routines instruction by instruction with Intel's rsqrtps / rcpps; tests/unit/test_libmvec_trig.cpp). WRF
+calls those six only in configurations CPPWRF does not run (map_proj 6 / polar curvature, Gaussian grids, FARMS,
+urban trees).
 The full CPU suite therefore runs on AMD CPUs: on every push to main on GitHub-hosted runners (AMD EPYC or Intel Xeon; for 1.1.0
 at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 33/33; for
 1.2.0 at 0bc4652, in a Debian 13 container: suite PASS 386 with the 44 `cpu_sp` cases, WRF output files 42, ideal
