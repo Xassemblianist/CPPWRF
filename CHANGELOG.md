@@ -28,6 +28,10 @@ resumes across versions from WRF's wrfrst files.
   them), grid%sr is zeroed over the whole array before the microphysics (solve_em.F), and moist_physics_prep_em /
   moist_physics_finish_em run on the tile without the spec zone (solve_em.F). On a domain that does not move these
   values were already WRF's: the full CPU suite passes unchanged.
+- Kessler (mp_physics = 1) with column physics zeroes SR before the microphysics as solve_em.F does for every
+  mp_physics /= 0: a run resumed from a wrfrst file with SR /= 0 wrote the file's SR on (WRF: 0 after the first step).
+- An ideal domain with specified boundaries on one axis only (other than WRF's channel: specified y with periodic x) is
+  an error: WRF cannot express it, and the microphysics ran on columns its prep had not set.
 - tests/phys/libmvec_intel: Intel's 4-lane powf (_ZGVbN4vv_powf) in the preload as well, so WRF real*4 references made
   on AMD runners equal the Intel ones.
 
