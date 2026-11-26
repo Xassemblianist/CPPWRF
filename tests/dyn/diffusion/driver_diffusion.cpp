@@ -496,8 +496,13 @@ int main(int argc, char* argv[]) {
     copy_dev(xkhv_k1.data(), xkhv.data(), xkhv.size() * sizeof(double));
   }
 
-  // Case B: km_opt = 4 (with diff_opt = 2 slope reduction)
+  // Case B: km_opt = 4 (with diff_opt = 2 slope reduction); the arrays zeroed as the Fortran driver does (smag2d_km
+  // leaves the edges of a specified domain untouched)
   {
+    xkmh.fill(0.0);
+    xkmv.fill(0.0);
+    xkhh.fill(0.0);
+    xkhv.fill(0.0);
     DiffusionParams p;
     p.km_opt = 4;
     p.diff_opt = 2;

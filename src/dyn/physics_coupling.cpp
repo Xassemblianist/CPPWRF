@@ -328,14 +328,18 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
     throw std::runtime_error("mp_physics = 16 (WDM6) needs the land mask XLAND of the column physics");
   const Grid& g = g_;
   Field3& qv = s.q_2[s.P_QV];
-  // solve_em calls moist_physics_prep_em on the tile without the spec zone (sz) in x (unless periodic_x)
-  // and y; only the lanes of its i loop matter here (the mp columns all lie inside it)
+  // solve_em calls moist_physics_prep_em and moist_physics_finish_em on the tile without the spec zone (sz) in x
+  // (unless periodic_x) and y (solve_em.F:3780-3800, 4345-4355); their i loop is also libmvec's lane order. The spec
+  // zone's th_phy, h_diabatic, qv_diabatic, qc_diabatic keep their values: h_diabatic there enters
+  // small_step_finish's last stage and the stage's calc_p_rho_phi on the whole tile (a moved nest's strip and edge
+  // hold shifted or interpolated values there; a nest that does not move keeps its initial 0)
   const int pz = g.bc_x == BC::Specified || g.bc_y == BC::Specified ? 1 : 0;
   const int pi0 = g.bc_x == BC::Periodic ? 0 : pz;
-  parallel_for(g.mass_cells(), KPrep{s.t_2.cview(), qv.cview(), s.ph_2.cview(), s.al.cview(), s.p.cview(),
+  const Range3D mp_tile{pi0, g.nx - pi0, pz, g.ny - pz, 0, g.nz};
+  parallel_for(mp_tile, KPrep{s.t_2.cview(), qv.cview(), s.ph_2.cview(), s.al.cview(), s.p.cview(),
                                      b.phb.view(), b.alb.view(), b.pb.view(), th_phy.view(), s.h_diabatic.view(),
                                      qv_diabatic.view(), rho.view(), pii.view(), z.view(), dz8w.view(), p_phy.view(), pi0, g.nx - 2 * pi0});
-  if (s.P_QC >= 0) parallel_for(g.mass_cells(), KSaveQc{s.q_2[s.P_QC].cview(), qc_diabatic.view()});
+  if (s.P_QC >= 0) parallel_for(mp_tile, KSaveQc{s.q_2[s.P_QC].cview(), qc_diabatic.view()});
   namespace pc = phys::cst;
   // microphysics_driver: with specified boundaries the spec zone is skipped (sz = spec_zone)
   const int sx = g.bc_x == BC::Specified ? 1 : 0, sy = g.bc_y == BC::Specified ? 1 : 0;
@@ -344,6 +348,13 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
   const tile::PatchBox mp_ob = tile::own_box(g);
   const Range2D mp_own{std::max(sx, mp_ob.i0), std::min(g.nx - sx, mp_ob.i1), std::max(sy, mp_ob.j0),
                        std::min(g.ny - sy, mp_ob.j1)};
+  // solve_em.F:3852: grid%sr = 0. over the whole array before microphysics_driver (the schemes then set it on the
+  // tile without the spec zone; the spec zone of a moved nest would otherwise keep the shifted values)
+  if (sr.layout().total > 0) {
+    const View2<real> v = sr.view();
+    const Layout& L = sr.layout();
+    parallel_for(Range3D{L.wi0, L.wi1, L.wj0, L.wj1, 0, 1}, [=] CPPWRF_HD(int i, int j, int) { v(i, j) = real(0); });
+  }
   if (p_.mp_physics == 4) {
     // debug (CPPWRF_VM_DUMP): WSM5 inputs and outputs, for a replay through WRF's wsm5
     vmdump::dump("vm_mp_in", 1, {&th_phy, &qv, &s.q_2[s.P_QC], &s.q_2[s.P_QR], &s.q_2[s.P_QI], &s.q_2[s.P_QS], &rho,
@@ -592,7 +603,7 @@ void PhysicsCoupling::step(State& s, const BaseState& b, real dt) {
                                             real(pc::svp1), real(pc::svp2), real(pc::svp3), real(pc::svpt0),
                                             real(pc::rhowater), g.nz, mp_cols.i0, mp_cols.i1 - mp_cols.i0});
   }
-  parallel_for(g.mass_cells(), KFinish{s.t_2.view(), s.h_diabatic.view(), th_phy.cview(), qv.cview(),
+  parallel_for(mp_tile, KFinish{s.t_2.view(), s.h_diabatic.view(), th_phy.cview(), qv.cview(),
                                        qv_diabatic.view(), s.P_QC >= 0 ? s.q_2[s.P_QC].cview() : qv.cview(),
                                        qc_diabatic.view(), dt, p_.mp_tend_lim, s.P_QC >= 0});
   std::vector<Field3*> fs{&s.t_2, &s.h_diabatic};

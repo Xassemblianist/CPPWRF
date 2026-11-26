@@ -469,6 +469,27 @@ int input_att(const Domain& d, const char* att, int def) {
   return v;
 }
 
+// a 2-D variable of a domain's wrfinput (the first time) as an Arr of the domain's mass layout, the halo 0
+Arr input_mass2d(const Domain& d, const char* var) {
+  const std::string path = d.cfg->get_string("real.dir") + "/" + d.cfg->get_string("real.wrfinput", "wrfinput_d01");
+  const Grid& g = d.m->g;
+  Arr a;
+  a.L = Layout::make(g, Stagger::M, 2);
+  a.esz = int(sizeof(real));
+  a.h.assign(a.L.total * sizeof(real), 0);
+  std::vector<double> v(std::size_t(g.nx) * std::size_t(g.ny));
+  int nc = 0, id = 0;
+  if (nc_open(path.c_str(), NC_NOWRITE, &nc) != NC_NOERR) throw std::runtime_error("moving nests: cannot open " + path);
+  const std::size_t start[3] = {0, 0, 0}, count[3] = {1, std::size_t(g.ny), std::size_t(g.nx)};
+  const bool ok = nc_inq_varid(nc, var, &id) == NC_NOERR && nc_get_vara_double(nc, id, start, count, v.data()) == NC_NOERR;
+  nc_close(nc);
+  if (!ok) throw std::runtime_error(std::string("moving nests: cannot read ") + var + " of " + path);
+  real* p = reinterpret_cast<real*>(a.h.data());
+  for (int j = 0; j < g.ny; ++j)
+    for (int i = 0; i < g.nx; ++i) p[a.L.index(i, j, 0)] = real(v[std::size_t(j) * std::size_t(g.nx) + std::size_t(i)]);
+  return a;
+}
+
 // a move array as an Arr (a copy)
 Arr from_move_array(const WrfHistory::MoveArray& a) {
   Arr out;
@@ -496,7 +517,9 @@ std::vector<Arr> nest_arrays(Domain& d, const std::string& name) {
     }
   for (const Tracked& t : d.reg->fields)
     if (t.name == name && on_grid(t.L, d.m->g)) r.push_back(from_tracked(t));
-  if (r.empty() && d.hist)
+  // the history's own copy of a field the model also carries (e.g. F, E, SINALPHA, COSALPHA of a real input, which
+  // the history reads from wrfinput): WRF has one grid%NAME, so both get the interpolated values
+  if (d.hist)
     if (WrfHistory::MoveArray* a = d.hist->move_array(name)) {
       Arr x;
       x.L = a->L;
@@ -650,6 +673,41 @@ bool time_for_move2_vortex(Moves& mv, const Domain& parent, const Domain& nest, 
   return move_cd_x != 0 || move_cd_y != 0;
 }
 
+// grid%nest_pos of a nest over its whole memory, as WRF's MOVE build has it when the nest first moves (no feedback
+// changes a nest without children): share/mediation_wrfmain.F:115-116 set nest_pos = ht; nest_pos + 500 where > 0
+// over the whole array at the nest's input (med_initialdata_input, called by med_nest_initial). Then grid%ht holds
+// the wrfinput HGT on the domain's points, and in the row jde and the column ide (the memory beyond the last mass
+// point) the SINT interpolation of the parent's terrain (interp_fcn writes nfld up to ide / jde: med_interp_domain
+// of med_nest_initial, every imask 1, the nest at its initial position); the rest of the halo is 0. The shift of
+// a move brings that row / column into the domain (the new strip's NEST_POS). The history's array holds the domain's
+// points; this adds the row jde and the column ide (the nest at its initial position: called at the first move).
+void nest_pos_memory(Domain& P, Domain& N, WrfHistory::MoveArray& np) {
+  using namespace nest::move;
+  const Grid& g = N.m->g;
+  const Layout& L = np.L;
+  if (L.nx != g.nx || L.ny != g.ny || L.wi1 < g.nx + 1 || L.wj1 < g.ny + 1)
+    throw std::logic_error("moving nests: the layout of NEST_POS");
+  Arr c = input_mass2d(P, "HGT");  // the parent's terrain when the nest started (its wrfinput)
+  Arr n;
+  n.L = L;
+  n.esz = int(sizeof(real));
+  n.h.assign(L.total * sizeof(real), 0);
+  Masks M;
+  M.reset(g.nx, g.ny);
+  for (auto& v : M.m) std::fill(v.begin(), v.end(), 1);
+  Geo G;
+  G.nide = g.nx + 1;
+  G.njde = g.ny + 1;
+  G.ipos = N.i_parent_start;
+  G.jpos = N.j_parent_start;
+  G.nri = G.nrj = N.ratio;
+  interp_fcn_sint(c.view<real>(), n.view<real>(), 1, M, Masks::NOSTAG, false, false, G);
+  const real* s = reinterpret_cast<const real*>(n.h.data());
+  auto pos = [](real h) { return h > real(0) ? h + real(500.) : h; };
+  for (int i = 0; i <= g.nx; ++i) np.v[L.index(i, g.ny, 0)] = pos(s[L.index(i, g.ny, 0)]);
+  for (int j = 0; j < g.ny; ++j) np.v[L.index(g.nx, j, 0)] = pos(s[L.index(g.nx, j, 0)]);
+}
+
 }  // namespace
 
 void move_nest(Domain& P, Domain& N, int dx, int dy) {
@@ -672,8 +730,11 @@ void move_nest(Domain& P, Domain& N, int dx, int dy) {
   if (P.hist) P.hist->move_flush();
   if (N.hist) {
     N.hist->move_flush();
+    const bool first = N.hist->move_array("nest_pos") == nullptr;
     N.hist->move_begin();
     N.hist->move_t_begin();
+    if (WrfHistory::MoveArray* np = first ? N.hist->move_array("nest_pos") : nullptr)
+      nest_pos_memory(P, N, *np);
   }
   const int r = N.ratio;
   // shift_domain_em: px = isign(parent_grid_ratio, disp_x); one shift (|disp| <= 1)
