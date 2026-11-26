@@ -21,6 +21,15 @@ resumes across versions from WRF's wrfrst files.
   builds: unchanged results).
 
 ### Fixed
+- glibc's math in the GPU builds and the FP32 builds' own float functions: asin, acos, log10, tgamma (and asinf, acosf,
+  log10f, tgammaf) go through the x86-64 libm's SVID wrappers (math/w_*_compat.c) as the public functions WRF and the
+  CPU FP64 build call do, so a domain error (|x| > 1, a negative argument of log10, a negative integer or -inf of
+  tgamma) returns libm's +NaN instead of the kernel's -NaN (the device's canonical NaN on GPUs); libmvec's vector
+  log10 calls the wrapper for its special lanes as well (src/core/glibc_math_compat.hpp, glibc_mathf_compat.hpp;
+  core/glibc_math.hpp, glibc_mathf.hpp unchanged). Every in-domain result is unchanged (P1, P4 byte-identical in CPU
+  FP64 and FP32, CUDA FP64 and FP32 identity). New ctest test_libm_special: cppwrf::libm, libmvec's lanes, the float
+  ports and the FP32 executables' C functions against the system libm / libmvec on special inputs, bit for bit, on
+  the host and (GPU builds) on the device.
 - HIP builds (no CUDA or CPU change of any result; docs/HIP.md "Bit-identity review"): a launch carries its ensemble
   member's fatal slot as a kernel argument (HIP kernels cannot read their dynamic shared memory size, CUDA's carrier),
   so HIP threads ensembles have per-member device flags as on CUDA; fmax / fmin in HIP builds (device and clang's host

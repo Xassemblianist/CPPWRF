@@ -439,6 +439,11 @@ foreach(src ${CPPWRF_UNIT_TESTS})
   # OpenMP threads that spin while waiting stall the tests for hours on a loaded machine
   set_tests_properties(${name} PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 endforeach()
+# test_libm_special also checks the C float functions an FP32 executable defines (src/core/glibc_mathf_host.cpp),
+# in every x86-64 build
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+  target_sources(test_libm_special PRIVATE ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
+endif()
 
 # Namelist translator (tools/wrf2cppwrf.py; python3, no WRF data needed)
 add_subdirectory(tests/tools)

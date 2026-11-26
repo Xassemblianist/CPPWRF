@@ -21,7 +21,7 @@
 #include "core/gpu_runtime.hpp"
 #include "core/libmvec_tables.hpp"
 #if defined(CPPWRF_GLIBC_MATH)
-#include "core/glibc_math.hpp"
+#include "core/glibc_math_compat.hpp"
 #endif
 
 #if defined(__x86_64__) && !defined(CPPWRF_NO_LIBMVEC) && !defined(CPPWRF_LIBMVEC_HW_LOG)
@@ -102,7 +102,7 @@ CPPWRF_MV double scalar_log(double x) {
 }
 CPPWRF_MV double scalar_log10(double x) {
 #if defined(CPPWRF_GLIBC_MATH)
-  return ::cppwrf::glibc::log10(x);
+  return ::cppwrf::glibc::compat::log10(x);  // libmvec calls the public log10 (the SVID wrapper)
 #else
   return std::log10(x);
 #endif

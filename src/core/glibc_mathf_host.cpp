@@ -9,8 +9,9 @@
 // rounded) as before. sqrtf, fmodf, roundf, lroundf, llroundf, fminf, fmaxf are exact by definition and stay libm's.
 // errno is not set (no caller reads it). Proof: tools/glibc_mathf_proof.cpp (every input of each function against
 // glibc 2.41), tests/unit/test_glibc_mathf.cpp; the ctest fp32_host_libm checks that the executable imports none of
-// these from libm.
-#include "core/glibc_mathf.hpp"
+// these from libm. asinf, acosf, log10f and tgammaf are libm's SVID wrappers around the kernels
+// (core/glibc_mathf_compat.hpp: +NaN for a domain error).
+#include "core/glibc_mathf_compat.hpp"
 
 namespace g = cppwrf::glibcf;
 
@@ -27,11 +28,11 @@ void sincosf(float x, float* s, float* c) noexcept {  // glibc's sincosf: sinf's
 float tanf(float x) noexcept { return g::tanf(x); }
 float atanf(float x) noexcept { return g::atanf(x); }
 float atan2f(float y, float x) noexcept { return g::atan2f(y, x); }
-float asinf(float x) noexcept { return g::asinf(x); }
-float acosf(float x) noexcept { return g::acosf(x); }
+float asinf(float x) noexcept { return g::compat::asinf(x); }
+float acosf(float x) noexcept { return g::compat::acosf(x); }
 float sinhf(float x) noexcept { return g::sinhf(x); }
 float tanhf(float x) noexcept { return g::tanhf(x); }
-float log10f(float x) noexcept { return g::log10f(x); }
+float log10f(float x) noexcept { return g::compat::log10f(x); }
 float erff(float x) noexcept { return g::erff(x); }
-float tgammaf(float x) noexcept { return g::tgammaf(x); }
+float tgammaf(float x) noexcept { return g::compat::tgammaf(x); }
 }
