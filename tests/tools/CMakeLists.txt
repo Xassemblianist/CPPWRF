@@ -49,3 +49,8 @@ set_tests_properties(affected_cases PROPERTIES LABELS unit)
 add_test(NAME fp32_double_rounding_tool COMMAND python3 -m unittest discover -v -s tests/tools -p test_fp32_double_rounding.py
          WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 set_tests_properties(fp32_double_rounding_tool PROPERTIES LABELS unit)
+# tools/colab/colab_guard.sh (every Colab runtime request: one attempt, the rate limit, the block lock, the stop on exit)
+# with a mock colab CLI, and no `colab new` / `colab run` elsewhere in the repository (offline, seconds)
+add_test(NAME colab_guard COMMAND python3 -m unittest discover -v -s tests/tools -p test_colab_guard.py
+         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+set_tests_properties(colab_guard PROPERTIES LABELS unit)

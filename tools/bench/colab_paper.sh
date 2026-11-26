@@ -92,6 +92,7 @@ fi
 [ $SAVE = 1 ] && date > "$OUT/in/save_lday"
 echo "[colab_paper] commit $(cat "$OUT/in/commit.txt"), $GPU, set $SET, cases $CASES, data $DATA, paper_run.py ${PR[*]:-}"
 TAG=colab_paper
+. "$REPO/tools/colab/colab_guard.sh"  # the only way to ask for a runtime: one attempt, rate limit, block lock
 rx() { timeout "$(( $1 + 120 ))" colab exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'; }
 cleanup() {
   rm -f "$OUT/in/rclone.conf"
@@ -101,14 +102,10 @@ cleanup() {
   else timeout 300 colab stop -s "$S" || echo "[$TAG] WARNING: could not stop $S, check: colab sessions"; fi
 }
 trap cleanup EXIT
-if [ -z "$S" ]; then
-  for try in 1 2 3; do
-    S=cppwrf-paper-$(echo "$GPU" | tr A-Z a-z)-$(date +%Y%m%d_%H%M%S)
-    echo "[$TAG] new session $S ($GPU)"
-    timeout 900 colab new -s "$S" --gpu "$GPU" && break
-    S=; sleep 60
-  done
-  [ -n "$S" ] || { echo "[$TAG] no $GPU session"; exit 1; }
+if [ -z "$S" ]; then  # one request, no retry (tools/colab/colab_guard.sh)
+  S=cppwrf-paper-$(echo "$GPU" | tr A-Z a-z)-$(date +%Y%m%d_%H%M%S)
+  echo "[$TAG] new session $S ($GPU)"
+  colab_guard_new "$S" --gpu "$GPU" || { echo "[$TAG] no $GPU session"; exit 1; }
 fi
 echo 'import os, shutil; os.makedirs("/content/in", exist_ok=True); print("DISK", shutil.disk_usage("/").total // 2**30)' |
   rx 60 | grep DISK || { echo "[$TAG] session not answering"; exit 1; }

@@ -1008,6 +1008,20 @@ ran the full suite in about 42 min; GPU runs need it), with `--cases`, `--data`,
 `tools/colab/colab_regression.sh` runs the legacy regression tool (`tools/regression`). The Google Cloud tools
 (`tools/gcp/gcp_run.sh`, `gcp_wrfref.sh`) are kept but not used.
 
+Every Colab tool asks for its runtime through one guard, `tools/colab/colab_guard.sh` (repeated automated session
+requests can get an account's Colab runtimes blocked as abusive):
+
+- One request per run and no retry: when `colab new` fails (503 / Service Unavailable, quota, refused, any non-zero
+  exit) the tool stops with a message. The CLI's own assignment retries are switched off
+  (`COLAB_CLI_ASSIGN_RETRIES=0`). Do not wrap the tools in retry loops.
+- A rate limit shared by all tools: at most one request per 10 minutes and 6 per 24 hours, failed ones included
+  (`~/.cache/cppwrf/colab/attempts`). `CPPWRF_COLAB_FORCE=1 tools/colab/...` lets one request of one command past it
+  (at most 3 forced requests per 24 hours).
+- If Colab's answer mentions "abusive", "blocked" or "suspicion", the guard writes `~/.cache/cppwrf/colab/BLOCKED` and
+  refuses every request, forced or not, until a person has read the message and deleted the file.
+- The session is stopped when the tool exits for any reason (success, error, Ctrl-C, SIGTERM); `--keep` leaves a
+  session that came up running. `tools/colab/colab_guard.sh status` prints the lock and the requests of the last day.
+
 The suite's cases are defined in `tests/verify/cases/` (one file per group, `NN_<group>.py`, loaded in the order of
 their names; `wrf_suite.py --list` prints them all). A group file defines `CASES`, `DATA` (the data tars each case
 reads, in `vm_data.txt`'s order) and `STATUS` (its rows of the case table in docs/STATUS.md, which

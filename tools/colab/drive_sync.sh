@@ -60,7 +60,8 @@ if [ ${#todo[@]} -gt 0 ]; then
     rm -f "$OUT/gcs.tok" "$OUT/rclone.conf"
   }
   trap cleanup EXIT
-  timeout 900 colab new -s "$S"
+  . "$REPO/tools/colab/colab_guard.sh"  # one runtime request, rate limit, block lock, stop on exit
+  colab_guard_new "$S" || exit 1
   echo 'import os; os.makedirs("/content/sync", exist_ok=True); print("OK")' | timeout 120 colab exec -s "$S" --timeout 60
   (umask 077; rclone config show cppwrf-drive > "$OUT/rclone.conf")
   for f in "$OUT/rclone.conf" "$REPO/tools/colab/remote_drive_sync.sh"; do

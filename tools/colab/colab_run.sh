@@ -39,6 +39,7 @@
 # bench case the nsys tables per step and the ncu kernel table) and nsys/ (nsys stats as CSV).
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+. "$REPO/tools/colab/colab_guard.sh"  # the only way to ask for a runtime: one attempt, rate limit, block lock
 : "${CPPWRF_WRF_RUNS:?set CPPWRF_WRF_RUNS}"
 SCRATCH=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}
 GPU=G4 KEEP=0 OUT= FILES= NSYS= NCU= BASE= DEVMIB= ENVS=() KEYS= MAX_UPLOAD_MIN=${MAX_UPLOAD_MIN:-20} TABLES=--no-thompson-tables WT=
@@ -102,7 +103,7 @@ cleanup() {
   else timeout 300 colab stop -s "$S" || echo "[colab_run] WARNING: could not stop $S, check: colab sessions"; fi
 }
 trap cleanup EXIT
-timeout 900 colab new -s "$S" --gpu "$GPU"
+colab_guard_new "$S" --gpu "$GPU" || exit 1
 # uploads go through Jupyter's contents API, which refuses large files (and `colab upload` exits 0 anyway):
 # send 32 MiB parts, join them on the VM and check the md5 (each part is cut just before it is sent: the disk
 # never holds a second copy of the data)

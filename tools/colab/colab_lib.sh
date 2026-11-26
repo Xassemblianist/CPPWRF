@@ -6,7 +6,8 @@
 # leave the session running) and optionally DRIVE_RESULTS (a folder of the Drive remote, e.g.
 # cppwrf-g4results/wrfref_<date>: the runtime also puts results.tar.gz and the job's fetch/ files there, and
 # cj_results / cj_fetch read them from there when `colab download` fails), then call:
-#   cj_start GPU          new session (or S; GPU CPU: a CPU-only runtime), stop it on exit; fails unless the CPU is
+#   cj_start GPU          new session (or S; GPU CPU: a CPU-only runtime) through colab_guard_new (one attempt, no
+#                         retry; refused by the rate limit or the block lock), stop it on exit; fails unless the CPU is
 #                         Intel or ANY_CPU=1 (then the job runs with CPPWRF_ANY_CPU=1); sets NPROC
 #   cj_send FILE NAME     local FILE -> /content/cpu/NAME (in/NAME: an input of the job, copied to /opt/job)
 #   cj_launch BODY DATA ARG...   the job: `bash BODY /opt/job ARG...` in the chroot after DATA's tars are unpacked
@@ -19,6 +20,9 @@
 # Download errors go to OUT/download.log; a partial file of a failed download is deleted.
 # The runtime gets only the rclone section of the Drive remote cppwrf-drive and, with a bucket, read-only bucket tokens
 # (tools/colab/gcs_token.py); the token is deleted when the data are in place, both at the end and on exit.
+
+# every runtime request goes through tools/colab/colab_guard.sh (one attempt, rate limit, block lock, stop on exit)
+. "$(dirname "${BASH_SOURCE[0]}")/colab_guard.sh"
 
 rx() { timeout "$(( $1 + 120 ))" colab exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'; }  # python on stdin
 
@@ -36,7 +40,7 @@ cj_start() {
   if [ -z "$S" ]; then
     S=cppwrf-cpu-$(echo "$gpu" | tr A-Z a-z)-$(date +%Y%m%d_%H%M%S)
     echo "[$TAG] new session $S ($gpu)"
-    if [ "$gpu" = CPU ]; then timeout 900 colab new -s "$S"; else timeout 900 colab new -s "$S" --gpu "$gpu"; fi
+    if [ "$gpu" = CPU ]; then colab_guard_new "$S" || return 1; else colab_guard_new "$S" --gpu "$gpu" || return 1; fi
   fi
   cpu=$(echo 'print(open("/proc/cpuinfo").read().split("model name")[1].split("\n")[0].strip(" \t:"), "|", __import__("os").cpu_count())' | rx 60 | grep . || true)
   echo "[$TAG] CPU: $cpu"
