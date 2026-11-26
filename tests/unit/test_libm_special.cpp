@@ -9,11 +9,17 @@
 // log10 of core/libmvec_x86.hpp, cppwrf::vm::log10, glibc's float functions (core/glibc_mathf.hpp and the wrappers)
 // and the C functions an FP32 executable defines (core/glibc_mathf_host.cpp, linked into this test), libmvec's 4-lane
 // float functions. The vector log / log10 and 4-lane powf lanes that take rcpps (CPU-defined) are compared on Intel
-// only, where WRF's references are made (elsewhere: SKIP, counted); their scalar-callout lanes and every other
-// function are compared on any CPU. GPU builds: the same functions on the device against the
-// system libm. A result must have the same bits; when an input is a NaN only NaN-ness is compared (the operand whose
-// NaN propagates is not fixed by C, and the device returns its canonical NaN). Meaningful where WRF's references are
-// made (glibc 2.41, x86-64): another glibc reports the differences and fails.
+// only, where WRF's references are made (elsewhere: SKIP, counted); so are 4-lane powf's overflow / underflow lanes,
+// which rcpps's result selects. The vector log / log10's scalar-callout lanes, powf's special x / y lanes and every
+// other function are compared on any CPU. GPU builds: the wrapped functions on the device (cppwrf::libm's double
+// overloads, mvec::log10, vm::log10; the float overloads in the FP32 identity build) against the system libm.
+// A result must have the same bits; when an input is a NaN and libm's result is a NaN only NaN-ness is compared (the
+// operand whose NaN propagates is not fixed by C, and the device returns its canonical NaN).
+// The comparison with libm is meaningful where WRF's references are made (glibc 2.41, x86-64). On another glibc the
+// differences are reported and the test exits 77 (skipped), after the checks that do not depend on the glibc version
+// have passed: the wrappers' fixed results (+NaN, -inf, +-inf on a domain or pole error) on the host and the device,
+// and that this program's float C functions are its own (core/glibc_mathf_host.cpp). CPPWRF_TEST_NOT_241=1 takes
+// that path on glibc 2.41.
 #if !defined(CPPWRF_GLIBC_MATH)
 #define CPPWRF_GLIBC_MATH 1  // the FP64 GPU build's host path, here also in the CPU builds
 #endif
@@ -73,8 +79,11 @@ const bool g_intel = is_intel();
 long g_skip = 0;
 // the lanes of _ZGVbN2v_log / log10 that do not call the scalar function: x in [DBL_MIN, DBL_MAX]
 bool log_rcpps_lane(double x) { return x >= DBL_MIN && x <= DBL_MAX; }
-// the lanes of _ZGVbN4vv_powf past its special_x / special_y masks (libmvec_f4.hpp: x in [FLT_MIN, FLT_MAX), y finite)
+#if defined(CPPWRF_HAVE_MVEC_F4)
+// the lanes of _ZGVbN4vv_powf past its special_x / special_y masks (libmvec_f4.hpp: x in [FLT_MIN, FLT_MAX), y finite):
+// rcpps's result also decides whether the lane overflows / underflows into the scalar powf (special_r)
 bool powf_rcpps_lane(float x, float y) { return x >= FLT_MIN && x < FLT_MAX && std::isfinite(y); }
+#endif
 std::uint64_t bits(double v) {
   std::uint64_t b;
   std::memcpy(&b, &v, 8);
@@ -97,11 +106,12 @@ float flt(std::uint32_t b) {
 }
 
 long g_n = 0, g_bad = 0;
+long g_inv_n = 0, g_inv_bad = 0;  // the checks that do not depend on the glibc version
 template <class T>
 void check(const char* name, T x, T y, T got, T want, bool pair = false) {
   ++g_n;
   const bool nan_in = std::isnan(x) || (pair && std::isnan(y));
-  const bool ok = nan_in ? std::isnan(got) == std::isnan(want) : bits(got) == bits(want);
+  const bool ok = nan_in && std::isnan(want) ? std::isnan(got) : bits(got) == bits(want);
   if (ok) return;
   if (g_bad++ < 40) {
     if (pair)
@@ -168,7 +178,8 @@ std::vector<float> special_floats() {
 constexpr int kDevD = 6, kDevF = 5;
 const char* kDevDName[kDevD] = {"libm::asin", "libm::acos", "libm::log10", "libm::tgamma", "mvec::log10",
                                 "vm::log10"};
-const char* kDevFName[kDevF] = {"compat::asinf", "compat::acosf", "compat::log10f", "compat::tgammaf", "vm::log10f"};
+const char* kDevFName[kDevF] = {"libm::asin(float)", "libm::acos(float)", "libm::log10(float)",
+                                "libm::tgamma(float)", "vm::log10(float)"};
 CPPWRF_HD inline double dev_d(int fn, double x) {
   switch (fn) {
     case 0: return cppwrf::libm::asin(x);
@@ -179,15 +190,65 @@ CPPWRF_HD inline double dev_d(int fn, double x) {
     default: return cppwrf::vm::log10(x, 0, 1);  // a 1-trip loop: the scalar log10
   }
 }
+// cppwrf::libm's float overloads: the host's asinf ... (this program's, core/glibc_mathf_host.cpp), on the device of
+// the FP32 identity build glibc's (core/libm.hpp: glibcf::compat); vm::log10(float): libm's log10f likewise
 CPPWRF_HD inline float dev_f(int fn, float x) {
-  namespace c = cppwrf::glibcf::compat;
   switch (fn) {
-    case 0: return c::asinf(x);
-    case 1: return c::acosf(x);
-    case 2: return c::log10f(x);
-    case 3: return c::tgammaf(x);
-    default: return cppwrf::vm::log10(x, 0, 1);  // libm's log10f (FP32 builds)
+    case 0: return cppwrf::libm::asin(x);
+    case 1: return cppwrf::libm::acos(x);
+    case 2: return cppwrf::libm::log10(x);
+    case 3: return cppwrf::libm::tgamma(x);
+    default: return cppwrf::vm::log10(x, 0, 1);
   }
+}
+// the wrappers' fixed results (__kernel_standard under _POSIX_), any glibc version: false where none is fixed
+bool expect_d(int fn, double x, std::uint64_t* b) {
+  if (std::isnan(x)) return false;
+  switch (fn) {
+    case 0:
+    case 1:  // asin / acos(|x| > 1): NAN
+      if (!(std::fabs(x) > 1.0)) return false;
+      *b = 0x7ff8000000000000ull;
+      return true;
+    case 3:  // tgamma: pole copysign(HUGE_VAL, x), negative integer or -inf NAN
+      if (x == 0.0) *b = std::signbit(x) ? 0xfff0000000000000ull : 0x7ff0000000000000ull;
+      else if (x < 0.0 && std::floor(x) == x) *b = 0x7ff8000000000000ull;
+      else return false;
+      return true;
+    default:  // log10 (scalar, vector callout lane, vm::log10): log10(0) -HUGE_VAL, log10(x < 0) NAN
+      if (x == 0.0) *b = 0xfff0000000000000ull;
+      else if (x < 0.0) *b = 0x7ff8000000000000ull;
+      else return false;
+      return true;
+  }
+}
+bool expect_f(int fn, float x, std::uint32_t* b) {
+  if (std::isnan(x)) return false;
+  switch (fn) {
+    case 0:
+    case 1:
+      if (!(std::fabs(x) > 1.0f)) return false;
+      *b = 0x7fc00000u;
+      return true;
+    case 3:
+      if (x == 0.0f) *b = std::signbit(x) ? 0xff800000u : 0x7f800000u;
+      else if (x < 0.0f && std::floor(x) == x) *b = 0x7fc00000u;
+      else return false;
+      return true;
+    default:
+      if (x == 0.0f) *b = 0xff800000u;
+      else if (x < 0.0f) *b = 0x7fc00000u;
+      else return false;
+      return true;
+  }
+}
+template <class T, class B>
+void check_fixed(const char* where, const char* name, T x, T got, B want) {
+  ++g_inv_n;
+  if (bits(got) == want) return;
+  if (g_inv_bad++ < 40)
+    std::printf("  %s %s(%a): %a (0x%llx), the wrapper's fixed result 0x%llx\n", where, name, double(x), double(got),
+                (unsigned long long)bits(got), (unsigned long long)want);
 }
 #if defined(CPPWRF_GPUCC)
 __global__ void kdev(int n, const double* xd, const float* xf, double* yd, float* yf) {
@@ -200,7 +261,8 @@ __global__ void kdev(int n, const double* xd, const float* xf, double* yd, float
 }  // namespace
 
 int main() {
-  const bool strict = std::strcmp(gnu_get_libc_version(), "2.41") == 0;
+  const char* not241 = std::getenv("CPPWRF_TEST_NOT_241");
+  const bool strict = std::strcmp(gnu_get_libc_version(), "2.41") == 0 && !(not241 && *not241 == '1');
   const std::vector<double> xs = special_doubles();
   const std::vector<float> xf = special_floats();
 
@@ -310,7 +372,7 @@ int main() {
     F1 volatile p = u.program;
     if (!own(reinterpret_cast<void*>(u.program))) {
       std::printf("%s: libm's, not this program's (core/glibc_mathf_host.cpp not linked)\n", u.name);
-      ++g_bad;
+      ++g_inv_bad;
     }
     for (float x : xf) {
       check(u.name, x, 0.0f, u.port(x), s(x));
@@ -363,15 +425,31 @@ int main() {
       check(v.name, -x, 0.0f, v.port(-x), o[1]);
     }
 #endif
+  // the wrappers' fixed results on the host (any glibc)
+  for (int fn = 0; fn < kDevD; ++fn)
+    for (double x : xs) {
+      std::uint64_t b;
+      if (expect_d(fn, x, &b)) check_fixed("host", kDevDName[fn], x, dev_d(fn, x), b);
+    }
+  for (int fn = 0; fn < kDevF; ++fn)
+    for (float x : xf) {
+      std::uint32_t b;
+      if (expect_f(fn, x, &b)) check_fixed("host", kDevFName[fn], x, dev_f(fn, x), b);
+    }
   const long host_n = g_n, host_bad = g_bad;
   std::printf("host: %ld results, %ld differ from libm %s\n", host_n, host_bad, gnu_get_libc_version());
   if (g_skip)
     std::printf("SKIP %ld libmvec lanes that use rcpps (log, log10, 4-lane powf): not an Intel CPU, the ports are "
-                "Intel's (test_libmvec / test_libmvec_f4 check them against Intel's results)\n", g_skip);
+                "Intel's (test_libmvec checks log / log10 against Intel's results on any CPU; 4-lane powf is "
+                "compared with libmvec on Intel only)\n", g_skip);
 
 #if defined(CPPWRF_GPUCC)
   {  // the device against the system libm (and the host ports)
-    const int n = int(std::min(xs.size(), xf.size()));
+    const int nd = int(xs.size()), nf = int(xf.size()), n = std::max(nd, nf);
+    std::vector<double> hxd(xs);
+    std::vector<float> hxf(xf);
+    hxd.resize(std::size_t(n), 0.0);  // the shorter list padded (the pads are not checked)
+    hxf.resize(std::size_t(n), 0.0f);
     double *dxd = nullptr, *dyd = nullptr;
     float *dxf = nullptr, *dyf = nullptr;
     if (gpuMalloc(&dxd, n * sizeof(double)) != gpuSuccess) {
@@ -380,8 +458,8 @@ int main() {
       gpuMalloc(&dyd, kDevD * n * sizeof(double));
       gpuMalloc(&dxf, n * sizeof(float));
       gpuMalloc(&dyf, kDevF * n * sizeof(float));
-      gpuMemcpy(dxd, xs.data(), n * sizeof(double), gpuMemcpyHostToDevice);
-      gpuMemcpy(dxf, xf.data(), n * sizeof(float), gpuMemcpyHostToDevice);
+      gpuMemcpy(dxd, hxd.data(), n * sizeof(double), gpuMemcpyHostToDevice);
+      gpuMemcpy(dxf, hxf.data(), n * sizeof(float), gpuMemcpyHostToDevice);
       kdev<<<unsigned((n + 127) / 128), 128>>>(n, dxd, dxf, dyd, dyf);
       std::vector<double> yd(std::size_t(kDevD) * n);
       std::vector<float> yf(std::size_t(kDevF) * n);
@@ -396,31 +474,44 @@ int main() {
         return 1;
       }
       const char* sd[kDevD] = {"asin", "acos", "log10", "tgamma", "log10", "log10"};
-      const char* sf[kDevF] = {"asinf", "acosf", "log10f", "tgammaf", "log10f"};
+      [[maybe_unused]] const char* sf[kDevF] = {"asinf", "acosf", "log10f", "tgammaf", "log10f"};
       for (int fn = 0; fn < kDevD; ++fn) {
         D1 volatile s = sys<D1>(sd[fn]);
-        for (int i = 0; s && i < n; ++i) {
-          const double x = xs[std::size_t(i)];
-          if (fn == 4 && !(x < DBL_MIN) && !(x > DBL_MAX) && !std::isnan(x)) continue;  // vector lanes
-          check(kDevDName[fn], x, 0.0, yd[std::size_t(fn) * n + i], s(x));
+        for (int i = 0; s && i < nd; ++i) {
+          const double x = xs[std::size_t(i)], y = yd[std::size_t(fn) * n + i];
+          std::uint64_t b;
+          if (expect_d(fn, x, &b)) check_fixed("device", kDevDName[fn], x, y, b);
+          if (fn == 4 && log_rcpps_lane(x)) continue;  // the vector lanes (the device has no rcpps)
+          check(kDevDName[fn], x, 0.0, y, s(x));
         }
       }
+#if defined(CPPWRF_FP32_IDENTITY)
+      // the float overloads compute glibc's float functions on the device only in the identity build (elsewhere the
+      // device's own float math library)
       for (int fn = 0; fn < kDevF; ++fn) {
-#if !defined(CPPWRF_FP32_IDENTITY)
-        if (fn == 4) continue;  // vm::log10(float) on the device: the device's log10f outside the identity build
-#endif
         F1 volatile s = sys<F1>(sf[fn]);
-        for (int i = 0; s && i < n; ++i)
-          check(kDevFName[fn], xf[std::size_t(i)], 0.0f, yf[std::size_t(fn) * n + i], s(xf[std::size_t(i)]));
+        for (int i = 0; s && i < nf; ++i) {
+          const float x = xf[std::size_t(i)], y = yf[std::size_t(fn) * n + i];
+          std::uint32_t b;
+          if (expect_f(fn, x, &b)) check_fixed("device", kDevFName[fn], x, y, b);
+          check(kDevFName[fn], x, 0.0f, y, s(x));
+        }
       }
+#endif
       std::printf("device: %ld results, %ld differ from libm\n", g_n - host_n, g_bad - host_bad);
     }
   }
 #endif
-  if (!strict) {
-    std::printf("test_libm_special FAILED: glibc %s, not 2.41 (the version WRF's references use)\n",
-                gnu_get_libc_version());
+  std::printf("fixed wrapper results and own float functions: %ld checked, %ld wrong\n", g_inv_n, g_inv_bad);
+  if (g_inv_bad) {
+    std::printf("test_libm_special FAILED\n");
     return 1;
+  }
+  if (!strict) {
+    std::printf("test_libm_special SKIPPED (77): glibc %s%s, not the reference glibc 2.41 (the version WRF's "
+                "references use): the %ld differences from this libm above are reported, not failed\n",
+                gnu_get_libc_version(), not241 && *not241 == '1' ? " (CPPWRF_TEST_NOT_241)" : "", g_bad);
+    return 77;
   }
   std::printf(g_bad ? "test_libm_special FAILED\n" : "test_libm_special passed\n");
   return g_bad ? 1 : 0;

@@ -440,10 +440,11 @@ foreach(src ${CPPWRF_UNIT_TESTS})
   set_tests_properties(${name} PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 endforeach()
 # test_libm_special also checks the C float functions an FP32 executable defines (src/core/glibc_mathf_host.cpp),
-# in every x86-64 build
+# in every x86-64 build; exit 77 (skipped): a glibc other than 2.41, whose libm is not the reference
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
   target_sources(test_libm_special PRIVATE ${CMAKE_SOURCE_DIR}/src/core/glibc_mathf_host.cpp)
 endif()
+set_tests_properties(test_libm_special PROPERTIES SKIP_RETURN_CODE 77)
 
 # Namelist translator (tools/wrf2cppwrf.py; python3, no WRF data needed)
 add_subdirectory(tests/tools)
