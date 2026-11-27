@@ -478,14 +478,17 @@ CPPWRF_FORCEINLINE void rrtmg_lw_setcoef_stage(int lay, rb tsk, const LwViews& v
 }
 
 // ---- stage 2: per layer -------------------------------------------------------------------------
+// Bands [B0, B1) of taumol (the GPU batch: band groups, one kernel each; cldprmc with the first group). cldprmc
+// writes only taucmc and taumol only taug / fracs, each from the layer's const inputs: any grouping, same values.
+template <int B0 = 0, int B1 = 16>
 CPPWRF_FORCEINLINE void rrtmg_lw_layer(int nlayers, int lay, const LwViews& v,
                                        const RrtmgLwTables& CPPWRF_RESTRICT tables) {
   const int laytrop = CSI(v.iscal)[0];
-  if (CSI(v.icldlyr)[lay] != 0) {
+  if (B0 == 0 && CSI(v.icldlyr)[lay] != 0) {
     rrtmg_lw_cldprmc(nlayers, CSI(v.iscal)[1], CSI(v.iscal)[2], CSI(v.iscal)[3], v.cldfmc, v.ciwpth, v.clwpth,
                      v.cswpth, v.reicmc, v.relqmc, v.resnmc, v.taucmc, tables, lay, lay + 1);
   }
-  rrtmg_lw_taumol(nlayers, v.pavel, v.wx, v.coldry, laytrop, v.jp, v.jt, v.jt1, v.colh2o, v.colco2, v.colo3,
+  rrtmg_lw_taumol<B0, B1>(nlayers, v.pavel, v.wx, v.coldry, laytrop, v.jp, v.jt, v.jt1, v.colh2o, v.colco2, v.colo3,
                   v.coln2o, v.colco, v.colch4, v.colo2, v.colbrd, v.fac00, v.fac01, v.fac10, v.fac11, v.rat_h2oco2,
                   v.rat_h2oco2_1, v.rat_h2oo3, v.rat_h2oo3_1, v.rat_h2on2o, v.rat_h2on2o_1, v.rat_h2och4,
                   v.rat_h2och4_1, v.rat_n2oco2, v.rat_n2oco2_1, v.rat_o3co2, v.rat_o3co2_1, v.selffac, v.selffrac,
