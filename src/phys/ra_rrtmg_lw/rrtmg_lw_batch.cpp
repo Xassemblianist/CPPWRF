@@ -18,13 +18,18 @@ namespace {
 #define LW_CI(a, b, c) (a)
 #define LW_X(a, b, c) (c)
 inline Range3D lw_range(int n, int nx) { return Range3D{0, n, 0, 1, 0, nx}; }
-// the per-column kernels (one thread per column) as column_for: blocks of one warp (column_block(), 32 x 1) spread the
-// few columns of a chunk over more SMs than parallel_for's 64-thread blocks; each thread's work is unchanged
+// the per-column kernels (one thread per column). CUDA: column_for, blocks of one warp (column_block(), 32 x 1)
+// spread the few columns of a chunk over more SMs than parallel_for's 64-thread blocks. HIP keeps parallel_for's 64
+// (a 32 x 1 block would leave half of each wave64 idle). Each thread's work is unchanged.
+#if defined(CPPWRF_USE_HIP)
+template <class K> void lw_per_column(int n, const K& k) { parallel_for(lw_range(n, 1), k); }
+#else
 template <class K> struct LwPerColumn {
   K k;
   CPPWRF_HD void operator()(int a, int) const { k(a, 0, 0); }
 };
 template <class K> void lw_per_column(int n, const K& k) { column_for(Range2D{0, n, 0, 1}, LwPerColumn<K>{k}); }
+#endif
 #else
 #define LW_CI(a, b, c) (c)
 #define LW_X(a, b, c) (b)
