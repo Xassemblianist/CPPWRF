@@ -11,7 +11,8 @@
 # and runs the example's run.ini in both builds (outputs /opt/qs/gpu/out_cuda, out_cuda_dp). One line per step in
 # /opt/qs/gpu/gpu.txt ("PASS|FAIL step (seconds)"), then gpu_done.
 STAMP=$1
-H=/content/qs_gpu R=/content/deb13 G=/content/deb13/opt/qs/gpu
+CR=$(cd "$(dirname "$0")/.." && pwd)  # /content, or /content/cppwrf_<session> on an attached runtime (colab_api.py attach)
+H=$CR/qs_gpu R=$CR/deb13 G=$CR/deb13/opt/qs/gpu
 mkdir -p $H
 exec > $H/gpu_host.log 2>&1
 set -x
@@ -29,7 +30,7 @@ for i in $(seq 20); do  # the chroot job installs debootstrap at the same time: 
     apt-get -o DPkg::Lock::Timeout=600 -qq install -y libnetcdf-dev >> $H/apt.log 2>&1 && break
   sleep 30
 done
-rm -rf $H/src && mkdir -p $H/src && tar xzf /content/cpu/src.tar.gz -C $H/src
+rm -rf $H/src && mkdir -p $H/src && tar xzf $CR/cpu/src.tar.gz -C $H/src
 cd $H/src || exit 1
 NP=$(nproc)
 # README.md, "Build": the GPU builds (all targets, as the README's commands)
@@ -41,7 +42,7 @@ step straka_cuda_fp32 build/cppwrf configs/straka.ini --set output.dir=$H/straka
 step straka_cuda_fp64 build-gpu-dp/cppwrf configs/straka.ini --set output.dir=$H/straka_cuda_dp
 end=$((SECONDS + 3 * 3600))
 until [ "$(cat $G/cpu_ready 2> /dev/null)" = "$STAMP" ]; do
-  [ -e /content/cpu/done ] || [ $SECONDS -ge $end ] && exit 0
+  [ -e $CR/cpu/done ] || [ $SECONDS -ge $end ] && exit 0
   sleep 10
 done
 ln -sfn $R/opt/qs /opt/qs

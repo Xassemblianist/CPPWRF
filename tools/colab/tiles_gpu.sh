@@ -16,12 +16,13 @@
 #     without CUDA graphs too: the stepping times (bench.log).
 # Logs go to /opt/job (the chroot job's results); gpu_done ends the chroot job's wait.
 DP=$1 DPT=$2 FP32=$3 LAYOUTS=$4 BENCH=$5 BLAYOUTS=$6
-G=/content/tiles_gpu R=/content/deb13 J=/content/deb13/opt/job
+CR=$(cd "$(dirname "$0")/.." && pwd)  # /content, or /content/cppwrf_<session> on an attached runtime (colab_api.py attach)
+G=$CR/tiles_gpu R=$CR/deb13 J=$CR/deb13/opt/job
 mkdir -p $G
 exec > $G/gpu.log 2>&1
 set -x
-until [ -e /content/cpu/data_done ] || [ -e /content/cpu/done ]; do sleep 10; done
-[ -e /content/cpu/done ] && exit 0
+until [ -e $CR/cpu/data_done ] || [ -e $CR/cpu/done ]; do sleep 10; done
+[ -e $CR/cpu/done ] && exit 0
 ln -sfn $R/opt/job /opt/job
 finish() { cp $G/gpu.log $J/gpu_host.log 2> /dev/null; touch $J/gpu_done; }
 trap finish EXIT
@@ -35,8 +36,8 @@ done
 # the suite's comparison (tests/verify/exact.py) reads the files with netCDF4, which a runtime image may lack
 python3 -c 'import netCDF4' 2> /dev/null || pip install -q netCDF4 > $G/pip.log 2>&1
 rm -rf $G/src $G/base && mkdir -p $G/src $G/base
-tar xzf /content/cpu/src.tar.gz -C $G/src
-tar xzf /content/cpu/in/base_src.tar.gz -C $G/base
+tar xzf $CR/cpu/src.tar.gz -C $G/src
+tar xzf $CR/cpu/in/base_src.tar.gz -C $G/base
 build() {  # SRC BUILD DOUBLE
   local t0=$SECONDS
   cmake -S "$1" -B "$2" -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE="$3" -DCPPWRF_CUDA_FP32_IDENTITY=OFF > "$2.log" 2>&1 &&

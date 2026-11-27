@@ -24,7 +24,8 @@
 # gcs.tok is deleted when the data are in place, rclone.conf at the end.
 B=$1 DATA=$2; shift 2
 [ "$B" = - ] && B=
-C=/content/cpu R=/content/deb13 T=/content/tars
+CR=$(cd "$(dirname "$0")/.." && pwd)  # /content, or /content/cppwrf_<session> on an attached runtime
+C=$CR/cpu R=$CR/deb13 T=$CR/tars
 J=$R/opt/job
 GH=https://github.com/Xassemblianist/cppwrf-data/releases/download/data-v1
 cd $C || exit 1

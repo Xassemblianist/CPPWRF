@@ -14,12 +14,13 @@ CASES=$1 LAYOUTS=$2 FP32=${3:-}
 # FP32 (cuda_dp suite cases, run here in FP32 for at most 30 simulated minutes): the CUDA FP32 build of the base
 # revision (/content/cpu/in/base_src.tar.gz, without MPI) and this revision's with CPPWRF_MPI as one process and as
 # 2 x 1 and 1 x 2 ranks on the GPU; every output file must be the base build's (gpu_fp32.txt).
-G=/content/mpi_gpu R=/content/deb13 J=/content/deb13/opt/job
+CR=$(cd "$(dirname "$0")/.." && pwd)  # /content, or /content/cppwrf_<session> on an attached runtime (colab_api.py attach)
+G=$CR/mpi_gpu R=$CR/deb13 J=$CR/deb13/opt/job
 mkdir -p $G
 exec > $G/gpu.log 2>&1
 set -x
-until [ -e /content/cpu/data_done ] || [ -e /content/cpu/done ]; do sleep 10; done
-[ -e /content/cpu/done ] && exit 0
+until [ -e $CR/cpu/data_done ] || [ -e $CR/cpu/done ]; do sleep 10; done
+[ -e $CR/cpu/done ] && exit 0
 ln -sfn $R/opt/job /opt/job
 finish() { cp $G/gpu.log $J/gpu_host.log 2> /dev/null; touch $J/gpu_done; }
 trap finish EXIT
@@ -35,7 +36,7 @@ MPIRUN="$(command -v mpirun.openmpi || command -v mpirun) --allow-run-as-root --
 { $MPIRUN --version 2>&1 | head -3; } >> $J/gpu.txt
 python3 -c 'import netCDF4' 2> /dev/null || pip install -q netCDF4 > $G/pip.log 2>&1
 rm -rf $G/src && mkdir -p $G/src
-tar xzf /content/cpu/src.tar.gz -C $G/src
+tar xzf $CR/cpu/src.tar.gz -C $G/src
 t0=$SECONDS
 cmake -S $G/src -B $G/b_dp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=ON -DCPPWRF_MPI=ON \
   -DMPI_CXX_COMPILER="$(command -v mpicxx.openmpi || command -v mpicxx)" > $G/b_dp.log 2>&1 &&
@@ -43,7 +44,7 @@ cmake -S $G/src -B $G/b_dp -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -D
 echo "build: exit $?, $((SECONDS - t0)) s" >> $J/gpu.txt
 tail -40 $G/b_dp.log > $J/gpu_build.log
 if [ -n "$FP32" ]; then
-  rm -rf $G/base && mkdir -p $G/base && tar xzf /content/cpu/in/base_src.tar.gz -C $G/base
+  rm -rf $G/base && mkdir -p $G/base && tar xzf $CR/cpu/in/base_src.tar.gz -C $G/base
   ( cmake -S $G/base -B $G/b_base -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF -DCPPWRF_CUDA_FP32_IDENTITY=OFF > $G/b_base.log 2>&1 &&
       cmake --build $G/b_base -j"$(nproc)" --target cppwrf >> $G/b_base.log 2>&1
     echo "build base FP32: exit $?" >> $J/gpu.txt ) &

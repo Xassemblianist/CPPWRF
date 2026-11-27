@@ -45,7 +45,7 @@ cj_results
 bad=0
 grep . "$OUT/setup.out" 2> /dev/null && bad=1
 cat "$OUT/cpu.txt" 2> /dev/null || true
-if timeout 900 $COLAB_API download -s "$S" /content/cpu/fetch/regression.tar.gz "$OUT/regression.tar.gz" > /dev/null 2>&1; then
+if timeout 900 $COLAB_API download -s "$S" "$CJ_ROOT/cpu/fetch/regression.tar.gz" "$OUT/regression.tar.gz" > /dev/null 2>&1; then
   tar xzf "$OUT/regression.tar.gz" -C "$OUT" && rm -f "$OUT/regression.tar.gz"
 else echo "[colab_regression] no regression.tar.gz"; bad=1; fi
 [ "$MODE" = check ] || echo "update_golden: $(grep -E '^Successfully' "$OUT/update.log" 2> /dev/null || echo 'no summary') ($(tail -1 "$OUT/update.log" 2> /dev/null))"

@@ -6,7 +6,8 @@ file server runs on 127.0.0.1 and logs every call. Checks: one create request pe
 capacity", no retry otherwise; at most 2 of this project's runtimes (the account's other runtimes neither counted nor
 touched); the block lock; no CPU runtimes; the runtime deleted on exit after success, failure, an error later and
 SIGTERM, and --keep; DEADLINE_EXCEEDED waits on the same request; upload / download / exec; colab_lib.sh's cj_start;
-and that nothing else in the repository asks for a runtime. Never talks to the real endpoint (every script checks the
+attaching to a runtime the owner opened (by name, the only free one, refusals, never deleted, our session, processes
+and files removed on exit, error and SIGTERM); and that nothing else in the repository asks for a runtime. Never talks to the real endpoint (every script checks the
 URL)."""
 import base64
 import json
@@ -50,6 +51,8 @@ class Mock:
         self.calls = []
         self.lock = threading.Lock()
         self.url = None
+        self.sessions = {}                  # runtime -> {session id: (execution_state, last_activity or None)}
+        self.exec_timeout = 1.5
 
     def log(self, tool, args):
         with self.lock:
@@ -90,15 +93,29 @@ class Mock:
             self.runtimes.pop(a["name"], None)
             return {}
         if name == "delete_session":
+            rt, _, sid = a["name"].rpartition("/sessions/")
+            self.sessions.get(rt, {}).pop(sid, None)
             return {}
+        if name == "create_session":
+            if a["parent"] not in self.runtimes:
+                raise Err("NOT_FOUND", a["parent"])
+            sid = a.get("sessionId") or "s-generated"
+            if sid in self.sessions.setdefault(a["parent"], {}):
+                raise Err("ALREADY_EXISTS", sid)
+            self.sessions[a["parent"]][sid] = ("idle", time.strftime("%Y-%m-%dT%H:%M:%S.000000Z", time.gmtime()))
+            return {"name": f"{a['parent']}/sessions/{sid}"}
+        if name == "list_sessions":
+            return {"sessions": [{"name": f"{a['parent']}/sessions/{sid}"} for sid in self.sessions.get(a["parent"], {})]}
         if name == "execute_code":
-            rt = a["session"].rsplit("/sessions/", 1)[0]
+            rt, _, sid = a["session"].rpartition("/sessions/")
             if rt not in self.runtimes:
                 raise Err("NOT_FOUND", rt)
+            if sid != "main" and sid not in self.sessions.get(rt, {}):   # an attached runtime: our session first
+                raise Err("NOT_FOUND", a["session"])
             code = a["code"].replace("/content", self.root + "/content")
             try:
-                r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=1.5,
-                                   cwd=self.root)
+                r = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True,
+                                   timeout=self.exec_timeout, cwd=self.root)
             except subprocess.TimeoutExpired:
                 raise Err("DEADLINE_EXCEEDED", "execution cut off")
             out = {"stdout": r.stdout, "stderr": r.stderr if r.returncode == 0 else ""}
@@ -150,6 +167,12 @@ def handler(mock):
             if not self.token_ok():
                 return self.reply(404)
             u = urlparse(self.path)
+            if u.path == "/api/sessions":   # the runtime's Jupyter sessions with their kernels' activity
+                rt = self.headers["X-Colab-Runtime-Proxy-Token"][4:]
+                mock.log("http_sessions", rt)
+                return self.reply(200, json.dumps([
+                    {"path": sid, "kernel": {"execution_state": st, "last_activity": t}}
+                    for sid, (st, t) in mock.sessions.get(rt, {}).items() if t is not None]).encode())
             if u.path.startswith("/files/"):
                 mock.log("http_get", u.path)
                 p = self.file_path("/files/")
@@ -220,9 +243,15 @@ class Base(unittest.TestCase):
         self.srv.shutdown()
         self.srv.server_close()
         for tool, a in self.mock.calls:
-            if tool in ("delete_runtime", "delete_session", "execute_code", "get_runtime"):
-                name = a.get("name") or a.get("session")
+            name = a.get("name") or a.get("session") or a.get("parent") if isinstance(a, dict) else ""
+            if tool == "delete_runtime":
                 self.assertTrue(name.startswith("runtimes/cppwrf-"), f"{tool} on {name}")
+            if tool in ("delete_session", "execute_code"):   # our runtime, or our session on an attached one
+                self.assertTrue(name.startswith("runtimes/cppwrf-") or "/sessions/cppwrf-" in name, f"{tool} on {name}")
+            if tool == "create_session":
+                self.assertTrue(a.get("sessionId", "").startswith("cppwrf-"), f"{tool} {a}")
+            if name:
+                self.assertNotIn("cppmpas-", name, f"{tool} on {name}")
         self.assertIn("runtimes/owner-notebook", self.mock.runtimes)
         self.assertIn("runtimes/cppmpas-opm14-gpu", self.mock.runtimes)
         self.tmp.cleanup()
@@ -490,6 +519,239 @@ class Client(Base):
         self.assertEqual(self.deletes(), ["runtimes/cppwrf-owner-notebook"])
         r = self.api("own")
         self.assertEqual(r.stdout.splitlines()[0], "1")
+
+
+class Attach(Base):
+    """`colab_api.py attach` / colab_guard_attach: runtimes the owner opened in the web UI are used, never deleted."""
+    S = "cppwrf-attach-20261127_101010"
+    SID = "cppwrf-attach-20261127-101010"
+    WEB = "runtimes/j_Web-G4_abc."           # the shape of a web-opened runtime's name
+    ROOT = "/content/cppwrf_attach_20261127_101010"
+
+    def setUp(self):
+        super().setUp()
+        self.mock.exec_timeout = 15
+        # the base's runtimes/owner-notebook (L4) is the owner's other GPU runtime; its notebook session
+        self.mock.sessions["runtimes/owner-notebook"] = {"fileId=1abc": ("busy", self.ago(0))}
+        self.mock.runtimes[self.WEB] = SPECS[1]["key"]
+        self.mock.sessions[self.WEB] = {"fileId=2def": ("idle", self.ago(5))}
+        self.procs = []
+
+    def tearDown(self):
+        for p in self.procs:
+            if p.poll() is None:
+                p.kill()
+        super().tearDown()
+
+    @staticmethod
+    def ago(s):
+        return time.strftime("%Y-%m-%dT%H:%M:%S.000000Z", time.gmtime(time.time() - s))
+
+    def local(self, remote):
+        return os.path.join(self.root, remote.lstrip("/"))
+
+    def attach(self, *args, **kw):
+        return self.api("attach", "-s", self.S, *args, **kw)
+
+    def attaches(self):
+        return [a for t, a in self.mock.calls if t == "create_session"]
+
+    def no_runtime_touched(self):
+        self.assertEqual(self.deletes(), [])
+        self.assertEqual(self.creates(), [])
+        self.assertIn(self.WEB, self.mock.runtimes)
+
+    def test_attach_by_name_exec_upload_and_stop_only_detaches(self):
+        r = self.attach("--runtime", self.WEB.split("/")[1])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Accelerator: G4", r.stdout)
+        self.assertIn(f"Root: {self.ROOT}", r.stdout)
+        self.assertEqual(self.attaches(), [{"parent": self.WEB, "sessionId": self.SID}])
+        self.assertTrue(os.path.exists(os.path.join(self.state, "attached", self.SID)))
+        # exec on our session; files only below our directory
+        r = self.api("exec", "-s", self.S, stdin=f"import os\nos.makedirs('{self.ROOT}/job', exist_ok=True)\n"
+                     f"open('{self.ROOT}/job/x', 'w').write('1')\nprint('RAN')\n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("RAN", r.stdout)
+        ex = [a["session"] for t, a in self.mock.calls if t == "execute_code"]
+        self.assertEqual(ex, [f"{self.WEB}/sessions/{self.SID}"])
+        src = os.path.join(self.d, "f")
+        with open(src, "wb") as f:
+            f.write(b"abc")
+        r = self.api("upload", "-s", self.S, src, f"{self.ROOT}/f")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        r = self.api("upload", "-s", self.S, src, "/content/owners_file")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("outside our directory", r.stderr)
+        self.assertFalse(os.path.exists(self.local("/content/owners_file")))
+        # a process of ours (its command line names our directory) and the owner's file next to ours
+        p = subprocess.Popen(["bash", "-c", "sleep 300; true", self.local(self.ROOT) + "/remote_job.py"])
+        self.procs.append(p)
+        with open(self.local("/content/owner.ipynb"), "w") as f:
+            f.write("{}")
+        r = self.api("stop", "-s", self.S)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.no_runtime_touched()
+        self.assertFalse(os.path.exists(self.local(self.ROOT)))
+        self.assertTrue(os.path.exists(self.local("/content/owner.ipynb")))
+        self.assertIsNotNone(p.wait(timeout=10))
+        self.assertNotIn(self.SID, self.mock.sessions[self.WEB])
+        self.assertIn("fileId=2def", self.mock.sessions[self.WEB])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "attached", self.SID)))
+        # after the detach the name is not attached any more: stop is the old path (our own runtime ID only)
+        self.assertNotIn(self.WEB, [a.get("name") for t, a in self.mock.calls if t == "delete_runtime"])
+
+    def test_attach_by_environment(self):
+        r = self.attach(CPPWRF_COLAB_RUNTIME="owner-notebook")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Accelerator: L4", r.stdout)   # the owner's notebook session (busy) does not count
+        self.assertEqual(self.attaches()[0]["parent"], "runtimes/owner-notebook")
+        self.assertEqual(self.api("detach", "-s", self.S).returncode, 0)
+        self.no_runtime_touched()
+
+    def test_attach_the_only_one(self):
+        self.mock.runtimes.pop("runtimes/owner-notebook")
+        self.mock.runtimes["runtimes/cpu-notebook"] = SPECS[0]["key"]          # no GPU: not a candidate
+        self.mock.runtimes["runtimes/cppwrf-l4-y"] = SPECS[4]["key"]           # ours, created: not a candidate
+        r = self.attach()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.attaches(), [{"parent": self.WEB, "sessionId": self.SID}])
+        self.assertEqual(self.api("detach", "-s", self.S).returncode, 0)
+        self.no_runtime_touched()
+        self.mock.runtimes.pop("runtimes/cppwrf-l4-y")
+        self.mock.runtimes["runtimes/owner-notebook"] = SPECS[4]["key"]
+
+    def test_two_candidates_refused(self):
+        r = self.attach()
+        self.assertEqual(r.returncode, 4)
+        self.assertIn("2 free GPU runtimes", r.stderr)
+        self.assertEqual(self.attaches(), [])
+        self.assertFalse(os.path.exists(os.path.join(self.state, "attached", self.SID)))
+        self.no_runtime_touched()
+
+    def test_none_refused_with_how_to(self):
+        self.mock.runtimes.pop("runtimes/owner-notebook")
+        self.mock.runtimes.pop(self.WEB)
+        r = self.attach()
+        self.assertEqual(r.returncode, 4)
+        self.assertIn("Open one in the browser", r.stderr)
+        self.mock.runtimes["runtimes/owner-notebook"] = SPECS[4]["key"]
+        self.mock.runtimes[self.WEB] = SPECS[1]["key"]
+
+    def test_another_tools_busy_session(self):
+        # another tool used owner-notebook a minute ago: the WEB runtime is then the only free one
+        self.mock.sessions["runtimes/owner-notebook"]["s-1234"] = ("idle", self.ago(60))
+        # a stale API session (an hour old) and one whose kernel is gone do not make WEB busy
+        self.mock.sessions[self.WEB]["s-old"] = ("idle", self.ago(3600))
+        self.mock.sessions[self.WEB]["s-gone"] = ("idle", None)
+        r = self.attach()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.attaches()[0]["parent"], self.WEB)
+        self.assertEqual(self.api("detach", "-s", self.S).returncode, 0)
+        # named, but busy: refused
+        r = self.attach("--runtime", "owner-notebook")
+        self.assertEqual(r.returncode, 4)
+        self.assertIn("s-1234", r.stderr)
+        # running code now (execution_state busy), even if its last activity is old
+        self.mock.sessions[self.WEB]["cppmpas-x"] = ("busy", self.ago(3600))
+        r = self.attach("--runtime", self.WEB)
+        self.assertEqual(r.returncode, 4)
+        self.assertEqual(len(self.attaches()), 1)
+        self.no_runtime_touched()
+
+    def test_never_other_tools_runtimes_or_cpu(self):
+        self.mock.runtimes["runtimes/cppwrf-l4-y"] = SPECS[4]["key"]
+        self.mock.runtimes["runtimes/cpu-notebook"] = SPECS[0]["key"]
+        for name in ("cppmpas-opm14-gpu", "cppwrf-l4-y", "cpu-notebook", "nope"):
+            r = self.attach("--runtime", name)
+            self.assertEqual(r.returncode, 4, name)
+        self.assertEqual(self.attaches(), [])
+        self.mock.runtimes.pop("runtimes/cppwrf-l4-y")
+
+    # ---- through the guard: the trap detaches, never deletes
+    GUARDED = ('trap "echo CALLER_CLEANUP" EXIT\ncolab_guard_attach cppwrf-attach-20261127_101010 {rt}|| exit 1\n'
+               'echo "UP $COLAB_GUARD_GPU $COLAB_GUARD_ROOT"\n'
+               'echo "import os; os.makedirs(\'$COLAB_GUARD_ROOT\', exist_ok=True); print(\'MADE\')" | '
+               '"$COLAB_API" exec -s cppwrf-attach-20261127_101010\n')
+
+    def guarded(self, extra="", rt="j_Web-G4_abc.", **kw):
+        return self.bash(self.GUARDED.format(rt=f"{rt} " if rt else "") + extra, **kw)
+
+    def assert_detached(self):
+        self.no_runtime_touched()
+        self.assertFalse(os.path.exists(self.local(self.ROOT)))
+        self.assertNotIn(self.SID, self.mock.sessions[self.WEB])
+        self.assertIn(("delete_session", {"name": f"{self.WEB}/sessions/{self.SID}"}), self.mock.calls)
+
+    def test_guard_success_detaches_on_exit(self):
+        r = self.guarded()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(f"UP G4 {self.ROOT}", r.stdout)
+        self.assertIn("MADE", r.stdout)
+        self.assertIn("CALLER_CLEANUP", r.stdout)
+        self.assertIn("the runtime stays up", r.stderr)
+        self.assert_detached()
+
+    def test_guard_error_detaches(self):
+        r = self.guarded(extra="false\necho NOT_HERE\n")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("NOT_HERE", r.stdout)
+        self.assert_detached()
+
+    def test_guard_sigterm_detaches(self):
+        p = subprocess.Popen(["bash", "-c", PRE + self.GUARDED.format(rt="j_Web-G4_abc. ")
+                              + "echo READY\nsleep 60 > /dev/null 2>&1 & wait $!\n"],
+                             env=self.env(), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        for _ in range(300):
+            if os.path.isdir(self.local(self.ROOT)):
+                break
+            time.sleep(0.1)
+        time.sleep(1)
+        p.send_signal(signal.SIGTERM)
+        p.communicate(timeout=120)
+        self.assert_detached()
+
+    def test_guard_refusal_touches_nothing(self):
+        r = self.guarded(rt="")    # two candidates
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("Open one in the browser", r.stderr)
+        self.assertEqual(self.attaches(), [])
+        self.assertEqual([t for t, a in self.mock.calls if t in ("delete_session", "execute_code")], [])
+        self.no_runtime_touched()
+
+    def test_guard_keep_leaves_our_session(self):
+        r = self.guarded(KEEP="1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn(self.SID, self.mock.sessions[self.WEB])
+        self.assertTrue(os.path.isdir(self.local(self.ROOT)))
+        self.assertEqual(self.api("stop", "-s", self.S).returncode, 0)   # stop then only detaches
+        self.assert_detached()
+
+    def test_cj_start_attach(self):
+        bindir = os.path.join(self.d, "bin")
+        os.makedirs(bindir)
+        with open(os.path.join(bindir, "rclone"), "w") as f:
+            f.write('#!/bin/sh\n[ "$1" = listremotes ] && echo cppwrf-drive:\n')
+        os.chmod(os.path.join(bindir, "rclone"), 0o755)
+        lib = (f'OUT=$HOME TAG=t S={self.S} KEEP=0 BK= ANY_CPU=1 ATTACH=1 ATTACH_RT={self.WEB}; REPO=x\n. "$LIB"\n')
+        r = self.bash(lib + 'cj_start G4\necho "NPROC $NPROC ROOT $CJ_ROOT"\n'
+                      'echo "import os; print(os.path.isdir(\'/content/cpu/in\'))" | rx 60\n',
+                      PATH=bindir + os.pathsep + os.environ["PATH"])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn(f"ROOT {self.ROOT}", r.stdout)
+        self.assertIn("True", r.stdout)                     # rx: /content/cpu is ours, below ROOT
+        self.assertFalse(os.path.exists(self.local("/content/cpu")))
+        self.assert_detached()
+
+    def test_colab_run_needs_attach_or_t4(self):
+        run = os.path.join(REPO, "tools", "colab", "colab_run.sh")
+        for args in ([], ["--gpu", "G4"], ["--attach", "--gpu", "T4"]):
+            r = subprocess.run(["bash", run, *args], env=self.env(CPPWRF_WRF_RUNS=self.d, CPPWRF_SCRATCH=self.d),
+                               capture_output=True, text=True, timeout=60)
+            self.assertEqual(r.returncode, 2, args)
+            if not args:
+                self.assertIn("Open one in the browser", r.stderr)
+        self.assertEqual(self.mock.calls, [])
 
 
 class Repository(unittest.TestCase):

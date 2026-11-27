@@ -9,6 +9,9 @@ output, may be empty; NAME@cuda or NAME@cuda_dp runs the case with that build). 
 binaries for the VM's GPU, runs the suite cases against the WRF references, the files test with the FP64 binary
 (CPPWRF_FILES_NO_VALUES=1), times the bench cases, and leaves everything in /content/job (summary.txt, logs) and
 /content/results.tar.gz.
+CPPWRF_JOB_ROOT (default /content) replaces /content in every path: colab_run.sh --attach keeps the job's files under
+/content/cppwrf_<session> on a runtime the owner opened, and removes that directory at the end. (Setup still installs
+libnetcdf-dev and the netCDF4 Python module on the runtime.)
 
 CPPWRF_JOB_GLIBC_PROOF (default 10^7, 0: none): random inputs per function of tools/glibc_math_proof_cuda.cu, the
 device's glibc math functions (the CUDA FP64 build's libm) against the host's ("glibc device math" in summary.txt).
@@ -49,9 +52,10 @@ import sys
 import threading
 import time
 
-JOB = "/content/job"
-SRC = "/content/cppwrf"
-WR = "/content/data/wrf_runs"
+R = os.environ.get("CPPWRF_JOB_ROOT", "/content")  # colab_run.sh --attach: /content/cppwrf_<session>
+JOB = f"{R}/job"
+SRC = f"{R}/cppwrf"
+WR = f"{R}/data/wrf_runs"
 
 
 def sh(cmd, log, cwd=None, env=None):
@@ -121,11 +125,11 @@ int main(int, char** v) {
 
 def hold_device_memory(mib, note):
     """A process that leaves mib MiB of device memory free (it lives as long as this job)."""
-    open("/content/hog.cu", "w").write(HOG)
-    if sh("nvcc -O2 /content/hog.cu -o /content/hog", "setup.log") != 0:
+    open(f"{R}/hog.cu", "w").write(HOG)
+    if sh(f"nvcc -O2 {R}/hog.cu -o {R}/hog", "setup.log") != 0:
         note("device memory limit: the holder did not build")
         return
-    p = subprocess.Popen(["/content/hog", str(mib)], stdout=subprocess.PIPE, text=True)
+    p = subprocess.Popen([f"{R}/hog", str(mib)], stdout=subprocess.PIPE, text=True)
     note(f"device memory limit: {p.stdout.readline().strip()}")
 
 
@@ -223,7 +227,7 @@ def res_usage(binary):
     return res
 
 
-PROF = "/content/prof"
+PROF = f"{R}/prof"
 NSYS_REPORTS = ("cuda_gpu_kern_sum", "cuda_api_sum", "cuda_gpu_mem_size_sum")
 
 
@@ -232,7 +236,7 @@ def nsys_run(tag, part, cmd, run_time, env):
     rep, o = f"{PROF}/{tag}_{part}", os.path.join(JOB, "nsys", f"{tag}_{part}")
     os.makedirs(PROF, exist_ok=True)
     os.makedirs(os.path.dirname(o), exist_ok=True)
-    log, d = f"nsys-{tag}-{part}.log", f"/content/bench/{tag}_nsys"
+    log, d = f"nsys-{tag}-{part}.log", f"{R}/bench/{tag}_nsys"
     c = cmd(d, run_time)
     sh(f"rm -rf {d} && nsys profile --trace=cuda --sample=none --cpuctxsw=none --force-overwrite=true -o {rep} "
        f"{shlex.join(c)}", log, cwd=SRC, env=env)
@@ -327,7 +331,7 @@ def profile_ncu(tag, cmd, run_time, env, ncu, top, res, note):
         rx = "|".join(key_regex(k) for k in top)
     else:
         rx = ncu
-    rep, d = f"{PROF}/{tag}_ncu", f"/content/bench/{tag}_ncu"
+    rep, d = f"{PROF}/{tag}_ncu", f"{R}/bench/{tag}_ncu"
     os.makedirs(PROF, exist_ok=True)
     for metrics in (NCU_METRICS, NCU_METRICS[:4]):  # the smaller set when a metric is unknown to this GPU
         for f in glob.glob(rep + ".*"):
@@ -388,7 +392,7 @@ def main():
     except Exception as e:  # noqa: BLE001 - colab_run.sh waits for the done file: always write it
         note(f"job error: {type(e).__name__}: {e}")
     summary.close()
-    sh("tar czf /content/results.tar.gz -C /content job", "pack.log")
+    sh(f"tar czf {R}/results.tar.gz -C {R} job", "pack.log")
     open(os.path.join(JOB, "done"), "w").write("done\n")
 
 
@@ -399,7 +403,7 @@ def job(note):
     gpu = out("nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader")
     cpu = out("grep -m1 'model name' /proc/cpuinfo")
     nvcc = out("nvcc --version | tail -2 | head -1")
-    commit = open("/content/commit.txt").read().strip() if os.path.exists("/content/commit.txt") else "?"
+    commit = open(f"{R}/commit.txt").read().strip() if os.path.exists(f"{R}/commit.txt") else "?"
     note(f"GPU: {gpu}")
     note(f"CPU: {out('nproc')} cores, {cpu}")
     note(f"nvcc: {nvcc}")
@@ -407,23 +411,23 @@ def job(note):
 
     sh("apt-get -qq update && apt-get -qq install -y libnetcdf-dev > /dev/null", "setup.log")
     sh("pip -q install netCDF4 numpy", "setup.log")
-    sh(f"rm -rf {SRC} /content/data && mkdir -p {SRC} /content/data && tar xzf /content/src.tar.gz -C {SRC} "
-       "&& tar xf /content/data.tar -C /content/data", "setup.log")
+    sh(f"rm -rf {SRC} {R}/data && mkdir -p {SRC} {R}/data && tar xzf {R}/src.tar.gz -C {SRC} "
+       f"&& tar xf {R}/data.tar -C {R}/data", "setup.log")
     nproc = int(out("nproc") or "4")
     bins = {}
     for name, dp in (("cuda", "OFF"), ("cuda_dp", "ON")):
-        b = f"/content/build-{name}"
+        b = f"{R}/build-{name}"
         t = time.time()
         rc = sh(f"cmake -S {SRC} -B {b} -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE={dp} -DCPPWRF_CUDA_FP32_IDENTITY=OFF "
                 f"&& cmake --build {b} -j{nproc} --target cppwrf", f"build-{name}.log")
         note(f"build {name}: exit {rc}, {time.time() - t:.0f} s")
         if rc == 0:
             bins[name] = f"{b}/cppwrf"
-    base_bins, BASE_SRC = {}, "/content/cppwrf-base"
+    base_bins, BASE_SRC = {}, f"{R}/cppwrf-base"
     if os.environ.get("CPPWRF_JOB_BASE") == "1":
-        sh(f"rm -rf {BASE_SRC} && mkdir -p {BASE_SRC} && tar xzf /content/base.tar.gz -C {BASE_SRC}", "setup.log")
+        sh(f"rm -rf {BASE_SRC} && mkdir -p {BASE_SRC} && tar xzf {R}/base.tar.gz -C {BASE_SRC}", "setup.log")
         for name, dp in (("cuda", "OFF"), ("cuda_dp", "ON")):
-            b = f"/content/build-base-{name}"
+            b = f"{R}/build-base-{name}"
             t = time.time()
             rc = sh(f"cmake -S {BASE_SRC} -B {b} -DCMAKE_BUILD_TYPE=Release -DCPPWRF_ENABLE_CUDA=ON "
                     f"-DCPPWRF_DOUBLE={dp} -DCPPWRF_CUDA_FP32_IDENTITY=OFF && cmake --build {b} -j{nproc} --target cppwrf", f"build-base-{name}.log")
@@ -440,23 +444,23 @@ def job(note):
     n_proof = int(os.environ.get("CPPWRF_JOB_GLIBC_PROOF", "10000000"))
     if n_proof > 0:
         rc = sh(f"nvcc -std=c++20 -O3 --fmad=false -arch=native -DCPPWRF_GLIBC_MATH -Isrc -Itools "
-                f"-Xcompiler -fopenmp,-ffp-contract=off tools/glibc_math_proof_cuda.cu -o /content/glibc_math_proof_cuda "
-                f"&& /content/glibc_math_proof_cuda {n_proof}", "glibc_proof.log", cwd=SRC)
+                f"-Xcompiler -fopenmp,-ffp-contract=off tools/glibc_math_proof_cuda.cu -o {R}/glibc_math_proof_cuda "
+                f"&& {R}/glibc_math_proof_cuda {n_proof}", "glibc_proof.log", cwd=SRC)
         lines = [l for l in open(os.path.join(JOB, "glibc_proof.log")) if l.startswith("glibc_math_proof_cuda:")]
         note(f"glibc device math: exit {rc}, {lines[-1].strip() if lines else 'no result'}")
 
-    env = dict(os.environ, CPPWRF_WRF_RUNS=WR, CPPWRF_WRF_REF="/content/data/wrf_ref", OMP_NUM_THREADS="4")
+    env = dict(os.environ, CPPWRF_WRF_RUNS=WR, CPPWRF_WRF_REF=f"{R}/data/wrf_ref", OMP_NUM_THREADS="4")
     if cases and bins:
         args = " ".join(f"--{k.replace('_', '-')} {v}" for k, v in bins.items())
-        sh(f"python3 tests/verify/wrf_suite.py {args} --only {cases} --exact --out /content/suite", "suite.log", cwd=SRC,
+        sh(f"python3 tests/verify/wrf_suite.py {args} --only {cases} --exact --out {R}/suite", "suite.log", cwd=SRC,
            env=env)
         for line in open(os.path.join(JOB, "suite.log")):
             if re.match(r"(PASS|FAIL|SKIP|ERROR|SUITE)\s", line):
                 note("suite " + line.rstrip())
 
     if files and "cuda_dp" in bins:  # the GPU's wrfout / wrfrst files: variables, attributes and times as WRF's
-        sh(f"bash tests/verify/run_wrf_files_test.sh /content/build-cuda_dp {' '.join(files)}", "files.log", cwd=SRC,
-           env=dict(env, CPPWRF_FILES_NO_VALUES="1", CPPWRF_SCRATCH="/content/files"))
+        sh(f"bash tests/verify/run_wrf_files_test.sh {R}/build-cuda_dp {' '.join(files)}", "files.log", cwd=SRC,
+           env=dict(env, CPPWRF_FILES_NO_VALUES="1", CPPWRF_SCRATCH=f"{R}/files"))
         for line in open(os.path.join(JOB, "files.log")):
             if re.match(r"(PASS|FAIL|SKIP|compared)\s", line):
                 note("files " + line.rstrip())
@@ -497,7 +501,7 @@ def job(note):
                 quick = os.environ.get("CPPWRF_JOB_AB") == "quick"
                 for rnd in (1,) if quick else (1, 2):
                     for v, b, cwd in (("base", base_bins[key], BASE_SRC), ("new", bins[key], SRC)):
-                        log, o = f"ab-{v}{rnd}-{tag}.log", f"/content/bench/ab_{v}"
+                        log, o = f"ab-{v}{rnd}-{tag}.log", f"{R}/bench/ab_{v}"
                         with GpuMemory() as mem:
                             sh(f"rm -rf {o} && {shlex.join(cmd(o, t, b))}", log, cwd=cwd, env=menv)
                         d = timings(os.path.join(JOB, log))
@@ -510,18 +514,18 @@ def job(note):
                 if quick:  # one run of each build only (does the case fit, its time and memory)
                     continue
                 if "CPPWRF_KTIME" in keys:
-                    sh(f"rm -rf /content/bench/ab_base && {shlex.join(cmd('/content/bench/ab_base', t, base_bins[key]))}",
+                    sh(f"rm -rf {R}/bench/ab_base && {shlex.join(cmd(R + '/bench/ab_base', t, base_bins[key]))}",
                        f"bench-env-base-{tag}.log", cwd=BASE_SRC, env=env)
                 for v, b, cwd in (("base", base_bins[key], BASE_SRC), ("new", bins[key], SRC)):
-                    o = f"/content/bench/out_{v}"
+                    o = f"{R}/bench/out_{v}"
                     sh(f"rm -rf {o} && {shlex.join(cmd(o, t, b, quiet=False))}", f"ab-out-{v}-{tag}.log", cwd=cwd,
                        env=plain)
-                n, bad = same_outputs("/content/bench/out_base", "/content/bench/out_new")
+                n, bad = same_outputs(f"{R}/bench/out_base", f"{R}/bench/out_new")
                 note(f"ab {tag}: outputs of base and new: {n} files, " +
                      ("IDENTICAL" if n and not bad else "DIFFERENT: " + " ".join(bad[:8]) if bad else "none written"))
-                sh("rm -rf /content/bench/out_base /content/bench/out_new", "setup.log")
+                sh(f"rm -rf {R}/bench/out_base {R}/bench/out_new", "setup.log")
 
-            o = f"/content/bench/{tag}"
+            o = f"{R}/bench/{tag}"
             with GpuMemory() as mem:
                 sh(f"rm -rf {o} && {shlex.join(cmd(o, t))}", f"bench-{tag}.log", cwd=SRC, env=plain)
             # one line per domain (a nest's parent first: its stepping time contains the nests' steps)

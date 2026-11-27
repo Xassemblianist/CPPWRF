@@ -16,13 +16,25 @@ tools/bench use, so that they keep their command lines:
   colab_api.py upload -s NAME SRC DST      local SRC -> runtime DST (absolute), 32 MiB pieces, parents created; prints
         "Uploaded DST" only when the runtime's file has SRC's size
   colab_api.py download -s NAME SRC DEST   runtime SRC -> local DEST (resumed with Range, at most 3 tries)
-  colab_api.py stop -s NAME                delete the runtime (and its session); a runtime that does not exist is fine
+  colab_api.py stop -s NAME                delete the runtime (and its session); a runtime that does not exist is fine.
+        On an attached runtime (below) stop only detaches: it never deletes a runtime this project did not create.
+  colab_api.py attach -s NAME [--runtime R]   use a GPU runtime the owner opened in the Colab web UI (creating G4 /
+        A100 / L4 from the API fails, a Google bug; a web-opened runtime is listed and can be driven): R, else the
+        environment CPPWRF_COLAB_RUNTIME, else the one GPU runtime that is neither ours (cppwrf-*) nor CPPMPAS's
+        (cppmpas-*) and has no session another tool used in the last CPPWRF_COLAB_ATTACH_IDLE_S (600) s (several such
+        runtimes, or none: refused, exit 4). Opens our own kernel session cppwrf-<NAME> on it and records the runtime
+        in $CPPWRF_COLAB_GUARD_DIR/attached/, so exec / upload / download / stop -s NAME use it. Prints the
+        accelerator ("Accelerator: G4") and our directory on it ("Root: /content/cppwrf_<NAME>"); uploads to an
+        attached runtime must go below that directory.
+  colab_api.py detach -s NAME              end our use of an attached runtime: kill our processes (command lines with
+        our directory), remove /content/cppwrf_<NAME>, close our session. The runtime stays up.
   colab_api.py sessions | runtimes         the account's runtimes (ours marked); own: only ours, count first
   colab_api.py specs | usage               runtime specs; subscription and runtimes
 
 NAME is the tools' session name; the runtime is runtimes/<NAME in lower case, '_' -> '-', prefix "cppwrf-">, so every
 command finds it without local state, and stop / exec / upload / download refuse a runtime without that prefix:
-nothing here touches a runtime this project did not create (the owner's notebooks, CPPMPAS's runtimes).
+nothing here touches a runtime this project did not create (the owner's notebooks, CPPMPAS's runtimes), except one
+that `attach` picked: there only our session and our directory are used, and nothing deletes the runtime.
 
 Environment: CPPWRF_COLAB_API_URL (default the MCP endpoint; the offline tests point it at a mock), and
 CPPWRF_COLAB_API_HEADERS (default ~/.local/bin/colab_mcp_headers.sh: prints the JSON auth headers, a fresh gcloud ADC
@@ -44,6 +56,9 @@ URL = os.environ.get("CPPWRF_COLAB_API_URL", "https://colaboratory.googleapis.co
 HEADERS_CMD = os.environ.get("CPPWRF_COLAB_API_HEADERS", os.path.expanduser("~/.local/bin/colab_mcp_headers.sh"))
 PREFIX = "cppwrf-"
 SESSION_ID = "main"
+GUARD_DIR = os.environ.get("CPPWRF_COLAB_GUARD_DIR", os.path.expanduser("~/.cache/cppwrf/colab"))
+NEVER = ("cppmpas-",)      # runtimes of other tools: never attached, never touched
+ATTACH_IDLE_S = float(os.environ.get("CPPWRF_COLAB_ATTACH_IDLE_S", 600))
 PIECE = int(os.environ.get("CPPWRF_COLAB_API_PIECE", 32 << 20))  # bytes per upload request (the runtime takes < 50 MB)
 CREATE_WAIT_S = 1800       # create_runtime: at most this long waiting for one runtime to come up
 STATUSES = ("FAILED_PRECONDITION", "DEADLINE_EXCEEDED", "RESOURCE_EXHAUSTED", "UNAVAILABLE", "NOT_FOUND", "ABORTED",
@@ -206,7 +221,211 @@ def own_runtime(session):
     return f"runtimes/{rid}"
 
 
+# ---- attached runtimes (opened by the owner in the web UI; never deleted here)
+
+def attach_file(session):
+    return os.path.join(GUARD_DIR, "attached", runtime_id(session))
+
+
+def attached(session):
+    """The runtime that `attach -s session` picked, or None."""
+    try:
+        with open(attach_file(session)) as f:
+            return f.read().split()[0]
+    except (OSError, IndexError):
+        return None
+
+
+def job_root(session):
+    """Our directory on an attached runtime: /content/cppwrf_<name>."""
+    return "/content/" + runtime_id(session).replace("-", "_")
+
+
+def target(session):
+    """(runtime, kernel session, attached?) of a tool's session name."""
+    rt = attached(session)
+    if rt:
+        return rt, f"{rt}/sessions/{runtime_id(session)}", True
+    rt = own_runtime(session)
+    return rt, f"{rt}/sessions/{SESSION_ID}", False
+
+
+def short(rt):
+    return rt.split("/")[-1]
+
+
+def accel(r):
+    return (r.get("runtimeSpec", {}).get("accelerator") or "NONE").upper()
+
+
+def _time(ts):
+    from datetime import datetime, timezone
+    try:
+        return datetime.strptime(ts.rstrip("Z")[:26], "%Y-%m-%dT%H:%M:%S.%f").replace(tzinfo=timezone.utc).timestamp()
+    except ValueError:
+        try:
+            return datetime.strptime(ts.rstrip("Z")[:19], "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            return None
+
+
+def busy_sessions(rt, own_sid):
+    """Sessions on rt that another tool opened and used in the last ATTACH_IDLE_S s (or that run code now). The
+    notebook's own session (fileId=...) is the owner's browser and does not count. When the runtime's activity
+    cannot be read, every other session counts as busy."""
+    names = [s.get("name", "").split("/")[-1] for s in call_retry("list_sessions", {"parent": rt}).get("sessions", [])]
+    others = [n for n in names if n and n != own_sid and not n.startswith("fileId=")]
+    if not others:
+        return []
+    try:
+        ci = call_retry("get_runtime", {"name": rt}).get("connectionInfo", {})
+        req = urllib.request.Request(ci["url"].rstrip("/") + "/api/sessions",
+                                     headers={"X-Colab-Runtime-Proxy-Token": ci["token"],
+                                              "User-Agent": "cppwrf-colab-api/1"})
+        with urllib.request.urlopen(req, timeout=60) as f:
+            live = {x.get("path") or x.get("name"): x.get("kernel") or {} for x in json.loads(f.read())}
+    except (ApiError, KeyError, ValueError, OSError) as e:
+        say(f"{rt}: cannot read its sessions' activity ({e}); counting {len(others)} other sessions as busy")
+        return others
+    busy = []
+    for n in others:
+        k = live.get(n)
+        if k is None:
+            continue  # no kernel any more
+        t = _time(k.get("last_activity") or "")
+        if k.get("execution_state") == "busy" or t is None or time.time() - t < ATTACH_IDLE_S:
+            busy.append(n)
+    return busy
+
+
+def ensure_session(rt, sid):
+    try:
+        call_retry("create_session", {"parent": rt, "sessionId": sid}, timeout=300)
+    except ApiError as e:
+        if e.status != "ALREADY_EXISTS":
+            raise
+
+
+def cmd_attach(a):
+    sid = runtime_id(a.session)
+    want = a.runtime or os.environ.get("CPPWRF_COLAB_RUNTIME", "")
+    if want and not want.startswith("runtimes/"):
+        want = "runtimes/" + want
+    rts = list_runtimes()
+    if want:
+        hit = [r for r in rts if r.get("name", "").rstrip(".") == want.rstrip(".")]
+        if not hit:
+            say(f"REFUSED: no runtime {want}; the account has: " + (", ".join(r.get("name", "?") for r in rts) or "none"))
+            return 4
+        r = hit[0]
+        if short(r["name"]).startswith(NEVER + (PREFIX,)):
+            say(f"REFUSED: {r['name']} belongs to a tool (cppmpas-* is CPPMPAS's; cppwrf-* runtimes are created and "
+                "deleted by colab_guard.sh), not one the owner opened")
+            return 4
+        if accel(r) == "NONE":
+            say(f"REFUSED: {r['name']} has no GPU (Colab is for GPU work only)")
+            return 4
+        busy = busy_sessions(r["name"], sid)
+        if busy:
+            say(f"REFUSED: {r['name']} has sessions another tool used in the last {ATTACH_IDLE_S:.0f} s: "
+                + ", ".join(busy))
+            return 4
+    else:
+        cands = [r for r in rts if accel(r) != "NONE" and not short(r.get("name", "")).startswith(NEVER + (PREFIX,))]
+        free = [r for r in cands if not busy_sessions(r["name"], sid)]
+        if len(free) != 1:
+            if not cands:
+                say("REFUSED: no GPU runtime to attach to. Open one in the browser: colab.research.google.com, a "
+                    "notebook, Runtime > Change runtime type > GPU (G4), Connect; then run again (it is found by "
+                    "list_runtimes)")
+            else:
+                say(f"REFUSED: {len(free)} free GPU runtimes of {len(cands)} the owner opened ("
+                    + ", ".join(f"{r['name']} {accel(r)}{'' if r in free else ' busy'}" for r in cands)
+                    + "): name one with --runtime NAME or CPPWRF_COLAB_RUNTIME")
+            return 4
+        r = free[0]
+    rt, acc = r["name"], accel(r)
+    ensure_session(rt, sid)
+    os.makedirs(os.path.dirname(attach_file(a.session)), exist_ok=True)
+    with open(attach_file(a.session), "w") as f:
+        f.write(f"{rt} {acc}\n")
+    say(f"attached to {rt} ({acc}): our session {sid}, our directory {job_root(a.session)}; the runtime is never "
+        "deleted by CPPWRF")
+    print(f"Session READY: {rt}/sessions/{sid}")
+    print(f"Accelerator: {acc}")
+    print(f"Root: {job_root(a.session)}")
+    return 0
+
+
+CLEAN = """import os, signal, subprocess, time, shutil
+root = {root!r}
+assert root.startswith("/content/cppwrf_") and "/" not in root[len("/content/"):]
+me = os.getpid()
+for sig in (signal.SIGTERM, signal.SIGKILL):
+    for p in os.listdir("/proc"):
+        if not p.isdigit() or int(p) == me:
+            continue
+        try:
+            cmd = open(f"/proc/{{p}}/cmdline", "rb").read().replace(b"\\0", b" ").decode(errors="replace")
+        except OSError:
+            continue
+        if root in cmd:
+            try:
+                os.kill(int(p), sig)
+            except OSError:
+                pass
+    time.sleep(2 if sig == signal.SIGTERM else 0)
+
+
+def mounts():  # mount points below root (the chroot jobs bind /proc, /sys, /dev into root/deb13), deepest first
+    ms = [ln.split()[1].replace("\\\\040", " ") for ln in open("/proc/mounts")]
+    return sorted((m for m in ms if m.startswith(root + "/")), key=len, reverse=True)
+
+
+for m in mounts():
+    subprocess.run(["umount", "-l", m], capture_output=True)
+left = mounts()
+if left:  # never delete through a bind mount of the runtime's /dev or /proc
+    print("MOUNTED", root, " ".join(left))
+else:
+    shutil.rmtree(root, ignore_errors=True)
+    print("REMOVED", root, not os.path.exists(root))
+"""
+
+
+def detach(session):
+    rt, sess, _ = target(session)
+    root, rc = job_root(session), 0
+    try:
+        r = exec_code(rt, sess, CLEAN.format(root=root), 300, attached_rt=True)
+        if "REMOVED" not in (r.get("stdout") or "") or r.get("executionError"):
+            say(f"detach: removing {root} on {rt} failed: {r.get('stderr', '')} {r.get('executionError', '')}")
+            rc = 1
+    except ApiError as e:
+        say(f"detach: could not clean {root} on {rt}: {e}")
+        rc = 0 if e.status == "NOT_FOUND" else 1  # the runtime is gone: nothing of ours is left
+    try:
+        call("delete_session", {"name": sess}, timeout=120)
+    except ApiError:
+        pass
+    try:
+        os.remove(attach_file(session))
+    except OSError:
+        pass
+    say(f"detached from {rt}: our session closed, {root} removed; the runtime is left up")
+    return rc
+
+
+def cmd_detach(a):
+    if not attached(a.session):
+        say(f"{a.session}: not attached")
+        return 0
+    return detach(a.session)
+
+
 def cmd_stop(a):
+    if attached(a.session):
+        return detach(a.session)  # never delete a runtime the owner opened
     rt = own_runtime(a.session)
     try:
         call("delete_session", {"name": f"{rt}/sessions/{SESSION_ID}"}, timeout=120)
@@ -269,36 +488,53 @@ finally:
 """
 
 
-def cmd_exec(a):
-    rt = own_runtime(a.session)
-    env = {}
-    for kv in a.env:
-        k, _, v = kv.partition("=")
-        env[k] = v
-    code = WRAP.format(env=repr(env), code=repr(sys.stdin.read()))
-    sess = f"{rt}/sessions/{SESSION_ID}"
+class Timeout(Exception):
+    pass
+
+
+def exec_code(rt, sess, code, timeout, attached_rt=False):
+    """execute_code until it returns (reattached past the server's cutoff); Timeout closes the kernel session. On an
+    attached runtime our session is opened again when it is gone (closed by a timeout, or the kernel restarted)."""
     args = {"session": sess, "code": code, "executionId": str(uuid.uuid4())}
-    t0 = time.time()
+    t0, reopened = time.time(), False
     while True:
-        left = a.timeout - (time.time() - t0)
+        left = timeout - (time.time() - t0)
         if left <= 0:
-            say(f"timeout after {a.timeout} s: closing the kernel session (aborts the code)")
             try:
                 call("delete_session", {"name": sess}, timeout=120)
             except ApiError:
                 pass
-            return 124
+            raise Timeout()
         try:
-            r = call("execute_code", args, timeout=min(660, left + 30))
-            break
+            return call("execute_code", args, timeout=min(660, left + 30))
         except ApiError as e:
             if e.status in ("DEADLINE_EXCEEDED", "UNAVAILABLE"):
                 continue  # the identical call reattaches to the same execution
             if e.status == "RESOURCE_EXHAUSTED":
                 time.sleep(20)
                 continue
-            say(f"execute_code: {e}")
-            return 1
+            if e.status == "NOT_FOUND" and attached_rt and not reopened:
+                reopened = True
+                ensure_session(rt, sess.split("/")[-1])
+                continue
+            raise
+
+
+def cmd_exec(a):
+    rt, sess, att = target(a.session)
+    env = {}
+    for kv in a.env:
+        k, _, v = kv.partition("=")
+        env[k] = v
+    code = WRAP.format(env=repr(env), code=repr(sys.stdin.read()))
+    try:
+        r = exec_code(rt, sess, code, a.timeout, att)
+    except Timeout:
+        say(f"timeout after {a.timeout} s: closed the kernel session (aborts the code)")
+        return 124
+    except ApiError as e:
+        say(f"execute_code: {e}")
+        return 1
     out, err = r.get("stdout", ""), r.get("stderr", "")
     if out:
         sys.stdout.write(out if out.endswith("\n") else out + "\n")
@@ -321,7 +557,8 @@ def cmd_exec(a):
 
 class Conn:
     def __init__(self, session):
-        self.rt = own_runtime(session)
+        self.rt, _, self.attached = target(session)
+        self.root = job_root(session)
         self.t = 0
 
     def info(self):
@@ -359,6 +596,9 @@ def remote_size(c, path):
 def cmd_upload(a):
     c = Conn(a.session)
     dst = a.dst if a.dst.startswith("/") else "/content/" + a.dst
+    if c.attached and not os.path.normpath(dst).startswith(c.root + "/"):
+        say(f"REFUSED: {dst} is outside our directory {c.root} on the attached runtime {c.rt}")
+        return 1
     parts = dst.strip("/").split("/")
     for i in range(1, len(parts)):  # the parents, one level per request
         d = "/".join(parts[:i])
@@ -452,12 +692,16 @@ def main(argv=None):
         s.add_argument("-s", "--session", required=True)
         s.add_argument("src")
         s.add_argument("dst" if name == "upload" else "dest")
-    s = sub.add_parser("stop")
+    for name in ("stop", "detach"):
+        s = sub.add_parser(name)
+        s.add_argument("-s", "--session", required=True)
+    s = sub.add_parser("attach")
     s.add_argument("-s", "--session", required=True)
+    s.add_argument("--runtime", help="runtimes/ID or ID (default: CPPWRF_COLAB_RUNTIME, else the only free one)")
     for name in ("sessions", "runtimes", "own", "specs", "usage"):
         sub.add_parser(name)
     a = p.parse_args(argv)
-    fn = {"new": cmd_new, "exec": cmd_exec, "upload": cmd_upload, "download": cmd_download, "stop": cmd_stop,
+    fn = {"new": cmd_new, "exec": cmd_exec, "upload": cmd_upload, "download": cmd_download, "stop": cmd_stop, "attach": cmd_attach, "detach": cmd_detach,
           "sessions": cmd_runtimes, "runtimes": cmd_runtimes, "own": cmd_runtimes, "specs": cmd_specs,
           "usage": cmd_usage}[a.cmd]
     try:

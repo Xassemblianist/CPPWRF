@@ -8,7 +8,10 @@
 # cj_results / cj_fetch read them from there when `tools/colab/colab_api.py download` fails), then call:
 #   cj_start GPU          new GPU runtime (or S) through colab_guard_new (one request, no retry; refused at 2 runtimes
 #                         or by the block lock; no CPU runtimes), deleted on exit; fails unless the CPU is
-#                         Intel or ANY_CPU=1 (then the job runs with CPPWRF_ANY_CPU=1); sets NPROC
+#                         Intel or ANY_CPU=1 (then the job runs with CPPWRF_ANY_CPU=1); sets NPROC.
+#                         ATTACH=1 (ATTACH_RT=RUNTIME optional): no request, colab_guard_attach on a runtime the owner
+#                         opened in the browser instead (GPU is then only the session's name); the job's files are
+#                         below CJ_ROOT=/content/cppwrf_<session> there, removed on exit; the runtime is never deleted
 #   cj_send FILE NAME     local FILE -> /content/cpu/NAME (in/NAME: an input of the job, copied to /opt/job)
 #   cj_launch BODY DATA ARG...   the job: `bash BODY /opt/job ARG...` in the chroot after DATA's tars are unpacked
 #   cj_wait HOURS LOG     poll every 5 min (LOG: the job's log under /opt/job shown with the progress), a new bucket
@@ -24,7 +27,12 @@
 # every runtime request goes through tools/colab/colab_guard.sh (one request, 2 runtimes at most, block lock, delete on exit)
 . "$(dirname "${BASH_SOURCE[0]}")/colab_guard.sh"
 
-rx() { timeout "$(( $1 + 120 ))" $COLAB_API exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'; }  # python on stdin
+CJ_ROOT=/content  # the job's base on the runtime: /content/cppwrf_<session> on an attached one (cj_start)
+# python on stdin; its /content/cpu, /content/deb13, /content/tars become CJ_ROOT's
+rx() {
+  sed "s%/content/\(cpu\|deb13\|tars\)%$CJ_ROOT/\1%g" |
+    timeout "$(( $1 + 120 ))" $COLAB_API exec -s "$S" --timeout "$1" 2>/dev/null | grep -v '^\[colab\]'
+}
 
 cj_cleanup() {
   rm -f "$OUT/gcs.tok" "$OUT/rclone.conf"
@@ -37,7 +45,13 @@ cj_start() {
   local gpu=$1 cpu
   rclone listremotes | grep -x "cppwrf-drive:" > /dev/null || { echo "[$TAG] no rclone remote cppwrf-drive (tools/colab/drive_sync.sh)"; return 1; }
   trap cj_cleanup EXIT
-  if [ -z "$S" ]; then
+  if [ -n "${ATTACH:-}" ]; then
+    S=${S:-cppwrf-cpu-attach-$(date +%Y%m%d_%H%M%S)}
+    echo "[$TAG] session $S on a runtime the owner opened${ATTACH_RT:+ ($ATTACH_RT)}"
+    colab_guard_attach "$S" "${ATTACH_RT:-}" || return 1
+    CJ_ROOT=$COLAB_GUARD_ROOT
+    [ -n "$CJ_ROOT" ] || { echo "[$TAG] attach gave no directory"; return 1; }
+  elif [ -z "$S" ]; then
     S=cppwrf-cpu-$(echo "$gpu" | tr A-Z a-z)-$(date +%Y%m%d_%H%M%S)
     echo "[$TAG] new session $S ($gpu)"
     colab_guard_new "$S" --gpu "$gpu" ${FALLBACK:+--fallback "$FALLBACK"} || return 1
@@ -56,7 +70,7 @@ cj_start() {
 }
 
 cj_send() {  # the contents API takes files up to ~100 MB (the source and the inputs are a few MB)
-  timeout 900 $COLAB_API upload -s "$S" "$1" "/content/cpu/$2" 2>&1 | grep Uploaded > /dev/null || { echo "[$TAG] upload of $1 failed"; return 1; }
+  timeout 900 $COLAB_API upload -s "$S" "$1" "$CJ_ROOT/cpu/$2" 2>&1 | grep Uploaded > /dev/null || { echo "[$TAG] upload of $1 failed"; return 1; }
 }
 
 cj_token() {  # a new read-only bucket token (at most 1 h); nothing without a bucket
@@ -117,7 +131,7 @@ cj_get() {  # REMOTE DEST DRIVE_NAME TIMEOUT: colab_api.py download, else the Dr
 }
 
 cj_results() {
-  cj_get /content/cpu/results.tar.gz "$OUT/results.tar.gz" results.tar.gz 1800 ||
+  cj_get "$CJ_ROOT/cpu/results.tar.gz" "$OUT/results.tar.gz" results.tar.gz 1800 ||
     { echo "[$TAG] download failed ($OUT/download.log)"; return 1; }
   tar xzf "$OUT/results.tar.gz" -C "$OUT" && rm -f "$OUT/results.tar.gz" "$OUT/src.tar.gz"
   echo "[$TAG] results in $OUT"; cat "$OUT/versions.txt" 2>/dev/null || true
@@ -127,7 +141,7 @@ cj_results() {
 }
 
 cj_fetch() {  # NAME DEST: /content/cpu/fetch/NAME by colab_api.py download, else from DRIVE_RESULTS
-  cj_get "/content/cpu/fetch/$1" "$2" "$1" 7200
+  cj_get "$CJ_ROOT/cpu/fetch/$1" "$2" "$1" 7200
 }
 
 cj_salvage() {  # the logs of a job that did not finish (or of a session that stopped answering), into OUT/partial
@@ -140,7 +154,7 @@ with tarfile.open("/content/cpu/partial.tar.gz", "w:gz") as t:
 print("SALVAGED")
 EOF
   mkdir -p "$OUT/partial"
-  timeout 900 $COLAB_API download -s "$S" /content/cpu/partial.tar.gz "$OUT/partial.tar.gz" >> "$OUT/download.log" 2>&1 &&
+  timeout 900 $COLAB_API download -s "$S" "$CJ_ROOT/cpu/partial.tar.gz" "$OUT/partial.tar.gz" >> "$OUT/download.log" 2>&1 &&
     tar xzf "$OUT/partial.tar.gz" -C "$OUT/partial" && rm -f "$OUT/partial.tar.gz" &&
     echo "[$TAG] the logs so far in $OUT/partial"
 }
