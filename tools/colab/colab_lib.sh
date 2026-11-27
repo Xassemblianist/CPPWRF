@@ -36,6 +36,7 @@ rx() {
 
 cj_cleanup() {
   rm -f "$OUT/gcs.tok" "$OUT/rclone.conf"
+  [ -z "${ATTACH:-}" ] || [ "${COLAB_GUARD_ATTACHED:-0}" = 1 ] || return 0  # no attach happened: nothing of ours remote
   echo 'import subprocess; subprocess.run("rm -f /content/cpu/gcs.tok* /content/cpu/rclone.conf", shell=True)' | rx 60 > /dev/null || true
   if [ "$KEEP" = 1 ]; then echo "[$TAG] --keep: session $S left running ($COLAB_API stop -s $S)"
   else timeout 300 $COLAB_API stop -s "$S" || echo "[$TAG] WARNING: could not stop $S, check: $COLAB_API sessions"; fi

@@ -742,6 +742,13 @@ class Attach(Base):
         self.assertIn("True", r.stdout)                     # rx: /content/cpu is ours, below ROOT
         self.assertFalse(os.path.exists(self.local("/content/cpu")))
         self.assert_detached()
+        # a refused attach (two candidates): the tool's own cleanup sends nothing either
+        self.mock.calls.clear()
+        r = self.bash(lib.replace(f" ATTACH_RT={self.WEB}", "") + 'cj_start G4 || echo CJ_REFUSED\n',
+                      PATH=bindir + os.pathsep + os.environ["PATH"])
+        self.assertIn("CJ_REFUSED", r.stdout)
+        self.assertEqual([t for t, a in self.mock.calls if t not in ("list_runtimes", "list_sessions", "get_runtime",
+                                                                     "http_sessions")], [])
 
     def test_colab_run_needs_attach_or_t4(self):
         run = os.path.join(REPO, "tools", "colab", "colab_run.sh")

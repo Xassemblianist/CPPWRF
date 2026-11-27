@@ -121,6 +121,7 @@ fi
 timeout 120 $COLAB_API usage | tail -3 || true
 echo "[colab_run] session $S (${GPU:-attach})"
 cleanup() {
+  [ -z "$ATTACH" ] || [ "${COLAB_GUARD_ATTACHED:-0}" = 1 ] || return 0  # no attach happened: nothing of ours remote
   if [ "$KEEP" = 1 ]; then echo "[colab_run] --keep: session $S left running ($COLAB_API stop -s $S)"
   else timeout 300 $COLAB_API stop -s "$S" || echo "[colab_run] WARNING: could not stop $S, check: $COLAB_API sessions"; fi
 }
