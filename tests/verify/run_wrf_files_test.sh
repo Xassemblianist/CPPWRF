@@ -84,6 +84,25 @@ has_file() {
   done
   return 1
 }
+# the domains (d01 d02 ...) of the KIND_dNN_* files CPPWRF wrote under $1 (its nests in dNN/), not in resumed/
+domains_written() {
+  find "$1" -path "$1/resumed" -prune -o -type f -name "$2_d0[0-9]_*" -print |
+    sed -E "s#.*/$2_(d0[0-9])_.*#\1#" | sort -u
+}
+# every domain CPPWRF wrote KIND files for ($2 under $1) needs WRF's of that domain in one of the dirs $4...: a
+# reference pack without a nest's files would otherwise compare d01 only ($3: the leg's label)
+check_domains() {
+  local out=$1 kind=$2 label=$3 dom dir found missing=0
+  shift 3
+  for dom in $(domains_written "$out" "$kind"); do
+    found=0
+    for dir in "$@"; do
+      [ "$dir" != "-" ] && has_file "$dir/${kind}_${dom}_"* && found=1
+    done
+    if [ $found = 0 ]; then echo "FAIL $name: $label: CPPWRF wrote ${kind}_${dom}, no WRF ${kind}_${dom} in $*"; missing=1; fi
+  done
+  return $missing
+}
 
 # name | config | wrfout reference dir | restart reference dir (or -) | extra --set
 CASES="
@@ -174,6 +193,10 @@ while IFS='|' read -r name cfg ref rst extra; do
     echo "FAIL $name: cppwrf failed"; tail -3 "$WORK/$name/run.log"; fail=1; continue
   fi
   ok=1 before=$n
+  check_domains "$WORK/$name" wrfout "straight history" "$ref" "$rst" || ok=0
+  if [ "$rst" != "-" ] || compgen -G "$ref/wrfrst_d0*" > /dev/null; then
+    check_domains "$WORK/$name" wrfrst "restart files" "$rst" "$ref" || ok=0
+  fi
   for dir in "$ref" "$rst"; do
     [ "$dir" = "-" ] || [ ! -d "$dir" ] && continue
     for f in "$dir"/wrfout_d0* "$dir"/wrfrst_d0*; do
@@ -189,7 +212,19 @@ while IFS='|' read -r name cfg ref rst extra; do
   if [ "$rst" != "-" ]; then
     before_resume=$n
     rdir=$WORK/$name/resumed; mkdir -p "$rdir"
-    rsets=("${sets[@]}" --set output.dir="$rdir")
+    # the restart cadence of WRF's resumed run (make_resumed_refs.sh: its namelist's restart_interval; the seed's
+    # alarm rings first at minute 2), not the straight leg's restart.interval / restart.end: the resumed wrfrst
+    # files WRF wrote are then compared too (wrf_suite.compare_seeded_restart does the same for its tags)
+    rsets=()
+    for ((i = 0; i < ${#sets[@]}; i++)); do
+      if [ "${sets[$i]}" = --set ] && [[ "${sets[$((i + 1))]:-}" =~ ^restart\.(interval|end)= ]]; then i=$((i + 1)); continue; fi
+      rsets+=("${sets[$i]}")
+    done
+    rint=$(python3 -c 'import sys; sys.path[:0] = ["tests/verify", "."]; import wrf_suite
+print("%g" % wrf_suite.namelist_restart_interval(sys.argv[1]))' "$rsm/namelist.input" 2> "$WORK/$name/rint.log") ||
+      { echo "FAIL $name: restart_interval of $rsm/namelist.input: $(tail -1 "$WORK/$name/rint.log")"; ok=0; rint=; }
+    [ -n "$rint" ] && rsets+=(--set restart.interval="$rint")
+    rsets+=(--set output.dir="$rdir")
     at=$(rst_info at "$rst" "$ref")
     if [ -z "$at" ] || [ ! -f "$rst/wrfrst_d01_$at" ]; then
       echo "FAIL $name: restart file wrfrst_d01_${at:-?} not found in $rst"; ok=0
@@ -198,9 +233,14 @@ while IFS='|' read -r name cfg ref rst extra; do
       if ! "$EXE" "$cfg" "${rsets[@]}" > "$rdir/run.log" 2>&1; then
         echo "FAIL $name: resumed run failed"; tail -3 "$rdir/run.log"; ok=0
       else
-        for f in "$rsm"/wrfout_d0*; do
+        check_domains "$rdir" wrfout "resumed history" "$rsm" || ok=0
+        check_domains "$rdir" wrfrst "resumed restart files" "$rsm" || ok=0
+        for f in "$rsm"/wrfout_d0* "$rsm"/wrfrst_d0*; do
           [ -f "$f" ] || continue
-          b=$(basename "$f"); ours=$rdir/$b; [ -f "$ours" ] || ours=$rdir/${b:7:3}/$b
+          b=$(basename "$f")
+          [[ "$b" == wrfrst_d0?_"$at" ]] && continue  # the seeds make_resumed_refs.sh links in
+          ours=$rdir/$b; [ -f "$ours" ] || ours=$rdir/${b:7:3}/$b
+          if [ ! -f "$ours" ]; then echo "FAIL $name: resumed $b not written"; ok=0; continue; fi
           $CMP "$(ignored "$f" "$name")" "$ours" "$f" > "$rdir/cmp.log" 2>&1 || { ok=0; echo "FAIL $name resumed $b"; head -20 "$rdir/cmp.log"; }
           n=$((n + 1))
         done

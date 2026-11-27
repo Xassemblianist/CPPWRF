@@ -27,10 +27,9 @@ def values(a, b, skip=(), numbers=True):
             continue
         w = b.variables[n]
         if v.dtype.kind in 'SU' or n == 'Times' or n.startswith('md___'):
-            x = b''.join(np.array(v[:]).ravel())
-            y = b''.join(np.array(w[:]).ravel())
-            if x != y:
-                print('%-14s text differs' % n)
+            dif = exact.describe(np.asarray(v[:]), np.asarray(w[:]))  # stored bytes and shape (NUL bytes too)
+            if dif:
+                print('%-14s text %s' % (n, dif))
                 bad += 1
             continue
         x = np.asarray(v[:])
@@ -53,38 +52,13 @@ def values(a, b, skip=(), numbers=True):
 
 
 def metadata(a, b, ignore):
-    bad = 0
-    va, vb = list(a.variables), list(b.variables)
-    if va != vb:
-        bad += 1
-        print('variable list/order differs; missing', [x for x in vb if x not in va],
-              'extra', [x for x in va if x not in vb])
-    dims = lambda f: [(d, 'U' if f.dimensions[d].isunlimited() else len(f.dimensions[d])) for d in f.dimensions]
-    if dims(a) != dims(b):
-        bad += 1
-        print('dimensions', dims(a), dims(b))
-    for n in vb:
-        if n not in va:
-            continue
-        x, y = a.variables[n], b.variables[n]
-        if x.dimensions != y.dimensions or x.dtype != y.dtype:
-            bad += 1
-            print('dims/type', n, x.dimensions, y.dimensions, x.dtype, y.dtype)
-        ax = [(k, str(x.getncattr(k))) for k in x.ncattrs()]
-        ay = [(k, str(y.getncattr(k))) for k in y.ncattrs()]
-        if ax != ay:
-            bad += 1
-            print('attributes', n, ax, ay)
-    ga = [(k, repr(a.getncattr(k)), type(a.getncattr(k)).__name__) for k in a.ncattrs() if k not in ignore]
-    gb = [(k, repr(b.getncattr(k)), type(b.getncattr(k)).__name__) for k in b.ncattrs() if k not in ignore]
-    if ga != gb:
-        bad += 1
-        for x, y in zip(ga, gb):
-            if x != y:
-                print('global attribute', x, y)
-        if len(ga) != len(gb):
-            print('global attribute count', len(ga), len(gb))
-    return bad
+    """exact.metadata: variable list and order, dimensions (unlimited ones with their length), each variable's
+    dimensions, type and attributes (type and every element), the global attributes (type and every element) and
+    their order."""
+    out = exact.metadata(a, b, tuple(ignore))
+    for x in out:
+        print(x)
+    return len(out)
 
 
 def main():

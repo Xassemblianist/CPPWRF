@@ -17,7 +17,9 @@ since the start) and RAIN1H (rain in the hour before the frame, when the frame a
 QGRAUP, QHAIL, QNCLOUD, QNRAIN, QNICE, QNSNOW, QNGRAUPEL, QNHAIL). Rain categories: for RAIN1H at 0.1, 1 and 5 mm
 and for RAIN at 1 and 10 mm the variable "<var>>=<th>mm" with frac (fraction of the points whose category, rain >=
 th or not, differs between TEST and REF), wet_ref, wet_test (fractions of rainy points). Values are compared as
-float64 (a real*4 file's numbers converted exactly). Exit 1 when the sets have no common frame.
+float64 (a real*4 file's numbers converted exactly). Exit 1 when the sets have no common frame, when no variable
+was compared, or when a comparison failed (different shapes, a NaN or infinity on either side, a --vars variable
+missing): its JSON line carries "error" and the report lists it under "Not compared" and exits 1 too.
 
 report: reads the JSON lines of several pairs (e.g. "r4-r8": WRF real*4 against WRF real*8, "fp32-r8": CPPWRF FP32
 against WRF real*8) and writes markdown tables (one per case and domain at the first hour and, for runs of more than
@@ -126,6 +128,7 @@ def compare(a):
     t0 = tsec(common[0])
     out = open(a.out, "a") if a.out else sys.stdout
     prev = {}  # time -> (test rain, reference rain)
+    nrec, nerr = 0, 0
     for t in common:
         rt, rr = Reader(ft[t]), Reader(fr[t])
         base = dict(case=a.case, pair=a.pair, domain=a.domain, time=t, hours=round((tsec(t) - t0) / 3600.0, 4))
@@ -135,10 +138,17 @@ def compare(a):
                 if v == "RAIN1H":
                     continue
                 if not (rt.has(v) and rr.has(v)):
+                    if a.vars:  # a variable asked for by name must be in both
+                        recs.append(dict(var=v, error=f"not in {'the test' if not rt.has(v) else 'the reference'}"))
                     continue
                 x, y = rt.get(v), rr.get(v)
                 if x.shape != y.shape:
                     recs.append(dict(var=v, error=f"shape {x.shape} vs {y.shape}"))
+                    continue
+                bad = [f"{w} {int(z.size - np.isfinite(z).sum())}" for w, z in (("test", x), ("reference", y))
+                       if not np.isfinite(z).all()]
+                if bad:  # NaN would print as '-' in the report's tables
+                    recs.append(dict(var=v, error=f"non-finite values: {', '.join(bad)}"))
                     continue
                 recs.append(dict(var=v, **stats(x, y)))
                 if v == "RAIN":
@@ -155,11 +165,18 @@ def compare(a):
             rr.close()
         for r in recs:
             out.write(json.dumps({**base, **r}) + "\n")
+            if "error" in r:
+                nerr += 1
+                print(f"{a.case} {a.pair} {a.domain} {t} {r['var']}: {r['error']}", file=sys.stderr)
+            else:
+                nrec += 1
         for k in [k for k in prev if tsec(k) < tsec(t) - 3600.5]:
             del prev[k]
     if a.out:
         out.close()
-    return 0
+    if not nrec:
+        print(f"no variable compared in {len(common)} common frames", file=sys.stderr)
+    return 1 if nerr or not nrec else 0
 
 
 # ---- report
@@ -299,7 +316,9 @@ def svg(case, dom, pairs, metric, path, vars_=("T2", "U10", "RAIN1H", "T", "U", 
 
 
 def report(a):
-    idx = index(load(a.stats))
+    recs = load(a.stats)
+    idx = index(recs)
+    errors = [r for r in recs if "error" in r]  # compare's failed comparisons: listed, and the report fails
     hours = [float(h) for h in a.hours.split(",")]
     m = a.metric
     num, den = a.num, a.den
@@ -382,11 +401,18 @@ def report(a):
         out.append(f"| {case} | {dom} | {h:g} h | {med:.2f} | {big[0]:.2f} ({big[1]}) | {over or '-'} |")
     text = (f"### Summary: R = {m}({num}) / {m}({den})\n\n" + "\n".join(out) + "\n\n### Per case\n" + "\n".join(lines)
             + "\n")
+    if errors:
+        text += "\n### Not compared\n\n" + "\n".join(
+            f"- {r.get('case')} {r.get('pair')} {r.get('domain')} {r.get('time')} {r.get('var')}: {r['error']}"
+            for r in errors) + "\n"
+        for r in errors:
+            print(f"{r.get('case')} {r.get('pair')} {r.get('domain')} {r.get('time')} {r.get('var')}: {r['error']}",
+                  file=sys.stderr)
     if a.md:
         open(a.md, "w").write(text)
     else:
         sys.stdout.write(text)
-    return 0
+    return 1 if errors else 0
 
 
 def main():

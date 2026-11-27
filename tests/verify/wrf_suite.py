@@ -802,10 +802,13 @@ def chain_self_stream(straight, resumed, mid, *, restart, wrfrst_resume, noise, 
     ignore = ("START_DATE", RUN_START_ALARM, HISTORY_ALARM, HISTORY_RINGING, RESTART_ALARM) if wrfrst_resume else ()
     if wrfrst_resume and aux:
         ignore += (AUX_ALARM, AUX_RINGING)
+    # NOAHMP_INIT reinitialises CROPCAT on a resume from a wrfrst file (PhysicsSuite::restarted); CPPWRF's own
+    # restart file carries it (sfc_cropcat): a native resume must keep it bit for bit. Global attributes are
+    # compared on every stream (a wrfrst resume's START_DATE is the restart time, as WRF's: ignored above).
+    waive = (lambda _: ("CROPCAT",)) if wrfrst_resume else None
     with _NC:
-        # NOAHMP_INIT reinitialises this output on restart (PhysicsSuite::restarted).
-        return exact.compare_stream(resumed, straight, after=mid, global_atts=restart,
-                                    ignore_atts=ignore, common_only=True, waive=lambda _: ("CROPCAT",), noise=noise)
+        return exact.compare_stream(resumed, straight, after=mid, global_atts=True,
+                                    ignore_atts=ignore, common_only=True, waive=waive, noise=noise)
 
 
 def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False, wrf=None):
@@ -945,9 +948,13 @@ def restart_chain(b, cfg, sets, refs, t, mid, iv, out, native_only=False, wrf=No
         return bad + [f"no WRF reference {', '.join(missing)}"], what
     tw, scheduled, split = {}, {}, {}
     for d, w in wdom.items():
-        with _NC, netCDF4.Dataset(w) as ds:
-            xt = [float(x) * 60.0 for x in ds["XTIME"][:]]
-            reference_start = ds.getncattr("SIMULATION_START_DATE")
+        xt = []
+        with _NC:
+            for f in reference_stream(w):  # every file of WRF's history stream (frames_per_outfile)
+                with netCDF4.Dataset(f) as ds:
+                    xt += [float(x) * 60.0 for x in ds["XTIME"][:]]
+                    if f == w:
+                        reference_start = ds.getncattr("SIMULATION_START_DATE")
         within = [x for x in xt if x <= t + 1e-6]
         if not within:
             return bad + [f"{d}: no WRF history through {t:g}s"], what
@@ -1283,16 +1290,22 @@ def compare_dumps(a, b):
     return res or ["identical"]
 
 
+def output_hashes(root, path):
+    """out_hashes.hash_tree of a case's outputs, under _NC (it opens netCDF files while other cases' threads do)."""
+    import out_hashes
+    with _NC:
+        return out_hashes.hash_tree(root, path)
+
+
 def y_slab(wrfout):
     """WRF's run of wrfout is a periodic-y slab with e_sn = 3 (namelist.input next to it): compare_real.py --y-slab."""
     nl = os.path.join(os.path.dirname(wrfout), "namelist.input")
     if not os.path.exists(nl):  # a packed reference without its namelist: WRF's two mass rows (e_sn = 3); compare_real.py
-        try:                    # still requires every WRF row to equal the first bit for bit
-            import netCDF4
-            with netCDF4.Dataset(wrfout) as ds:
-                return ds.dimensions["south_north"].size == 2
-        except (OSError, KeyError, ImportError):
+        if not os.path.exists(wrfout):  # compare_real.py fails on it
             return False
+        import netCDF4          # still requires every WRF row to equal the first bit for bit
+        with _NC, netCDF4.Dataset(wrfout) as ds:  # an unreadable reference raises (no silent "not a slab")
+            return "south_north" in ds.dimensions and ds.dimensions["south_north"].size == 2
     txt = open(nl).read().lower()
     per = re.search(r"^\s*periodic_y\s*=\s*\.true\.", txt, re.M)
     esn = re.search(r"^\s*e_sn\s*=\s*3\s*,", txt, re.M)
@@ -1431,11 +1444,14 @@ def compare_seeded_restart(resumed, rsm, start, t, *, interval=60000, pending=12
     expected = [times_at(start, sec) for sec in range(120, int(t) + 1, 60)]
     history = stream_files(rsm, "wrfout", "d01")
     stats, noise = {}, set()
+    # CPPWRF's resumed history must be exactly the scheduled frames (subset=True below lets CPPWRF have extra
+    # variables beside a staged reference, and would let extra frames, e.g. one at the restart time, pass)
+    inventory = history_inventory(stream_files(resumed, "wrfout", "d01"), set(expected), start)
     with _NC:
         dif, _ = exact.compare_stream(stream_files(resumed, "wrfout", "d01"), history, subset=True,
                                       until=end, stats=stats, required_times=expected, wrf_reference=True,
                                       waive=uninitialised, noise=noise)
-    bad = [f"wrfout {k}: {v}" for k, v in dif.items()]
+    bad = [f"wrfout {k}: {v}" for k, v in dif.items()] + [f"wrfout {x}" for x in inventory]
     required = {times_at(start, s) for s in restart_schedule(dt, interval, t, begin=60, pending=pending)}
     ref, errors = restart_inventory(stream_files(rsm, "wrfrst", "d01"), "d01", start, required,
                                     side="WRF restart reference", seed=seed)
@@ -1568,11 +1584,14 @@ def kind(name):
     """What the check `name` compares with: 'wrf0' (WRF's output at tolerance 0: the tolerance-0 cases, the
     restart checks (cases/restarts.py: their resumed runs too), the restart chains with suite.chain_wrf), 'wrfl2'
     (WRF's by relative L2: the cuda cases of the fast FP32 build) or 'self' (CPPWRF against CPPWRF only: the
-    restart chains without a WRF run of their configuration, restart_p1_fp32_cuda)."""
+    restart chains without a WRF run of their configuration, the decomposition restart cases (suite.layout_restart),
+    restart_p1_fp32_cuda)."""
     case = next((c for c in CASES if c[0] == name), None)
     if case is None:
         return "self" if name == "restart_p1_fp32_cuda" else "wrf0"
     sets = case[3]
+    if layout_restart_at(sets):  # CPPWRF decomposed against CPPWRF one patch (layout_restart): no WRF comparison
+        return "self"
     if chain_at(sets):
         return "wrf0" if chain_at(sets)[3] else "self"
     return "wrf0" if all(x == 0.0 for x in case[6].values()) else "wrfl2"
@@ -1668,8 +1687,7 @@ def main():
 
     def done(path, good):  # the outputs of passing cases are deleted (they take tens of GB)
         if good and a.hash_out:  # (out_hashes.py; FILE paths relative to --out)
-            import out_hashes
-            lines = out_hashes.hash_tree(a.out, path)
+            lines = output_hashes(a.out, path)
             with hash_lock, open(a.hash_out, "a") as f:
                 f.writelines(ln + "\n" for ln in lines)
         if good and not a.keep:

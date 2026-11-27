@@ -13,8 +13,9 @@ build's name is one of them).
   out_hashes.py compare REF NEW [--cases NAME,...]
       REF and NEW (files of lines, .gz too): every line of REF whose first path component is a case of NEW (or of
       --cases) must be in NEW with the same hash, NEW must have no variable REF lacks, and every case of NEW must have
-      reference lines. Prints a summary and the
-      first differences; exit 0 when equal, 1 when not, 2 when nothing could be compared.
+      reference lines; a case named in --cases that neither file hashed is a difference. A malformed line, or two
+      hashes of one variable, is an error. Prints a summary and the first differences; exit 0 when equal, 1 when
+      not, 2 when nothing could be compared.
 
 tests/verify/wrf_suite.py --hash-out FILE appends the lines of every passing check's outputs before it deletes them.
 """
@@ -65,13 +66,21 @@ def hash_tree(root, d):
 
 
 def read(path):
+    """{(file, variable): (type, shape, hash)}. A line without its five fields (a truncated or corrupted file) or
+    one key with two different hashes (appended runs that disagree) is an error, not a line to drop."""
     op = gzip.open if path.endswith(".gz") else open
     out = {}
     with op(path, "rt") as f:
-        for ln in f:
+        for i, ln in enumerate(f, 1):
+            if not ln.strip():
+                continue
             p = ln.rstrip("\n").split("\t")
-            if len(p) == 5:
-                out[(p[0], p[1])] = (p[2], p[3], p[4])
+            if len(p) != 5 or not all(p):
+                raise ValueError(f"{path}:{i}: malformed hash line {ln.rstrip()!r}")
+            k, v = (p[0], p[1]), (p[2], p[3], p[4])
+            if out.get(k, v) != v:
+                raise ValueError(f"{path}:{i}: {p[0]} {p[1]} hashed twice with different values")
+            out[k] = v
     return out
 
 
@@ -86,10 +95,13 @@ def compare(ref, new, cases=None):
         return 2
     rc = {case(k[0]) for k in rr}
     nc = {case(k[0]) for k in nn}
+    absent = sorted(want - rc - nc) if cases else []  # a requested case neither file hashed (skipped, misspelt)
     diff = sorted(k for k in rr if k in nn and rr[k] != nn[k])
     miss = sorted(k for k in rr if k not in nn)
     extra = sorted(k for k in nn if k not in rr and case(k[0]) in rc)
     only_new = sorted(nc - rc)
+    for c in absent:
+        print(f"ABSENT  {c} (requested, hashed in neither file)")
     for k in diff[:20]:
         print(f"DIFFER  {k[0]} {k[1]}")
     for k in miss[:20]:
@@ -99,7 +111,7 @@ def compare(ref, new, cases=None):
     print(f"HASHES {len(rc & nc)} cases, {len(rr)} variables compared: {len(diff)} differ, {len(miss)} missing, "
           f"{len(extra)} extra; {len(only_new)} cases without reference hashes"
           + (f" ({', '.join(only_new[:10])}{' ...' if len(only_new) > 10 else ''})" if only_new else ""))
-    return 0 if not (diff or miss or extra or only_new) else 1
+    return 0 if not (diff or miss or extra or only_new or absent) else 1
 
 
 def main():
@@ -110,7 +122,10 @@ def main():
                 print(ln)
     elif a[:1] == ["compare"] and len(a) in (3, 5):
         cases = a[4].split(",") if len(a) == 5 and a[3] == "--cases" else None
-        sys.exit(compare(a[1], a[2], cases))
+        try:
+            sys.exit(compare(a[1], a[2], cases))
+        except ValueError as e:
+            sys.exit(f"HASHES {e}")
     else:
         sys.exit(__doc__)
 

@@ -7,8 +7,9 @@ Tolerances:
   FP32: rtol=1e-5,  atol=1e-5
 diag.csv is text: its values carry at most the significant digits the writer stored. Each diag.csv comparison
 gets at least half a unit in the last stored digit, rtol_diag = max(rtol, 0.5 * 10**(1 - D)), where D is the
-smaller of the two files' largest significant-digit count (a %.9g file: D = 9; the shortest round-trip form that
-DiagWriter writes since 4c6efdf: up to 17 digits, D >= 16, so rtol_diag = rtol). The snapshots are binary and keep
+golden file's largest significant-digit count (a %.9g file: D = 9; the shortest round-trip form that DiagWriter
+writes since 4c6efdf: up to 17 digits, D >= 16, so rtol_diag = rtol); a run that stores fewer digits fails (its
+precision does not widen the tolerance), and so does one with a column missing or added. The snapshots are binary and keep
 rtol. On a failure the commit the goldens were made at (golden/COMMIT) is printed.
 """
 import csv
@@ -91,11 +92,16 @@ def compare(run_dir, golden_dir, prec="float32"):
         return 1
 
     # Skip nondeterministic timing column 'wall_s'
-    cols_to_check = [c for c in run_diag[0].keys() if c != "wall_s"]
-    if set(cols_to_check) - set(gold_diag[0].keys()):
+    cols_to_check = [c for c in gold_diag[0].keys() if c != "wall_s"]
+    if set(run_diag[0].keys()) != set(gold_diag[0].keys()):  # a column missing from the run fails too
         print(f"FAIL: diag.csv columns differ: run {list(run_diag[0].keys())} gold {list(gold_diag[0].keys())}")
         return 1
-    digits = min(file_digits(run_diag, cols_to_check), file_digits(gold_diag, cols_to_check))
+    # the tolerance comes from the golden file's precision; a run that stores fewer digits is a writer regression,
+    # not a reason to widen it
+    digits = file_digits(gold_diag, cols_to_check)
+    if file_digits(run_diag, cols_to_check) < digits:
+        print(f"FAIL: diag.csv stores {file_digits(run_diag, cols_to_check)} significant digits, the golden {digits}")
+        return 1
     rtol_diag = max(rtol, 0.5 * 10.0 ** (1 - digits)) if digits > 0 else rtol
     print(f"diag.csv: {digits} significant digits stored, rtol {rtol_diag:.1e} (snapshots: rtol {rtol:.0e})")
     for row_idx, (r_row, g_row) in enumerate(zip(run_diag, gold_diag)):
