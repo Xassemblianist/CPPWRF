@@ -212,7 +212,19 @@ while IFS='|' read -r name cfg ref rst extra; do
   if [ "$rst" != "-" ]; then
     before_resume=$n
     rdir=$WORK/$name/resumed; mkdir -p "$rdir"
-    rsets=("${sets[@]}" --set output.dir="$rdir")
+    # the restart cadence of WRF's resumed run (make_resumed_refs.sh: its namelist's restart_interval; the seed's
+    # alarm rings first at minute 2), not the straight leg's restart.interval / restart.end: the resumed wrfrst
+    # files WRF wrote are then compared too (wrf_suite.compare_seeded_restart does the same for its tags)
+    rsets=()
+    for ((i = 0; i < ${#sets[@]}; i++)); do
+      if [ "${sets[$i]}" = --set ] && [[ "${sets[$((i + 1))]:-}" =~ ^restart\.(interval|end)= ]]; then i=$((i + 1)); continue; fi
+      rsets+=("${sets[$i]}")
+    done
+    rint=$(python3 -c 'import sys; sys.path[:0] = ["tests/verify", "."]; import wrf_suite
+print("%g" % wrf_suite.namelist_restart_interval(sys.argv[1]))' "$rsm/namelist.input" 2> "$WORK/$name/rint.log") ||
+      { echo "FAIL $name: restart_interval of $rsm/namelist.input: $(tail -1 "$WORK/$name/rint.log")"; ok=0; rint=; }
+    [ -n "$rint" ] && rsets+=(--set restart.interval="$rint")
+    rsets+=(--set output.dir="$rdir")
     at=$(rst_info at "$rst" "$ref")
     if [ -z "$at" ] || [ ! -f "$rst/wrfrst_d01_$at" ]; then
       echo "FAIL $name: restart file wrfrst_d01_${at:-?} not found in $rst"; ok=0
@@ -222,9 +234,13 @@ while IFS='|' read -r name cfg ref rst extra; do
         echo "FAIL $name: resumed run failed"; tail -3 "$rdir/run.log"; ok=0
       else
         check_domains "$rdir" wrfout "resumed history" "$rsm" || ok=0
-        for f in "$rsm"/wrfout_d0*; do
+        check_domains "$rdir" wrfrst "resumed restart files" "$rsm" || ok=0
+        for f in "$rsm"/wrfout_d0* "$rsm"/wrfrst_d0*; do
           [ -f "$f" ] || continue
-          b=$(basename "$f"); ours=$rdir/$b; [ -f "$ours" ] || ours=$rdir/${b:7:3}/$b
+          b=$(basename "$f")
+          [[ "$b" == wrfrst_d0?_"$at" ]] && continue  # the seeds make_resumed_refs.sh links in
+          ours=$rdir/$b; [ -f "$ours" ] || ours=$rdir/${b:7:3}/$b
+          if [ ! -f "$ours" ]; then echo "FAIL $name: resumed $b not written"; ok=0; continue; fi
           $CMP "$(ignored "$f" "$name")" "$ours" "$f" > "$rdir/cmp.log" 2>&1 || { ok=0; echo "FAIL $name resumed $b"; head -20 "$rdir/cmp.log"; }
           n=$((n + 1))
         done

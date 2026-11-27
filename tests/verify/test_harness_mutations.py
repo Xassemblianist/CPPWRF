@@ -792,6 +792,41 @@ cp "$FAKE_MADE"/wrfout_d01_* "$out"/; mkdir -p "$out"/d02; cp "$FAKE_MADE"/d02/w
         self.assertIn("exact.compare_stream(files, straight, after=date, global_atts=False, stats=stats)", src)
         self.assertNotIn("subset=True", src)
 
+    def test_files_test_compares_the_resumed_restart_files(self):  # AUDA4 A4-13 (resumed leg)
+        build, runs = self.root / "build", self.root / "runs"
+        ref, rst, rsm = runs / "run_P1_r8/steps", runs / "rst_P1_r8", runs / "rsm_P1_r8"
+        start60 = wrf_suite.times_at(START, 60)
+        for d in (ref, rst):
+            fixture(d, (0, 60, 120))
+        (rst / "namelist.input").write_text("&time_control\n start_year=2026,\n start_month=10,\n start_day=12,\n"
+                                            " start_hour=0,\n/\n")
+        fixture(rst, (60,), kind="wrfrst", alarm=60)
+        fixture(rsm, (120,), start=start60)
+        made = fixture(self.root / "made", (120,), kind="wrfrst", start=start60)
+        shutil.copyfile(made, rsm / made.name)  # the wrfrst WRF's resumed run wrote at minute 2
+        (rsm / "namelist.input").write_text(RESUME_NAMELIST)
+        build.mkdir()
+        (build / "cppwrf").write_text("""#!/usr/bin/env bash
+for a in "$@"; do case "$a" in output.dir=*) out=${a#output.dir=};; esac; done
+if [[ "$out" == */resumed ]]; then
+  cp "$FAKE_RSM"/wrfout_d01_* "$out"/
+  [ -n "$FAKE_RESUMED_RST" ] && cp "$FAKE_RSM"/wrfrst_d01_* "$out"/
+else
+  cp "$FAKE_RST"/wrfout_d01_* "$FAKE_RST"/wrfrst_d01_* "$out"/
+fi
+exit 0
+""")
+        (build / "cppwrf").chmod(0o755)
+        env = dict(os.environ, CPPWRF_WRF_RUNS=str(runs), FAKE_RSM=str(rsm), FAKE_RST=str(rst),
+                   CPPWRF_SCRATCH=str(self.root), FAKE_RESUMED_RST="1")
+        cmd = ["bash", ROOT / "tests/verify/run_wrf_files_test.sh", build, "p1"]
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        env["FAKE_RESUMED_RST"] = ""  # the resumed run wrote no restart file
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, cwd=ROOT)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn(f"resumed wrfrst_d01_{wrf_suite.times_at(START, 120)} not written", r.stdout)
+
     def test_real_comparator_preserves_int64(self):
         wrf, cpp = self.root / "wrf", self.root / "cpp"
         cmd = [sys.executable, ROOT / "tests/init_real/compare_real.py", cpp, wrf]
