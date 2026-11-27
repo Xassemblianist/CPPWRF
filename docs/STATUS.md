@@ -1,20 +1,20 @@
 # CPPWRF: status and verification
 
-Version 1.5.0. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the verified scope of the release.
+Version 1.6.0. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the verified scope of the release.
 
 CPPWRF reproduces WRF-ARW v4.8.0 statement by statement. This page lists what is implemented, how it
-is verified against WRF, and the current results. At `091ffae` (v1.5.0), `tests/verify/wrf_suite.py` defines 1161
-cases (625 CPU FP64, 405 CUDA FP64, 43 fast CUDA FP32, 44 CPU FP32 (`cpu_sp`) and 44 CUDA FP32 identity
-(`cuda_sp_id`)), plus 18 restart configurations. CPU CI at `ac13ebe` passed 533 suite checks at tolerance 0 against
-WRF, including 471 CPU FP64 cases outside `--slow` (two new `*_chk` tile-check cases), 18 restart checks, and 44
-`cpu_sp` cases. CPU CI also passed 42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and
-CTest 44/44. The 154 slow CPU cases are 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases. The
+is verified against WRF, and the current results. At `8e8b1fc` (v1.6.0), `tests/verify/wrf_suite.py` defines 1223
+cases (654 CPU FP64, 428 CUDA FP64, 45 fast CUDA FP32, 48 CPU FP32 (`cpu_sp`) and 48 CUDA FP32 identity
+(`cuda_sp_id`)), plus 19 restart configurations. CPU CI at `8e8b1fc` passed 567 suite checks at tolerance 0 against
+WRF: 500 CPU FP64 cases outside `--slow`, 19 restart checks and 48 `cpu_sp` cases. CPU CI also passed 43 WRF output
+file checks, 14 ideal file checks, `ctest -L diff` 34/34 and CTest 48/48. The 154 slow CPU cases are 9 runs of 24 h, 30 h and 72 h and 145 Noah-MP option cases. The
 `ideal_grav2d_x` cases verify the Straka density current against WRF real*8 at tolerance 0 on CPU and CUDA.
 
-For v1.5.0 at `40628eb`, the Colab G4 passed all 423 CUDA FP64 and 44 CUDA FP32 identity checks against WRF at
-tolerance 0. For 1.1.0 the Colab G4 reported 338 CUDA FP64 passes, including all 319 cases at tolerance 0, 18 GPU
+For v1.6.0 at `8e8b1fc`, two Tesla T4 GPUs on Kaggle (sm_75, CUDA 13.0.88) passed all 446 CUDA FP64 and 48 CUDA
+FP32 identity checks against WRF at tolerance 0. For v1.5.0 at `40628eb`, the Colab G4 passed all 423 CUDA FP64 and
+44 CUDA FP32 identity checks. For 1.1.0 the Colab G4 reported 338 CUDA FP64 passes, including all 319 cases at tolerance 0, 18 GPU
 restart checks and the legacy `straka_wrf_cuda` RMS check. The 43 CUDA FP32 cases with `restart_p1_fp32_cuda` gave
-44 runs within their tolerances. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the GPU runs from v1.2.0 through v1.5.0.
+44 runs within their tolerances. See [RELEASE_NOTES.md](RELEASE_NOTES.md) for the GPU runs from v1.2.0 through v1.6.0.
 
 ## Implemented
 
@@ -385,6 +385,8 @@ possible. The historical CPU suite totals include the legacy `straka_wrf` RMS ch
 against WRF real*8, including `ideal_grav2d_x`, use tolerance 0.
 For 1.5.0 at `ac13ebe`, CPU CI reported suite PASS 533 FAIL 0 at tolerance 0 against WRF. CPU CI also passed
 42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 44/44.
+For 1.6.0 at `8e8b1fc` (run 45830990704), CPU CI reported suite PASS 567 FAIL 0 at tolerance 0 against WRF. CPU CI
+also passed 43 WRF output file checks, 14 ideal file checks, `ctest -L diff` 34/34 and CTest 48/48.
 The CPU result does not depend on the OpenMP thread count or on the Intel machine: P4, P6, P8, P9, MYNN,
 P1 with Noah-MP and the two-way nest N3s (1 h, both domains) and em_quarter_ss (30 min) with 1, 16 and 44
 threads are bit-identical to serial WRF on c3 (Sapphire Rapids) and n2 machines (`run.threads` in
@@ -431,6 +433,8 @@ For 1.4.0 (`a63ed9f`, 2026-11-23), 405 cases and 18 GPU restart checks passed ag
 (423 PASS, 0 FAIL, 0 SKIP).
 For 1.5.0 (`40628eb`, 2026-11-24), all 405 cases and 18 GPU restart checks passed against WRF at tolerance 0
 (423 PASS, 0 FAIL, 0 SKIP).
+For 1.6.0 (`8e8b1fc`, 2026-11-26/27, two Tesla T4 on Kaggle, sm_75, CUDA 13.0.88, driver 580.178.04), all 446 CUDA
+FP64 checks passed against WRF real*8 at tolerance 0; the device glibc math proof was identical.
 The legacy RMS check used WRF real*4 and a tolerance of 1e-4 K. The `ideal_grav2d_x` case uses tolerance 0 against
 WRF real*8. Earlier subsets also ran on Colab's L4 (sm_89) and A100
 (sm_80); H100 was not available. The FP64 device code
@@ -506,19 +510,22 @@ The CPU FP32 build (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`) is bit-ident
 the default real*4 build) on 24 configurations: P1, P2, P3, P4, P9, NMP1 (Noah-MP), P6 (Thompson), MYNN, C01
 (aerosol-aware Thompson), D6 (WDM6), D5 (WDM5), MORR and MORG (Morrison with hail / graupel), G2 (GWDO), the nests N1
 (one-way) and N3 (two-way, P4 physics), MON3 (monotonic advection on N3), KESSKF (Kessler), ACM7 (ACM2 + Pleim-Xiu),
-Q4 (QNSE), T6 (Tiedtke), P7 (New Tiedtke), DUD4 (Dudhia shortwave) and SLAB1 (5-layer slab LSM). The 44 `cpu_sp`
-cases run each of them for 1 h and 20 of them also for 3 minutes with history every step (every minute on the nests of N3 and MON3), every variable of the WRF
+Q4 (QNSE), T6 (Tiedtke), P7 (New Tiedtke), DUD4 (Dudhia shortwave), SLAB1 (5-layer slab LSM) and the moving nests MV1
+(prescribed moves) and VX1 (vortex following). The 48 `cpu_sp` cases run each of them for 1 h and 22 of them also for
+3 minutes or 3 parent steps with history every step (every minute on the nests of N3 and MON3), every variable of the WRF
 real*4 history at tolerance 0. The default CUDA FP32 build (`-DCPPWRF_ENABLE_CUDA=ON -DCPPWRF_DOUBLE=OFF`,
 `CPPWRF_CUDA_FP32_IDENTITY=ON` by default: no FMA contraction, glibc 2.41's float functions on the device) gives the
-same bits on the GPU: the 44 `cuda_sp_id` cases pass on an RTX 2060 (sm_75) and on a Colab G4 (sm_120). The FP32
+same bits on the GPU: the `cuda_sp_id` cases passed on an RTX 2060 (sm_75) and on a Colab G4 (sm_120) (44 cases
+for v1.5.0), and all 48 on two Tesla T4 on Kaggle (sm_75) for v1.6.0. The FP32
 executables define glibc 2.41's float functions themselves (src/core/glibc_mathf_host.cpp), so binaries built on Ubuntu
 24.04 (glibc 2.39) pass these cases too. The opt-in fast CUDA FP32 build (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) is compared
 by relative L2 (above and docs/FP32_ACCURACY.md). In the [v1.3.0 paper benchmark](#performance), the identity build
 takes 2.1 to 18.0 % longer in steady stepping than the fast build (identity time / fast time - 1). docs/FP32_IDENTITY.md
 has the method, the case table, the proofs of the ported functions, the cost and what is not identical yet (moving
 nests, more than two domains, restarts, configurations without a WRF real*4 reference, other compilers for WRF).
-The moving nest MV1 (3 minutes and 1 h, the `cpu_sp` cases real_mv1_fp32_cpu*) is identical to WRF real*4's dmpar
-run with preset moves on the CPU as well; its GPU twin (`cuda_sp_id`) has not run yet.
+The moving nests MV1 and VX1 (the `cpu_sp` cases real_mv1_fp32_cpu* and real_vx1_fp32_cpu*) are identical to WRF
+real*4's dmpar runs with preset moves and with vortex following on the CPU; their `cuda_sp_id` twins are among the 48
+cases of the v1.6.0 Kaggle proof.
 
 ### Verification coverage
 

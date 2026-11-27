@@ -1,3 +1,88 @@
+# CPPWRF 1.6.0 release notes
+
+CPPWRF 1.6.0 adds moving nests (prescribed moves and vortex following), the CLM lake model and observation nudging,
+all verified against WRF at tolerance 0. It also adds Docker images and a tool for the first run on AMD GPUs.
+
+## Added
+
+- **Moving nests with prescribed moves.** `num_moves`, `move_id`, `move_interval`, `move_cd_x`, `move_cd_y` and
+  `corral_dist` run as in WRF 4.8.0 dmpar built with preset moves (`-DMOVE_NESTS`), for a nest of domain 1.
+  `tools/wrf2cppwrf.py` translates them. The suite cases MV1 and MV2 equal WRF's dmpar runs on both domains at
+  tolerance 0 on the CPU and in CUDA FP64. MV1 also equals WRF real\*4 in CPU FP32. See
+  [NESTING.md](NESTING.md) and USER_GUIDE section 6 for the supported options and restrictions.
+- **Vortex-following nests.** `[domains] vortex_following = true` runs as WRF built with vortex following
+  (`-DMOVE_NESTS -DVORTEX_CENTER`). The translator and `cppwrf-wrf` take `--vortex-following`, because the namelist
+  does not say how WRF was built. The suite cases VX1 and VX2 are identical to WRF on both domains on the CPU and in
+  CUDA FP64. VX1 is also identical to WRF real\*4 in CPU FP32.
+- **CLM lake model** (`sf_lake_physics = 1`) with Noah or Noah-MP on one real-data domain. The suite cases LK1, LK2,
+  LK3, LKV, LKN and `restart_lk1` are identical to WRF at tolerance 0 on the CPU and in CUDA FP64.
+- **Observation nudging** (`obs_nudge_opt = 1`) on Lambert conformal grids. The suite cases OB1, OB2, OB3, OB4, OB9,
+  OBN and OB1R and the `ob1` files test are identical to WRF at tolerance 0 on the CPU; OB1 to OBN also in CUDA FP64.
+  See [STATUS.md](STATUS.md) for the restrictions of both options.
+- **Docker images.** CPU and CUDA images with WPS 4.6.0, the WRF 4.8.0 run tables and a one-command quick start. A
+  workflow builds, smoke-tests and publishes them to GHCR. The CUDA image includes sm_75 (T4, RTX 20xx). See
+  [QUICKSTART.md](QUICKSTART.md#docker-one-command).
+- **AMD GPUs.** `tools/amd/amd_run.sh` builds the HIP and CPU binaries on a ROCm node and runs ctest, the device math
+  proofs and the GPU suite checks. It also compares the HIP FP64 outputs with the CUDA FP64 build's. The new ctest
+  `test_device_ieee` checks the device's IEEE arithmetic against the host and explicit oracles. The HIP builds
+  still have not run on AMD hardware. See [HIP.md](HIP.md).
+- **Kaggle tools.** `tools/kaggle` runs the release GPU proof in shards on two T4 GPUs per session and one
+  performance session (`kaggle_perf.sh`).
+
+## Changed
+
+- **PERF15.** The split and batched forms (WSM6 in column stages, launch fusion, the Kain-Fritsch, MYJ and QNSE
+  column work buffer) are used only in the FP64 builds and in the CUDA FP32 identity build (`CPPWRF_SPLIT_PATHS`).
+  The CUDA FP32 identity build now uses all three. On an RTX 2060, P4 stepping time fell by 2.3 % and Q4 by 1.9 %,
+  P1 and P9 were unchanged, and the CUDA FP32 identity output files were byte-identical to the base. See
+  [PERF.md](PERF.md).
+- **HIP builds.** `fmax` / `fmin` follow x86's `maxsd` / `minsd` as glibc 2.41 computes them, each launch carries
+  its fatal slot, and more value-changing HIP flags are refused. CPU and CUDA builds compile the same code as
+  before.
+
+## Fixed
+
+- **Kessler on a resumed run.** `grid%sr` is set to 0 before the microphysics for every `mp_physics /= 0`, as in
+  `solve_em.F`. A Kessler run resumed from a wrfrst file with SR /= 0 had kept the file's SR.
+- **Boundaries.** An ideal domain with specified boundaries on one axis only (other than WRF's channel) is rejected.
+- **Nest interpolation.** SINT gives the signs of zero as WRF's `share/sint.F` computes them.
+- **Diffusion.** `smag2d_km` leaves the edge rows and columns of a specified or nested domain untouched, as WRF does.
+  On domains that do not move the values were already WRF's.
+- **glibc math.** `asin`, `acos`, `log10` and `tgamma` (and the float versions) in the GPU builds and the FP32 builds'
+  float functions go through libm's SVID wrappers, so domain errors return +NaN as in WRF. In-domain results are
+  unchanged.
+- **WRF references made on AMD runners.** The `libmvec_intel` preload also covers `acos`, `asin`, `tan`, their
+  float versions and the 4-lane `powf`, so these references equal the Intel ones.
+- **Tests and harness.** `test_libm_special` uses glibc-independent checks. The verification harness reads WRF's
+  later history files of a reference (`frames_per_outfile`). `test_device_ieee` is compiled with `--fmad=false` in
+  every CUDA build (`70617e3`).
+
+## Verification
+
+| Where | Result |
+|---|---|
+| Final CPU CI at `8e8b1fc` (run `45830990704`) | Suite PASS 567 FAIL 0, all against WRF at tolerance 0. WRF output files 43, ideal files 14, `ctest -L diff` 34/34, CTest 48/48. |
+| Kaggle at `8e8b1fc` (two Tesla T4, sm_75, CUDA 13.0.88, driver 580.178.04), 2026-11-26/27 | CUDA FP64 446/446 against WRF real\*8 at tolerance 0. CUDA FP32 identity 48/48 against WRF real\*4 at tolerance 0. Fast CUDA FP32 46/46: 45 against WRF by relative L2 error, 1 CPPWRF self-consistency check only. The glibc math proof (CUDA) was identical. CTest: FP64 build 47 passed and 2 skipped (`test_libm_special`, `test_wrf_readers`); FP32 identity build 48 passed and 2 skipped (the same two); fast FP32 build 49/50. |
+| Fast FP32 build, `test_device_ieee` | Failed at `8e8b1fc`: the fast build's `--fmad=true` contracted the test's own `a * b + c` check. Fixed in `70617e3` (a test-only build flag). Re-run of `test_device_ieee` in the fast FP32 build after `70617e3` on an RTX 5070 Ti (sm_120, CUDA 13.1, WSL2): PASS (135953 inputs, 24 + 24 operations). |
+
+`70617e3` and the release commit change only a test's compile flag, versions and documentation. The model code is
+identical to `8e8b1fc`.
+
+The suite defines 1223 cases (654 CPU FP64, 428 CUDA FP64, 45 fast CUDA FP32, 48 `cpu_sp` and 48 `cuda_sp_id`)
+and 19 restart configurations. The CPU CI suite includes 500 CPU FP64 cases outside `--slow`, 19 restart checks and
+the 48 `cpu_sp` cases.
+
+## Known issues and limitations
+
+- On an RTX 5070 Ti (sm_120) under Windows WSL2 (driver 621.24), CUDA FP64 builds made with CUDA 13.1 abort with an
+  illegal memory access in the Noah land-surface kernel. The same source built with CUDA 13.0.88 passes there, and
+  builds that compile that file without device optimisation (`-G`) pass. Use CUDA 13.0 for sm_120 FP64 builds until
+  this is resolved. It is under investigation.
+- `restart_acm7_fp64_cuda` aborted once at `1x2@off` in a Kaggle job before 1.5.0's FIX16 changes. The cause remains
+  unexplained. All 14 later repetitions for 1.5.0 passed.
+
+See [STATUS.md](STATUS.md) for the verified configurations and current limitations.
+
 # CPPWRF 1.5.0 release notes
 
 CPPWRF 1.5.0 runs single-domain ensembles in one process, reduces the cost of halo exchanges in decomposed runs,

@@ -5,14 +5,14 @@
 Docker kurulu bir x86-64 makinede ABD'nin güneydoğusu için üç saatlik örnek tahmini çalıştırın.
 
 ```bash
-docker run --rm -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cpu quickstart
+docker run --rm -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.6.0-cpu quickstart
 ```
 
 NVIDIA GPU için NVIDIA Container Toolkit ve CUDA 13.0 uyumlu bir sürücü gerekir (Linux'ta 580.65.06 veya üstü).
 CUDA imgesi sm_75 (T4, RTX 20xx), sm_80, sm_86, sm_89, sm_90 ve sm_120 GPU'ları için derlenmiştir.
 
 ```bash
-docker run --rm --gpus all -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cuda quickstart
+docker run --rm --gpus all -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.6.0-cuda quickstart
 ```
 
 Harita `out/slp_t2_d01.png` dosyasına yazılır. Her koşunun NetCDF dosyaları ve günlükleri yeni bir

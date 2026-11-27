@@ -5,14 +5,14 @@
 With Docker on x86-64, run the bundled three-hour forecast for the southeastern United States:
 
 ```bash
-docker run --rm -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cpu quickstart
+docker run --rm -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.6.0-cpu quickstart
 ```
 
 For NVIDIA GPUs, install NVIDIA Container Toolkit and use a CUDA 13.0-compatible driver (Linux 580.65.06 or later).
 The CUDA image is compiled for sm_75 (T4, RTX 20xx), sm_80, sm_86, sm_89, sm_90 and sm_120 GPUs.
 
 ```bash
-docker run --rm --gpus all -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.5.0-cuda quickstart
+docker run --rm --gpus all -v "$PWD/out:/out" ghcr.io/xassemblianist/cppwrf:1.6.0-cuda quickstart
 ```
 
 Look for `out/slp_t2_d01.png`. Each run keeps its NetCDF files and logs in a new `out/forecast.*/` directory.

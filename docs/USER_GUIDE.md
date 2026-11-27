@@ -44,19 +44,19 @@ CPPWRF follows WRF v4.8.0 statement by statement: the same formulas, operation o
 updates, branches, constants and defaults. Every result is checked against WRF itself (docs/STATUS.md):
 
 - **CPU, FP64** (`-DCPPWRF_DOUBLE=ON`, OpenMP): bit-identical to WRF v4.8.0 real*8 (`configure -r8`) run in one
-  process, in every variable and output time of the wrfout and wrfrst files. For v1.5.0 at `ac13ebe`, CPU CI passed
-  489 FP64 checks and 44 FP32 checks, all 533 against WRF at tolerance 0. CPU CI also passed 42 WRF output file
-  checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 44/44. For v1.3.0 at `318159a`, CPU CI reported
+  process, in every variable and output time of the wrfout and wrfrst files. For v1.6.0 at `8e8b1fc`, CPU CI passed
+  519 FP64 checks and 48 FP32 checks, all 567 against WRF at tolerance 0. CPU CI also passed 43 WRF output file
+  checks, 14 ideal file checks, `ctest -L diff` 34/34 and CTest 48/48. For v1.3.0 at `318159a`, CPU CI reported
   483 FP64 passes, including the legacy Straka RMS check. The suite covers real-data domains in the mid-latitudes,
   the tropics, the Arctic and the Alps, the physics suites, nests, restarts, 24 h and 72 h forecasts, WRF's default
   namelist and WRF's idealized cases.
-- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build. For v1.5.0 at `40628eb`, all 423 CUDA FP64
-  checks passed against WRF at tolerance 0 on the RTX PRO 6000 Blackwell of a Colab G4. Earlier G4 runs reported
-  423 passes for v1.4.0 and v1.3.0, 422 for v1.2.3, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1. Earlier subsets
+- **GPU, FP64** (CUDA): bit-identical to WRF and to the CPU build. For v1.6.0 at `8e8b1fc`, all 446 CUDA FP64
+  checks passed against WRF at tolerance 0 on two Tesla T4 GPUs (sm_75) on Kaggle. For v1.5.0 at `40628eb`, all 423
+  passed on the RTX PRO 6000 Blackwell of a Colab G4. Earlier G4 runs reported 423 passes for v1.4.0 and v1.3.0, 422 for v1.2.3, 356 for v1.2.2 and 338 for v1.1.0 to v1.2.1. Earlier subsets
   ran on NVIDIA L4 and A100.
 - **CPU and GPU, FP32** (`-DCPPWRF_DOUBLE=OFF`): bit-identical to stock WRF v4.8.0 real*4 (gfortran, the default
-  real*4 build) on 24 configurations, the 44 `cpu_sp` and 44 `cuda_sp_id` cases of the suite (P1-P4, P9, Noah-MP,
-  Thompson, MYNN, WDM6, Morrison, the nests N1 / N3 and more). The CUDA FP32 build defaults to this identity mode
+  real*4 build) on 26 configurations, the 48 `cpu_sp` and 48 `cuda_sp_id` cases of the suite (P1-P4, P9, Noah-MP,
+  Thompson, MYNN, WDM6, Morrison, the nests N1 / N3, the moving nests MV1 / VX1 and more). The CUDA FP32 build defaults to this identity mode
   (`CPPWRF_CUDA_FP32_IDENTITY=ON`). The FP32 executables carry glibc 2.41's float functions, so the result does not
   depend on the host's libm (docs/FP32_IDENTITY.md).
 - **GPU, FP32 (fast mode)**: opt-in (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, FMA contraction and CUDA's math library; 2 to

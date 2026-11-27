@@ -5,7 +5,7 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
-## Unreleased
+## 1.6.0 (2026-11-27)
 
 ### Added
 - The first AMD GPU run in one command (docs/HIP.md "First run on AMD hardware"): tools/amd/amd_run.sh builds HIP FP64,
@@ -32,6 +32,30 @@ resumes across versions from WRF's wrfrst files.
   domains at tolerance 0 on the CPU and in CUDA FP64, MV1 also in CPU FP32 against WRF real*4. The option has no row in
   data/option_tiers.txt (the table is empty again) and needs no `allow_unverified`. Vortex following and
   `time_to_move` stay rejected.
+- Vortex-following nests (docs/NESTING.md "Vortex-following nests", USER_GUIDE section 6): `[domains] vortex_following
+  = true` as WRF 4.8.0 built with configure nesting 3 (`-DMOVE_NESTS -DVORTEX_CENTER`) runs it (time_for_move2's vortex
+  branch, compute_500mb_height, vortex_interval, max_vortex_speed, track_level, time_to_move, corral_dist), with the
+  restrictions of the prescribed moves and one nest; tools/wrf2cppwrf.py and tools/cppwrf-wrf `--vortex-following`
+  (the namelist cannot say how WRF was built). Differential test tests/nest/vortex against WRF's
+  compute_500mb_height. Verified: the suite cases VX1 and VX2 are identical to WRF dmpar (one MPI rank) on both domains
+  at tolerance 0 on the CPU and in CUDA FP64, VX1 also in CPU FP32 against WRF real*4.
+- CLM lake model, sf_lake_physics = 1 (WRF's module_sf_lake.F: lakeini and Lake) with Noah or Noah-MP, use_lakedepth,
+  lakedepth_default and lake_min_elev on one real-data domain, history and restart fields, translated by
+  tools/wrf2cppwrf.py; column test tests/phys/sf_lake. Verified: LK1, LK2, LK3, LKV, LKN and restart_lk1 identical to
+  WRF at tolerance 0 on the CPU and in CUDA FP64.
+- Observation nudging, obs_nudge_opt = 1 (module_fddaobs_rtfdda.F, module_fddaobs_driver.F, wrf_fddaobs_in.F) and its
+  &fdda options on Lambert conformal grids, translated by tools/wrf2cppwrf.py. Verified: OB1, OB2, OB3, OB4, OB9, OBN,
+  OB1R and the files test ob1 identical to WRF at tolerance 0 on the CPU, OB1 ... OBN also in CUDA FP64.
+- Docker: CPU and CUDA images with WPS 4.6.0, the WRF 4.8.0 run tables and a one-command quickstart
+  (docs/QUICKSTART.md); a workflow builds, smoke-tests and publishes them to GHCR; base images pinned by digest; the
+  CUDA image also for sm_75.
+- tools/kaggle: the release GPU proof in shards (two T4 per session, one suite worker per GPU) and one performance
+  session (kaggle_perf.sh).
+
+### Changed
+- PERF15 (docs/PERF.md): the split / batched forms (WSM6 in column stages, launch fusion, the Kain-Fritsch, MYJ and
+  QNSE column work buffer) only in the FP64 builds and the CUDA FP32 identity build (`CPPWRF_SPLIT_PATHS`); the CUDA
+  FP32 identity build now uses all three, with byte-identical output files.
 
 ### Fixed
 - glibc's math in the GPU builds and the FP32 builds' own float functions: asin, acos, log10, tgamma (and asinf, acosf,
@@ -67,7 +91,12 @@ resumes across versions from WRF's wrfrst files.
 - An ideal domain with specified boundaries on one axis only (other than WRF's channel: specified y with periodic x) is
   an error: WRF cannot express it, and the microphysics ran on columns its prep had not set.
 - tests/phys/libmvec_intel: Intel's 4-lane powf (_ZGVbN4vv_powf) in the preload as well, so WRF real*4 references made
-  on AMD runners equal the Intel ones.
+  on AMD runners equal the Intel ones; also Intel's acos, asin, tan, acosf, asinf and tanf.
+- Nest interpolation: SINT's signs of zero as WRF computes them (share/sint.F).
+- test_libm_special: skipped on a glibc other than 2.41; every float special value and cppwrf::libm's float overloads
+  on the device. The verification harness reads a reference's later history files (frames_per_outfile).
+- test_device_ieee is compiled with --fmad=false in every CUDA build: the fast FP32 build's --fmad=true contracted its
+  own a * b + c check (a test-only flag; no model code changed).
 
 ## 1.5.0 (2026-11-24)
 

@@ -1,11 +1,11 @@
 # CPPWRF
 
-Version 1.5.0 ([release notes](docs/RELEASE_NOTES.md)). The Zenodo concept DOI for all versions is
+Version 1.6.0 ([release notes](docs/RELEASE_NOTES.md)). The Zenodo concept DOI for all versions is
 [doi:10.5281/zenodo.24442751](https://doi.org/10.5281/zenodo.24442751). The 1.5.0 archive is
 [doi:10.5281/zenodo.24509951](https://doi.org/10.5281/zenodo.24509951). Project site:
 [cppwrf.org](https://cppwrf.org).
 
-CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static nesting,
+CPPWRF is a C++20 / CUDA port of the WRF-ARW v4.8.0 model: the dynamical core, the physics, static and moving nests,
 `real.exe` and `ideal.exe`. One source tree builds for the CPU (OpenMP) and for NVIDIA GPUs (CUDA), in FP64
 or FP32. It reads WRF's `wrfinput` / `wrfbdy` files and writes WRF's `wrfout` and `wrfrst` files.
 
@@ -13,21 +13,22 @@ The port follows WRF statement by statement, and every result is checked against
 
 - **CPU, FP64: bit-identical to WRF v4.8.0 real*8.** Every compared value of every variable and output time
   is equal at tolerance 0, for the real-data cases, the physics suites, nests, restarts and WRF's idealized cases.
-- **GPU, FP64: bit-identical to WRF too.** For v1.5.0, all 423 CUDA FP64 checks matched WRF real*8 at tolerance 0
-  on the Colab G4 at `40628eb` (RTX PRO 6000 Blackwell, sm_120, CUDA 13.0). The CUDA FP32 identity build matched
-  WRF real*4 at tolerance 0 in all 44 cases. Earlier G4 runs reported 423 passes for v1.4.0 and v1.3.0, 422 for v1.2.3,
+- **GPU, FP64: bit-identical to WRF too.** For v1.6.0, all 446 CUDA FP64 checks matched WRF real*8 at tolerance 0
+  on two Tesla T4 GPUs (sm_75, CUDA 13.0.88) on Kaggle at `8e8b1fc`. The CUDA FP32 identity build matched WRF real*4
+  at tolerance 0 in all 48 cases. The v1.5.0 Colab G4 run (RTX PRO 6000 Blackwell, sm_120, CUDA 13.0) at `40628eb`
+  passed 423 CUDA FP64 checks. Earlier G4 runs reported 423 passes for v1.4.0 and v1.3.0, 422 for v1.2.3,
   356 for v1.2.2 and 338 for v1.2.0 and v1.2.1. The v1.1.0 G4 total of 338 included 319 cases, 18 restart checks
   and the legacy `straka_wrf_cuda` RMS check against WRF real*4 at 1e-4 K. The WRF real*8 comparisons passed at tolerance 0.
   Earlier subsets also ran on L4 (sm_89) and A100 (sm_80).
-- **CPU and GPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 24 configurations,
-  among them P1-P4, Thompson, MYNN, WDM6, Morrison, Noah-MP and the nests N1 / N3. The CUDA FP32 build defaults to
-  this identity mode (`CPPWRF_CUDA_FP32_IDENTITY=ON`), and the result does not depend on the host's libm. See
+- **CPU and GPU, FP32: bit-identical to WRF v4.8.0 real*4** (the default gfortran real*4 build) on 26 configurations,
+  among them P1-P4, Thompson, MYNN, WDM6, Morrison, Noah-MP, the nests N1 / N3 and the moving nests MV1 / VX1.
+  The CUDA FP32 build defaults to this identity mode (`CPPWRF_CUDA_FP32_IDENTITY=ON`), and the result does not depend on the host's libm. See
   [docs/FP32_IDENTITY.md](docs/FP32_IDENTITY.md).
 - **GPU, FP32 (fast mode):** opt-in (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, FMA contraction and CUDA's math library).
   In the [v1.3.0 paper benchmark](#performance), the identity build takes 2.1 to 18.0 % longer in steady stepping
   than the fast build (identity time / fast time - 1). The fast build is compared with WRF by relative L2 error.
-  The v1.5.0 G4 run passed 43 of 44 checks. The remaining case passed on an RTX 2060 with the harness fix at `091ffae`
-  ([release notes](docs/RELEASE_NOTES.md)).
+  The v1.6.0 Kaggle run passed 46 of 46 checks: 45 against WRF by relative L2 error and 1 CPPWRF self-consistency
+  check ([release notes](docs/RELEASE_NOTES.md)).
 
 The details are in [docs/STATUS.md](docs/STATUS.md).
 
@@ -61,24 +62,23 @@ The details are in [docs/STATUS.md](docs/STATUS.md).
 | PBL and surface layer | YSU, MYJ, ACM2, MYNN-EDMF with most of its options, BouLac, QNSE with the EDKF mass flux; revised MM5, Eta, Pleim-Xiu, MYNN and QNSE surface layers; gravity wave drag |
 | Land surface | 5-layer slab, Noah, Noah-MP (its options without extra input fields), RUC; single-layer urban canopy model; CLM lake model (one domain, with Noah or Noah-MP); fractional sea ice, SST update |
 | Radiation | RRTMG LW and SW, RRTM LW, Dudhia SW, cumulus clouds in radiation, McICA |
-| Nesting and nudging | one-way and two-way nests with feedback and smoothing, prescribed moves of a nest of domain 1; grid (analysis) nudging; observation nudging (Lambert conformal grids) |
+| Nesting and nudging | one-way and two-way nests with feedback and smoothing, prescribed moves and vortex following of a nest of domain 1; grid (analysis) nudging; observation nudging (Lambert conformal grids) |
 | Pre-processing | `cppwrf_real` (real.exe from WPS met_em files) and WRF's ideal.exe cases |
 | Diagnostics and I/O | buckets, precipitation windows, output_diagnostics (auxhist3), WRF NetCDF wrfout / wrfrst, iofields |
 
 WRF's `namelist.input` works as is: `tools/wrf2cppwrf.py` translates it, including `physics_suite`. An option
 without a port is reported as an error and never silently ignored. MPI runs give WRF's bits in every tested layout
 on one machine: up to 48 CPU ranks, and CUDA FP64 on two GPUs; runs across several nodes use the same code and have
-not been tested yet ([docs/MPI.md](docs/MPI.md)). Vortex-following moving nests, the BEP urban models, and other
-missing schemes are listed in [docs/STATUS.md](docs/STATUS.md#not-yet-implemented) and in
-[docs/USER_GUIDE.md](docs/USER_GUIDE.md#rejected-options-and-why).
+not been tested yet ([docs/MPI.md](docs/MPI.md)). The BEP urban models and other missing schemes are listed in
+[docs/STATUS.md](docs/STATUS.md#not-yet-implemented) and in [docs/USER_GUIDE.md](docs/USER_GUIDE.md#rejected-options-and-why).
 
 ## How it is verified
 
 - **Column and kernel tests** (`tests/phys`, `tests/dyn`, `tests/nest`): each scheme runs on the same inputs in
   C++ and in WRF's own compiled Fortran objects, and the outputs must be bit-identical.
 - **Model runs and restart checks** (`tests/verify/wrf_suite.py`): CPU CI runs these checks on every push. For
-  v1.5.0 at `ac13ebe`, all 533 suite checks passed against WRF at tolerance 0 (489 FP64 and 44 FP32). CPU CI also
-  passed 42 WRF output file checks, 14 ideal file checks, `ctest -L diff` 32/32 and CTest 44/44. For v1.3.0 at
+  v1.6.0 at `8e8b1fc`, all 567 suite checks passed against WRF at tolerance 0 (519 FP64 and 48 FP32). CPU CI also
+  passed 43 WRF output file checks, 14 ideal file checks, `ctest -L diff` 34/34 and CTest 48/48. For v1.3.0 at
   `318159a`, the suite reported 483 FP64 passes (464 cases, 18 restart checks and the legacy `straka_wrf` RMS check)
   and 44 FP32 passes. The `ideal_grav2d_x` cases verify the Straka density current against WRF real*8 at tolerance 0
   on CPU and CUDA. Another 154 CPU FP64 cases run with `--slow`. The CUDA FP64 checks and the CUDA FP32 identity
@@ -194,7 +194,7 @@ with WRF's `input_sounding`) and the suite's real-data cases, which read the WRF
 - [docs/USER_GUIDE.md](docs/USER_GUIDE.md): building, the way from WPS to wrfout, the translator, every supported
   and rejected option, nests, GPU runs, restarts, output streams, configuration keys
 - [CHANGELOG.md](CHANGELOG.md), [docs/RELEASE_NOTES.md](docs/RELEASE_NOTES.md): versions and the verified scope of
-  v1.5.0 (and of the earlier releases)
+  v1.6.0 (and of the earlier releases)
 - [docs/STATUS.md](docs/STATUS.md): what is ported, how it is verified, every case and result
 - [docs/PERF.md](docs/PERF.md): the benchmark against WRF, the GPU profile and the performance roadmap
 - [docs/FP32_IDENTITY.md](docs/FP32_IDENTITY.md): the FP32 builds that are bit-identical to WRF real*4
