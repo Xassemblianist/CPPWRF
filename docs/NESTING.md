@@ -105,7 +105,11 @@ of latitude / longitude (Model::xlat / xlong, the radiation driver's) follow the
 moving nest that is not a nest of domain 1, has nests or siblings; tiles or MPI ranks; the adaptive time step;
 `parent_grid_ratio` > 3; a nest whose interpolation window leaves domain 1's points (i/j_parent_start < 5 or within
 5 parent cells plus the nest of the east / north edge); a resumed run (`run.restart_file`); `time_to_move` with
-prescribed moves (verified with vortex following only).
+prescribed moves (verified with vortex following only). Restart files within the run need `cppwrf.allow_unverified = true`: domain 1's
+alarm writes them after `med_nest_move` as WRF does, and the history fields of the moved nest are WRF's, but its
+restart-only fields are not yet (start_domain's RHO and the new strip's WW, RUBLTEN / RVBLTEN; DEFOR11 / DEFOR22 / DIV
+at the top level; the parent's HT_COARSE; the preset-moves build's XI / XJ / VC_I / VC_J = -1 and
+COMPUTE_VORTEX_CENTER_ALARM as alarm 55).
 
 Verification: the suite cases MV1 (N3 with four moves of d02 at 1, 2, 20 and 40 min; 3 parent steps with history
 every step and 1 h) and MV2 (two moves cancelled by the corral) against WRF 4.8.0 dmpar with one MPI rank built with
