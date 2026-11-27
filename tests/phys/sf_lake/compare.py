@@ -10,6 +10,9 @@ b = open(sys.argv[2], "rb").read()
 if len(a) != len(b):
     print(f"FAIL: sizes differ ({len(a)} / {len(b)} bytes)")
     sys.exit(1)
+if not a or len(a) % 8:  # two empty or truncated outputs are no identical result
+    print(f"FAIL: {len(a)} bytes, not a positive number of 8-byte values")
+    sys.exit(1)
 n = len(a) // 8
 bad = [i for i in range(n) if a[8 * i:8 * i + 8] != b[8 * i:8 * i + 8]]
 if bad:

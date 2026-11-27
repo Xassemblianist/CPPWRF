@@ -69,7 +69,8 @@ end=$((SECONDS + 3600))
 until [ -e $G/gpu_done ] || [ $SECONDS -ge $end ]; do sleep 10; done
 cat $G/gpu.txt >> $R 2> /dev/null || echo "FAIL gpu (no gpu.txt)" >> $R
 cp $G/*.log $J/ 2> /dev/null
-compare_out() {  # NAME DIR: every wrfout file of DIR against the CPU run (GPU FP64: tolerance 0; FP32: relative L2)
+compare_out() {  # NAME DIR: every wrfout file of DIR against the CPU run (GPU FP64: tolerance 0, every variable
+  # with the text ones, metadata; FP32: relative L2, a NaN or infinity on either side fails); files only one run wrote
   python3 - "$1" "$Q/ex/out" "$2" <<'EOF'
 import glob, os, sys
 import numpy as np, netCDF4
@@ -77,29 +78,41 @@ sys.path.insert(0, "tests/verify")
 import exact
 name, ref, run = sys.argv[1:]
 files = sorted(os.path.relpath(f, ref) for f in glob.glob(ref + "/**/wrfout_d0*", recursive=True))
-bad, worst = [], {}
+extra = sorted(set(os.path.relpath(f, run) for f in glob.glob(run + "/**/wrfout_d0*", recursive=True)) - set(files))
+bad, worst = [f"{f}: only in {run}" for f in extra], {}
 for f in files:
     if not os.path.exists(os.path.join(run, f)):
         bad.append(f"{f}: missing"); continue
     a, b = exact.raw(netCDF4.Dataset(os.path.join(ref, f))), exact.raw(netCDF4.Dataset(os.path.join(run, f)))
+    bad += [f"{f} {v}: only in {run}" for v in b.variables if v not in a.variables]
+    if name == "fp64":
+        bad += [f"{f}: {m}" for m in exact.metadata(a, b, ("TITLE", "CPPWRF_UNVERIFIED_OPTIONS"))]
     for v in a.variables:
         if v not in b.variables:
             bad.append(f"{f} {v}: missing"); continue
-        x, y = a[v][:], b[v][:]
-        if x.dtype.kind not in "fiu":
-            continue
+        x, y = np.asarray(a[v][:]), np.asarray(b[v][:])
         if name == "fp64":
             d = exact.describe(x, y)
             if d: bad.append(f"{f} {v}: {d}")
-        elif v in ("U", "V", "W", "T", "QVAPOR", "PH", "MU", "PSFC", "T2", "RAINNC"):
-            x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+            continue
+        if x.dtype.kind not in "fiu":
+            continue
+        if x.shape != y.shape:
+            bad.append(f"{f} {v}: shape {x.shape} vs {y.shape}"); continue
+        x, y = x.astype(np.float64), y.astype(np.float64)
+        if not (np.isfinite(x).all() and np.isfinite(y).all()):
+            bad.append(f"{f} {v}: non-finite values (CPU {int(x.size - np.isfinite(x).sum())}, "
+                       f"GPU {int(y.size - np.isfinite(y).sum())})"); continue
+        if v in ("U", "V", "W", "T", "QVAPOR", "PH", "MU", "PSFC", "T2", "RAINNC"):
             n = np.linalg.norm(x)
-            worst[v] = max(worst.get(v, 0.0), float(np.linalg.norm(x - y) / n) if n else 0.0)
+            worst[v] = max(worst.get(v, 0.0), float(np.linalg.norm(x - y) / n) if n else float(np.linalg.norm(y)))
 print(f"{len(files)} files")
 if name == "fp64":
     print("identical" if not bad else "DIFFER\n" + "\n".join(bad[:40]))
     sys.exit(1 if bad or not files else 0)
 print("relative L2 (largest over the files): " + " ".join(f"{v} {e:.2e}" for v, e in sorted(worst.items())))
+if bad:
+    print("FAIL\n" + "\n".join(bad[:40]))
 sys.exit(1 if bad or not files else 0)
 EOF
 }

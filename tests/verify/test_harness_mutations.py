@@ -678,6 +678,120 @@ cp "$FAKE_MADE"/wrfout_d01_* "$out"/; mkdir -p "$out"/d02; cp "$FAKE_MADE"/d02/w
                 r = subprocess.run(cmd, capture_output=True, text=True)
                 self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
+    def test_unit_comparators_reject_nan_and_empty_outputs(self):  # AUDA4 A4-11
+        def rc(script, *args):
+            return subprocess.run([sys.executable, ROOT / script, *map(str, args)], capture_output=True,
+                                  text=True).returncode
+        ncols, nz = 2, 3
+        inp, wrf, cpp = self.root / "bmj_in.bin", self.root / "bmj_wrf.bin", self.root / "bmj_cpp.bin"
+        np.array([ncols, nz], "<i4").tofile(inp)
+        n = 2 * 134 + 134 * 76 + 5 * nz * ncols + 6 * ncols
+        np.ones(n, "<f8").tofile(wrf)
+        bmj = ("tests/phys/cu_bmj/compare.py", wrf, cpp, "--input", inp, "--tol")
+        np.ones(n, "<f8").tofile(cpp)
+        self.assertEqual(rc(*bmj, "1e30"), 0)
+        np.full(n, np.nan, "<f8").tofile(cpp)  # an FP32 driver that wrote NaN everywhere
+        self.assertEqual(rc(*bmj, "1e30"), 1)
+        for f in (wrf, cpp):  # two empty outputs
+            f.write_bytes(b"")
+        self.assertEqual(rc(*bmj, "0"), 1)
+        lake = ("tests/phys/sf_lake/compare.py", wrf, cpp)
+        self.assertEqual(rc(*lake), 1)
+        adv_in, adv_w, adv_c = self.root / "adv_in.bin", self.root / "adv_wrf.bin", self.root / "adv_cpp.bin"
+        adv_in.write_bytes(np.array([1, 1, 1, 0, 1, 1, 1], "<i4").tobytes())
+        np.array([1.0, 2.0, 0.0], "<f8").tofile(adv_w)
+        np.array([1.0, 2.0, 0.0], "<f8").tofile(adv_c)
+        adv = ("tests/dyn/advection/compare.py", adv_w, adv_c, adv_in, "t")
+        self.assertEqual(rc(*adv), 0)
+        np.array([1.0, 2.0, -0.0], "<f8").tofile(adv_c)  # WRF +0, CPPWRF -0
+        self.assertEqual(rc(*adv), 1)
+
+    def test_fp32_accuracy_fails_on_shape_nan_and_nothing_compared(self):  # AUDA4 A4-14
+        tool = ROOT / "tools/verify/fp32_accuracy.py"
+
+        def write(path, w_levels=3, t2=1.0):
+            with Dataset(path, "w") as ds:
+                ds.createDimension("Time", None)
+                ds.createDimension("DateStrLen", 19)
+                ds.createDimension("x", 2)
+                ds.createDimension("z", w_levels)
+                ds.createVariable("Times", "S1", ("Time", "DateStrLen"))[0] = np.frombuffer(START.encode(), "S1")
+                ds.createVariable("T2", "f4", ("Time", "x"))[0] = [t2, 2.0]
+                ds.createVariable("W", "f4", ("Time", "z", "x"))[0] = 0.0
+        test, ref = self.root / f"wrfout_d01_{START}", self.root / "ref" / f"wrfout_d01_{START}"
+        ref.parent.mkdir()
+        write(ref)
+
+        def run(*extra):
+            return subprocess.run([sys.executable, tool, "compare", test, ref, *extra, "--out", self.root / "s.jsonl"],
+                                  capture_output=True, text=True)
+        write(test)
+        self.assertEqual(run().returncode, 0)
+        for mutation, kw, extra in (("W staggered differently", {"w_levels": 2}, ()),
+                                    ("NaN in T2", {"t2": np.nan}, ()),
+                                    ("no requested variable", {}, ("--vars", "NO_SUCH_VAR"))):
+            with self.subTest(mutation=mutation):
+                write(test, **kw)
+                r = run(*extra)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        r = subprocess.run([sys.executable, tool, "report", self.root / "s.jsonl"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("Not compared", r.stdout)
+
+    def test_hash_compare_requires_requested_cases_and_whole_lines(self):  # AUDA4 A4-8
+        import out_hashes
+        ref, new = self.root / "ref.tsv", self.root / "new.tsv"
+        line = "caseA/wrfout_d01\tU\tfloat64\t(1, 2)\tabc\n"
+        ref.write_text(line)
+        new.write_text(line)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(out_hashes.compare(str(ref), str(new), cases=["caseA"]), 0)
+            self.assertEqual(out_hashes.compare(str(ref), str(new), cases=["caseA", "caseB_MISSING"]), 1)
+            new.write_text(line + "caseA/wrfout_d01\tV\tfloat64\n")  # truncated line
+            with self.assertRaisesRegex(ValueError, "malformed"):
+                out_hashes.compare(str(ref), str(new))
+            new.write_text(line + line.replace("abc", "abd"))  # two runs appended that disagree
+            with self.assertRaisesRegex(ValueError, "hashed twice"):
+                out_hashes.compare(str(ref), str(new))
+            new.write_text(line + line)  # the same hash twice
+            self.assertEqual(out_hashes.compare(str(ref), str(new)), 0)
+
+    def test_golden_compare_checks_every_column_at_the_golden_precision(self):  # AUDA4 A4-9
+        tool = ROOT / "tools/regression/compare_golden.py"
+        run, gold = self.root / "run", self.root / "gold"
+
+        def write(d, rows):
+            d.mkdir(exist_ok=True)
+            (d / "diag.csv").write_text("\n".join(rows) + "\n")
+            self.snaps(d, (1,))
+        write(gold, ["step,time,wall_s,max_abs_w,dry_mass", "1,60,0.1,1.2345678901234567,9.8765432109876543"])
+
+        def rc():
+            return subprocess.run([sys.executable, tool, run, gold, "float64"], capture_output=True,
+                                  text=True).returncode
+        write(run, ["step,time,wall_s,max_abs_w,dry_mass", "1,60,0.2,1.2345678901234567,9.8765432109876543"])
+        self.assertEqual(rc(), 0)
+        write(run, ["step,time,wall_s,max_abs_w", "1,60,0.2,1.2345678901234567"])  # dry_mass dropped
+        self.assertEqual(rc(), 1)
+        write(run, ["step,time,wall_s,max_abs_w,dry_mass", "1,60,0.2,1.2,9.9"])  # two digits, 3 % off
+        self.assertEqual(rc(), 1)
+
+    def test_matrix_resume_comparison_is_two_way(self):  # AUDA4 A4-7: the call of tools/gcp/matrix_variant.py
+        import exact
+        straight = fixture(self.root / "straight", (0, 60, 120, 180))
+        with Dataset(straight, "a") as ds:
+            ds.createVariable("DROPPED_VAR", "f8", ("Time", "x"))[:] = 1
+        resumed = fixture(self.root / "resumed", (120,), start=wrf_suite.times_at(START, 60))
+        old, n = exact.compare_stream([str(straight)], [str(resumed)], subset=True, global_atts=False)
+        self.assertEqual((old, n), ({}, 1))  # the call before: the lost frame and variable passed
+        new, _ = exact.compare_stream([str(resumed)], [str(straight)], after=wrf_suite.times_at(START, 60),
+                                      global_atts=False)
+        self.assertIn("(times)", new)
+        self.assertIn("(wrf-only-vars)", new)
+        src = (ROOT / "tools/gcp/matrix_variant.py").read_text()
+        self.assertIn("exact.compare_stream(files, straight, after=date, global_atts=False, stats=stats)", src)
+        self.assertNotIn("subset=True", src)
+
     def test_real_comparator_preserves_int64(self):
         wrf, cpp = self.root / "wrf", self.root / "cpp"
         cmd = [sys.executable, ROOT / "tests/init_real/compare_real.py", cpp, wrf]

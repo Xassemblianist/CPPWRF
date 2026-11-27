@@ -18,8 +18,7 @@ labels = [f"{f}{s}" for s in range(nspec) for f in ("q_2.", "q_1.")] + ["rqvften
 bad = 0
 for m, lab in enumerate(labels):
     x, y = a[m * n3:(m + 1) * n3].reshape(nz, ny, nx), b[m * n3:(m + 1) * n3].reshape(nz, ny, nx)
-    d = x.view("<u8") != y.view("<u8")
-    d &= ~((x == 0) & (y == 0))  # +0 / -0
+    d = x.view("<u8") != y.view("<u8")  # bit for bit: -0 differs from +0 (tests/verify/exact.py)
     if d.any():
         bad += 1
         k, j, i = np.argwhere(d)[0]

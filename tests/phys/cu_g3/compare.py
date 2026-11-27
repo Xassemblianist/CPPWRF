@@ -36,6 +36,9 @@ def main():
     names += [(n, n2) for n in ("RAINCV", "PRATEC")]
     if a.model:
         names = names[-6:]
+    if w.size != sum(m for _, m in names):  # an empty or truncated pair of files would compare empty slices
+        print(f"FAIL: {w.size} values, expected {sum(m for _, m in names)}")
+        return 1
     off, bad = 0, 0
     act = None
     for n, m in names:
@@ -48,8 +51,9 @@ def main():
             continue
         if a.tol == 0:
             d = (x.view("<u8") != y.view("<u8")) & ~(np.isnan(x) & np.isnan(y))
-        else:
-            d = np.abs(x - y) > a.tol * np.maximum(np.abs(x), 1e-30)
+        else:  # NaN or an infinity on one side differs at any tolerance (NaN > t is False)
+            with np.errstate(invalid="ignore", over="ignore"):
+                d = ~(np.abs(x - y) <= a.tol * np.maximum(np.abs(x), 1e-30)) & ~(x == y) & ~(np.isnan(x) & np.isnan(y))
         nonzero = int(np.count_nonzero(x))
         if d.any():
             bad += 1

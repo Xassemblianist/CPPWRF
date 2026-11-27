@@ -26,14 +26,18 @@ def main():
     names = [("QS0", JTB), ("SQS", JTB), ("PTBL", JTB * ITB)]
     names += [(n, nz * ncols) for n in ("RTHCUTEN", "RQVCUTEN", "CCLDFRA", "QCCONV", "QICONV")]
     names += [(n, ncols) for n in ("RAINCV", "PRATEC", "CUTOP", "CUBOT", "CLDEFI", "CONVCLD")]
+    if w.size != sum(m for _, m in names):  # an empty or truncated pair of files would compare empty slices
+        print(f"FAIL: {w.size} values, expected {sum(m for _, m in names)}")
+        return 1
     off, bad = 0, 0
     for n, m in names:
         x, y = w[off:off + m], c[off:off + m]
         off += m
         if a.tol == 0:
             d = (x.view("<u8") != y.view("<u8")) & ~(np.isnan(x) & np.isnan(y))
-        else:
-            d = np.abs(x - y) > a.tol * np.maximum(np.abs(x), 1e-30)
+        else:  # NaN or an infinity on one side differs at any tolerance (NaN > t is False)
+            with np.errstate(invalid="ignore", over="ignore"):
+                d = ~(np.abs(x - y) <= a.tol * np.maximum(np.abs(x), 1e-30)) & ~(x == y) & ~(np.isnan(x) & np.isnan(y))
         nonzero = int(np.count_nonzero(x))
         if d.any():
             bad += 1

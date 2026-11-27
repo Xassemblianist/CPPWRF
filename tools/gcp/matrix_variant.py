@@ -9,7 +9,8 @@ Times) of each domain's wrfout, wrfrst and auxhist3 (output_diagnostics) files i
 NaN, -0 differs from +0), with the types, dimensions, variable and global attributes (TITLE aside). Prints one
 line per domain and stream: NAME d0N [wrfrst] frames N differing: none | {VAR: 'time npoints/maxdiff ...', ...};
 times, variables or metadata only one model has are differences too ('(times)', '(wrf-only-vars)',
-'(cppwrf-only-vars)', '(metadata)'). Or NAME WRF-FAILED with CPPWRF's status on the same namelist,
+'(cppwrf-only-vars)', '(metadata)'); NaN-in-both N points: both models NaN at the same N points (identical by the rule,
+reported: the runs set run.stop_on_nonfinite=false). Or NAME WRF-FAILED with CPPWRF's status on the same namelist,
 TRANSLATE-FAILED / CPPWRF-FAILED / IDEAL-FAILED / NO-OUTPUT / HARNESS-ERROR (the script itself failed).
 run.keep=1 copies WRF's namelist.input, inputs and wrfout files to WORK/keep/run_NAME (a suite reference);
 run.delete=section.key,... deletes namelist lines (the option then takes its Registry default), as real_variant.py.
@@ -259,12 +260,14 @@ def compare_runs(wdir, cout, label="", inputs=()):
             if not cf + wf:
                 continue
             seen = True
-            bad, n = exact.compare_stream(cf, wf)
+            stats = {}  # both models NaN at the same points is identical, and reported (run.stop_on_nonfinite=false)
+            bad, n = exact.compare_stream(cf, wf, stats=stats)
             nc_, nw = {os.path.basename(f) for f in cf}, {os.path.basename(f) for f in wf}
             if nc_ != nw:  # the frames' split into files (frames_per_outfile) or the file names
                 bad["(files)"] = f"only-cppwrf {sorted(nc_ - nw)} only-wrf {sorted(nw - nc_)}"
             tag = d if kind == "wrfout" else f"{d} {kind}"
-            print(f"{name} {tag}{label} frames {n} differing: {bad if bad else 'none'}", flush=True)
+            nan = f" NaN-in-both {stats['nan']} points" if stats.get("nan") else ""
+            print(f"{name} {tag}{label} frames {n} differing: {bad if bad else 'none'}{nan}", flush=True)
     return seen
 
 
@@ -323,12 +326,14 @@ def resume_run(S):
         print(f"{name} CPPWRF-RESUME-FAILED {(c2.stderr or c2.stdout).strip().splitlines()[-1:]}", flush=True)
         return
     compare_runs(R2, out2, " resumed", inputs=rst)
-    for d in doms:  # the resumed histories against WRF's uninterrupted one (its earlier frames are no difference)
-        straight = stream_files(R, "wrfout", d)
+    for d in doms:  # the resumed histories against WRF's uninterrupted one after the restart time: the same frames
+        straight = stream_files(R, "wrfout", d)  # and variables both ways (its earlier frames are no difference)
         for who, files in (("resumed-vs-straight", stream_files(cdir_of(out2, d), "wrfout", d)),
                            ("wrf-resumed-vs-straight", stream_files(R2, "wrfout", d))):
-            bad, n = exact.compare_stream(straight, files, subset=True, global_atts=False)
-            print(f"{name} {d} {who} frames {n} differing: {bad if bad else 'none'}", flush=True)
+            stats = {}
+            bad, n = exact.compare_stream(files, straight, after=date, global_atts=False, stats=stats)
+            nan = f" NaN-in-both {stats['nan']} points" if stats.get("nan") else ""
+            print(f"{name} {d} {who} frames {n} differing: {bad if bad else 'none'}{nan}", flush=True)
     subprocess.run(["rm", "-rf", R2])
 
 
