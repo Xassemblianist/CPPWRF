@@ -507,7 +507,7 @@ and LH with isfflx 0 uninitialised; they are not compared.)
 ### FP32 against WRF real*4
 
 The CPU FP32 build (`-DCPPWRF_ENABLE_CUDA=OFF -DCPPWRF_DOUBLE=OFF`) is bit-identical to stock WRF v4.8.0 real*4 (gfortran 14.2, glibc 2.41,
-the default real*4 build) on 24 configurations: P1, P2, P3, P4, P9, NMP1 (Noah-MP), P6 (Thompson), MYNN, C01
+the default real*4 build) on 26 configurations: P1, P2, P3, P4, P9, NMP1 (Noah-MP), P6 (Thompson), MYNN, C01
 (aerosol-aware Thompson), D6 (WDM6), D5 (WDM5), MORR and MORG (Morrison with hail / graupel), G2 (GWDO), the nests N1
 (one-way) and N3 (two-way, P4 physics), MON3 (monotonic advection on N3), KESSKF (Kessler), ACM7 (ACM2 + Pleim-Xiu),
 Q4 (QNSE), T6 (Tiedtke), P7 (New Tiedtke), DUD4 (Dudhia shortwave), SLAB1 (5-layer slab LSM) and the moving nests MV1

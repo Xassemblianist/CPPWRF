@@ -24,7 +24,7 @@ ported, what differs, and how to check CPPWRF against your own WRF runs.
     changes with its MPI layout, its compiler and its flags. So WRF on your cluster, with 64 MPI ranks, does not
     match itself on one rank bit for bit either.
   - `cpu-fp32` and the default `gpu-fp32` build (`CPPWRF_CUDA_FP32_IDENTITY=ON`, default) are bit-identical to each
-    other and to stock WRF v4.8.0 real*4 on the 24 configurations of docs/FP32_IDENTITY.md. The opt-in fast build
+    other and to stock WRF v4.8.0 real*4 on the 26 configurations of docs/FP32_IDENTITY.md. The opt-in fast build
     (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`, 2 to 17 % faster in the paper benchmark) differs from WRF real*8 by about as
     much as WRF's own real*4 build does (docs/FP32_ACCURACY.md).
 - **The run directory:** `cppwrf-wrf` and `cppwrf-realexe` are drop-in replacements for `wrf.exe` and `real.exe`

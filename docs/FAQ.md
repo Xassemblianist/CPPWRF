@@ -36,7 +36,7 @@ FP32, 2.84 s in identity FP32, and 9.16 s in GPU FP64. WRF real*4 at its best st
 (48 hardware threads) takes 28.60 s. These figures use the history-off medians from `runs.csv` and `summary.json`.
 
 The default `gpu-fp32` build (`CPPWRF_CUDA_FP32_IDENTITY=ON`) is bit-identical to `cpu-fp32` and to stock WRF v4.8.0
-real*4 on the 24 configurations of docs/FP32_IDENTITY.md. In the v1.3.0 paper benchmark the identity build takes
+real*4 on the 26 configurations of docs/FP32_IDENTITY.md. In the v1.3.0 paper benchmark the identity build takes
 2.1 to 18.0 % longer in steady stepping than the fast build (identity time / fast time - 1). The opt-in fast build
 (`-DCPPWRF_CUDA_FP32_IDENTITY=OFF`) is not bit-identical to WRF real*4. Its difference from WRF real*8 is about the
 size of the difference between WRF's own real*4 and real*8 builds. The benchmark's accuracy files give a relative L2 error of
