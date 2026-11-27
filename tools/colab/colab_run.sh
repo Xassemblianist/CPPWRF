@@ -39,6 +39,8 @@
 #            (mp_physics 8 / 28) are then bit-identical to WRF in FP64
 #   --keep   leave the runtime running (delete it later with `tools/colab/colab_api.py stop -s <session>`)
 #   --out    local results directory (default: ${CPPWRF_SCRATCH:-~/cppwrf_scratch}/colab/<date>_<gpu>)
+#   --release-data  the VM fetches the cases' data tars of the cppwrf-data release (wrf_suite.py --data-for, SHA256SUMS
+#            checked, as the Kaggle proof) instead of staging them from ${CPPWRF_WRF_RUNS} and uploading them
 #   MAX_UPLOAD_MIN (environment, default 20): stop when the upload would take longer (slow regions)
 #
 # The source is the committed HEAD (git archive); the data come from ${CPPWRF_WRF_RUNS} through
@@ -49,9 +51,8 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 . "$REPO/tools/colab/colab_guard.sh"  # the only way to ask for a runtime: one request per spec, 2 runtimes at most, block lock
-: "${CPPWRF_WRF_RUNS:?set CPPWRF_WRF_RUNS}"
 SCRATCH=${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}
-GPU= ATTACH= ATTACH_RT= CREATE= FALLBACK= KEEP=0 OUT= FILES= NSYS= NCU= BASE= DEVMIB= ENVS=() KEYS= MAX_UPLOAD_MIN=${MAX_UPLOAD_MIN:-20} TABLES=--no-thompson-tables WT=
+GPU= ATTACH= ATTACH_RT= CREATE= FALLBACK= KEEP=0 OUT= FILES= NSYS= NCU= BASE= DEVMIB= ENVS=() KEYS= MAX_UPLOAD_MIN=${MAX_UPLOAD_MIN:-20} TABLES=--no-thompson-tables WT= RELDATA=
 CASES=real_r1_fp64_cuda,real_p1_r8_fp64_cuda_1h,real_p1_fp32_1h,real_p4_r8_fp64_cuda_1h,real_p8_r8_fp64_cuda_1h,real_t6_r8_fp64_cuda_1h,real_d0_r8_fp64_cuda_1h,real_nmp1_r8_fp64_cuda_1h
 BENCH=real_p1_r8_fp64_cuda_1h,real_p1_fp32_1h,real_d0_r8_fp64_cuda_1h
 while [ $# -gt 0 ]; do
@@ -71,8 +72,9 @@ while [ $# -gt 0 ]; do
     --device-mib) DEVMIB=$2; shift 2 ;;
     --wrf-tables) TABLES= WT=wrf-tables; shift ;;
     --keep) KEEP=1; shift ;;
+    --release-data) RELDATA=1; shift ;;
     --out) OUT=$2; shift 2 ;;
-    *) sed -n '3,37p' "$0"; exit 2 ;;
+    *) sed -n '3,44p' "$0"; exit 2 ;;
   esac
 done
 if [ -n "$ATTACH" ]; then
@@ -107,7 +109,14 @@ key=$( (echo "$STAGE" | tr ',' '\n' | sort -u; echo "files:$FILES$NOREFS$WT";
          git -C "$REPO" rev-parse HEAD; sha256sum "$REPO/tools/colab/stage_data.py") | tr '\n' ',' | sha256sum | cut -c1-16)
 DATA=$SCRATCH/colab/cache/data_$key.tar
 # GPU runs only: CPPWRF computes the Thompson tables on the VM instead of uploading WRF's 370 MB (--wrf-tables: WRF's)
-if [ ! -f "$DATA" ]; then
+DATA_URL=https://github.com/Xassemblianist/cppwrf-data/releases/download/data-v1
+if [ -n "$RELDATA" ]; then
+  RELTARS=$(cd "$REPO" && python3 tests/verify/wrf_suite.py --data-for "$STAGE")
+  echo "[colab_run] release data: $RELTARS"
+else
+  : "${CPPWRF_WRF_RUNS:?set CPPWRF_WRF_RUNS (or --release-data)}"
+fi
+if [ -z "$RELDATA" ] && [ ! -f "$DATA" ]; then
   staging=$(mktemp "$DATA.XXXXXX")
   if python3 "$REPO/tools/colab/stage_data.py" --only "$STAGE" --files "$FILES" $TABLES $NOREFS "$staging"; then
     mv -f "$staging" "$DATA"
@@ -176,7 +185,7 @@ upload() {
 }
 upload "$OUT/src.tar.gz" "$RR/src.tar.gz" || exit 1
 [ -z "$BASE" ] || upload "$OUT/base.tar.gz" "$RR/base.tar.gz" || exit 1
-upload "$DATA" "$RR/data.tar" || exit 1
+[ -n "$RELDATA" ] || upload "$DATA" "$RR/data.tar" || exit 1
 upload "$OUT/commit.txt" "$RR/commit.txt" || exit 1
 upload "$REPO/tools/colab/remote_job.py" "$RR/remote_job.py" || exit 1
 fenv=("${ENVS[@]}" --env CPPWRF_JOB_ROOT="$RR"); [ -z "$FILES" ] || fenv+=(--env CPPWRF_JOB_FILES="$FILES")
@@ -185,6 +194,7 @@ fenv=("${ENVS[@]}" --env CPPWRF_JOB_ROOT="$RR"); [ -z "$FILES" ] || fenv+=(--env
 [ -z "$NCU" ] || fenv+=(--env CPPWRF_JOB_NCU="$NCU")
 [ -z "$BASE" ] || fenv+=(--env CPPWRF_JOB_BASE=1)
 [ -z "$DEVMIB" ] || fenv+=(--env CPPWRF_JOB_DEVICE_MIB="$DEVMIB")
+[ -z "$RELDATA" ] || fenv+=(--env CPPWRF_JOB_DATA_TARS="$RELTARS" --env CPPWRF_JOB_DATA_URL="$DATA_URL")
 timeout 300 $COLAB_API exec -s "$S" --timeout 120 --env CPPWRF_JOB_CASES="$CASES" --env CPPWRF_JOB_BENCH="$BENCH" "${fenv[@]}" <<'EOF'
 import os, subprocess
 env = dict(os.environ)

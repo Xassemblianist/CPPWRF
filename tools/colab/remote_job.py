@@ -2,7 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """The Colab VM side of tools/colab/colab_run.sh (runs detached under nohup; /content/job/done marks the end).
 
-Expects /content/src.tar.gz (git archive of the repository) and /content/data.tar (tools/colab/stage_data.py),
+Expects /content/src.tar.gz (git archive of the repository) and /content/data.tar (tools/colab/stage_data.py; or,
+with CPPWRF_JOB_DATA_TARS and CPPWRF_JOB_DATA_URL, the cppwrf-data release tars, fetched here),
 and the environment CPPWRF_JOB_CASES (wrf_suite.py case names, comma-separated), CPPWRF_JOB_FILES (cases of
 tests/verify/run_wrf_files_test.sh, may be empty) and CPPWRF_JOB_BENCH (suite case names to time again without
 output, may be empty; NAME@cuda or NAME@cuda_dp runs the case with that build). Builds the CUDA FP32 and FP64
@@ -56,6 +57,55 @@ R = os.environ.get("CPPWRF_JOB_ROOT", "/content")  # colab_run.sh --attach: /con
 JOB = f"{R}/job"
 SRC = f"{R}/cppwrf"
 WR = f"{R}/data/wrf_runs"
+
+
+def fetch_release_data(tars, url, dest, log):
+    """CPPWRF_JOB_DATA_TARS (colab_run.sh --release-data): the cases' data tars of the cppwrf-data release (as
+    tools/kaggle/kg_proof_body.py fetch_tar): each tar's assets (NAME or NAME.partNNN in order) checked against the
+    release's SHA256SUMS and streamed into tar -x in DEST, then NAME.links where the release has one."""
+    import hashlib
+    sums = {}
+    for line in subprocess.run(["curl", "-fsSL", "--retry", "3", f"{url}/SHA256SUMS"], capture_output=True, text=True,
+                               check=True).stdout.splitlines():
+        if line.strip():
+            d, a = line.split()
+            sums[a.lstrip("*")] = d.lower()
+
+    def assets(name):
+        if name in sums:
+            return [name]
+        parts = sorted(a for a in sums if re.fullmatch(re.escape(name) + r"\.part\d+", a))
+        if not parts:
+            raise RuntimeError(f"DATA_FAILED {name}: not in SHA256SUMS")
+        return parts
+
+    def stream(names):
+        with open(os.path.join(JOB, log), "a") as f, subprocess.Popen(
+                ["tar", "--no-same-owner", "--ignore-zeros", "-xf", "-", "-C", dest], stdin=subprocess.PIPE) as tar:
+            for a in names:
+                part = f"{R}/data_part"
+                for attempt in range(3):
+                    rc = subprocess.call(["curl", "-fsSL", "--retry", "2", "--connect-timeout", "20", "--max-time", "900",
+                                          "-o", part, f"{url}/{a}"])
+                    if rc == 0 and hashlib.sha256(open(part, "rb").read()).hexdigest() == sums[a]:
+                        break
+                    time.sleep(8)
+                else:
+                    raise RuntimeError(f"DATA_FAILED {a} (download or SHA256)")
+                with open(part, "rb") as src:
+                    while chunk := src.read(1 << 24):
+                        tar.stdin.write(chunk)
+                os.remove(part)
+                f.write(f"data {a} sha256 ok\n")
+            tar.stdin.close()
+            if tar.wait():
+                raise RuntimeError(f"DATA_FAILED {names[0]} (unpack)")
+
+    for name in tars:
+        stream(assets(name))
+    for name in tars:
+        if name + ".links" in sums:
+            stream([name + ".links"])
 
 
 def sh(cmd, log, cwd=None, env=None):
@@ -411,8 +461,13 @@ def job(note):
 
     sh("apt-get -qq update && apt-get -qq install -y libnetcdf-dev > /dev/null", "setup.log")
     sh("pip -q install netCDF4 numpy", "setup.log")
+    rel = [t for t in os.environ.get("CPPWRF_JOB_DATA_TARS", "").split(",") if t]
     sh(f"rm -rf {SRC} {R}/data && mkdir -p {SRC} {R}/data && tar xzf {R}/src.tar.gz -C {SRC} "
-       f"&& tar xf {R}/data.tar -C {R}/data", "setup.log")
+       + ("" if rel else f"&& tar xf {R}/data.tar -C {R}/data"), "setup.log")
+    if rel:
+        t = time.time()
+        fetch_release_data(rel, os.environ["CPPWRF_JOB_DATA_URL"], f"{R}/data", "setup.log")
+        note(f"data: release tars {', '.join(rel)} ({time.time() - t:.0f} s)")
     nproc = int(out("nproc") or "4")
     bins = {}
     for name, dp in (("cuda", "OFF"), ("cuda_dp", "ON")):
