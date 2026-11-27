@@ -439,6 +439,10 @@ foreach(src ${CPPWRF_UNIT_TESTS})
   # OpenMP threads that spin while waiting stall the tests for hours on a loaded machine
   set_tests_properties(${name} PROPERTIES ENVIRONMENT "OMP_NUM_THREADS=2;OMP_WAIT_POLICY=passive")
 endforeach()
+# test_device_ieee checks the device arithmetic the strict builds' kernels rely on (a * b + c rounded twice): compiled
+# without FMA contraction in every CUDA build, the fast FP32 build's (--fmad=true for its kernels) included
+set_source_files_properties(${CMAKE_SOURCE_DIR}/tests/unit/test_device_ieee.cpp
+                            PROPERTIES COMPILE_OPTIONS "$<$<COMPILE_LANGUAGE:CUDA>:--fmad=false>")
 # test_libm_special also checks the C float functions an FP32 executable defines (src/core/glibc_mathf_host.cpp),
 # in every x86-64 build; exit 77 (skipped): a glibc other than 2.41, whose libm is not the reference
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
