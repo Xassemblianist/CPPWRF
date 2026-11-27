@@ -2,6 +2,7 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -49,6 +50,20 @@ class DomainRunner {
   void set_defer_output(bool d) { defer_output_ = d; }
   // two-way nests: the WRF-field view (WrfHistory) carries the physics feedback, also when no wrfout is written
   void set_need_history(bool h) { need_history_ = h; }
+  // Nests: only domain 1's restart alarm writes restart files (med_before_solve_io: "Only the parent initiates the
+  // restart writing"), med_restart_out writes every domain's at the start of domain 1's next step, after the nests'
+  // feedback and moves. This domain's own alarm still rings on its own clock (solve_em's restart_flag; its
+  // WRF_ALARM_ISRINGING_51 / SECS_TIL_NEXT_RING_51), but after_step writes no restart file: write_restart_by_parent
+  // does. parent_due(n): domain 1 writes restart files at the end of this domain's step n (snapshots for them).
+  void set_restart_by_parent(std::function<bool(long)> parent_due) { rst_parent_due_ = std::move(parent_due); }
+  // domain 1 wrote its restart files of this time (wrfrst: its alarm rang, wrfrst files too; else CPPWRF's own file of
+  // a last step only): this domain's of its last step
+  void write_restart_by_parent(bool wrfrst);
+  // the step of domain 1's last restart files (do_restart) and whether its alarm rang there (-1: none yet)
+  long restart_written_step() const { return rst_written_step_; }
+  bool restart_written_ring() const { return rst_written_ring_; }
+  // the alarm of domain 1 (set_restart_by_parent): whether restart files are written at the end of step n
+  bool restart_files_due(long n) const;
 
   // Prints completion statistics
   void finish();
@@ -72,8 +87,12 @@ class DomainRunner {
   std::string first_nonfinite() const;
   void do_snap(long n);
 
+  std::function<bool(long)> rst_parent_due_;  // set_restart_by_parent (empty: this domain writes its own files)
+  long rst_written_step_ = -1, last_step_ = -1;
+  bool rst_written_ring_ = false, rst_last_ring_ = false;  // rst_last_ring_: the own alarm rang at last_step_
 #ifdef CPPWRF_HAVE_NETCDF
-  void do_restart(long n, bool ring);
+  // ring: this domain's alarm rang at step n; wrfrst: write the wrfrst files (domain 1: ring)
+  void do_restart(long n, bool ring, bool wrfrst);
   void save_restart_file(const std::string& path, long step, double time_sec, bool ring);
   void load_restart_file(const std::string& path);
 #endif
@@ -147,6 +166,10 @@ class DomainRunner {
   // grid_fdda: AUXINPUT10_ALARM (gfdda_interval_m) rings as the auxinput4 one up to its StopTime, this run's start
   // + gfdda_end_h (aux10_stop_s_ < 0: none); a ring reads the analyses of that time from wrffdda_d0N
   double aux10_first_s_ = 0.0, aux10_stop_s_ = -1.0;
+  // resumed from a WRF restart file with WRF_ALARM_SECS_TIL_NEXT_RING_36 >= 0: input_wrf's WRFU_AlarmSet (RingInterval,
+  // RingTime, no StopTime) cleared the alarm's StopTime (ESMF_Alarm.F90: StopTimeSet = .FALSE.), it rings on past
+  // gfdda_end_h; CPPWRF's own file carries it on
+  bool aux10_no_stop_ = false;
   int aux10_ring_at_start_ = -1;
   long aux10_read_step_ = -1;
   bool aux10_on() const;

@@ -3346,32 +3346,31 @@ class WrfTranslator:
             # counted from the simulation start
             self.error("WRF restart = .true. is not translated: resume CPPWRF with --set run.restart_file=<wrfrst file> "
                        "and run.run_time counted from the simulation start.")
-        # restart files are written whenever restart_interval > 0 (Registry default 0), whatever restart is;
-        # a non-zero restart_interval_m takes precedence (share/set_timekeeping.F:400)
+        # restart files are written whenever the restart interval > 0 (Registry default 0), whatever restart is;
+        # set_timekeeping (share/set_timekeeping.F:395-410): restart_interval_m (restart_interval when 0) plus
+        # restart_interval_d, _h and _s, one interval (WRFU_TimeIntervalSet(D=, H=, M=, S=))
         restart_m = self.get_opt("time_control", "restart_interval_m", 0) or \
             self.get_opt("time_control", "restart_interval", 0)
-        for unit_key in ("restart_interval_s", "restart_interval_h", "restart_interval_d", "restart_begin",
-                         "restart_begin_s", "restart_begin_m", "restart_begin_h", "restart_begin_d",
+        restart_s = 86400 * (self.get_opt("time_control", "restart_interval_d", 0) or 0) + \
+            3600 * (self.get_opt("time_control", "restart_interval_h", 0) or 0) + 60 * (restart_m or 0) + \
+            (self.get_opt("time_control", "restart_interval_s", 0) or 0)
+        for unit_key in ("restart_begin", "restart_begin_s", "restart_begin_m", "restart_begin_h", "restart_begin_d",
                          "restart_begin_y"):
             if self.get_opt("time_control", unit_key, 0):
                 self.error(f"WRF {unit_key} is not supported; use restart_interval (minutes).")
         # main/module_wrf_top.F:416: WRF also writes a restart file of the initial state
         if self.get_opt("time_control", "write_restart_at_0h", False):
             self.error("WRF write_restart_at_0h = .true. is not supported.")
-        if restart_m and restart_m > 0:
+        if restart_s > 0:
             # the restart file of every domain (med_restart_out, output_restart) in NetCDF, named by rst_outname
             io_form_rst = self.get_opt("time_control", "io_form_restart", 2)
             if io_form_rst != 2:
                 self.error(f"WRF io_form_restart = {io_form_rst} is not supported; CPPWRF writes NetCDF (2).")
             self.check_outname("rst_outname", "wrfrst_d<domain>_<date>")
-            # nests: med_restart_out writes every domain when d01's restart alarm rings, each domain's own alarm
-            # (DomainRunner) rings at the same times only when the interval is a multiple of d01's time step
-            steps = restart_m * 60 / dt_val
-            if max_dom > 1 and abs(steps - round(steps)) > 1e-9 * steps:
-                self.error(f"WRF restart_interval = {restart_m} min is not a multiple of time_step = {dt_val:g} s "
-                           "in a nested run: not supported.")
+            # nests: med_restart_out writes every domain when d01's restart alarm rings (each domain's own alarm
+            # rings on its own clock: restart_flag, WRF_ALARM_SECS_TIL_NEXT_RING_51)
             sections["restart"] = {
-                "interval": int(restart_m * 60)
+                "interval": int(restart_s)
             }
 
         # 14. Nested Domains [domains] and [d02]..[d0N]

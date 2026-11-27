@@ -324,6 +324,12 @@ void check_native_restart(const std::string& path, const io_netcdf::RestartMeta&
   if (f.commit != CPPWRF_COMMIT && !cfg.get_bool("run.restart_any_commit", false))
     throw std::runtime_error(path + ": written by commit " + f.commit + ", this build is " + CPPWRF_COMMIT +
                              ": resume from the run's wrfrst file (or set run.restart_any_commit = true)");
+  // the build's REAL (CPPWRF_DOUBLE): the same commit builds FP32 and FP64; the file's NC_FLOAT / NC_DOUBLE fields
+  // would be converted on reading
+  const double bytes = f.scalar("REAL_BYTES", 0.0);
+  if (bytes != 0.0 && bytes != double(sizeof(real)))
+    throw std::runtime_error(path + ": written by a " + (bytes == 4.0 ? "FP32" : "FP64") + " build, this build is " +
+                             (sizeof(real) == 4 ? "FP32" : "FP64") + " (CPPWRF_DOUBLE): resume from the run's wrfrst file");
   const std::string mine = restart_options(cfg);
   if (f.options == mine) return;
   const auto a = option_lines(f.options), b = option_lines(mine);
@@ -393,6 +399,7 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   }
   // the step the run started at (also without column physics: the history's START_DATE and alarm 55 count from it)
   meta.scalars.emplace_back("RUN_START_STEP", double(run_start_step_));
+  meta.scalars.emplace_back("REAL_BYTES", double(sizeof(real)));  // check_native_restart
   // the alarms as this run has them: history and auxhist3 (a run resumed from a wrfrst file has the file's) with the
   // intervals of its configuration (output.out_interval, phys.auxhist3_interval), the restart alarm's PrevRingTime
   // and pending one-shot RingTime, the auxinput4 / auxinput10 schedules and whether this step's record was read
@@ -410,6 +417,7 @@ void DomainRunner::save_restart_file(const std::string& path, long step, double 
   meta.scalars.emplace_back("AUX4_READ", aux4_read_step_ == step ? 1.0 : 0.0);
   meta.scalars.emplace_back("AUX10_FIRST_S", aux10_first_s_);
   meta.scalars.emplace_back("AUX10_READ", aux10_read_step_ == step ? 1.0 : 0.0);
+  meta.scalars.emplace_back("AUX10_NO_STOP", aux10_no_stop_ ? 1.0 : 0.0);
 
   const io_netcdf::DType dt = sizeof(real) == 8 ? io_netcdf::DType::F64 : io_netcdf::DType::F32;
   std::vector<std::vector<real>> bufs;
@@ -711,6 +719,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
     if (meta.scalar("AUX4_READ", 0.0) != 0.0) aux4_read_step_ = meta.step;
     aux10_first_s_ = meta.scalar("AUX10_FIRST_S", aux10_first_s_);
     if (meta.scalar("AUX10_READ", 0.0) != 0.0) aux10_read_step_ = meta.step;
+    aux10_no_stop_ = meta.scalar("AUX10_NO_STOP", 0.0) != 0.0;
   }
 
   if (meta.nx != g.nx || meta.ny != g.ny || meta.nz != g.nz) {
@@ -733,7 +742,9 @@ void DomainRunner::load_restart_file(const std::string& path) {
         rst_ring_set_ = true;
         rst_ring_t_ = wrf_time::make(rsecs);
       } else {
-        rst_ring_time_ = meta.time_sec + double(rsecs);
+        // the restart time: start_step time steps (input_wrf's curtime, the resumed clock's start; the file's XTIME is
+        // REAL, rounded in a real*4 file: 610 s = 10.166667 min = 610.0000191 s, past the step's tolerance)
+        rst_ring_time_ = double(start_step) * g.dt + double(rsecs);
       }
     }
     if (!wrf_file && native_rst_iv_same_) rst_ring_time_ = native_rst_ring_time_;
@@ -802,6 +813,7 @@ void DomainRunner::load_restart_file(const std::string& path) {
     const auto [ring10, secs10] = wrf_alarm(path, 36);  // AUXINPUT10_ALARM (grid_fdda)
     if (secs10 >= 0 && secs10 < 1700000000) aux10_first_s_ = double(start_step) * g.dt + double(secs10);
     aux10_ring_at_start_ = ring10 == 1 ? 1 : 0;
+    if (secs10 >= 0) aux10_no_stop_ = true;  // input_wrf's WRFU_AlarmSet without StopTime
     if (aux3_iv_ > 0) {  // AUXHIST3_ALARM: an output alarm as the history one (share/input_wrf.F:290-325)
       const auto [ring3, secs3] = wrf_alarm(path, 4);
       if (secs3 >= 1700000000) {
@@ -1135,7 +1147,8 @@ bool DomainRunner::start() {
   if (aux10_on()) {  // set_timekeeping: StopTime = the run's start + auxinput10_end_h (none without an end)
     const int end_h = m_.suite->options().fdda.end_h;
     // the run's start: this one's, or (resumed from CPPWRF's own file) that of the run that wrote the file
-    aux10_stop_s_ = end_h > 0 ? double(m_.suite->run_start_step) * g.dt + double(end_h) * 3600.0 : -1.0;
+    aux10_stop_s_ = end_h > 0 && !aux10_no_stop_ ? double(m_.suite->run_start_step) * g.dt + double(end_h) * 3600.0
+                                                  : -1.0;
     if (wrfout_)
       wrfout_->set_auxinput10_alarm(double(m_.suite->options().fdda.interval_m) * 60.0, aux10_first_s_, aux10_stop_s_);
   }
@@ -1247,7 +1260,8 @@ void DomainRunner::wrf_timing_line(const std::string& what, std::chrono::steady_
 
 void DomainRunner::after_solve(long n) {
 #ifdef CPPWRF_HAVE_NETCDF
-  if (write_wrfout_ && wrfout_ && (hist_due(n) || n == m_.nsteps || rst_due(n) || aux3_due(n))) wrfout_->after_solve(n);
+  if (write_wrfout_ && wrfout_ && (hist_due(n) || n == m_.nsteps || rst_due(n) || restart_files_due(n) || aux3_due(n)))
+    wrfout_->after_solve(n);
   else if (wrfout_ && wrfout_->move_build()) wrfout_->move_track(n);  // moving nests: every step's th_phy_m_t0
 #else
   (void)n;
@@ -1295,7 +1309,7 @@ void DomainRunner::before_step(long n) {
 #endif
   if (m_.adapt) adapt_before_step(n);
 #ifdef CPPWRF_HAVE_NETCDF
-  if (write_wrfout_ && wrfout_ && (hist_due(n) || n == m_.nsteps || rst_due(n) || aux3_due(n)))
+  if (write_wrfout_ && wrfout_ && (hist_due(n) || n == m_.nsteps || rst_due(n) || restart_files_due(n) || aux3_due(n)))
     wrfout_->before_step(n);
 #endif
   if (pending_ >= 0) {  // deferred frame of the previous step (set_defer_output)
@@ -1371,9 +1385,23 @@ bool DomainRunner::reads_state(long n) const {
   if (m_.adapt || n == m_.nsteps || (nonfinite_every_step_ && !nonfinite_seen_)) return true;
   if (n % diag_iv_ == 0 || n % out_iv_ == 0 || hist_due(n) || aux3_due(n)) return true;
 #ifdef CPPWRF_HAVE_NETCDF
-  if (rst_due(n)) return true;
+  if (rst_due(n) || restart_files_due(n)) return true;
 #endif
   return false;
+}
+
+bool DomainRunner::restart_files_due(long n) const { return rst_parent_due_ ? rst_parent_due_(n) : rst_due(n); }
+
+void DomainRunner::write_restart_by_parent(bool wrfrst) {
+#ifdef CPPWRF_HAVE_NETCDF
+  const long n = last_step_;
+  if (n < 0 || (rst_end_ > 0 && n > rst_end_)) return;
+  // domain 1's last step without a ring: CPPWRF's own restart file only (restart.interval > 0), as after_step writes
+  if (!wrfrst && !(rst_iv_s_ > 0 && n == m_.nsteps)) return;
+  do_restart(n, rst_last_ring_, wrfrst);
+#else
+  (void)wrfrst;
+#endif
 }
 
 bool DomainRunner::after_step(long n) {
@@ -1417,8 +1445,13 @@ bool DomainRunner::after_step(long n) {
   if (ring && !last && domain_tag_ == "d01" && m_.suite && m_.suite->options().sst_update == 1 && aux4_due(n))
     read_aux4(n);
   if (ring && !last && domain_tag_ == "d01" && aux10_on() && aux10_due(n)) read_aux10(n);
-  if ((ring || (rst_iv_s_ > 0 && last)) && (rst_end_ <= 0 || n <= rst_end_)) {
-    do_restart(n, ring);
+  last_step_ = n;
+  rst_last_ring_ = ring;
+  // a nest's files: write_restart_by_parent, when domain 1 writes its own
+  if (!rst_parent_due_ && (ring || (rst_iv_s_ > 0 && last)) && (rst_end_ <= 0 || n <= rst_end_)) {
+    do_restart(n, ring, ring);
+    rst_written_step_ = n;
+    rst_written_ring_ = ring;
   }
 #endif
   return true;
@@ -1575,7 +1608,7 @@ bool DomainRunner::rst_one_shot(long n) const {
   return d >= -eps && d < m_.g.dt - eps;
 }
 
-void DomainRunner::do_restart(long n, bool ring) {
+void DomainRunner::do_restart(long n, bool ring, bool wrfrst) {
 #ifdef CPPWRF_HAVE_NETCDF
   wrf_io::output_queue::check();  // no restart file after a writer error already known
 #endif
@@ -1588,8 +1621,10 @@ void DomainRunner::do_restart(long n, bool ring) {
   // to the next ring as interval - (time - PrevRingTime) in whole seconds (share/output_wrf.F:413-435). Only with
   // WRF output: a nest's feedback also builds the history writer with output.format = native, but then its
   // before_step / after_solve snapshots (T before the feedback, P_HYD, ...) are not taken
-  if (!write_wrfout_) ring = false;
-  if (wrfout_ && ring && m_.adapt) {
+  if (!write_wrfout_) wrfrst = false;
+  // WRF_ALARM_ISRINGING_51: this domain's own alarm (a nest's files are written at domain 1's ring)
+  if (wrfout_) wrfout_->set_restart_ringing(ring ? 1 : 0);
+  if (wrfout_ && wrfrst && m_.adapt) {
     // output_wrf.F:413-435: interval - (current time - PrevRingTime) in whole seconds; the history alarm rang at this
     // step only when it is the last one (med_restart_out of a later step runs after med_hist_out turned it off)
     const wrf_time::Interval t = t_end_[std::size_t(n - start_step)];
@@ -1599,13 +1634,13 @@ void DomainRunner::do_restart(long n, bool ring) {
     wrfout_->set_history_alarm(hring ? 1 : 0, hsecs);
     wrfout_->write_restart(n, time_s(n), 0.0, 0.0,
                            rst_iv_s_ > 0 ? double(rst_iv_t_.S - (t - rst_prev_t_).S) : 1700000000.0, aux4_first_s_);
-  } else if (wrfout_ && ring) {
+  } else if (wrfout_ && wrfrst) {
     wrfout_->set_exact_time(elapsed(n), false);
     wrfout_->set_auxhist3_alarm(double(aux3_iv_) * m_.g.dt, double(aux3_ref_) * m_.g.dt);
     wrfout_->write_restart(n, n * m_.g.dt, double(hist_iv_) * m_.g.dt, double(hist_ref_) * m_.g.dt,
                            double(rst_secs_to_ring(n, true)), aux4_first_s_);
   }
-  if (wrf_timing_ && wrfout_ && ring) wrf_timing_line(writing("restart", domain_tag_), t_rst);
+  if (wrf_timing_ && wrfout_ && wrfrst) wrf_timing_line(writing("restart", domain_tag_), t_rst);
 }
 #endif
 

@@ -684,7 +684,12 @@ bool WrfHistory::value(const std::string& name, const std::string& varname, cons
   }
   if (name == "SAVE_TOPO_FROM_REAL") { out.assign(1, 0.0); return true; }
   if (name == "DTBC") {  // time since the last boundary update (spec_bdyupdate's dtbc)
-    // nests: med_nest_force sets dtbc = 0 at every parent step
+    // nests: med_nest_force sets dtbc = 0 at every parent step and solve_em adds dt in REAL (the model's dtbc:
+    // 3 * real(50 / 3) of a nest of ratio 3 under dt 50 s; the time since the parent step in double is 1 ulp off)
+    if (wc_->domain() > 1 && m_.bc) {
+      out.assign(1, double(real(m_.bc->dtbc)));
+      return true;
+    }
     // an ideal domain (no specified boundaries) never resets it: solve_em's dtbc + dt from the start
     const double iv = wc_->domain() > 1 ? m_.g.dt * std::max(1, wc_->integer("parent_time_step_ratio"))
                       : m_.g.bc_x == BC::Specified ? wc_->num("interval_seconds") : 0.0;
@@ -1415,7 +1420,9 @@ void WrfHistory::write_restart(long step, double time_sec, double history_interv
   wrf_io::DomainAtts d = domain_atts();
   // output_wrf restart_only: the alarms WRF created (all but 26 and 54) at this time; the history alarm has
   // just rung (or rings every history_interval), the restart alarm is ringing, 55 counts from the run's start
-  const long el = std::lround(time_sec);
+  // the time's whole seconds: output_wrf's WRFU_TimeIntervalGet(curtime - PrevRingTime, S=) truncates the fraction
+  // of the exact clock (a time step of 60 / 11 s: 114 6/11 s is 114, not 115)
+  const long el = has_exact_ ? long(exact_.S) : std::lround(time_sec);
   // d01's boundary alarm at a boundary time: med_restart_out runs before med_latbound_in reads the next boundary
   // values, so the alarm is ringing, and the step before set just_read_boundary = Is_alarm_tstep (solve_em.F:5103)
   const bool specified = g.bc_x == BC::Specified || g.bc_y == BC::Specified;
@@ -1460,7 +1467,7 @@ void WrfHistory::write_restart(long step, double time_sec, double history_interv
       secs = int(lsince < 0 ? iv - (el - std::lround(restart_sec_)) : iv - (el - (last - lsince % iv)));
       if ((step == m_.nsteps || d.grid_id > 1) && since >= 0 && since % iv == 0 && last == el) ring = 1;
     } else if (a == 51) {
-      ring = 1;
+      ring = rst_ringing_;
       secs = int(std::lround(restart_secs_to_ring));
     } else if (a == 52) {
       // set_timekeeping creates d01's boundary alarm ringing; only med_latbound_in of a specified boundary (real

@@ -99,6 +99,9 @@ class WrfHistory {
     exact_adaptive_ = adaptive;
   }
   void set_history_alarm(int ring, long secs) { hist_alarm_ring_ = ring; hist_alarm_secs_ = secs; }
+  // WRF_ALARM_ISRINGING_51 of the next write_restart: the domain's own restart alarm rang at that step (a nest's files
+  // are written when domain 1's alarm rings, its own may not)
+  void set_restart_ringing(int ring) { rst_ringing_ = ring; }
   // the file of the last write (write, write_auxhist3, write_restart), for the log
   const std::string& last_path() const { return last_path_; }
 
@@ -188,6 +191,7 @@ class WrfHistory {
   double aux3_iv_s_ = 0, aux3_ref_s_ = 0;
   int jrep_ = 1;  // output rows per model row: 2 for ideal x-z runs (ny = 1)
   double auxinput4_interval_s_ = 0;  // sst_update: the AUXINPUT4 alarm
+  int rst_ringing_ = 1;  // set_restart_ringing
   double aux10_iv_s_ = 0, aux10_ref_s_ = 0, aux10_stop_s_ = -1;  // grid_fdda: the AUXINPUT10 alarm
   int wrfinput_id_ = -1;
   std::vector<double> p_hyd0_;  // P_HYD of the initial state (start_em)

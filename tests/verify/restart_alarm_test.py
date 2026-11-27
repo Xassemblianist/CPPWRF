@@ -193,6 +193,31 @@ def main():
     _, got = run("dt60_11", ["--set", f"time.dt={float(fdt)!r}", "--set", "time.dt_den=11",
                              "--set", "restart.interval=55", "--set", "run.run_time=120"])
     check("time step 60 / 11 s, restart.interval = 55", got, wrf_rings(fdt, 55, 120))
+    # and history every 60 s (11 steps): output_wrf's WRF_ALARM_SECS_TIL_NEXT_RING_01 = 60 - (time - PrevRingTime) in
+    # whole seconds of the exact clock, truncated: 60 - 54 = 6 at 114 6/11 s (60 at 60 s, where it rang); WRF 4.8.0's
+    # wrfrst files of N3s's d01 with time_step 5 + 5/11, history_interval_s 60, restart_interval_s 55: 60 and 6
+    d, got = run("dt60_11_hist", ["--set", f"time.dt={float(fdt)!r}", "--set", "time.dt_den=11",
+                                  "--set", "restart.interval=55", "--set", "run.run_time=120",
+                                  "--set", "output.out_interval=11"])
+    hist = []
+    for f in sorted(glob.glob(os.path.join(d, "wrfrst_d01_*"))):
+        with netCDF4.Dataset(f) as nc:
+            hist.append(int(nc.getncattr("WRF_ALARM_SECS_TIL_NEXT_RING_01")))
+    check("time step 60 / 11 s, history every 60 s: WRF_ALARM_SECS_TIL_NEXT_RING_01", hist,
+          [60 - (math.floor(t - 60 * math.floor(t / 60)) if t % 60 else 0) for t, _ in wrf_rings(fdt, 55, 120)])
+
+    # a run resumed from a wrfrst file of a time that is not a whole minute: input_wrf's RingTime counts from the
+    # restart time (the resumed clock's start), not from XTIME (minutes, REAL: 516 s = 8.6 min, 8.6000004 in real*4,
+    # 516.0000229 s, which missed the ring of 1032 s by more than the step's tolerance in the FP32 build)
+    d, got = run("iv516", ["--set", "restart.interval=516", "--set", "run.run_time=1104"])
+    check("restart.interval = 516, (time, seconds to the next ring)", got, wrf_rings(dt, 516, 1104))
+    f516 = glob.glob(os.path.join(d, "wrfrst_d01_*_00:08:36"))
+    if not f516:
+        print("FAIL no restart file of 516 s to resume from")
+        return 1
+    _, got = run("resumed_516", ["--set", f"run.restart_file={f516[0]}", "--set", "restart.interval=120",
+                                 "--set", "run.run_time=1104"])
+    check("run resumed from 516 s with restart.interval = 120", got, wrf_rings(dt, 120, 1104, 516, 516))
     return 1 if fails else 0
 
 
