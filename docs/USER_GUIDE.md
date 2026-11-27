@@ -1024,6 +1024,14 @@ runtime requests can get an account's Colab runtimes blocked as abusive):
 - The runtime is deleted when the tool exits for any reason (success, error, Ctrl-C, SIGTERM); `--keep` leaves a
   runtime that came up running (`tools/colab/colab_api.py stop -s NAME` deletes it). `tools/colab/colab_guard.sh
   status` prints the lock, the project's runtimes and the requests of the last day.
+- Creating G4, A100 or L4 runtimes from the API currently fails (a Google bug; T4 still works), so the usual way is
+  to open a GPU runtime in the browser (a notebook, Runtime > Change runtime type > GPU, Connect) and attach to it:
+  `colab_run.sh --attach [RUNTIME]` (or `ATTACH=1` for the `cj_start` tools). Without a name the tool takes the only
+  GPU runtime that is not `cppwrf-*` or `cppmpas-*` and that no other tool has used in the last 10 minutes, and
+  refuses when there are several (`tools/colab/colab_api.py runtimes` lists them; `CPPWRF_COLAB_RUNTIME` names one).
+  The tool opens its own kernel session there, keeps its files in `/content/cppwrf_<session>`, and on exit kills
+  its processes, removes that directory and closes its session. An attached runtime is never deleted.
+  `colab_run.sh --gpu T4` creates a runtime as before; other accelerators need `--create`.
 
 The suite's cases are defined in `tests/verify/cases/` (one file per group, `NN_<group>.py`, loaded in the order of
 their names; `wrf_suite.py --list` prints them all). A group file defines `CASES`, `DATA` (the data tars each case
