@@ -360,15 +360,21 @@ def run_check(case, d):
 
 
 def run_compare(a, b, rtol):
-    """Same case, different backend or precision: final-snapshot relative L2 differences."""
+    """Same case, different backend or precision: final-snapshot relative L2 differences. Both runs must have
+    written the same snapshot steps (a run that stopped early compares nothing past its last step), past step 0,
+    at the same times, with at least one field compared."""
     rep = Report(f"compare {a} vs {b}")
     sa, sb = list_steps(a), list_steps(b)
     common = sorted(set(sa) & set(sb))
-    if not common:
-        rep.add("steps", "FAIL", "no common snapshot steps")
+    if not common or sorted(sa) != sorted(sb) or common[-1] == 0:
+        rep.add("steps", "FAIL", "no common snapshot steps" if not common else
+                f"snapshot steps differ: only {a}: {sorted(set(sa) - set(sb))}, only {b}: {sorted(set(sb) - set(sa))}"
+                if sorted(sa) != sorted(sb) else "only the initial snapshot (step 0)")
         rep.print()
         return rep
     A, B = read_snap(a, common[-1]), read_snap(b, common[-1])
+    if A.get("_time") != B.get("_time"):
+        rep.add("time", "FAIL", f"step {common[-1]}: time {A.get('_time')} vs {B.get('_time')}")
     for k in sorted(set(A) ^ set(B)):  # a variable one run writes and the other does not
         rep.add(k, "FAIL", f"only in {a if k in A else b}")
     for k in sorted(A):
@@ -383,6 +389,8 @@ def run_compare(a, b, rtol):
             scale = np.linalg.norm(A[k] - ref)
         rel = np.linalg.norm(A[k] - B[k]) / scale if scale > 0 else float(np.linalg.norm(A[k] - B[k]))
         rep.check(k, rel <= rtol, f"rel L2 diff {rel:.3e} (tol {rtol:.0e}) step {common[-1]}")
+    if not any(not k.startswith("_") and k in B for k in A):
+        rep.add("fields", "FAIL", "no field compared")
     rep.print()
     return rep
 
@@ -405,7 +413,8 @@ def run_convergence(dirs):
 
 
 def run_wrf(wrfout, d, rms_tol):
-    """theta' of a CPPWRF x-z run against a WRF wrfout file at every common output time."""
+    """theta' of a CPPWRF x-z run against a WRF wrfout file at every WRF output time (each must have a CPPWRF
+    snapshot: a run that stopped early fails)."""
     import netCDF4
     rep = Report(f"wrf {os.path.basename(wrfout)} vs {d}")
     ds = netCDF4.Dataset(wrfout)
@@ -424,6 +433,9 @@ def run_wrf(wrfout, d, rms_tol):
     dz = float(np.abs(zc - z_wrf).max())
     rep.check("grid_z", dz <= TOL["wrf_grid_z"], f"max |z_cpp - z_wrf| {dz:.2e} m")
     n = 0
+    missing = [tw for tw in xt if tw not in snaps]
+    if missing:
+        rep.add("times", "FAIL", f"no CPPWRF snapshot at WRF output times {[float(x) for x in missing]} s")
     for it, tw in enumerate(xt):
         if tw not in snaps:
             continue

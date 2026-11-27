@@ -6,7 +6,9 @@
 
 Per output time: max abs / relative L2 difference of U, V, W, PH (full), MU (full), P (full),
 THM (theta_m), QVAPOR (and the hydrometeors, RAINNC, REFL_10CM when present), over the whole domain and over the interior (N points away from the
-lateral boundaries, default 6). The caller sets the tolerances. Invalid comparisons exit nonzero.
+lateral boundaries, default 6). The caller sets the tolerances. Invalid comparisons exit nonzero, and so does a
+NaN or infinity in any compared field of either run at any matched time (the table is printed first): the caller
+gates only some fields at one time, and a non-finite value is never a tolerance question.
 --y-slab: a periodic-y slab that WRF ran with e_sn = 3 (two mass rows, three V rows) and CPPWRF with one row: every
 WRF row must equal the first bit for bit, and the first row is compared; any other shape difference still fails.
 """
@@ -39,6 +41,7 @@ def main(wrfout, d, inner, y_slab=False):
         snaps[stamp] = step
     if not set(xt) & snaps.keys():
         sys.exit("no matched WRF and CPPWRF snapshot times")
+    nonfinite = []
     print(f"{'t':>6} {'var':>6} {'max|d|':>11} {'relL2':>24} {'relL2_in':>10} {'max|wrf|':>10}")
     for it, t in enumerate(xt):
         if t not in snaps:
@@ -84,11 +87,17 @@ def main(wrfout, d, inner, y_slab=False):
                 a = a[..., :1, :]
             if a.shape != b.shape:
                 sys.exit(f"t={t:g} {k}: WRF shape {a.shape} differs from CPPWRF shape {b.shape}")
+            for side, x in (("WRF", a), ("CPPWRF", b)):
+                n = int(np.size(x) - np.isfinite(x).sum())
+                if n:
+                    nonfinite.append(f"t={t:g} {k}: {n} non-finite values in {side}")
             e = b - a
             sl = (Ellipsis, slice(inner, -inner), slice(inner, -inner))
             rl = np.sqrt(np.sum(e * e) / max(np.sum(a * a), 1e-300))
             ri = np.sqrt(np.sum(e[sl] ** 2) / max(np.sum(a[sl] ** 2), 1e-300))
             print(f"{t:6.17g} {k:>6} {np.abs(e).max():11.3e} {rl:24.17g} {ri:10.2e} {np.abs(a).max():10.3e}")
+    if nonfinite:
+        sys.exit("; ".join(nonfinite))
 
 
 if __name__ == "__main__":

@@ -7,9 +7,11 @@ and the same metadata check. It adds, per variable over the common frames: the f
 RMSE, the largest distance in units in the last place (ulp) and the first differing point.
 
   cppwrf-compare A B [-v VAR,VAR] [--exact] [--json] [--no-metadata]
-A and B: two directories (each stream and domain found in both is compared: wrfout_d01, wrfout_d02, wrfrst_d01,
-...), two files, or two glob patterns. Exit status: 0 identical, 1 different, 2 an error (no common frame, missing
-files)."""
+A and B: two directories (each stream and domain: wrfout_d01, wrfout_d02, wrfrst_d01, ..., also in a dNN/
+subdirectory, CPPWRF's nests; a stream on one side only is a difference), two files, or two glob patterns. Every
+variable with a Time dimension over the common frames, and those without one in every pair of files; the variable
+lists and metadata of every pair of files. Duplicate Times, files without records and a comparison without any
+variable are differences. Exit status: 0 identical, 1 different, 2 an error (no common frame, missing files)."""
 import argparse
 import glob
 import importlib
@@ -70,11 +72,13 @@ class StreamResult:
     only_vars_b: List[str] = field(default_factory=list)
     metadata: List[str] = field(default_factory=list)
     variables: List[VarResult] = field(default_factory=list)
+    records: List[str] = field(default_factory=list)  # duplicate Times, files without records
 
     @property
     def identical(self) -> bool:
         return (bool(self.common_times) and not self.only_a and not self.only_b and not self.only_vars_a
-                and not self.only_vars_b and not self.metadata and all(v.identical for v in self.variables))
+                and not self.only_vars_b and not self.metadata and not self.records and bool(self.variables)
+                and all(v.identical for v in self.variables))
 
 
 def _ordered(x: np.ndarray) -> np.ndarray:
@@ -101,9 +105,13 @@ def ulp_distance(a: np.ndarray, b: np.ndarray) -> np.ndarray:
 
 
 def _streams(path: str) -> Dict[str, List[str]]:
-    """{stream_dNN: files} of a directory, a file or a glob pattern."""
+    """{stream_dNN: files} of a directory (and its dNN/ subdirectories, where CPPWRF writes a nest's files), a file
+    or a glob pattern."""
     if os.path.isdir(path):
         files = [os.path.join(path, f) for f in os.listdir(path)]
+        files += [os.path.join(path, d, f) for d in os.listdir(path)
+                  if re.fullmatch(r"d\d\d", d) and os.path.isdir(os.path.join(path, d))
+                  for f in os.listdir(os.path.join(path, d))]
     else:
         files = glob.glob(path) or ([path] if os.path.exists(path) else [])
     out: Dict[str, List[str]] = {}
@@ -123,6 +131,14 @@ def pairs(a: str, b: str) -> List[Tuple[str, List[str], List[str]]]:
     return [(k, sa[k], sb[k]) for k in sorted(set(sa) & set(sb))]
 
 
+def unpaired(a: str, b: str) -> Tuple[List[str], List[str]]:
+    """The streams (stream_dNN) of directory a only and of directory b only (none for files or patterns)."""
+    if not (os.path.isdir(a) or os.path.isdir(b)):
+        return [], []
+    sa, sb = _streams(a), _streams(b)
+    return sorted(set(sa) - set(sb)), sorted(set(sb) - set(sa))
+
+
 def compare_stream(label: str, files_a: Sequence[str], files_b: Sequence[str], variables: Optional[Sequence[str]] = None,
                    metadata: bool = True) -> StreamResult:
     """Every variable of every frame both have (by Times); one frame of one variable in memory at a time."""
@@ -130,23 +146,35 @@ def compare_stream(label: str, files_a: Sequence[str], files_b: Sequence[str], v
     res = StreamResult(label, list(files_a), list(files_b))
     opened: list = []
     try:
-        A, B = ex.frames(files_a, opened), ex.frames(files_b, opened)
+        dup, empty = [], []
+        A, B = ex.frames(files_a, opened, dup, empty), ex.frames(files_b, opened, dup, empty)
+        res.records = [f"duplicate Times {d}" for d in dup] + [f"zero records in {f}" for f in empty]
         common = sorted(set(A) & set(B))
         res.common_times, res.only_a, res.only_b = common, sorted(set(A) - set(B)), sorted(set(B) - set(A))
         if not common:
             return res
-        da, db = A[common[0]][0], B[common[0]][0]
-        res.only_vars_a = sorted(v for v in da.variables if v not in db.variables)
-        res.only_vars_b = sorted(v for v in db.variables if v not in da.variables)
-        if metadata:
-            res.metadata = ex.metadata(da, db)
-        names = [v for v in db.variables if v in da.variables and "Time" in db[v].dimensions and v != "Times"
-                 and (not variables or v in variables)]
+        file_pairs = list(dict.fromkeys((A[t][0], B[t][0]) for t in common))  # every pair of files, frame order
+        for da, db in file_pairs:
+            res.only_vars_a += [v for v in da.variables if v not in db.variables and v not in res.only_vars_a]
+            res.only_vars_b += [v for v in db.variables if v not in da.variables and v not in res.only_vars_b]
+            if metadata:
+                res.metadata += [m for m in ex.metadata(da, db) if m not in res.metadata]
+        res.only_vars_a.sort()
+        res.only_vars_b.sort()
+        # a variable is compared in the frames whose files both hold it (one missing from a file is listed above)
+        names = list(dict.fromkeys(v for da, db in file_pairs for v in db.variables
+                                   if v in da.variables and v != "Times" and (not variables or v in variables)))
         for v in names:
+            first_b = next(db for _, db in file_pairs if v in db.variables)
+            if "Time" not in first_b[v].dimensions:
+                res.variables.append(_static(ex, v, file_pairs))
+                continue
             r = VarResult(v)
             sq, n_fin = 0.0, 0
             for t in common:
                 (a, ta), (b, tb) = A[t], B[t]
+                if v not in a.variables or v not in b.variables:
+                    continue
                 if a[v].dtype.kind == "S" or b[v].dtype.kind == "S":
                     r.frames_compared += 1
                     if ex.text(a[v], ta) != ex.text(b[v], tb):
@@ -193,6 +221,26 @@ def compare_stream(label: str, files_a: Sequence[str], files_b: Sequence[str], v
     return res
 
 
+def _static(ex, v: str, file_pairs) -> VarResult:
+    """A variable without a Time dimension, in every pair of files that both hold it."""
+    r = VarResult(v)
+    for a, b in file_pairs:
+        if v not in a.variables or v not in b.variables:
+            continue
+        x, y = np.asarray(a[v][:]), np.asarray(b[v][:])
+        r.frames_compared += 1
+        if x.shape != y.shape or a[v].dtype != b[v].dtype:
+            r.note = f"(no Time dimension) shape/type {x.shape} {a[v].dtype} vs {y.shape} {b[v].dtype}"
+            break
+        r.points += x.size
+        dif = ex.describe(x, y)
+        if dif:
+            r.frames_differing += 1
+            r.points_differing += int(ex.differ(x, y).sum()) if x.dtype.kind in "fiub" else 1
+            r.first = r.first or f"(no Time dimension) {dif}"
+    return r
+
+
 def format_stream(r: StreamResult, all_vars: bool = False) -> str:
     out = [f"== {r.label}: {len(r.common_times)} common frames ({len(r.files_a)} vs {len(r.files_b)} files)"]
     if r.only_a or r.only_b:
@@ -201,6 +249,10 @@ def format_stream(r: StreamResult, all_vars: bool = False) -> str:
         out.append(f"   variables only in A: {r.only_vars_a or '-'}; only in B: {r.only_vars_b or '-'}")
     for m in r.metadata:
         out.append(f"   metadata: {m}")
+    for m in r.records:
+        out.append(f"   records: {m}")
+    if r.common_times and not r.variables:
+        out.append("   no variable compared")
     diff = [v for v in r.variables if not v.identical]
     if diff:
         out.append(f"   {'variable':12s} {'frames':>9s} {'points':>12s} {'max|d|':>10s} {'rmse':>10s} {'max ulp':>10s}  first")
@@ -241,6 +293,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         return 2
     variables = a.variables.split(",") if a.variables else None
     results, status = [], 0
+    only_a, only_b = unpaired(a.a, a.b)
+    if only_a or only_b:
+        status = 1
+        if not a.json:
+            print(f"== streams only in A: {only_a or '-'}; only in B: {only_b or '-'}", flush=True)
     for label, fa, fb in ps:
         r = compare_stream(label, fa, fb, variables, metadata=not a.no_metadata)
         results.append(r)
@@ -253,7 +310,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if a.exact and status:
             break
     if a.json:
-        print(json.dumps([asdict(r) | {"identical": r.identical} for r in results], indent=1))
+        print(json.dumps([asdict(r) | {"identical": r.identical} for r in results]
+                         + [{"label": k, "only_in": side, "identical": False}
+                            for side, ks in (("A", only_a), ("B", only_b)) for k in ks], indent=1))
     else:
         print("IDENTICAL" if status == 0 else ("DIFFERENT" if status == 1 else "ERROR: a stream has no common frame"))
     return status

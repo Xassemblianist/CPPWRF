@@ -129,7 +129,7 @@ class HarnessMutations(ScratchMutationCase):
                     self.assertIn(diagnostic, msg)
 
     def run_chain(self, name, *, omit_final=False, omit_domain=False, omit_wrf_final=False,
-                  extra_resumed=False, bad_alarm=False):
+                  extra_resumed=False, bad_alarm=False, split_wrf=False):
         case = next(c for c in wrf_suite.CASES if c[0] == name)
         _, _, cfg, all_sets, refs, end, _ = case
         mid, interval, native, _ = wrf_suite.chain_at(all_sets)
@@ -141,7 +141,11 @@ class HarnessMutations(ScratchMutationCase):
         if native:  # The WRF reference can contain extra frames between CPPWRF outputs.
             wrf_times = (*wrf_times[:-1], int(mid) + 60, wrf_times[-1])
         refdir = self.root / name / "ref"
-        ref = fixture(refdir, wrf_times[:-1] if omit_wrf_final else wrf_times)
+        wrf_times = wrf_times[:-1] if omit_wrf_final else wrf_times
+        if split_wrf:  # WRF's stream in two files (frames_per_outfile): the second named by its first frame
+            fixture(refdir, wrf_times[len(wrf_times) // 2:])
+            wrf_times = wrf_times[:len(wrf_times) // 2]
+        ref = fixture(refdir, wrf_times)
         if nested:
             refs = {"d01": str(ref), "d02": str(fixture(refdir, cadence["d02"], domain="d02"))}
         else:
@@ -210,6 +214,82 @@ class HarnessMutations(ScratchMutationCase):
         self.assertIn("only-cppwrf", "\n".join(bad))
         self.assertIn(ALARM_51, "\n".join(bad))
         self.assertIn(ALARM_55, "\n".join(bad))
+
+    def test_chain_reads_whole_split_wrf_stream(self):  # AUDA4 A4-15
+        name = "real_d0_r8_fp64_cpu_chain"
+        bad, what = self.run_chain(name, split_wrf=True)
+        self.assertEqual(bad, [])
+        self.assertIn("in 2 file pairs", what)
+
+    def test_seeded_restart_rejects_extra_resumed_history_frame(self):  # AUDA4 A4-2
+        start60 = wrf_suite.times_at(START, 60)
+        rsm, res = self.root / "rsm", self.root / "res"
+        fixture(rsm, (120, 180), start=start60)
+        fixture(rsm, (120,), kind="wrfrst", start=start60, alarm=60000)
+        fixture(res, (120,), kind="wrfrst", start=start60, alarm=60000)
+        history = fixture(res, (120, 180), start=start60)
+        bad, _ = wrf_suite.compare_seeded_restart(str(res), str(rsm), START, 180)
+        self.assertEqual(bad, [])
+        history.unlink()
+        fixture(res, (60, 120, 180), start=start60)  # a frame at the restart time WRF does not write
+        bad, _ = wrf_suite.compare_seeded_restart(str(res), str(rsm), START, 180)
+        self.assertIn(f"only-cppwrf ['{start60}']", "\n".join(bad))
+
+    def test_layout_restart_cases_are_self_only(self):  # AUDA4 A4-3
+        names = [c[0] for c in wrf_suite.CASES if wrf_suite.layout_restart_at(c[3])]
+        self.assertTrue(names)
+        for name in names:
+            self.assertEqual(wrf_suite.kind(name), "self", name)
+
+    def test_netcdf_readers_hold_the_lock(self):  # AUDA4 A4-1
+        import out_hashes
+        held = []
+
+        def probe(*_args, **_kwargs):
+            held.append(wrf_suite._NC._is_owned())
+            return []
+        with patch.object(out_hashes, "hash_tree", probe):
+            wrf_suite.output_hashes("root", "path")
+        ref = fixture(self.root / "packed", (0,))  # a packed reference: no namelist.input beside it
+        with patch("netCDF4.Dataset", side_effect=OSError(-101, "NetCDF: HDF error")):
+            with self.assertRaises(OSError):  # a racy read error is no "not a y slab"
+                wrf_suite.y_slab(str(ref))
+        self.assertEqual(held, [True])
+        self.assertFalse(wrf_suite.y_slab(str(ref)))  # no south_north dimension
+
+    def chain_pair(self, kind):
+        straight, resumed = self.root / "straight", self.root / "resumed"
+        files = []
+        for d in (straight, resumed):
+            path = fixture(d, (120, 180), kind=kind)
+            with Dataset(path, "a") as ds:
+                ds.createVariable("CROPCAT", "i4", ("Time", "x"))[:] = 1
+            files.append(path)
+        return files
+
+    def test_native_chain_compares_cropcat_and_global_attributes(self):  # AUDA4 A1-7
+        def compare(files, kind, wrfrst_resume):
+            noise = set()
+            bad, _ = wrf_suite.chain_self_stream([str(files[0])], [str(files[1])], wrf_suite.times_at(START, 60),
+                                                 restart=kind == "wrfrst", wrfrst_resume=wrfrst_resume, noise=noise)
+            return bad, noise
+        for kind in ("wrfout", "wrfrst"):
+            with self.subTest(kind=kind):
+                files = self.chain_pair(kind)
+                self.assertEqual(compare(files, kind, False)[0], {})
+                with Dataset(files[1], "a") as ds:
+                    ds["CROPCAT"][:] = -9999
+                bad, _ = compare(files, kind, False)  # native: CPPWRF's restart file carries CROPCAT
+                self.assertIn("CROPCAT", bad)
+                bad, noise = compare(files, kind, True)  # wrfrst: NOAHMP_INIT resets it, as in WRF
+                self.assertEqual((bad, noise), ({}, {"CROPCAT"}))
+                with Dataset(files[1], "a") as ds:
+                    ds["CROPCAT"][:] = 1
+                    ds.SIMULATION_START_DATE = "2026-10-12_00:00:01"
+                for resume in (False, True):
+                    self.assertIn("(metadata)", compare(files, kind, resume)[0])
+                shutil.rmtree(self.root / "straight")
+                shutil.rmtree(self.root / "resumed")
 
     def test_auxhist3_and_restart_streams_are_required_at_runtime(self):
         refdir, out = self.root / "refs", self.root / "out"
@@ -476,6 +556,127 @@ class ComparatorMutations(ScratchMutationCase):
             r = subprocess.run(cmd + ["--y-slab"], capture_output=True, text=True)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn("rows differ", r.stderr)
+
+    def test_l2_rejects_nonfinite_values_of_ungated_fields(self):  # AUDA4 A4-4
+        tol = {"U": 3e-4, "W": 1e-2}  # a cuda case gates some fields only
+
+        def gate(res):
+            return [v for v, tl in tol.items() if not (res.get(v, float("inf")) <= tl)]
+        wrf, out = self.l2_fixture(0)
+        self.assertEqual(gate(wrf_suite.compare(wrf, out, 60)), [])
+        meta = json.loads((out / "snap_000001.json").read_text())
+        v = next(f for f in meta["variables"] if f["name"] == "v")
+        with (out / "snap_000001.bin").open("r+b") as data:  # CPPWRF's V NaN at one point
+            data.seek(v["offset"])
+            data.write(np.float64(np.nan).tobytes())
+        with self.assertRaisesRegex(RuntimeError, "V: 1 non-finite values in CPPWRF"):
+            wrf_suite.compare(wrf, out, 60)
+        wrf, out = self.l2_fixture(0)
+        with Dataset(wrf, "a") as ds:  # an infinity in WRF's P
+            ds["P"][0, 0, 0, 0] = np.inf
+        with self.assertRaisesRegex(RuntimeError, "P: 1 non-finite values in WRF"):
+            wrf_suite.compare(wrf, out, 60)
+
+    def snaps(self, d, steps, *, dt=60.0, value=1.0):
+        d.mkdir(parents=True, exist_ok=True)
+        for step in steps:
+            fields = [{"name": "u", "shape": [1, 1, 2], "dtype": "float64", "offset": 0}]
+            (d / f"snap_{step:06d}.bin").write_bytes(np.full(2, value + step, dtype="<f8").tobytes())
+            (d / f"snap_{step:06d}.json").write_text(json.dumps({"time": step * dt, "step": step,
+                                                                 "variables": fields}))
+
+    def test_backend_compare_requires_the_same_steps(self):  # AUDA4 A4-10
+        import verify
+        a, b = self.root / "a", self.root / "b"
+        self.snaps(a, (0, 3))
+        self.snaps(b, (0, 3))
+        with redirect_stdout(io.StringIO()):
+            self.assertFalse(verify.run_compare(str(a), str(b), 1e-3).failed)
+            (b / "snap_000003.json").unlink()  # b stopped after its initial snapshot
+            self.assertTrue(verify.run_compare(str(a), str(b), 1e-3).failed)
+            shutil.rmtree(b)
+            self.snaps(b, (0, 3), dt=30.0)  # the same step at another time
+            self.assertTrue(verify.run_compare(str(a), str(b), 1e-3).failed)
+
+    def test_wrf_theta_compare_requires_every_wrf_time(self):  # AUDA4 A4-10
+        import verify
+        wrf, d = self.root / "straka.nc", self.root / "straka"
+        with Dataset(wrf, "w") as ds:
+            for name, length in (("Time", 2), ("z", 2), ("zs", 3), ("y", 1), ("x", 4)):
+                ds.createDimension(name, length)
+            ds.createVariable("XTIME", "f8", ("Time",))[:] = [0, 5]
+            ds.createVariable("T", "f8", ("Time", "z", "y", "x"))[:] = 0
+            ds.createVariable("PH", "f8", ("Time", "zs", "y", "x"))[:] = 0
+            ds.createVariable("PHB", "f8", ("Time", "zs", "y", "x"))[:] = np.arange(3)[None, :, None, None] * 9.81
+        d.mkdir()
+        for step, time in ((0, 0.0), (300, 300.0)):
+            fields, blob = [], b""
+            for name, value in (("z_m", np.array([0.5, 1.5])[:, None, None] * np.ones((2, 1, 4))),
+                                ("th_pert", np.zeros((2, 1, 4)))):
+                fields.append({"name": name, "shape": list(value.shape), "dtype": "float64", "offset": len(blob)})
+                blob += value.astype("<f8").tobytes()
+            (d / f"snap_{step:06d}.bin").write_bytes(blob)
+            (d / f"snap_{step:06d}.json").write_text(json.dumps({"time": time, "step": step, "variables": fields}))
+        with redirect_stdout(io.StringIO()):
+            self.assertFalse(verify.run_wrf(str(wrf), str(d), 0.05).failed)
+            (d / "snap_000300.json").unlink()  # CPPWRF wrote t = 0 only
+            self.assertTrue(verify.run_wrf(str(wrf), str(d), 0.05).failed)
+
+    def test_files_test_requires_every_domain_cppwrf_wrote(self):  # AUDA4 A4-13
+        build, runs = self.root / "build", self.root / "runs"
+        ref = runs / "run_N1_r8/steps"
+        ref.mkdir(parents=True)
+        made = self.root / "made"
+        for dom in ("d01", "d02"):
+            f = fixture(made / ("" if dom == "d01" else dom), (0,), domain=dom)
+            if dom == "d01":
+                shutil.copyfile(f, ref / f.name)
+            else:
+                d02 = f
+        build.mkdir()
+        (build / "cppwrf").write_text("""#!/usr/bin/env bash
+for a in "$@"; do case "$a" in output.dir=*) out=${a#output.dir=};; esac; done
+cp "$FAKE_MADE"/wrfout_d01_* "$out"/; mkdir -p "$out"/d02; cp "$FAKE_MADE"/d02/wrfout_d02_* "$out"/d02/
+""")
+        (build / "cppwrf").chmod(0o755)
+        env = dict(os.environ, CPPWRF_WRF_RUNS=str(runs), FAKE_MADE=str(made), CPPWRF_SCRATCH=str(self.root))
+        cmd = ["bash", ROOT / "tests/verify/run_wrf_files_test.sh", build, "n1"]
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True)  # the reference pack lacks wrfout_d02
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("CPPWRF wrote wrfout_d02, no WRF wrfout_d02", r.stdout)
+        shutil.copyfile(d02, ref / d02.name)
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("PASS n1", r.stdout)
+
+    def test_real_comparator_checks_bytes_and_attribute_types(self):  # AUDA4 A4-5
+        wrf, cpp = self.root / "wrf.nc", self.root / "cpp.nc"
+        cmd = [sys.executable, ROOT / "tests/init_real/compare_real.py", cpp, wrf]
+        stamp = b"2026-10-12_00:00:00"
+
+        def write(path, times=stamp + b"\0", flag=np.int32(1), farr=(1.0, 1.0), big=500):
+            with Dataset(path, "w") as ds:
+                ds.createDimension("Time", 1)
+                ds.createDimension("DateStrLen", 20)
+                ds.createDimension("x", 2)
+                ds.createVariable("Times", "S1", ("Time", "DateStrLen"))[0] = np.frombuffer(times, "S1")
+                u = ds.createVariable("U", "f8", ("Time", "x"))
+                u[:] = 1
+                u.setncattr("flag", flag)
+                ds.setncattr("farr", np.array(farr))
+                ds.setncattr("bigarr", np.array([big if i == 500 else i for i in range(1005)], np.int32))
+        write(wrf)
+        for mutation, kw in (("NUL moved in Times", {"times": b"\0" + stamp}),
+                             ("attribute int32 vs int64", {"flag": np.int64(1)}),
+                             ("float array attribute at 1e-10", {"farr": (1.0, 1.0 + 1e-10)}),
+                             ("element 500 of a 1005-element attribute", {"big": -999})):
+            with self.subTest(mutation=mutation):
+                write(cpp)
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+                write(cpp, **kw)
+                r = subprocess.run(cmd, capture_output=True, text=True)
+                self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
 
     def test_real_comparator_preserves_int64(self):
         wrf, cpp = self.root / "wrf", self.root / "cpp"

@@ -65,6 +65,57 @@ class CompareTest(unittest.TestCase):
         rc, _ = quiet(compare.main, [self.a, scratch("cppwrf_cmp_c_")])
         self.assertEqual(rc, 2)
 
+    def test_false_passes_fail(self):  # AUDA4 A4-6: each mutation passed before
+        import netCDF4
+        first = "wrfout_d01_2026-10-12_00:00:00"
+        later = "wrfout_d01_2026-10-12_02:00:00"
+        for d in (self.a, self.b):
+            write_wrfout(os.path.join(d, later), [datetime.datetime(2026, 10, 12, 2)])
+            with netCDF4.Dataset(os.path.join(d, first), "a") as ds:
+                ds.createDimension("soil", 2)
+                ds.createVariable("ZS", "f4", ("soil",))[:] = [0.05, 0.25]  # no Time dimension
+        rc, out = quiet(compare.main, [self.a, self.b])
+        self.assertEqual(rc, 0, out)
+
+        def mutated(path, edit):
+            backup = os.path.join(scratch("cppwrf_cmp_orig_"), "orig.nc")
+            shutil.copyfile(path, backup)
+            try:
+                with netCDF4.Dataset(path, "a") as ds:
+                    edit(ds)
+                return quiet(compare.main, [self.a, self.b])
+            finally:
+                os.replace(backup, path)
+        with self.subTest(mutation="static variable"):
+            rc, out = mutated(os.path.join(self.b, first), lambda ds: ds["ZS"].__setitem__(1, 0.3))
+            self.assertEqual(rc, 1, out)
+            self.assertIn("ZS", out)
+        with self.subTest(mutation="global attribute of the second file"):
+            rc, out = mutated(os.path.join(self.b, later), lambda ds: ds.setncattr("DT", 12.0))
+            self.assertEqual(rc, 1, out)
+            self.assertIn("DT", out)
+        with self.subTest(mutation="duplicate Times"):
+            def dup(ds):
+                ds["Times"][1] = ds["Times"][0]
+            rc, out = mutated(os.path.join(self.b, first), dup)
+            self.assertEqual(rc, 1, out)
+            self.assertIn("duplicate Times", out)
+        with self.subTest(mutation="no variable compared"):
+            rc, out = quiet(compare.main, [self.a, self.b, "-v", "NO_SUCH_VAR"])
+            self.assertEqual(rc, 1, out)
+            self.assertIn("no variable compared", out)
+        with self.subTest(mutation="nest only in A (CPPWRF's d02/)"):
+            os.makedirs(os.path.join(self.a, "d02"))
+            write_wrfout(os.path.join(self.a, "d02", "wrfout_d02_2026-10-12_00:00:00"),
+                         [datetime.datetime(2026, 10, 12, 0)])
+            rc, out = quiet(compare.main, [self.a, self.b])
+            self.assertEqual(rc, 1, out)
+            self.assertIn("streams only in A: ['wrfout_d02']", out)
+            shutil.copytree(os.path.join(self.a, "d02"), os.path.join(self.b, "d02"))
+            rc, out = quiet(compare.main, [self.a, self.b])
+            self.assertEqual(rc, 0, out)
+            self.assertIn("wrfout_d02", out)
+
     def test_ulp(self):
         x = np.array([1.0, -0.0, 2.0], np.float32)
         y = np.array([np.nextafter(np.float32(1), np.float32(2)), 0.0, 2.0], np.float32)
