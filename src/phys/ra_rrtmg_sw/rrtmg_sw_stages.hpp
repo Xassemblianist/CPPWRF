@@ -59,6 +59,8 @@ struct SwViews {
   SD swhr, swhrc;      // [nl]
   SI iscal;  // [0] day (coszen > 0), [1] laytrop, [2] inflag, [3] iceflag, [4] liqflag, [5] a cloudy subcolumn
   SI solfr;  // [14] taumol_sw_solfr: the layer that writes sfluxzen per band (-1: none)
+  SI gcld;   // [112] 1: the g-point's subcolumn has a cloudy layer (cfu, cfd, cfdd written), 0: clear (they equal
+             // ccu, ccd, ccdd, which rrtmg_sw_level reads in their place)
   SD dscal;  // [0] prmu0, [1..4] asdir, asdif, aldir, aldif
 };
 
@@ -97,7 +99,7 @@ struct SwLayout {
     v.uvfd = v1(L1); v.uvfddir = v1(L1); v.nifd = v1(L1); v.nifddir = v1(L1);
     v.swhr = v1(L1); v.swhrc = v1(L1);
     v.dscal = v1(5);
-    v.jp = i1(L); v.jt = i1(L); v.jt1 = i1(L); v.indself = i1(L); v.indfor = i1(L); v.iscal = i1(6); v.solfr = i1(14);
+    v.jp = i1(L); v.jt = i1(L); v.jt1 = i1(L); v.indself = i1(L); v.indfor = i1(L); v.iscal = i1(6); v.solfr = i1(14); v.gcld = i1(112);
     if (nd_out) *nd_out = od;
     if (ni_out) *ni_out = oi;
     return v;
@@ -208,7 +210,10 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
   v.tz[num_levels + 1] = v.tz[num_levels];
   for (int m = 0; m < 7; ++m) v.wkl[m][num_levels] = v.wkl[m][num_levels - 1];
   // 3. ozone (inirad, CAM ozone on the model levels for o3input = 2)
+  // o3input = 2 reads the climatology only at k = num_levels - 1 and num_levels (the loop below), as the LW prep:
+  // the other layers' quadratures were never read (coldry is overwritten by inatm_sw before any other use)
   for (int k = 0; k < nlayers; ++k) {
+    if (c.o3input == 2 && k < num_levels - 1) continue;
     rb o3 = rb(0.0);
     const rb pr_k = v.pz[k], pr_k1 = v.pz[k + 1];
     for (int jj = 0; jj < 31; ++jj) {
@@ -221,7 +226,7 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
     v.coldry[k] = o3 / (pr_k - pr_k1);  // o3mmr (coldry is set by inatm_sw below)
   }
   for (int k = 0; k < nlayers; ++k) {
-    rb o3vmr = v.coldry[k] * amdo;
+    rb o3vmr;
     if (c.o3input == 2) {
       if (k < num_levels) {
         o3vmr = in.o33d[k];
@@ -229,6 +234,8 @@ CPPWRF_HD inline void rrtmg_sw_prep(const RrtmgSwCallConfig& c, const SwColumnIn
         o3vmr = in.o33d[num_levels - 1] - v.coldry[num_levels - 1] * amdo + v.coldry[k] * amdo;
         if (o3vmr <= rb(0.)) o3vmr = v.coldry[k] * amdo;
       }
+    } else {
+      o3vmr = v.coldry[k] * amdo;
     }
     v.wkl[2][k] = o3vmr;
   }
@@ -424,12 +431,11 @@ CPPWRF_FORCEINLINE void rrtmg_sw_gpoint_impl(const RrtmgSwCallConfig& c, int iw,
   const rb palbp = uv ? CSD(v.dscal)[1] : CSD(v.dscal)[3], palbd = uv ? CSD(v.dscal)[2] : CSD(v.dscal)[4];
 
   rb zref[ML + 1], zrefd[ML + 1], ztra[ML + 1], ztrad[ML + 1];
-  rb zdbt[ML + 1], ztdbt[ML + 1];
+  rb zdbt[ML + 1];  // ztdbt (zdbt's running product from the TOA) is formed in vrtqdr_sw_direct
 
   const rb zincflx = c.adjflux * CSD(v.sfluxzen)[iw] * prmu0;
 
   // Clear-sky TOA direct beam and surface values
-  ztdbt[0] = rb(1.0);
   zdbt[klev] = rb(0.0);
   ztra[klev] = rb(0.0);
   ztrad[klev] = rb(0.0);
@@ -480,24 +486,18 @@ CPPWRF_FORCEINLINE void rrtmg_sw_gpoint_impl(const RrtmgSwCallConfig& c, int iw,
       zdbtmc = tables.exp_tbl[itind];
     }
     zdbt[jk] = zdbtmc;
-    ztdbt[jk + 1] = zdbt[jk] * ztdbt[jk];
   }
 
-  vrtqdr_sw_direct<ML>(klev, zref, zrefd, ztra, ztrad, zdbt, ztdbt, zincflx, v.ccd, v.ccu, iw);
+  vrtqdr_sw_direct<ML>(klev, zref, zrefd, ztra, ztrad, zdbt, zincflx, v.ccd, v.ccu, iw);
 
-  if (!any_cld) {
-    for (int ikl = 0; ikl <= klev; ++ikl) {
-      v.cfu[ikl][iw] = v.ccu[ikl][iw];
-      v.cfd[ikl][iw] = v.ccd[ikl][iw];
-      v.cfdd[ikl][iw] = v.ccdd[ikl][iw];
-    }
-    return;
-  }
+  // a clear subcolumn: the total-sky fluxes are the clear-sky ones (spcvmc_sw copies them), rrtmg_sw_level reads
+  // ccu, ccd, ccdd in place of cfu, cfd, cfdd
+  v.gcld[iw] = any_cld ? 1 : 0;
+  if (!any_cld) return;
 
   // Cloudy subcolumn: update only cloudy layers in zref/zrefd/ztra/ztrad/zdbt and run total-sky vrtqdr_sw
   rb ztdbt_nodel = rb(1.0);
   v.cfdd[klev][iw] = zincflx;
-  ztdbt[0] = rb(1.0);
 
   for (int jk = 0; jk < klev; ++jk) {
     int ikl = klev - 1 - jk;
@@ -562,10 +562,9 @@ CPPWRF_FORCEINLINE void rrtmg_sw_gpoint_impl(const RrtmgSwCallConfig& c, int iw,
       ztdbt_nodel = zdbtmc * ztdbt_nodel;
       v.cfdd[ikl][iw] = zincflx * ztdbt_nodel;
     }
-    ztdbt[jk + 1] = zdbt[jk] * ztdbt[jk];
   }
 
-  vrtqdr_sw_direct<ML>(klev, zref, zrefd, ztra, ztrad, zdbt, ztdbt, zincflx, v.cfd, v.cfu, iw);
+  vrtqdr_sw_direct<ML>(klev, zref, zrefd, ztra, ztrad, zdbt, zincflx, v.cfd, v.cfu, iw);
 }
 
 template <int ML = RRTMG_SW_COL_MAX>
@@ -583,15 +582,16 @@ CPPWRF_FORCEINLINE void rrtmg_sw_level(int lev, const SwViews& v, const RrtmgSwT
   for (int ibm = 0; ibm < 14; ++ibm) {
     const int igt = tables.ngc[ibm];
     for (int jg = 0; jg < igt; ++jg, ++iw) {
-      const rb cfu = CSD2(v.cfu)[lev][iw], cfd = CSD2(v.cfd)[lev][iw];
-      const rb ccu = CSD2(v.ccu)[lev][iw], ccd = CSD2(v.ccd)[lev][iw];
-      const rb cfdd = CSD2(v.cfdd)[lev][iw];
+      const bool cld = CSI(v.gcld)[iw] != 0;
+      const rb ccu = CSD2(v.ccu)[lev][iw], ccd = CSD2(v.ccd)[lev][iw], ccdd = CSD2(v.ccdd)[lev][iw];
+      const rb cfu = cld ? CSD2(v.cfu)[lev][iw] : ccu, cfd = cld ? CSD2(v.cfd)[lev][iw] : ccd;
+      const rb cfdd = cld ? CSD2(v.cfdd)[lev][iw] : ccdd;
       fu += cfu;
       fd += cfd;
       cu += ccu;
       cd += ccd;
       fddir += cfdd;
-      cddir += CSD2(v.ccdd)[lev][iw];
+      cddir += ccdd;
       if (ibm >= 9 && ibm <= 12) {
         uvfd += cfd;
         uvfddir += cfdd;

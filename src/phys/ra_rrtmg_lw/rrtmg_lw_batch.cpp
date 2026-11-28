@@ -18,10 +18,23 @@ namespace {
 #define LW_CI(a, b, c) (a)
 #define LW_X(a, b, c) (c)
 inline Range3D lw_range(int n, int nx) { return Range3D{0, n, 0, 1, 0, nx}; }
+// the per-column kernels (one thread per column). CUDA: column_for, blocks of one warp (column_block(), 32 x 1)
+// spread the few columns of a chunk over more SMs than parallel_for's 64-thread blocks. HIP keeps parallel_for's 64
+// (a 32 x 1 block would leave half of each wave64 idle). Each thread's work is unchanged.
+#if defined(CPPWRF_USE_HIP)
+template <class K> void lw_per_column(int n, const K& k) { parallel_for(lw_range(n, 1), k); }
+#else
+template <class K> struct LwPerColumn {
+  K k;
+  CPPWRF_HD void operator()(int a, int) const { k(a, 0, 0); }
+};
+template <class K> void lw_per_column(int n, const K& k) { column_for(Range2D{0, n, 0, 1}, LwPerColumn<K>{k}); }
+#endif
 #else
 #define LW_CI(a, b, c) (c)
 #define LW_X(a, b, c) (b)
 inline Range3D lw_range(int n, int nx) { return Range3D{0, 1, 0, nx, 0, n}; }
+template <class K> void lw_per_column(int n, const K& k) { parallel_for(lw_range(n, 1), k); }
 #endif
 
 // common part of the kernels: the views of chunk column ci (global column col0 + ci)
@@ -76,12 +89,16 @@ struct KLwSetcoef {
   }
 };
 
+// taumol per (column, layer) in band groups [B0, B1), one kernel each (cldprmc with the first): all 16 bands inlined
+// in one kernel took ~250 registers per thread; every value is computed by the same band routine from the same
+// inputs whatever the grouping (rrtmg_lw_layer)
+template <int B0, int B1>
 struct KLwLayer {
   LwChunk ch;
   int nlayers;
   const RrtmgLwTables* t;
   CPPWRF_HD void operator()(int a, int b, int cc) const {
-    rrtmg_lw_layer(nlayers, LW_X(a, b, cc), ch.views(LW_CI(a, b, cc)), *t);
+    rrtmg_lw_layer<B0, B1>(nlayers, LW_X(a, b, cc), ch.views(LW_CI(a, b, cc)), *t);
   }
 };
 
@@ -153,15 +170,23 @@ void RrtmgLwBatch::run(const RrtmgLwCallConfig& c, const LwBatchInput& in, const
   for (int col0 = in.col_begin; col0 < col_end; col0 += chunk_) {
     const int n = std::min(chunk_, col_end - col0);
     const LwChunk ch{lay_, d, ip, n, col0};
-    parallel_for(lw_range(n, 1), KLwPrep{ch, c, in, d_tables_, d_consts_, out.o3});
+    lw_per_column(n, KLwPrep{ch, c, in, d_tables_, d_consts_, out.o3});
     parallel_for(lw_range(n, c.nlayers), KLwSetcoef{ch, in.tsk, d_tables_});
-    parallel_for(lw_range(n, c.nlayers), KLwLayer{ch, c.nlayers, d_tables_});
+#if defined(CPPWRF_USE_GPU)
+    parallel_for(lw_range(n, c.nlayers), KLwLayer<0, 3>{ch, c.nlayers, d_tables_});
+    parallel_for(lw_range(n, c.nlayers), KLwLayer<3, 6>{ch, c.nlayers, d_tables_});
+    parallel_for(lw_range(n, c.nlayers), KLwLayer<6, 10>{ch, c.nlayers, d_tables_});
+    parallel_for(lw_range(n, c.nlayers), KLwLayer<10, 13>{ch, c.nlayers, d_tables_});
+    parallel_for(lw_range(n, c.nlayers), KLwLayer<13, 16>{ch, c.nlayers, d_tables_});
+#else
+    parallel_for(lw_range(n, c.nlayers), KLwLayer<0, 16>{ch, c.nlayers, d_tables_});
+#endif
     if (c.nlayers <= 60)
       parallel_for(lw_range(n, 140), KLwGpoint<60>{ch, c.nlayers, d_tables_});
     else
       parallel_for(lw_range(n, 140), KLwGpoint<RRTMG_LW_SWEEP_MAX>{ch, c.nlayers, d_tables_});
     parallel_for(lw_range(n, c.nlayers + 1), KLwLevel{ch, c.nlayers, d_tables_});
-    parallel_for(lw_range(n, 1), KLwFinish{ch, c, in, out});
+    lw_per_column(n, KLwFinish{ch, c, in, out});
   }
 }
 

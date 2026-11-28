@@ -17,10 +17,23 @@ namespace {
 #define SW_CI(a, c) (a)
 #define SW_X(b, c) (c)
 inline Range3D sw_range(int n, int nx) { return Range3D{0, n, 0, 1, 0, nx}; }
+// the per-column kernels (one thread per column). CUDA: column_for, blocks of one warp (column_block(), 32 x 1)
+// spread the few columns of a chunk over more SMs than parallel_for's 64-thread blocks. HIP keeps parallel_for's 64
+// (a 32 x 1 block would leave half of each wave64 idle). Each thread's work is unchanged.
+#if defined(CPPWRF_USE_HIP)
+template <class K> void sw_per_column(int n, const K& k) { parallel_for(sw_range(n, 1), k); }
+#else
+template <class K> struct SwPerColumn {
+  K k;
+  CPPWRF_HD void operator()(int a, int) const { k(a, 0, 0); }
+};
+template <class K> void sw_per_column(int n, const K& k) { column_for(Range2D{0, n, 0, 1}, SwPerColumn<K>{k}); }
+#endif
 #else
 #define SW_CI(a, c) (c)
 #define SW_X(b, c) (b)
 inline Range3D sw_range(int n, int nx) { return Range3D{0, 1, 0, nx, 0, n}; }
+template <class K> void sw_per_column(int n, const K& k) { parallel_for(sw_range(n, 1), k); }
 #endif
 
 struct SwChunk {
@@ -148,16 +161,16 @@ void RrtmgSwBatch::run(const RrtmgSwCallConfig& c, const SwBatchInput& in, const
   for (int col0 = in.col_begin; col0 < col_end; col0 += chunk_) {
     const int n = std::min(chunk_, col_end - col0);
     const SwChunk ch{lay_, d, ip, n, col0};
-    parallel_for(sw_range(n, 1), KSwPrep{ch, c, in, d_tables_, d_consts_});
+    sw_per_column(n, KSwPrep{ch, c, in, d_tables_, d_consts_});
     parallel_for(sw_range(n, c.nlayers), KSwSetcoef{ch, d_tables_});
-    parallel_for(sw_range(n, 1), KSwSolfr{ch, c.nlayers, d_tables_});
+    sw_per_column(n, KSwSolfr{ch, c.nlayers, d_tables_});
     parallel_for(sw_range(n, c.nlayers), KSwLayer{ch, c.nlayers, d_tables_});
     if (c.nlayers <= 48)
       parallel_for(sw_range(n, 112), KSwGpoint<48>{ch, c, d_tables_});
     else
       parallel_for(sw_range(n, 112), KSwGpoint<RRTMG_SW_COL_MAX>{ch, c, d_tables_});
     parallel_for(sw_range(n, c.nlayers + 1), KSwLevel{ch, d_tables_});
-    parallel_for(sw_range(n, 1), KSwFinish{ch, c, in, out});
+    sw_per_column(n, KSwFinish{ch, c, in, out});
   }
 }
 
