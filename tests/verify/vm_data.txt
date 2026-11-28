@@ -180,6 +180,9 @@ nest3_data.tar
 movenest_data.tar
 # The vortex-following moving nests and their input files (VX1, VX2; one-rank WRF dmpar built with nesting 3)
 vortexnest_data.tar
+# The restart audit (tests/verify/cases/77_restart_audit.py): N3s with dt 50 s, N3s restart files every 100 s and resumed,
+# FD7 resumed past gfdda_end_h (portable WRF runs with their inputs)
+auda1_data.tar
 # the WRF v4.8.0 objects (-r8, -r8 -fdefault-double-8 builds) and input subsets of the differential tests
 # (ctest -L diff; tools/gcp/stage_diff_data.sh, tools/gcp/run_diff_tests.sh)
 diff_data.tar

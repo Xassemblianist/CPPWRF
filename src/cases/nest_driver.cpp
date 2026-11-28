@@ -757,16 +757,14 @@ std::vector<NestDomainSpec> parse_nest_specs(const io::Config& root_cfg) {
   }
 
   // med_restart_out writes every domain when d01's restart alarm rings (restart_interval is one value); each
-  // domain's own alarm (DomainRunner) rings at those times only when the interval is a multiple of d01's dt
+  // domain's own alarm (DomainRunner) rings on its own clock (restart_flag, its WRF_ALARM_SECS_TIL_NEXT_RING_51)
   auto rst_interval = [](const io::Config& c) {
     return c.get_double("restart.interval", c.get_double("output.restart_interval", 0.0));
   };
-  const double rst1 = rst_interval(specs[0].cfg), dt1 = specs[0].cfg.get_double("time.dt", 60.0);
+  const double rst1 = rst_interval(specs[0].cfg);
   for (const NestDomainSpec& sp : specs)
     if (rst_interval(sp.cfg) != rst1)
       throw std::runtime_error(sp.tag + ": the restart interval differs from d01's (WRF's restart_interval is one value)");
-  if (rst1 > 0 && std::abs(rst1 / dt1 - std::round(rst1 / dt1)) > 1e-9 * (rst1 / dt1))
-    throw std::runtime_error("nested runs: the restart interval must be a multiple of d01's time.dt");
 
   return specs;
 }
@@ -1175,6 +1173,25 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
                                  std::to_string(ri) + " s within the run) is not supported: WRF's wrfrst holds the "
                                  "vortex centre (XI, XJ, VC_I, VC_J), CPPWRF's does not");
     }
+    // writing wrfrst with prescribed moves: wrfrst_d02 after med_nest_move as WRF's (the moved prognostic and history
+    // fields), but not yet the restart-only fields of a moved nest (start_domain's RHO and the new strip's WW,
+    // RUBLTEN / RVBLTEN; DEFOR11 / DEFOR22 / DIV at the top level; the parent's HT_COARSE) nor what a "preset moves"
+    // build adds to the restart stream (XI, XJ, VC_I, VC_J = -1, COMPUTE_VORTEX_CENTER_ALARM as alarm 55)
+    if (!moves.vortex) {
+      const double ri = root_cfg.get_double("restart.interval", root_cfg.get_double("output.restart_interval", 0.0));
+      const double rt = root_cfg.get_double("run.run_time", 0.0);
+      if (ri > 0.0 && (rt <= 0.0 || ri <= rt)) {
+        if (!root_cfg.get_bool("cppwrf.allow_unverified", false))
+          throw std::runtime_error("moving nests (domains.num_moves > 0) with restart files (restart.interval = " +
+                                   std::to_string(ri) + " s within the run) are unverified: the moved nest's wrfrst "
+                                   "files differ from WRF's in restart-only fields (RHO, WW, RUBLTEN, RVBLTEN, DEFOR, "
+                                   "DIV, HT_COARSE, XI / XJ / VC_I / VC_J, alarm 55); set cppwrf.allow_unverified = true "
+                                   "to write them");
+        std::fprintf(stderr, "cppwrf: warning: moving nests with restart files: the moved nest's wrfrst files are "
+                             "unverified (restart-only fields differ from WRF's), run because cppwrf.allow_unverified "
+                             "is set\n");
+      }
+    }
     move_install = std::make_unique<nestmove::Install>();
     for (int i = 0; i < max_dom; ++i) move_regs.push_back(std::make_unique<nestmove::FieldRegistry>());
   }
@@ -1257,7 +1274,16 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     const tile::Use use(doms[i].model.g);
     const auto scope = move_scope(i);
     doms[i].runner = std::make_unique<DomainRunner>(doms[i].spec.cfg, doms[i].model, dom_out, doms[i].spec.tag);
-    if (doms[i].spec.parent_id > 0) doms[i].runner->set_defer_output(true);
+    if (doms[i].spec.parent_id > 0) {
+      doms[i].runner->set_defer_output(true);
+      // med_restart_out: domain 1's restart alarm writes every domain's restart files, after the nests' feedback and
+      // moves (advance_domain); this nest's step n ends at domain 1's step m when n * dt = m * dt1
+      doms[i].runner->set_restart_by_parent([&doms, i](long n) {
+        const double t = double(n) * doms[i].model.g.dt, dt1 = doms[0].model.g.dt;
+        const long m = std::lround(t / dt1);
+        return std::abs(double(m) * dt1 - t) <= 1e-6 * doms[i].model.g.dt && doms[0].runner->restart_files_due(m);
+      });
+    }
     // moving nests: the history fields the model does not carry move with the nest (WrfHistory's move arrays)
     if (moves.any()) doms[i].runner->set_need_history(true);
   }
@@ -1412,6 +1438,9 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
     if (!nestmove::time_for_move(moves, P, N, c.model.dt_clock, nsteps, dx, dy)) return;
     const auto scope = move_scope(ci);
     nestmove::move_nest(P, N, dx, dy);
+    // start_domain(nest) after the move: start_em sets dtbc = 0 for a nested domain (the next med_nest_force does too;
+    // a restart file of this time has it)
+    if (c.model.bc) c.model.bc->dtbc = 0;
     c.spec.i_parent_start = N.i_parent_start;
     c.spec.j_parent_start = N.j_parent_start;
   };
@@ -1467,8 +1496,18 @@ int run_nested(const io::Config& root_cfg, const std::string& out_dir) {
         nest_move(d, doms[c_idx]);
       }
 
-    const tile::Use use(d.model.g);
-    if (!d.runner->after_step(n)) return false;
+    {
+      const tile::Use use(d.model.g);
+      if (!d.runner->after_step(n)) return false;
+    }
+    // med_restart_out (domain 1's alarm, at the start of its next step): then every nest's files of this time
+    if (idx == 0 && d.runner->restart_written_step() == n)
+      for (int i = 1; i < max_dom; ++i)
+        if (doms[i].started) {
+          const tile::Use use(doms[i].model.g);
+          const auto s = move_scope(i);
+          doms[i].runner->write_restart_by_parent(d.runner->restart_written_ring());
+        }
     return true;
   };
 

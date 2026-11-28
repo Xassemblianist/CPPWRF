@@ -5,6 +5,36 @@ a verified configuration, of a configuration key or of an output file is a new m
 restart files (`restart_<step>.nc`) are not a stable interface: they are bound to the commit that wrote them; a run
 resumes across versions from WRF's wrfrst files.
 
+## Unreleased
+
+### Fixed
+- Nested runs: only domain 1's restart alarm writes restart files, every domain's at its ring, after the nests'
+  feedback and moves (WRF's med_before_solve_io / med_restart_out); each nest's own alarm still rings on its clock
+  (restart_flag, its WRF_ALARM_ISRINGING_51 / SECS_TIL_NEXT_RING_51). Before, each nest wrote its own files: before
+  the move (a moving nest's wrfrst_d02 held the unmoved nest), and at its own ring times in a run resumed from WRF's
+  wrfrst files whose nest alarm rings off domain 1's steps (a wrfrst_d02 in the middle of a parent step, none at
+  domain 1's times). The restart interval no longer has to be a multiple of domain 1's time step (cppwrf and
+  tools/wrf2cppwrf.py).
+- A nest's DTBC in wrfrst: solve_em's REAL sum of the nest's steps (50 for three steps of 50 / 3 s, not the 2.8e-14 of
+  the time since the parent step in double), 0 after a move (start_em).
+- FP32 build resumed from a wrfrst file of a time that is not a whole minute: the restart alarm's RingTime from the
+  restart step, not from XTIME (REAL minutes, 516 s read as 516.0000229 s: the ring came one step late and every later
+  restart file with it).
+- WRF_ALARM_SECS_TIL_NEXT_RING_01 / 04 / 30 / 36 of wrfrst: the whole seconds of the exact clock truncated, not
+  rounded (a time step of 60 / 11 s: 6 s at 114 6/11 s, as WRF 4.8.0 writes, not 5).
+- Grid nudging resumed from a WRF wrfrst file: input_wrf's WRFU_AlarmSet leaves AUXINPUT10_ALARM without StopTime, so
+  the analyses past gfdda_end_h are read as in WRF (they were skipped).
+- CPPWRF's own restart file records the build's precision; an FP64 build refuses an FP32 build's file (and the other
+  way round) instead of converting its fields.
+- tools/cppwrf-wrf: a resumed run's run.run_time with every digit (`:g` rounded 1036815 s to 1036820 s).
+- tools/wrf2cppwrf.py: restart_interval_d / _h / _s as WRF's set_timekeeping adds them (they were refused).
+
+### Changed
+- Moving nests (prescribed moves) with restart files within the run need cppwrf.allow_unverified: the moved nest's
+  wrfrst files are written after the move, but restart-only fields of a moved nest still differ from WRF's (RHO, WW,
+  RUBLTEN / RVBLTEN of the new strip, DEFOR11 / DEFOR22 / DIV at the top, the parent's HT_COARSE, and the preset-moves
+  build's XI / XJ / VC_I / VC_J and COMPUTE_VORTEX_CENTER_ALARM); the history is identical.
+
 ## 1.6.0 (2026-11-27)
 
 ### Added
