@@ -1,10 +1,12 @@
-# The full CPU FP64 WRF comparison suite of every push to main, on GitHub-hosted runners: the workflow suite.yml of
+# The full CPU FP64 WRF comparison suite on demand (and of release tags), on GitHub-hosted runners: the workflow suite.yml of
 # github.com/Xassemblianist/cppwrf-data (with the reference data of that repository's release; docs/USER_GUIDE.md,
 # "Remote Suite Runs"). Unpushed commits: tools/ci/ci_submit.sh.
 name: wrf_suite
+# Not on every push to main: main is pushed only after tools/ci/ci_submit.sh passed on the same commit, and a second
+# 20-runner suite per push left the shared runners of the account (40, half for another project) no room.
 on:
   push:
-    branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 permissions:
   contents: read

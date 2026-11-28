@@ -369,7 +369,7 @@ WRF's objects that take rsqrtps / rcpps, acos / asin / tan and acosf / asinf / t
 glibc's routines instruction by instruction with Intel's rsqrtps / rcpps; tests/unit/test_libmvec_trig.cpp). WRF
 calls those six only in configurations CPPWRF does not run (map_proj 6 / polar curvature, Gaussian grids, FARMS,
 urban trees).
-The full CPU suite therefore runs on AMD CPUs: on every push to main on GitHub-hosted runners (AMD EPYC or Intel Xeon; for 1.1.0
+The full CPU suite therefore runs on AMD CPUs: for every commit before it is pushed to main (tools/ci/ci_submit.sh) on GitHub-hosted runners (AMD EPYC or Intel Xeon; for 1.1.0
 at 78e46c2: suite PASS 342, WRF output files 42, ideal files 14, `ctest -L diff` 32/32, ctest 33/33; for
 1.2.0 at 0bc4652, in a Debian 13 container: suite PASS 386 with the 44 `cpu_sp` cases, WRF output files 42, ideal
 files 14, `ctest -L diff` 32/32, ctest 35/35; for 1.2.1 at 4a57df7: suite PASS 387, WRF output files 42,
