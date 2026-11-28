@@ -77,9 +77,9 @@ echo "import subprocess; subprocess.Popen('FP32_EXTRA_BUILDS=$EXTRA nohup bash /
   rx 60 | grep started > /dev/null || echo "[colab_fp32] the GPU side did not start"
 bad=0
 cj_wait "$HOURS" ../fp1/out/fp1.log || bad=1
-timeout 120 colab usage 2>&1 | grep -v '^\[colab\]' > "$OUT/usage.txt" || true
+timeout 120 $COLAB_API usage 2>&1 | grep -v '^\[colab\]' > "$OUT/usage.txt" || true
 cj_results || bad=1
-if timeout 1800 colab download -s "$S" /content/cpu/fetch/fp1.tar.gz "$OUT/fp1.tar.gz" > /dev/null 2>&1; then
+if timeout 1800 $COLAB_API download -s "$S" /content/cpu/fetch/fp1.tar.gz "$OUT/fp1.tar.gz" > /dev/null 2>&1; then
   tar xzf "$OUT/fp1.tar.gz" -C "$OUT" && rm -f "$OUT/fp1.tar.gz"
 else echo "[colab_fp32] fp1.tar.gz: download failed"; bad=1; fi
 grep . "$OUT/setup.out" 2> /dev/null && bad=1

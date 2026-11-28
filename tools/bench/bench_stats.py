@@ -33,7 +33,7 @@ fastest screened layouts: per block, WRF's run over CPPWRF's run of that block (
 over the blocks both ran in: the median block ratio with its bootstrap interval and range, and the ratio of the
 two medians over those same blocks; history off for step_s and wall, history on for wall.
 
-Cost: Colab compute units at RATE, the session's runtime rate from `colab usage` (--rate): the measured run, the
+Cost: Colab compute units at RATE, the session's runtime rate from `tools/colab/colab_api.py usage` (--rate): the measured run, the
 fixed part, the marginal part per simulated day and one forecast day (the runtime costs the same whichever
 processor a run uses, so for WRF this is the co-located price: an upper bound, the GPU idles). --cpu-rate: the rate
 of a CPU-only runtime with the same CPU, as a STATED ASSUMPTION (printed as such): WRF's and CPPWRF CPU's cost
@@ -418,7 +418,7 @@ def markdown(S, accuracy_md=None, md_path=None):
                 w("")
     if S.get("rate"):
         w("## Cost\n")
-        w(f"Colab compute units at the session's rate, {S['rate']} units per hour (`colab usage`): the measured run, "
+        w(f"Colab compute units at the session's rate, {S['rate']} units per hour (`tools/colab/colab_api.py usage`): the measured run, "
           "and one simulated day as the fixed part once plus the marginal part of 24 h. The runtime costs the same "
           "whichever processor a run uses: for WRF this is the price on the GPU runtime with the GPU idle, an upper "
           "bound, not a CPU-only price." + (

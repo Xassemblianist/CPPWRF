@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: GPL-3.0-or-later
+# NOTE: Colab is for GPU work only; tools/colab/colab_guard.sh refuses the CPU runtime this tool asks for, so it
+# stops before any request. Kept for its Drive and bucket checks.
+#
 # Copy the suite's data tars from the bucket to Google Drive (folder cppwrf-data of the rclone remote
 # cppwrf-drive), on a Colab CPU runtime: the data never pass through the workstation, and tools/colab/colab_suite.sh
 # then reads them from Drive without GCS egress fees on every run.
@@ -50,25 +53,26 @@ if [ ${#todo[@]} -gt 0 ]; then
     <(printf '%s\n' "${todo[@]}") "$OUT/bucket.txt"))"
   S=cppwrf-sync-$STAMP
   token() { (umask 077; python3 "$REPO/tools/colab/gcs_token.py" "$BK" > "$OUT/gcs.tok") &&
-            timeout 300 colab upload -s "$S" "$OUT/gcs.tok" /content/sync/gcs.tok.new 2>&1 | grep Uploaded > /dev/null &&
+            timeout 300 $COLAB_API upload -s "$S" "$OUT/gcs.tok" /content/sync/gcs.tok.new 2>&1 | grep Uploaded > /dev/null &&
             echo 'import os; os.replace("/content/sync/gcs.tok.new", "/content/sync/gcs.tok"); print("TOKEN")' |
-              timeout 120 colab exec -s "$S" --timeout 60 2>/dev/null | grep TOKEN > /dev/null; local r=$?; rm -f "$OUT/gcs.tok"; return $r; }
+              timeout 120 $COLAB_API exec -s "$S" --timeout 60 2>/dev/null | grep TOKEN > /dev/null; local r=$?; rm -f "$OUT/gcs.tok"; return $r; }
   cleanup() {
     echo 'import subprocess; subprocess.run("rm -f /content/sync/gcs.tok* /content/sync/rclone.conf", shell=True); print("CLEAN")' |
-      timeout 120 colab exec -s "$S" --timeout 60 2>/dev/null | grep CLEAN > /dev/null || echo "[drive_sync] WARNING: credentials not removed (the session stop deletes the VM)"
-    timeout 300 colab stop -s "$S" || echo "[drive_sync] WARNING: could not stop $S, check: colab sessions"
+      timeout 120 $COLAB_API exec -s "$S" --timeout 60 2>/dev/null | grep CLEAN > /dev/null || echo "[drive_sync] WARNING: credentials not removed (the session stop deletes the VM)"
+    timeout 300 $COLAB_API stop -s "$S" || echo "[drive_sync] WARNING: could not stop $S, check: $COLAB_API sessions"
     rm -f "$OUT/gcs.tok" "$OUT/rclone.conf"
   }
   trap cleanup EXIT
-  timeout 900 colab new -s "$S"
-  echo 'import os; os.makedirs("/content/sync", exist_ok=True); print("OK")' | timeout 120 colab exec -s "$S" --timeout 60
+  . "$REPO/tools/colab/colab_guard.sh"  # refuses CPU runtimes: Colab is for GPU work only
+  colab_guard_new "$S" || exit 1  # refused (no --gpu): this tool stops here
+  echo 'import os; os.makedirs("/content/sync", exist_ok=True); print("OK")' | timeout 120 $COLAB_API exec -s "$S" --timeout 60
   (umask 077; rclone config show cppwrf-drive > "$OUT/rclone.conf")
   for f in "$OUT/rclone.conf" "$REPO/tools/colab/remote_drive_sync.sh"; do
-    timeout 300 colab upload -s "$S" "$f" "/content/sync/$(basename "$f")" 2>&1 | grep Uploaded > /dev/null || { echo "[drive_sync] upload of $f failed"; exit 1; }
+    timeout 300 $COLAB_API upload -s "$S" "$f" "/content/sync/$(basename "$f")" 2>&1 | grep Uploaded > /dev/null || { echo "[drive_sync] upload of $f failed"; exit 1; }
   done
   rm -f "$OUT/rclone.conf"
   token || { echo "[drive_sync] token upload failed"; exit 1; }
-  timeout 600 colab exec -s "$S" --timeout 500 --env SYNC_ARGS="$BK $PAR ${todo[*]}" <<'EOF'
+  timeout 600 $COLAB_API exec -s "$S" --timeout 500 --env SYNC_ARGS="$BK $PAR ${todo[*]}" <<'EOF'
 import os, subprocess
 r = subprocess.run("chmod 600 /content/sync/rclone.conf /content/sync/gcs.tok; apt-get -qq update && "
                    "DEBIAN_FRONTEND=noninteractive apt-get -qq install -y rclone > /dev/null && rclone version | head -1",
@@ -84,7 +88,7 @@ EOF
     sleep 300
     token || echo "[drive_sync] token renewal failed"
     log=$(echo 'print(open("/content/sync/sync.log").read() if __import__("os").path.exists("/content/sync/sync.log") else "")' |
-          timeout 180 colab exec -s "$S" --timeout 60 2>/dev/null | grep -v '^\[colab\]' || true)
+          timeout 180 $COLAB_API exec -s "$S" --timeout 60 2>/dev/null | grep -v '^\[colab\]' || true)
     printf '%s\n' "$log" | grep -E '^(TAR|FAILED) ' | tail -n +$((seen + 1)) | while read -r k t sz dl ul; do
       [ "$k" = TAR ] && echo "[drive_sync] $(date +%H:%M) $t $(( sz / 1000000 )) MB: download $dl s ($(( sz / 1000000 / (dl > 0 ? dl : 1) )) MB/s), Drive $ul s ($(( sz / 1000000 / (ul > 0 ? ul : 1) )) MB/s)" ||
         echo "[drive_sync] $(date +%H:%M) FAILED $t"

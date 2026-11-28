@@ -22,7 +22,7 @@
 # tests' build; with --cases at most one per case) with --threads each
 # (default the runtime's vCPUs / jobs); --hours: the longest wait for the job (default 10; 20 with --slow); --rev: the
 # commit to test (default HEAD; the tools are always this checkout's). --session: an existing runtime of an earlier
-# --keep run (its Debian chroot and tars are reused); --keep: leave the runtime running (`colab stop -s NAME` later).
+# --keep run (its Debian chroot and tars are reused); --keep: leave the runtime running (`tools/colab/colab_api.py stop -s NAME` later).
 # --diff-only: only the differential tests and the other ctest tests (tools/colab/diff_body.sh: run_diff_tests.sh, as
 # the full suite runs them; data: the *diff*.tar of vm_data.txt unless --data), --tests: a ctest -R regex limiting
 # them; --faults DIR: its *.patch files (patch -p1, a line "# tests: REGEX" naming the tests that must fail), each

@@ -7,7 +7,8 @@
 #
 # DIR (default ${CPPWRF_SCRATCH:-~/cppwrf_scratch}/colab/tarlist_<date>) gets TAR.txt per tar (`tar tvf`, ending with
 # "exit N") and job.log. tests/verify/case_data.py DIR checks the suite cases' data tars (DATA) against them.
-# A CPU-only runtime (the CPU does not matter here); it is stopped at the end unless --keep.
+# Colab is for GPU work only and the guard refuses CPU runtimes, so this tool now stops at once; read the lists on
+# the workstation (rclone cat ... | tar tvf -) or on GitHub CI instead.
 set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 OUT= S= KEEP=0 TARS=
@@ -22,7 +23,7 @@ OUT=${OUT:-${CPPWRF_SCRATCH:-$HOME/cppwrf_scratch}/colab/tarlist_$(date +%Y%m%d_
 mkdir -p "$OUT"
 TAG=colab_tarlist ANY_CPU=1 BK=
 . "$REPO/tools/colab/colab_lib.sh"
-cj_start CPU
+cj_start CPU || exit 1  # refused: no CPU runtimes on Colab
 (umask 077; rclone config show cppwrf-drive > "$OUT/rclone.conf")
 cj_send "$OUT/rclone.conf" rclone.conf || exit 1
 rm -f "$OUT/rclone.conf"
@@ -52,8 +53,8 @@ for i in $(seq 72); do  # at most 6 h
   echo "[$TAG] $(date +%H:%M) $st"
   case $st in DONE*) break ;; esac
 done
-timeout 900 colab download -s "$S" /content/cpu/ls.tar.gz "$OUT/ls.tar.gz" > /dev/null 2>&1 || { echo "[$TAG] download failed"; exit 1; }
-timeout 300 colab download -s "$S" /content/cpu/job.log "$OUT/job.log" > /dev/null 2>&1 || true
+timeout 900 $COLAB_API download -s "$S" /content/cpu/ls.tar.gz "$OUT/ls.tar.gz" > /dev/null 2>&1 || { echo "[$TAG] download failed"; exit 1; }
+timeout 300 $COLAB_API download -s "$S" /content/cpu/job.log "$OUT/job.log" > /dev/null 2>&1 || true
 tar xzf "$OUT/ls.tar.gz" -C "$OUT" && rm -f "$OUT/ls.tar.gz"
 grep -H "^exit" "$OUT"/*.txt
 ! grep -h "^exit" "$OUT"/*.txt | grep -qv "^exit 0 "

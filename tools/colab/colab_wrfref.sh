@@ -27,7 +27,7 @@
 # are unpacked. --head: the data tar NAME (list it in --data) made on the runtime from the leading BYTES of the bucket
 # tars OBJ (ranged reads, as tools/bench/colab_fp32.sh: e.g. the inputs at the start of long72_data.tar,
 # long72_data.tar:122625536 = run_P4_72h_r8's namelist, tables, wrfinput and wrfbdy; needs CPPWRF_GCP_BUCKET).
-# The results come back with `colab download`; the runtime also puts them (results.tar.gz, refs.tar) on Drive
+# The results come back with `tools/colab/colab_api.py download`; the runtime also puts them (results.tar.gz, refs.tar) on Drive
 # (cppwrf-drive:cppwrf-g4results/wrfref_<date>/), where the script reads them when a download fails. --dry-run: check
 # REFS.txt (fields, WRF and real.exe executables, section.key=value changes, unique names), print each reference's
 # WRF runs, the job's arguments and where each data tar is (Drive / GitHub release / bucket); nothing starts. -h,

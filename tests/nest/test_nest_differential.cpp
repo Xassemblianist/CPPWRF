@@ -14,6 +14,7 @@
 
 #include "tests/nest/fortran_nest_bridge.h"
 #include "tests/nest/test_data_loader.hpp"
+#include "tests/nest/bdy_signed_zero.hpp"
 
 using namespace cppwrf::nest;
 using namespace cppwrf::nest::test;
@@ -108,8 +109,7 @@ void run_sint_sintb_tests(const CoarseDataset& ds) {
 }
 
 // SINT on fields of +0, -0 and small values (a moved nest's surface W over water, zero moisture): the sign of each
-// zero as WRF's SINT computes it (DONOR as written, its MAX / MIN trees). The SINTB paths are not checked here (their
-// kernel, smolarkiewicz_1d<T, true>, is not WRF's SINTB in the signs of zero).
+// zero as WRF's SINT computes it (DONOR as written, its MAX / MIN trees). SINTB: TEST 1c and 3b.
 void run_sint_signed_zero_tests() {
   std::cout << "\n======================================================\n";
   std::cout << "TEST 1b: SINT with signed zeros (Ratio 3 and Ratio 5)\n";
@@ -151,6 +151,188 @@ void run_sint_signed_zero_tests() {
       }
     }
   }
+}
+
+#ifdef CPPWRF_TEST_WRF_R4
+// WRF's REAL*4 SINTB: share/sint.o of a WRF v4.8.0 build without -r8 (WRF_R4_DIR), sintb_ renamed by run_test.sh
+extern "C" void wrf_r4_sintb_(const float* xf1, float* xf, const int* ims, const int* ime, const int* jms,
+                              const int* jme, const int* icmask, const int* its, const int* ite, const int* jts,
+                              const int* jte, const int* nf, const int* xstag, const int* ystag);
+#endif
+
+// SINTB (lateral-boundary forcing) on fields of mostly zeros of both signs against WRF's SINTB, bit for bit: each II's
+// loop copy (vector body, REAL*4 pair, scalar remainder) by its position in the trip count, odd and even counts.
+// T = double: WRF's -r8 SINTB (bridge); T = float: WRF's REAL*4 share/sint.o (WRF_R4_DIR).
+template <class T>
+std::size_t sintb_signed_zero_case(const char* name) {
+  SzRng rng(sizeof(T) == 8 ? 2468 : 1357);
+  std::size_t differ = 0, points = 0;
+  for (int ratio : {3, 5}) {
+    for (bool xstag : {false, true}) {
+      for (bool ystag : {false, true}) {
+        for (int n : {1, 2, 3, 4, 5, 6, 7, 8, 9, 12, 13, 33}) {
+          for (int trial = 0; trial < 24; ++trial) {
+            const int nf = ratio * ratio, ims = 1, jms = 1, its = 3 + (trial & 1), ite = its + n - 1;
+            const int ime = ite + 3, jts = 3, jte = 14, jme = jte + 3;
+            const int ni = ime - ims + 1, nj = jme - jms + 1;
+            std::vector<T> xf1(static_cast<std::size_t>(ni) * nj * nf), xf_cpp(xf1.size(), T(7)), xf_f(xf1.size(), T(7));
+            std::vector<int> mask(static_cast<std::size_t>(ni) * nj);
+            // odd trials: rows constant in i of SzRng::row (each II's loop copy shows in its signs of zero), even:
+            // every value drawn
+            const int phase = static_cast<int>(rng.next() & 3);
+            for (std::size_t r = 0; r < xf1.size(); r += ni) {
+              const T v = rng.row<T>(static_cast<int>(r / ni), phase);
+              for (int i = 0; i < ni; ++i) xf1[r + i] = (trial & 1) ? v : rng.value<T>();
+            }
+            for (auto& v : mask) v = rng.next() % 2;  // SINTB ignores icmask
+            sintb_fortran_layout<T>(xf1.data(), xf_cpp.data(), ims, ime, jms, jme, mask.data(), its, ite, jts, jte,
+                                    nf, xstag, ystag);
+            if constexpr (sizeof(T) == 8) {
+              wrf_bridge_sintb(xf1.data(), xf_f.data(), ims, ime, jms, jme, mask.data(), its, ite, jts, jte, nf,
+                               xstag ? 1 : 0, ystag ? 1 : 0);
+            } else {
+#ifdef CPPWRF_TEST_WRF_R4
+              const int xs = xstag ? 1 : 0, ys = ystag ? 1 : 0;
+              wrf_r4_sintb_(xf1.data(), xf_f.data(), &ims, &ime, &jms, &jme, mask.data(), &its, &ite, &jts, &jte,
+                            &nf, &xs, &ys);
+#endif
+            }
+            points += static_cast<std::size_t>(n) * (jte - jts + 1) * nf;
+            for (std::size_t i = 0; i < xf_cpp.size(); ++i) {
+              const bool same = (std::isnan(xf_cpp[i]) && std::isnan(xf_f[i])) ||
+                                (xf_cpp[i] == xf_f[i] && std::signbit(xf_cpp[i]) == std::signbit(xf_f[i]));
+              if (!same) ++differ;
+            }
+          }
+        }
+      }
+    }
+  }
+  std::cout << "  sintb (signed zeros) " << name << ": " << differ << " of " << points << " points differ"
+            << " [" << (differ == 0 ? "PASS" : "FAIL") << "]" << std::endl;
+  g_mismatches += differ;
+  return differ;
+}
+
+void run_sintb_signed_zero_tests() {
+  std::cout << "\n======================================================\n";
+  std::cout << "TEST 1c: SINTB with signed zeros (Ratio 3 and 5, all staggerings, odd and even trip counts)\n";
+  std::cout << "======================================================\n";
+  sintb_signed_zero_case<double>("REAL*8");  // a difference fails the run (g_mismatches)
+#ifdef CPPWRF_TEST_WRF_R4
+  sintb_signed_zero_case<float>("REAL*4");
+#else
+  std::cout << "  sintb (signed zeros) REAL*4: not run (set WRF_R4_DIR to a WRF v4.8.0 build without -r8)\n";
+#endif
+}
+
+// The model's lateral-boundary slab kernel (KBdySlabView3D, CPU) on signed-zero parent fields against WRF's
+// bdy_interp1: which SINTB call of bdy_interp1 last wrote each point's psca and its loop copy there
+// (sintb_bdy_lane). REAL*4: the same lane rule with WRF's REAL*4 SINTB in bdy_interp1's call order.
+void run_bdy_signed_zero_tests() {
+  std::cout << "\n======================================================\n";
+  std::cout << "TEST 3b: Boundary forcing with signed zeros (KBdySlabView3D vs bdy_interp1)\n";
+  std::cout << "======================================================\n";
+  SzRng rng(97531);
+  std::size_t differ = 0, entries = 0;
+  for (BdyZeroCase c : bdy_zero_cases()) {
+    for (int trial = 0; trial < 4; ++trial) {
+      c.make(rng, trial & 1);
+      for (int side = 0; side < 4; ++side) {
+        const int npos = c.npos(side);
+        std::vector<cppwrf::real> val(static_cast<std::size_t>(npos) * c.nk * c.kWidth, cppwrf::real(7));
+        std::vector<cppwrf::real> tend(val.size(), cppwrf::real(7));
+        const KBdySlabView3D k = c.functor(side, c.cfld.data(), c.nfld.data(), val.data(), tend.data());
+        for (int b = 0; b < c.kWidth; ++b)
+          for (int kk = 0; kk < c.nk; ++kk)
+            for (int pos = 0; pos < npos; ++pos) k(pos, kk, b);
+        for (int b = 0; b < c.kSz; ++b)
+          for (int kk = 0; kk < c.nk; ++kk)
+            for (int pos = 0; pos < npos; ++pos) {
+              const std::size_t i = static_cast<std::size_t>(pos) + static_cast<std::size_t>(kk) * npos +
+                                    static_cast<std::size_t>(b) * npos * c.nk;
+              for (int t = 0; t < 2; ++t) {
+                const double m = t ? tend[i] : val[i], w = c.wrf(side, t == 1, pos, kk, b);
+                ++entries;
+                if (!(m == w && std::signbit(m) == std::signbit(w))) ++differ;
+              }
+            }
+      }
+    }
+  }
+  std::cout << "  KBdySlabView3D (signed zeros) REAL*8: " << differ << " of " << entries << " slab entries differ"
+            << " [" << (differ == 0 ? "PASS" : "FAIL") << "]" << std::endl;
+  g_mismatches += differ;
+#ifdef CPPWRF_TEST_WRF_R4
+  // REAL*4: bdy_interp1's four SINTB calls with WRF's REAL*4 SINTB, read at each boundary point's (ci, cj), against
+  // sintb_point_2d<float> in the loop copy sintb_bdy_lane<float> gives (the kernel KBdySlabView3D runs in FP32 builds)
+  std::size_t differ4 = 0, points4 = 0;
+  for (BdyZeroCase c : bdy_zero_cases()) {
+    const int nri = c.ratio, nrj = c.ratio, nfx = nri * nrj, ipos = c.ipos, jpos = c.jpos;
+    const int cims = 1, cime = c.cni(), cjms = 1, cjme = c.cnj(), nci = cime - cims + 1;
+    const int nids = 1, nide = c.nni(), njds = 1, njde = c.nnj(), nits = nids, nite = nide, njts = njds, njte = njde;
+    const int ioff = c.xstag ? std::max((nri - 1) / 2, 1) : 0, joff = c.ystag ? std::max((nrj - 1) / 2, 1) : 0;
+    const int sz = c.kSz;
+    auto n2ci = [&](int n) { return (n + ipos * nri - 1) / nri; };
+    auto n2cj = [&](int n) { return (n + jpos * nrj - 1) / nrj; };
+    for (int trial = 0; trial < 6; ++trial) {
+      std::vector<float> plane(static_cast<std::size_t>(nci) * (cjme - cjms + 1));
+      const int phase = static_cast<int>(rng.next() & 3);
+      for (std::size_t r = 0; r < plane.size(); r += nci) {
+        const float v = rng.row<float>(static_cast<int>(r / nci), phase);
+        for (int i = 0; i < nci; ++i) plane[r + i] = (trial & 1) ? v : rng.value<float>();
+      }
+      std::vector<float> psca1(plane.size() * nfx), psca(plane.size() * nfx, 7.0f);
+      for (int f = 0; f < nfx; ++f) std::copy(plane.begin(), plane.end(), psca1.begin() + f * plane.size());
+      std::vector<int> icm(plane.size(), 0);
+      const int xs = c.xstag ? 1 : 0, ys = c.ystag ? 1 : 0;
+      auto call = [&](int a, int b, int d, int e) {
+        wrf_r4_sintb_(psca1.data(), psca.data(), &cims, &cime, &cjms, &cjme, icm.data(), &a, &b, &d, &e, &nfx, &xs, &ys);
+      };
+      // share/interp_fcn.F:2536-2560
+      if (njts >= njds && njts <= njds + sz + joff)
+        call(n2ci(nits) - 1, n2ci(nite) + 1, n2cj(std::max(njts, njds)), n2cj(std::min(njte, njds + sz + joff)));
+      if (njte <= njde && njte >= njde - sz - joff)
+        call(n2ci(nits) - 1, n2ci(nite) + 1, n2cj(std::max(njts, njde - sz - joff)), n2cj(std::min(njte, njde - 1 + joff)));
+      if (nits >= nids && nits <= nids + sz + ioff)
+        call(n2ci(std::max(nits, nids)), n2ci(std::min(nite, nids + sz + ioff)), n2cj(njts) - 1, n2cj(njte) + 1);
+      if (nite <= nide && nite >= nide - sz - ioff)
+        call(n2ci(std::max(nits, nide - sz - ioff)), n2ci(std::min(nite, nide - 1 + ioff)), n2cj(njts) - 1,
+             n2cj(njte) + 1);
+      // the boundary points bdy_interp1 reads (interp_fcn.F:2562-2620)
+      for (int nj1 = std::max(njds, njts - 1); nj1 <= std::min(njde + joff, njte + joff + 1); ++nj1) {
+        for (int ni1 = std::max(nids, nits - 1); ni1 <= std::min(nide + ioff, nite + ioff + 1); ++ni1) {
+          const int ni = ni1 - ioff, nj = nj1 - joff;
+          if (ni < nids || nj < njds) continue;
+          const bool west = ni >= nids && ni < nids + sz, south = nj >= njds && nj < njds + sz;
+          const bool east = c.xstag ? (ni >= nide - sz + 1 && ni <= nide) : (ni >= nide - sz && ni <= nide - 1);
+          const bool north = c.ystag ? (nj >= njde - sz + 1 && nj <= njde) : (nj >= njde - sz && nj <= njde - 1);
+          const bool bdy = west || south || east || north;
+          if (!bdy) continue;
+          const int ci = ipos + (ni1 - 1) / nri, cj = jpos + (nj1 - 1) / nrj;
+          const int ip = (ni1 - 1) % nri, jp = (nj1 - 1) % nrj;
+          const float w = psca[static_cast<std::size_t>(ci - cims) + static_cast<std::size_t>(cj - cjms) * nci +
+                               static_cast<std::size_t>(ip + jp * nri) * plane.size()];
+          float ax, ay;
+          compute_sint_subgrid_offsets(nri, c.xstag, c.ystag, ip, jp, ax, ay);
+          float patch[5][5];
+          for (int dj = -2; dj <= 2; ++dj)
+            for (int di = -2; di <= 2; ++di)
+              patch[dj + 2][di + 2] = plane[static_cast<std::size_t>(ci + di - cims) +
+                                            static_cast<std::size_t>(cj + dj - cjms) * nci];
+          const int lane = sintb_bdy_lane<float>(ci, cj, ipos, jpos, nri, nrj, sz, ioff, joff, nids, nide, njds, njde,
+                                                 nits, nite, njts, njte);
+          const float m = sintb_point_2d<float>(patch, ax, ay, lane);
+          ++points4;
+          if (!(m == w && std::signbit(m) == std::signbit(w))) ++differ4;
+        }
+      }
+    }
+  }
+  std::cout << "  sintb_bdy_lane + sintb_point_2d (signed zeros) REAL*4: " << differ4 << " of " << points4
+            << " boundary points differ [" << (differ4 == 0 ? "PASS" : "FAIL") << "]" << std::endl;
+  g_mismatches += differ4;
+#endif
 }
 
 void run_interp_fcn_sint_tests(const CoarseDataset& ds) {
@@ -638,8 +820,10 @@ int main(int argc, char** argv) {
 
   run_sint_sintb_tests(ds);
   run_sint_signed_zero_tests();
+  run_sintb_signed_zero_tests();
   run_interp_fcn_sint_tests(ds);
   run_bdy_interp_tests(ds);
+  run_bdy_signed_zero_tests();
   run_feedback_tests(ds);
   run_initialisation_tests(ds);
 

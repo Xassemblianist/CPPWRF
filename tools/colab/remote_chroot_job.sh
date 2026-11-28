@@ -24,7 +24,8 @@
 # gcs.tok is deleted when the data are in place, rclone.conf at the end.
 B=$1 DATA=$2; shift 2
 [ "$B" = - ] && B=
-C=/content/cpu R=/content/deb13 T=/content/tars
+CR=$(cd "$(dirname "$0")/.." && pwd)  # /content, or /content/cppwrf_<session> on an attached runtime
+C=$CR/cpu R=$CR/deb13 T=$CR/tars
 J=$R/opt/job
 GH=https://github.com/Xassemblianist/cppwrf-data/releases/download/data-v1
 cd $C || exit 1
@@ -43,7 +44,7 @@ finish() {
   ( cd $J 2> /dev/null && cp -f ./*.log ./*.out ./*.txt $C/res/ 2> /dev/null )
   cat $C/res/setup.out >> $C/setup.out 2> /dev/null; rm -f $C/res/setup.out
   [ -d $J/fetch ] && mv $J/fetch $C/fetch
-  # the results on Drive too (the caller's fallback to colab download): the large files first, so that their RESULTS
+  # the results on Drive too (the caller's fallback to tools/colab/colab_api.py download): the large files first, so that their RESULTS
   # lines and drive_results.log are in results.tar.gz; results.tar.gz itself last
   todrive() {
     rclone --config $C/rclone.conf copyto "$1" "cppwrf-drive:$DRES/$(basename "$1")" --drive-chunk-size 256M \

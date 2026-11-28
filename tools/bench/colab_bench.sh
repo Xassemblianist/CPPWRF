@@ -26,7 +26,7 @@
 # and tools/bench/bench_gpu.sh on the runtime's own Ubuntu (CUDA); the runs are tools/bench/bench_run.py's.
 # One session takes about 75 minutes of the G4 (12 compute units in November 2026); docs/PERF.md has its results.
 # Results in OUT (default ${CPPWRF_SCRATCH:-~/cppwrf_scratch}/colab/bench_<date>): report.md (tools/bench/bench_report.py
-# with the runtime's compute-unit rate from `colab usage`), results.txt (one JSON line per run and comparison),
+# with the runtime's compute-unit rate from `tools/colab/colab_api.py usage`), results.txt (one JSON line per run and comparison),
 # bench.log, logs/ (rsl.out.0000 of each WRF run, CPPWRF's logs, namelists, configurations, WRF's configure.wrf
 # flags), usage.txt. Exit 1 when the job failed or a build / case did not run.
 set -euo pipefail
@@ -73,9 +73,9 @@ else
 fi
 bad=0
 cj_wait "$HOURS" bench.log || bad=1
-timeout 120 colab usage 2>&1 | grep -v '^\[colab\]' > "$OUT/usage.txt" || true
+timeout 120 $COLAB_API usage 2>&1 | grep -v '^\[colab\]' > "$OUT/usage.txt" || true
 cj_results || bad=1
-if timeout 1800 colab download -s "$S" /content/cpu/fetch/bench.tar.gz "$OUT/bench.tar.gz" > /dev/null 2>&1; then
+if timeout 1800 $COLAB_API download -s "$S" /content/cpu/fetch/bench.tar.gz "$OUT/bench.tar.gz" > /dev/null 2>&1; then
   tar xzf "$OUT/bench.tar.gz" -C "$OUT" && rm -f "$OUT/bench.tar.gz"
 else echo "[colab_bench] bench.tar.gz: download failed"; bad=1; fi
 grep . "$OUT/setup.out" 2> /dev/null && bad=1

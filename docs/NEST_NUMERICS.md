@@ -128,7 +128,8 @@ Matches `med_nest_initial` (`share/mediation_integrate.F`) and `dyn_em/nest_init
 
 ## 7. Differential Test Results vs WRF 4.8.0 Fortran (`tests/nest/`)
 
-Command (needs a WRF v4.8.0 real*8 build; outputs under `$CPPWRF_SCRATCH/nest_test`):
+Command (needs a WRF v4.8.0 real*8 build; outputs under `$CPPWRF_SCRATCH/nest_test`; `WRF_R4_DIR`, a build without
+-r8, adds the REAL*4 SINTB checks):
 ```bash
 tests/nest/run_test.sh
 ```
@@ -138,8 +139,10 @@ tests/nest/run_test.sh
 | Test Group | Sub-tests | Max Rel Error | Max Abs Error | Status |
 |---|---|---|---|---|
 | 1. `sint` / `sintb` | `sint` (`xstag=0,1`), `sintb` (`xstag=0,1`) | `0.000000e+00` | `0.000000e+00` | PASS (Bit-exact) |
+| 1b / 1c. signed zeros | `sint` and `sintb` on fields of +0, -0 and small values (ratios 3, 5, all staggerings; `sintb`: trip counts 1-13 and 33, REAL*8 and REAL*4): SINTB's vector body, REAL*4 pair and scalar remainder by loop position | 0 | 0 | PASS (signs of zero included) |
 | 2. `interp_fcn_sint` / `KSint3D` | `(F,F)`, `(T,F)`, `(F,T)`, `(T,T)` + `KSint3D` | `0.000000e+00` | `0.000000e+00` | PASS (Bit-exact) |
 | 3. `bdy_interp1` / `LateralBC` | `call1` (`B`), `call2` (`BT`) on `XS, XE, YS, YE` for `(F,F), (T,F), (F,T)` | `0.000000e+00` | `0.000000e+00` | PASS (Bit-exact) |
+| 3b. `KBdySlabView3D` signed zeros | the model's slab kernel against `bdy_interp1` on the one-process nest patch: the SINTB call that last wrote each point and its loop copy (REAL*4: `sintb_bdy_lane` + `sintb_point_2d` against bdy_interp1's call order with WRF's REAL*4 SINTB) | 0 | 0 | PASS (signs of zero included) |
 | 4. `copy_fcn` + Smoothers | `copy_fcn` ratios `3, 4, 5` (`(F,F), (T,F), (F,T)`), `sm121`, `smdsm` | `0.000000e+00` | `0.000000e+00` | PASS (Bit-exact) |
 | 5. `couple_or_uncouple_em` | `couple` and `uncouple` (`mu_2, u_2, v_2, w_2, ph_2, t_2, moist`) | `0.000000e+00` | `0.000000e+00` | PASS (Bit-exact) |
 | 6. `nest_init` | `blend_terrain`, `copy_3d_field`, `adjust_tempqv` (`use_theta_m=0,1`) | `0.000000e+00` | `0.000000e+00` | PASS (Bit-exact) |
@@ -150,6 +153,7 @@ tests/nest/run_test.sh
 |---|---|---|
 | 1. `KSint3D` (`(F,F), (T,F), (F,T)`) | `<= 7.868e-13` (FMA in 4-pt Smolarkiewicz limiter) | PASS |
 | 2. `KBdySlab` (`B` and `BT` on `XS, XE, YS, YE`) | `<= 6.469e-16` | PASS |
+| 2b. `KBdySlabView3D` on signed-zero fields (TEST 3b on the device) | `0` (signs of zero included) | PASS |
 | 3. `KCopyFcn` (`(F,F), (T,F), (F,T)`) | `<= 3.802e-16` | PASS |
 | 4. `couple_or_uncouple_state` (`couple` & `uncouple` all fields) | `0.000000e+00` (Bit-exact) | PASS |
 | 5. `nest_init` (`blend_terrain`, `copy_3d_field`, `adjust_tempqv`) | `0.000000e+00` (Bit-exact) | PASS |

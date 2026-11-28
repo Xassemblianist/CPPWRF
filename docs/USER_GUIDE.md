@@ -1008,6 +1008,31 @@ ran the full suite in about 42 min; GPU runs need it), with `--cases`, `--data`,
 `tools/colab/colab_regression.sh` runs the legacy regression tool (`tools/regression`). The Google Cloud tools
 (`tools/gcp/gcp_run.sh`, `gcp_wrfref.sh`) are kept but not used.
 
+Every Colab tool talks to Google's official Colab API (`tools/colab/colab_api.py`: the MCP endpoint
+colaboratory.googleapis.com/mcp, auth headers from `~/.local/bin/colab_mcp_headers.sh`, a gcloud ADC token with the
+colaboratory scope) and asks for its runtime through one guard, `tools/colab/colab_guard.sh` (repeated automated
+runtime requests can get an account's Colab runtimes blocked as abusive):
+
+- GPU runtimes only: Colab is for GPU work. CPU work runs on the workstation or on GitHub CI.
+- At most 2 of this project's runtimes at once (runtime names `cppwrf-*`; other runtimes of the account, such as an
+  open notebook, are neither counted nor touched).
+- One create request per spec and no retry: when it fails the tool stops with a message. Only "no capacity / quota"
+  (FAILED_PRECONDITION) is followed by one request for the fallback spec (`colab_run.sh --fallback A100`). Do not
+  wrap the tools in retry loops.
+- If Colab's answer mentions "abusive", "blocked" or "suspicion", the guard writes `~/.cache/cppwrf/colab/BLOCKED` and
+  refuses every request until a person has read the message and deleted the file.
+- The runtime is deleted when the tool exits for any reason (success, error, Ctrl-C, SIGTERM); `--keep` leaves a
+  runtime that came up running (`tools/colab/colab_api.py stop -s NAME` deletes it). `tools/colab/colab_guard.sh
+  status` prints the lock, the project's runtimes and the requests of the last day.
+- Creating G4, A100 or L4 runtimes from the API currently fails (a Google bug; T4 still works), so the usual way is
+  to open a GPU runtime in the browser (a notebook, Runtime > Change runtime type > GPU, Connect) and attach to it:
+  `colab_run.sh --attach [RUNTIME]` (or `ATTACH=1` for the `cj_start` tools). Without a name the tool takes the only
+  GPU runtime that is not `cppwrf-*` or `cppmpas-*` and that no other tool has used in the last 10 minutes, and
+  refuses when there are several (`tools/colab/colab_api.py runtimes` lists them; `CPPWRF_COLAB_RUNTIME` names one).
+  The tool opens its own kernel session there, keeps its files in `/content/cppwrf_<session>`, and on exit kills
+  its processes, removes that directory and closes its session. An attached runtime is never deleted.
+  `colab_run.sh --gpu T4` creates a runtime as before; other accelerators need `--create`.
+
 The suite's cases are defined in `tests/verify/cases/` (one file per group, `NN_<group>.py`, loaded in the order of
 their names; `wrf_suite.py --list` prints them all). A group file defines `CASES`, `DATA` (the data tars each case
 reads, in `vm_data.txt`'s order) and `STATUS` (its rows of the case table in docs/STATUS.md, which
